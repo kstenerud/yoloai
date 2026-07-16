@@ -12,6 +12,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
 )
@@ -63,7 +64,8 @@ func TestExecuteVMWorkDirSetup_RunsSetupAndRecordsBaseline(t *testing.T) {
 
 	sandboxDir := t.TempDir()
 	meta := &store.Environment{
-		Name: "vmbox",
+		Name:      "vmbox",
+		Principal: config.CLIPrincipal,
 		Dirs: []store.DirEnvironment{{
 			HostPath:    "/home/user/project",
 			Mode:        store.DirModeCopy,

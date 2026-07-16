@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/cli/clitest"
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/require"
@@ -31,6 +32,7 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 
 	meta := &store.Environment{
 		Name:        name,
+		Principal:   config.CLIPrincipal,
 		BackendType: "docker",
 		Dirs:        []store.DirEnvironment{{HostPath: "/tmp/test", MountPath: "/tmp/test", Mode: "copy"}},
 	}

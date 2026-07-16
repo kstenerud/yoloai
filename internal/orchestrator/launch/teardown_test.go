@@ -26,7 +26,7 @@ import (
 // later Stop can ever find it. Uses a live stand-in process (sleep) as the
 // "injector".
 func TestTeardown_ReapsInjectorBeforeDeletingDir(t *testing.T) {
-	layout := config.NewLayout(t.TempDir())
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
 	d := state.Deps{Runtime: &fakeRuntime{}, Layout: layout}
 
 	dir := layout.SandboxDir("box")

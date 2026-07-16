@@ -123,6 +123,7 @@ func seedCopySandbox(t *testing.T, layout config.Layout, name string) {
 	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0750))
 	meta := &store.Environment{
 		Name:        name,
+		Principal:   config.CLIPrincipal,
 		BackendType: "gitdispatchmock",
 		CreatedAt:   time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -144,7 +145,7 @@ func seedCopySandbox(t *testing.T, layout config.Layout, name string) {
 // records nothing for that op and the assertion fails.
 func TestEngine_WorkCopyGit_DispatchesToRuntime(t *testing.T) {
 	registerGitDispatchMock(t)
-	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai")).WithPrincipal(config.CLIPrincipal)
 	const name = "dispatchbox"
 	seedCopySandbox(t, layout, name)
 	e := NewEngine("gitdispatchmock", slog.Default(), strings.NewReader(""), WithLayout(layout))

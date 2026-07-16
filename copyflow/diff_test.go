@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/store"
 )
@@ -38,6 +39,7 @@ func createCopySandbox(t *testing.T, tmpDir, name, hostPath string) string {
 
 	// Write environment.json
 	meta := &store.Environment{
+		Principal: config.CLIPrincipal,
 		Name:      name,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -59,6 +61,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
+		Principal: config.CLIPrincipal,
 		Name:      name,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -392,6 +395,7 @@ func TestLoadDiffContext_NoBaseline(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
+		Principal: config.CLIPrincipal,
 		Name:      "no-baseline",
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -419,6 +423,7 @@ func TestLoadDiffContext_CopyMode(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
+		Principal: config.CLIPrincipal,
 		Name:      name,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -446,6 +451,7 @@ func TestLoadDiffContext_RWMode(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
+		Principal: config.CLIPrincipal,
 		Name:      name,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -471,6 +477,7 @@ func TestLoadDiffContext_UnsupportedMode(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
+		Principal: config.CLIPrincipal,
 		Name:      name,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -495,6 +502,7 @@ func TestLoadDiffContext_DirSelector(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	meta := &store.Environment{
+		Principal: config.CLIPrincipal,
 		Name:      name,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{

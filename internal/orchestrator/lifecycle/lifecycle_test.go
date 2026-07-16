@@ -36,7 +36,9 @@ func newLifecycleDeps(rt runtime.Backend, tmpDir string) state.Deps {
 	// ownership", the re-baseline fails, and the recopy/wipe silently doesn't
 	// complete. A no-op off-sudo (SUDO_UID absent). git itself is resolved via the
 	// process PATH, so only SUDO_UID needs threading here.
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithEnv(testutil.GetCuratedHostEnv([]string{"SUDO_UID"}))
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).
+		WithEnv(testutil.GetCuratedHostEnv([]string{"SUDO_UID"})).
+		WithPrincipal(config.CLIPrincipal)
 	return state.Deps{Runtime: rt, Layout: layout, Input: strings.NewReader("")}
 }
 
@@ -48,6 +50,7 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -66,6 +69,7 @@ func createRWSandbox(t *testing.T, tmpDir, name, hostPath string) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -348,6 +352,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	// Create meta with HasPrompt=true
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -422,6 +427,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -499,6 +505,7 @@ func TestNeedsConfirmation_RunningButClean(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -542,6 +549,7 @@ func TestNeedsConfirmation_StoppedVMFailsafe(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -582,6 +590,7 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -625,6 +634,7 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,
@@ -722,6 +732,7 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -787,6 +798,7 @@ func TestReset_PromptOverwrite(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  origDir,
@@ -840,6 +852,7 @@ func TestReset_State(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -921,6 +934,7 @@ func TestReset_OriginalMissing(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -984,6 +998,7 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		HasPrompt: true,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
@@ -1074,6 +1089,7 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -1132,6 +1148,7 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -1184,6 +1201,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:    origDir,
@@ -1379,6 +1397,7 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs:      []store.DirEnvironment{{HostPath: "/tmp/project", Mode: "copy"}},
 	}

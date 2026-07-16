@@ -439,6 +439,23 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 	return nil
 }
 
+// Rename renames a Tart VM in place (runtime.Renamer). Verified on Apple
+// Silicon to keep a running VM running (D126/P1). The on-disk sandbox dir and
+// pidfile are keyed to the *bare* sandbox name (r.sandboxName strips the
+// principal prefix), which the principal rename does not change, so only the VM
+// name moves — the pidfile and secrets dir need no relocation. Used by the
+// v4->v5 principal-rename migration to move "yoloai-<name>" to
+// "yoloai-cli-<name>". Returns ErrNotFound if oldName does not exist.
+func (r *Runtime) Rename(ctx context.Context, oldName, newName string) error {
+	if !r.vmExists(ctx, oldName) {
+		return runtime.ErrNotFound
+	}
+	if _, err := r.runTart(ctx, "rename", oldName, newName); err != nil {
+		return fmt.Errorf("rename VM %q to %q: %w", oldName, newName, err)
+	}
+	return nil
+}
+
 // Remove deletes the VM and cleans up the PID file.
 // Uses a hard stop (not suspend) before deleting — suspending before an
 // immediate delete would waste time writing RAM state to disk.

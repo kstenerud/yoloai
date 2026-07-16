@@ -142,6 +142,7 @@ func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 	c, err := yoloai.NewClient(ctx, yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
+		Principal:   string(l.Principal),
 		BackendType: yoloai.BackendType(backend),
 		Input:       os.Stdin,
 		Output:      io.Discard, // best-effort path; don't write to the in-progress bug report

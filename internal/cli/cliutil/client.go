@@ -141,7 +141,7 @@ func ResolveContainerBackendConfig() yoloai.BackendType {
 // Used by lifecycle commands that operate on an existing sandbox.
 func ResolveBackendForSandbox(name string) yoloai.BackendType {
 	l := Layout()
-	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{DataDir: l.DataDir, HomeDir: l.HomeDir, Env: EdgeEnv()})
+	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{DataDir: l.DataDir, HomeDir: l.HomeDir, Principal: string(l.Principal), Env: EdgeEnv()})
 	if err == nil {
 		defer c.Close() //nolint:errcheck // backend-less close is a no-op
 		if sb, sbErr := c.Sandbox(name); sbErr == nil {
@@ -169,6 +169,7 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx cont
 	c, err := yoloai.NewClient(ctx, yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
+		Principal:   string(l.Principal),
 		BackendType: backend,
 		Logger:      slog.Default(),
 		Input:       cmd.InOrStdin(),
@@ -243,12 +244,13 @@ func WithTrackedDir(cmd *cobra.Command, name, hostPath string, fn func(ctx conte
 func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 	l := Layout()
 	return yoloai.NewClient(cmd.Context(), yoloai.ClientCreateOptions{
-		DataDir: l.DataDir,
-		HomeDir: l.HomeDir,
-		Logger:  slog.Default(),
-		Input:   cmd.InOrStdin(),
-		Output:  cmd.ErrOrStderr(),
-		Env:     EdgeEnv(),
+		DataDir:   l.DataDir,
+		HomeDir:   l.HomeDir,
+		Principal: string(l.Principal),
+		Logger:    slog.Default(),
+		Input:     cmd.InOrStdin(),
+		Output:    cmd.ErrOrStderr(),
+		Env:       EdgeEnv(),
 	})
 }
 
@@ -278,9 +280,10 @@ func SystemWithEnv(env map[string]string) (*yoloai.System, error) {
 // root, which differs only on an un-relocated flat v0 install).
 func systemForDataDir(dataDir string, env map[string]string) (*yoloai.System, error) {
 	c, err := yoloai.NewClient(context.Background(), yoloai.ClientCreateOptions{
-		DataDir: dataDir,
-		HomeDir: Layout().HomeDir,
-		Env:     env,
+		DataDir:   dataDir,
+		HomeDir:   Layout().HomeDir,
+		Principal: string(Layout().Principal),
+		Env:       env,
 	})
 	if err != nil {
 		return nil, err

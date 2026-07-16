@@ -65,13 +65,14 @@ func (g *hostSideExecerRuntime) Descriptor() runtime.BackendDescriptor {
 // docker/podman/containerd — audit C1), mapping the host work-copy path to the
 // dir's in-sandbox mount path and resolving the instance + container user.
 func TestNewSandbox_DispatchesToGitExecer(t *testing.T) {
-	layout := config.NewLayout(t.TempDir())
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
 	sandboxDir := layout.SandboxDir("box")
 	require.NoError(t, os.MkdirAll(sandboxDir, 0o750))
 	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
-		Version: 3,
-		Name:    "box",
-		Dirs:    []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
+		Version:   3,
+		Name:      "box",
+		Principal: config.CLIPrincipal,
+		Dirs:      []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	}))
 
 	rt := &gitExecerRuntime{caps: runtime.BackendCaps{GitExecInConfinement: true}}
@@ -80,7 +81,7 @@ func TestNewSandbox_DispatchesToGitExecer(t *testing.T) {
 	out, err := g.Run(context.Background(), store.WorkDir(sandboxDir, "/proj"), "status", "--porcelain")
 	require.NoError(t, err)
 	assert.Equal(t, "dispatched", out)
-	assert.Equal(t, "yoloai-box", rt.lastInstance)
+	assert.Equal(t, "yoloai-cli-box", rt.lastInstance)
 	assert.Equal(t, "yoloai", rt.lastUser)
 	assert.Equal(t, "/proj", rt.lastWorkDir, "host work-copy path maps to the dir's in-sandbox mount path")
 	assert.Equal(t, []string{"-c", "safe.directory=/proj", "status", "--porcelain"}, rt.lastArgs,
@@ -93,7 +94,7 @@ func TestNewSandbox_DispatchesToGitExecer(t *testing.T) {
 // dispatching executor; a backend that merely implements GitExec without the
 // cap, and a nil runtime, get the host executor.
 func TestNewSandbox_InjectsExecerByConfinement(t *testing.T) {
-	layout := config.NewLayout("/home/u/.yoloai")
+	layout := config.NewLayout("/home/u/.yoloai").WithPrincipal(config.CLIPrincipal)
 
 	vm := NewSandbox(layout, &gitExecerRuntime{caps: runtime.BackendCaps{FilesystemLocality: runtime.LocalitySandboxSide}}, "box")
 	_, ok := vm.e.(sandboxExec)

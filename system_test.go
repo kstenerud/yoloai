@@ -45,14 +45,14 @@ func TestSystem_Info(t *testing.T) {
 }
 
 // TestClient_Principal threads ClientCreateOptions.Principal into the layout
-// (default "" stays default; a valid segment parses; an invalid one is a
-// *UsageError).
+// (empty is rejected — no default principal, D126; a valid segment parses;
+// an invalid one is a *UsageError).
 func TestClient_Principal(t *testing.T) {
 	root := t.TempDir()
 
-	def, err := NewClient(context.Background(), ClientCreateOptions{DataDir: root, HomeDir: root})
-	require.NoError(t, err)
-	assert.Equal(t, config.PrincipalSegment(""), def.layout.Principal)
+	_, err := NewClient(context.Background(), ClientCreateOptions{DataDir: root, HomeDir: root})
+	require.Error(t, err)
+	assert.ErrorContains(t, err, "principal is required")
 
 	acme, err := NewClient(context.Background(), ClientCreateOptions{DataDir: root, HomeDir: root, Principal: "acme"})
 	require.NoError(t, err)
@@ -271,9 +271,10 @@ func TestSystem_CheckAgent(t *testing.T) {
 		dataDir := filepath.Join(home, ".yoloai")
 		require.NoError(t, os.MkdirAll(dataDir, 0o750))
 		c, err := NewClient(context.Background(), ClientCreateOptions{
-			DataDir: dataDir,
-			HomeDir: home,
-			Env:     env,
+			DataDir:   dataDir,
+			HomeDir:   home,
+			Env:       env,
+			Principal: "cli",
 		})
 		require.NoError(t, err)
 		return c.System(), home

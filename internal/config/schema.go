@@ -22,17 +22,32 @@ import (
 // way that needs a migration step, and document the change in BREAKING-CHANGES.
 //
 // The chain splits at libraryFrozenVersion: MigrateLibrary + MigrateAgentConfigs
-// own the sealed v0->v3 ladder; anything past it (v3->v4 overlay flatten) is a
-// crash-safe framework migration that owns its own stamp write, flipped LAST —
-// after its per-sandbox pass is durable — so the stamp is never ahead of the data
-// (the truth invariant). MigrateLibrary must NOT advance the stamp past
-// libraryFrozenVersion, or it would green the gate over un-flattened overlays.
-const LibrarySchemaVersion = 4
+// own the sealed v0->v3 ladder; anything past it (v3->v4 overlay flatten, v4->v5
+// principal rename) is a crash-safe framework migration that owns its own stamp
+// write, flipped LAST — after its per-sandbox pass is durable — so the stamp is
+// never ahead of the data (the truth invariant). MigrateLibrary must NOT advance
+// the stamp past libraryFrozenVersion, or it would green the gate over
+// un-migrated sandboxes.
+const LibrarySchemaVersion = SchemaPrincipalRenamed
 
 // libraryFrozenVersion is the ceiling of the sealed MigrateLibrary +
 // MigrateAgentConfigs ladder (the v2->v3 agent.json split and earlier). Framework
 // migrations take the realm from here to LibrarySchemaVersion.
 const libraryFrozenVersion = 3
+
+// Framework-migration target versions past libraryFrozenVersion. Each framework
+// migrator advances the realm one step and stamps its OWN target LAST — after
+// its per-sandbox pass is durable — guarded so a re-run never lowers a higher
+// stamp. They run in ascending order; the last equals LibrarySchemaVersion.
+const (
+	// SchemaOverlayFlattened is the target of the v3->v4 overlay flatten (shipped
+	// in v0.6.0).
+	SchemaOverlayFlattened = 4
+	// SchemaPrincipalRenamed is the target of the v4->v5 CLI principal rename:
+	// the CLI adopts the "cli" principal and existing "yoloai-<name>" instances
+	// are renamed/recreated to "yoloai-cli-<name>" (D126).
+	SchemaPrincipalRenamed = 5
+)
 
 // LaunchPrefixResolver maps a sandbox's stored backend type (the "backend"
 // string in environment.json) to that backend's constant agent-launch wrap

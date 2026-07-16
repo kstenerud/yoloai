@@ -270,7 +270,9 @@ func TestOverlayFlatten_NoOverlayStampsV4WithoutRuntime(t *testing.T) {
 	if err != nil {
 		t.Fatalf("read stamp: %v", err)
 	}
-	if !exists || v != config.LibrarySchemaVersion {
-		t.Errorf("stamp = %d (exists=%v), want %d", v, exists, config.LibrarySchemaVersion)
+	// The overlay flatten stamps its OWN target (v4), not LibrarySchemaVersion —
+	// the later principal-rename migrator takes the realm the rest of the way.
+	if !exists || v != config.SchemaOverlayFlattened {
+		t.Errorf("stamp = %d (exists=%v), want %d", v, exists, config.SchemaOverlayFlattened)
 	}
 }

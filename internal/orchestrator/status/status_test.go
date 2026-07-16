@@ -29,7 +29,7 @@ import (
 func TestInspectSandbox_NotFound(t *testing.T) {
 	tmpDir := t.TempDir()
 
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 	mock := &fakeRuntime{}
 	_, err := InspectSandbox(context.Background(), layout, mock, "nonexistent")
 	assert.ErrorIs(t, err, store.ErrSandboxNotFound)
@@ -43,7 +43,8 @@ func TestInspectSandbox_Removed(t *testing.T) {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
-		Name: name,
+		Name:      name,
+		Principal: config.CLIPrincipal,
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
@@ -59,7 +60,7 @@ func TestInspectSandbox_Removed(t *testing.T) {
 		},
 	}
 
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 	info, err := InspectSandbox(context.Background(), layout, mock, name)
 	require.NoError(t, err)
 	assert.Equal(t, StatusRemoved, info.Status)
@@ -73,7 +74,7 @@ func TestListSandboxes_Empty(t *testing.T) {
 	// Create sandboxes dir but leave it empty
 	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, ".yoloai", "sandboxes"), 0750))
 
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 	mock := &fakeRuntime{}
 	result, err := ListSandboxes(context.Background(), layout, mock)
 	require.NoError(t, err)
@@ -90,7 +91,8 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	validDir := filepath.Join(sandboxesDir, "valid")
 	require.NoError(t, os.MkdirAll(validDir, 0750))
 	meta := &store.Environment{
-		Name: "valid",
+		Name:      "valid",
+		Principal: config.CLIPrincipal,
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
@@ -110,7 +112,7 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 		},
 	}
 
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 	result, err := ListSandboxes(context.Background(), layout, mock)
 	require.NoError(t, err)
 	require.Len(t, result, 2)
@@ -439,7 +441,8 @@ func writeNetHealthFixture(t *testing.T, name string) config.Layout {
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	meta := &store.Environment{
-		Name: name,
+		Name:      name,
+		Principal: config.CLIPrincipal,
 		Dirs: []store.DirEnvironment{{
 			HostPath: "/tmp/test",
 			Mode:     "copy",
@@ -448,7 +451,7 @@ func writeNetHealthFixture(t *testing.T, name string) config.Layout {
 	}
 	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
 	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
-	return config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	return config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 }
 
 // runningInspectFn reports the instance as running, so DetectStatus (with no

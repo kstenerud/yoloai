@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -128,8 +129,8 @@ func writeFakeTart(t *testing.T, script string) string {
 }
 
 const netLivenessListJSON = `[
-  {"Name": "yoloai-embrace", "Running": true, "State": "running"},
-  {"Name": "yoloai-stopped", "Running": false, "State": "stopped"},
+  {"Name": "yoloai-cli-embrace", "Running": true, "State": "running"},
+  {"Name": "yoloai-cli-stopped", "Running": false, "State": "stopped"},
   {"Name": "some-other-vm", "Running": true, "State": "running"}
 ]`
 
@@ -148,14 +149,14 @@ case "$1" in
 esac
 `
 	fakeTart := writeFakeTart(t, script)
-	rt := &Runtime{tartBin: fakeTart, execEnv: []string{"PATH=/usr/bin:/bin"}}
+	rt := &Runtime{tartBin: fakeTart, execEnv: []string{"PATH=/usr/bin:/bin"}, layout: config.Layout{}.WithPrincipal(config.CLIPrincipal)}
 
 	report, err := rt.NetLiveness(context.Background())
 	require.NoError(t, err)
 	require.Len(t, report.VMs, 1)
 
 	vm := report.VMs[0]
-	assert.Equal(t, "yoloai-embrace", vm.VMName)
+	assert.Equal(t, "yoloai-cli-embrace", vm.VMName)
 	assert.Equal(t, "embrace", vm.SandboxName)
 	assert.Equal(t, runtime.NetHealthWedged, vm.State)
 	assert.Equal(t, "guest en0 is link-local 169.254.93.37", vm.Detail)
@@ -183,6 +184,7 @@ esac
 	rt := &Runtime{
 		tartBin: fakeTart, execEnv: []string{"PATH=/usr/bin:/bin"},
 		bridgeNets: func() []bridgeSubnet { return []bridgeSubnet{testBridge("bridge100", "192.168.64.1", 24)} },
+		layout:     config.Layout{}.WithPrincipal(config.CLIPrincipal),
 	}
 
 	report, err := rt.NetLiveness(context.Background())
@@ -190,7 +192,7 @@ esac
 	require.Len(t, report.VMs, 1)
 
 	vm := report.VMs[0]
-	assert.Equal(t, "yoloai-embrace", vm.VMName)
+	assert.Equal(t, "yoloai-cli-embrace", vm.VMName)
 	assert.Equal(t, "embrace", vm.SandboxName)
 	assert.Equal(t, runtime.NetHealthOK, vm.State)
 	assert.Equal(t, "192.168.64.12", vm.Detail)
@@ -221,6 +223,7 @@ esac
 	rt := &Runtime{
 		tartBin: fakeTart, execEnv: []string{"PATH=/usr/bin:/bin"},
 		bridgeNets: func() []bridgeSubnet { return []bridgeSubnet{testBridge("bridge100", "192.168.139.3", 23)} },
+		layout:     config.Layout{}.WithPrincipal(config.CLIPrincipal),
 	}
 
 	report, err := rt.NetLiveness(context.Background())
@@ -228,7 +231,7 @@ esac
 	require.Len(t, report.VMs, 1)
 
 	vm := report.VMs[0]
-	assert.Equal(t, "yoloai-embrace", vm.VMName)
+	assert.Equal(t, "yoloai-cli-embrace", vm.VMName)
 	assert.Equal(t, "embrace", vm.SandboxName)
 	assert.Equal(t, runtime.NetHealthWedged, vm.State)
 	assert.Equal(t,
@@ -247,7 +250,7 @@ func TestSandboxNetHealth_WedgedVM(t *testing.T) {
 	// Both subcommands guard on $2 so a wrong VM-name mapping classifies as
 	// unknown (not wedged) and fails the assertions below.
 	script := `#!/bin/sh
-[ "$2" = "yoloai-embrace" ] || { echo "wrong vm: $2" 1>&2; exit 98; }
+[ "$2" = "yoloai-cli-embrace" ] || { echo "wrong vm: $2" 1>&2; exit 98; }
 case "$1" in
   ip) echo "no IP address found" 1>&2; exit 1 ;;
   exec) echo "169.254.93.37" ;;
@@ -255,11 +258,11 @@ case "$1" in
 esac
 `
 	fakeTart := writeFakeTart(t, script)
-	rt := &Runtime{tartBin: fakeTart, execEnv: []string{"PATH=/usr/bin:/bin"}}
+	rt := &Runtime{tartBin: fakeTart, execEnv: []string{"PATH=/usr/bin:/bin"}, layout: config.Layout{}.WithPrincipal(config.CLIPrincipal)}
 
 	vm, err := rt.SandboxNetHealth(context.Background(), "embrace")
 	require.NoError(t, err)
-	assert.Equal(t, "yoloai-embrace", vm.VMName)
+	assert.Equal(t, "yoloai-cli-embrace", vm.VMName)
 	assert.Equal(t, "embrace", vm.SandboxName)
 	assert.Equal(t, runtime.NetHealthWedged, vm.State)
 	assert.Equal(t, "guest en0 is link-local 169.254.93.37", vm.Detail)

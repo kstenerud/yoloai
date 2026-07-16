@@ -608,6 +608,28 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 	return nil
 }
 
+// Rename renames a Docker container in place (runtime.Renamer). Docker rename
+// is metadata-only: a running container keeps running with the same PID and its
+// labels intact, so the v4->v5 principal-rename migration can move a
+// "yoloai-<name>" container to "yoloai-cli-<name>" without interrupting a
+// mid-task agent (D126). Podman inherits this by embedding the docker Runtime.
+// Returns ErrNotFound if oldName does not exist.
+//
+// Note: rename does NOT rewrite the stored com.yoloai.principal label (the SDK
+// has no label-update-without-recreate). The migrated container therefore keeps
+// its old principal label; that is harmless because the label-equality prune
+// predicate only reaps an instance absent from the known-sandbox set, and a
+// migrated sandbox is always in it. See the migration for the full reasoning.
+func (r *Runtime) Rename(ctx context.Context, oldName, newName string) error {
+	if err := r.client.ContainerRename(ctx, oldName, newName); err != nil {
+		if cerrdefs.IsNotFound(err) {
+			return runtime.ErrNotFound
+		}
+		return fmt.Errorf("rename container %q to %q: %w", oldName, newName, err)
+	}
+	return nil
+}
+
 // Remove removes a Docker container. Returns nil if already removed.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
 	if err := r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true}); err != nil {

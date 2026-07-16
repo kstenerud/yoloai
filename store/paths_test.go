@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -266,8 +267,14 @@ func TestWorkDir(t *testing.T) {
 }
 
 func TestInstanceName(t *testing.T) {
-	assert.Equal(t, "yoloai-mybox", InstanceName("", "mybox"))
+	assert.Equal(t, "yoloai-cli-mybox", InstanceName(config.CLIPrincipal, "mybox"))
 	assert.Equal(t, "yoloai-acme-mybox", InstanceName("acme", "mybox"))
+}
+
+func TestLegacyCLIInstanceName(t *testing.T) {
+	// The pre-D126 empty-principal form, used only by migrations that address
+	// instances created before the CLI adopted the "cli" principal.
+	assert.Equal(t, "yoloai-mybox", LegacyCLIInstanceName("mybox"))
 }
 
 func TestOverlayLowerDir(t *testing.T) {

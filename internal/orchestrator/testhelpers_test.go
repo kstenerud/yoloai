@@ -73,7 +73,7 @@ func (m *lifecycleMockRuntime) Exec(ctx context.Context, name string, cmd []stri
 // tmpDir/.yoloai. Used by terminal_test.go and any other sandbox tests that
 // need an engine before lifecycle methods moved to the lifecycle/ sub-package.
 func newLifecycleMgr(rt *lifecycleMockRuntime, tmpDir string) *Engine {
-	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 	return NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), WithLayout(layout))
 }
 
@@ -85,6 +85,7 @@ func createTestSandbox(t *testing.T, tmpDir, name, hostPath string, mode store.D
 
 	meta := &store.Environment{
 		Name:      name,
+		Principal: config.CLIPrincipal,
 		CreatedAt: time.Now(),
 		Dirs: []store.DirEnvironment{{
 			HostPath:  hostPath,

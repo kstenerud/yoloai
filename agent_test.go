@@ -32,7 +32,7 @@ func drainEvents(t *testing.T, ch <-chan LogEvent) []LogEvent {
 
 func TestAgentLogs_ForwardsFrames(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir, Principal: "cli"})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -57,7 +57,7 @@ func TestAgentLogs_ForwardsFrames(t *testing.T) {
 
 func TestAgentLogs_MissingSandbox(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir, Principal: "cli"})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 

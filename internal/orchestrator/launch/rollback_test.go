@@ -53,7 +53,7 @@ func TestRollbackPartialLaunch_ReapsContainerAndInjectorOnCancelledCtx(t *testin
 	rec := fmt.Sprintf(`{"pid":%d,"addr":"127.0.0.1:1"}`, pid)
 	require.NoError(t, fileutil.WriteFile(filepath.Join(dir, "injector.json"), []byte(rec), 0o600))
 
-	st := &state.State{Name: "box", SandboxDir: dir, Layout: config.NewLayout(t.TempDir())}
+	st := &state.State{Name: "box", SandboxDir: dir, Layout: config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)}
 	rt := &recordingRuntime{}
 
 	// The caller's context is ALREADY cancelled — the Ctrl-C case. Rollback must
@@ -63,7 +63,7 @@ func TestRollbackPartialLaunch_ReapsContainerAndInjectorOnCancelledCtx(t *testin
 
 	rollbackPartialLaunch(ctx, rt, st)
 
-	cname := "yoloai-box" // InstanceName for the default (empty) principal
+	cname := "yoloai-cli-box" // InstanceName for the CLI principal
 	assert.Equal(t, []string{cname}, rt.stopped, "stops the instance")
 	assert.Equal(t, []string{cname}, rt.removed, "removes the instance (triggers netns teardown)")
 	assert.True(t, rt.ctxLiveAtStop, "cleanup runs on a detached (non-cancelled) context")

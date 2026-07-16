@@ -32,7 +32,7 @@ type Environment struct {
 	Version       int                     `json:"version"` // schema version; 0 = legacy (pre-versioning)
 	YoloaiVersion string                  `json:"yoloai_version"`
 	Name          string                  `json:"name"`
-	Principal     config.PrincipalSegment `json:"principal,omitempty"` // owning principal; "" = default (no-principal). Attribution + runtime namespace (D62).
+	Principal     config.PrincipalSegment `json:"principal,omitempty"` // owning principal (the CLI's is "cli"); "" only in pre-D126 records the v4->v5 migration re-stamps. Attribution + runtime namespace (D62/D126).
 	CreatedAt     time.Time               `json:"created_at"`
 	BackendType   runtime.BackendType     `json:"backend"` // typed string; serializes as "docker"/"tart"/etc.
 	Profile       string                  `json:"profile,omitempty"`
