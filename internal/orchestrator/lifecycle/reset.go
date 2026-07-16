@@ -17,6 +17,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
+	"github.com/kstenerud/yoloai/internal/orchestrator/workcopy"
 	"github.com/kstenerud/yoloai/internal/orchestrator/workprobe"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/runtime"
@@ -166,56 +167,43 @@ func dirWorkReason(ctx context.Context, sandboxGit *git.Git, sandboxDir string, 
 	return false, ""
 }
 
-// resetCopyWorkdir removes the work copy, re-copies from the host path, and
-// records the git baseline. Returns the new baseline SHA (empty if deferred).
+// specOf adapts a stored DirEnvironment to the materialization inputs. Reset's
+// counterpart to create building the Spec from a DirSpec — the two carry the same
+// three fields under different names.
+func specOf(d store.DirEnvironment) workcopy.Spec {
+	return workcopy.Spec{Src: d.HostPath, IncludeIgnored: d.IncludeIgnored, StripHistory: d.StripHistory}
+}
+
+// resetCopyWorkdir re-copies the workdir from its host path and records the new
+// baseline SHA (empty if deferred to the VM). WipeAndCopy — the same
+// materialization create runs, so a reset reproduces the copy create would have
+// made. Reset drops the history notice: it does not warn today, and keeping that
+// is behaviour-preserving.
 func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir string, meta *store.Environment) (string, error) {
 	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
-
-	if err := os.RemoveAll(workDir); err != nil {
-		return "", fmt.Errorf("remove work copy: %w", err)
-	}
 	if _, err := os.Stat(meta.Workdir().HostPath); err != nil {
 		return "", fmt.Errorf("original directory no longer exists: %s", meta.Workdir().HostPath)
 	}
 	slog.Debug("re-copying workdir", "event", "sandbox.reset.workdir", "sandbox", sandboxName, "host_path", meta.Workdir().HostPath)
-	g := git.NewHost(d.Layout)
-	preserveGit, _ := workspace.PreserveGit(meta.Workdir().StripHistory, runtime.GitRunsInConfinement(d.Runtime))
-	if err := workspace.CopyProjectDir(meta.Workdir().HostPath, workDir, meta.Workdir().IncludeIgnored, preserveGit, func() ([]string, bool, error) {
-		return g.ListProjectFiles(ctx, meta.Workdir().HostPath)
-	}); err != nil {
+	sha, _, err := workcopy.Materialize(ctx, specOf(*meta.Workdir()), workDir, git.NewHost(d.Layout), d.Runtime)
+	if err != nil {
 		return "", fmt.Errorf("re-copy workdir: %w", err)
 	}
-	// SandboxSide backends (e.g. Tart) keep the work copy inside the sandbox, so
-	// the baseline is created in-VM after start; return the empty SHA that signals
-	// deferral. Checked before baselining, matching create's workcopy.Materialize —
-	// otherwise a work copy carrying a .git baselines to a host-side SHA that the
-	// recreate then overwrites. That overwrite is why this is only a consistency
-	// tidy and not a fix: recreateContainer re-runs the VM setup unconditionally,
-	// so the ordering here never changed what the VM ended up with (DF122, retracted).
-	if runtime.LocalityOf(d.Runtime) == runtime.LocalitySandboxSide {
-		return "", nil
-	}
-	return baseline.WorkCopy(ctx, g, workDir)
+	return sha, nil
 }
 
 // resetAuxCopyDir resets a single aux :copy dir and returns the new baseline SHA.
+// Same materialization as the workdir — which also gives aux dirs the SandboxSide
+// baseline deferral this path used to omit (masked before by the recreate's
+// unconditional VM setup, so no observable change; the divergence is simply gone).
 func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store.DirEnvironment, rt runtime.Backend) (string, error) {
 	auxWorkDir := store.WorkDir(sandboxDir, d.HostPath)
-	if err := os.RemoveAll(auxWorkDir); err != nil {
-		return "", fmt.Errorf("remove aux work copy %s: %w", d.HostPath, err)
-	}
 	if _, err := os.Stat(d.HostPath); err != nil {
 		return "", fmt.Errorf("original aux directory no longer exists: %s", d.HostPath)
 	}
-	preserveGit, _ := workspace.PreserveGit(d.StripHistory, runtime.GitRunsInConfinement(rt))
-	if err := workspace.CopyProjectDir(d.HostPath, auxWorkDir, d.IncludeIgnored, preserveGit, func() ([]string, bool, error) {
-		return g.ListProjectFiles(ctx, d.HostPath)
-	}); err != nil {
-		return "", fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
-	}
-	sha, err := baseline.WorkCopy(ctx, g, auxWorkDir)
+	sha, _, err := workcopy.Materialize(ctx, specOf(d), auxWorkDir, g, rt)
 	if err != nil {
-		return "", fmt.Errorf("baseline aux dir %s: %w", d.HostPath, err)
+		return "", fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
 	}
 	return sha, nil
 }

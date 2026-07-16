@@ -339,3 +339,45 @@ func TestResetCopyWorkdir_SandboxSide_DefersBaseline(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, sha, "an empty SHA is what tells reset to run the VM work-dir setup")
 }
+
+// resetAuxCopyDir (the restart-path aux dir) had no test before it moved onto
+// workcopy.Materialize. It must re-copy the aux dir from its host source,
+// discard the agent's leftovers, and record a fresh baseline — the same
+// WipeAndCopy the workdir gets.
+func TestResetAuxCopyDir_RebuildsFromHost(t *testing.T) {
+	auxSrc := filepath.Join(t.TempDir(), "auxsrc")
+	require.NoError(t, os.MkdirAll(auxSrc, 0o750))
+	testutil.InitGitRepo(t, auxSrc)
+	testutil.WriteFile(t, auxSrc, "aux.txt", "v1\n")
+	testutil.GitAdd(t, auxSrc, ".")
+	testutil.GitCommit(t, auxSrc, "aux initial")
+
+	sandboxDir := t.TempDir()
+	auxWorkDir := store.WorkDir(sandboxDir, auxSrc)
+	require.NoError(t, os.MkdirAll(auxWorkDir, 0o750))
+	testutil.WriteFile(t, auxWorkDir, "agent-leftover.txt", "stale")
+
+	// Upstream advances on the host.
+	testutil.WriteFile(t, auxSrc, "upstream.txt", "from host\n")
+	testutil.GitAdd(t, auxSrc, ".")
+	testutil.GitCommit(t, auxSrc, "aux upstream")
+
+	sha, err := resetAuxCopyDir(context.Background(),
+		git.NewTestHostWithEnv(testutil.GitEnv()), sandboxDir,
+		store.DirEnvironment{HostPath: auxSrc, Mode: "copy"}, confinedBackend())
+	require.NoError(t, err)
+
+	assert.Len(t, sha, 40, "HostSide backend records a baseline")
+	assert.False(t, exists(filepath.Join(auxWorkDir, "agent-leftover.txt")), "the agent's leftover is swept")
+	assert.True(t, exists(filepath.Join(auxWorkDir, "upstream.txt")), "upstream arrives")
+}
+
+// The existence-error preserved in the move: a source that has since been deleted
+// must be reported clearly rather than surfacing as a copy failure.
+func TestResetAuxCopyDir_OriginalMissing(t *testing.T) {
+	_, err := resetAuxCopyDir(context.Background(),
+		git.NewTestHostWithEnv(testutil.GitEnv()), t.TempDir(),
+		store.DirEnvironment{HostPath: filepath.Join(t.TempDir(), "gone"), Mode: "copy"}, confinedBackend())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "original aux directory no longer exists")
+}
