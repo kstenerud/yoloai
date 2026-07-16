@@ -3,10 +3,12 @@
 
 # Plan: the CLI is a principal — name it, and delete the empty-principal sentinel
 
-- **Status:** PLANNED — **P0 answered and P1 run (2026-07-16); P2 onward not started.** Scoped
-  2026-07-15 after DF98's third instance landed. Breaking change under
-  [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2; still wants a D-entry
-  superseding D62's CLI-elision bullets (owed — see [Open questions](#open-questions)).
+- **Status:** PLANNED — **P0 answered, P1 run, D-entry landed (2026-07-16); P2 onward not started.**
+  Scoped 2026-07-15 after DF98's third instance landed. The decision is
+  [D126](../../decisions/working-notes.md#d126--the-cli-is-a-principal-named-cli-the-empty-principal-sentinel-is-deleted-and--becomes-invalid),
+  which supersedes D62's CLI-elision bullets and D59's default/empty segment. Breaking change under
+  [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2. Still owed:
+  BREAKING-CHANGES entry, the rule-2 sweep, the schema bump.
 - **Depends on:** —
 
 ## The one-sentence version
@@ -45,23 +47,35 @@ InstancePrefix("acme")  == "yoloai-acme-"     // an integrator
 strings.HasPrefix("yoloai-acme-foo", "yoloai-")   // true
 ```
 
-Tart's and seatbelt's prune select orphans with `strings.HasPrefix(name, InstancePrefix(principal))`
-(`runtime/tart/prune.go:31,36`, `runtime/seatbelt/prune.go:80`). `known` is built from the caller's
+**Four of six backends** select orphans with `strings.HasPrefix(name, InstancePrefix(principal))`:
+tart (`prune.go:31,36`), seatbelt (`prune.go:80`), apple (`apple.go:473`, `orphanInstances:501`), and
+containerd for two of its three sweeps — its *container* sweep is safe (`prune.go:55` uses
+`IsOrphanCandidate`) but its **netns sweep** (`prune.go:109`) and **`reconcileBlockingContainers`**
+(`prune.go:249`, which stops and removes what it matches) are not. `known` is built from the caller's
 *own* `SandboxesDir` (`system.go` `classifySandboxes`), so another principal's sandboxes are never in
 it. Net effect: **`yoloai system prune` from the CLI reaps every integrator's instances** — the exact
 cross-principal destruction principal-scoping exists to prevent (DF19).
 
-Docker is immune, and for the reason that indicts the other two: it filters by label **equality** via
+**Verified by execution (2026-07-16, dry-run):** with a real unprincipaled CLI layout and a faithful
+`known` set, a tart prune spares the developer's own VM and the base image, and still selects a
+planted `yoloai-acme-probe`. The sweep is not over-broad in general — it is wrong in exactly the
+cross-principal way, and no correct `known` set can fix it, because another principal's sandboxes
+live under *their* `DataDir` (D59) and are structurally unknowable to the CLI.
+
+Docker is immune, and for the reason that indicts the rest: it filters by label **equality** via
 `runtime.IsOrphanCandidate` — `labels[LabelPrincipal] == string(principal)` (`runtime/orphan.go:30`)
 — which is what [D62](../../decisions/working-notes.md) actually specified: *"runtime enumeration
-filters by label, not by name-string splitting."* Tart and seatbelt never implemented that half, and
-prefix-matching only *looks* equivalent while one principal is empty.
+filters by label, not by name-string splitting."* Podman inherits it by embedding `docker.Runtime`.
+The other four never implemented that half, and prefix-matching only *looks* equivalent while one
+principal is empty.
 
 D62:380's non-collision proof covers **names** (`yoloai-foo` vs `yoloai-acme-foo` never collide) and
 says nothing about **prefix containment**. So the proof is sound and the guarantee it implies is not.
 Two independent fixes fall out, and this plan only needs the first: naming the CLI `cli` makes every
-namespace mutually disjoint and the whole class evaporates structurally; separately, tart and
-seatbelt should adopt `IsOrphanCandidate` per D62:379 regardless. Filed as **DF115**.
+namespace mutually disjoint and the whole class evaporates structurally; separately, tart, seatbelt,
+apple and containerd's two prefix-matched sweeps should adopt `IsOrphanCandidate` per D62:379
+regardless. Prefer both — the rename removes the hazard, the predicate removes the ability to
+reintroduce it. Filed as **DF115**.
 
 ## The defect
 
@@ -168,13 +182,34 @@ established, and P3 must not assume it.
 - **P0 — decide.** The [open questions](#open-questions) below. No code until they are answered.
 - **P1 — establish the rename table.** Verify per-backend rename support on real backends. This
   decides P3's shape and may force recreate-only for some, which changes the UX.
-- **P2 — CLI adopts `"cli"`.** Single site. Every backend's tests already run with a non-empty
-  principal (`testutil.UniqueTestPrincipal`), so the suites should stay green; if one breaks, it has
-  the DF98 bug and that is the gate working.
+- **P2 — CLI adopts `"cli"`.** Single site. **The original claim here was wrong and is corrected
+  (2026-07-16, measured):** it read *"Every backend's tests already run with a non-empty principal
+  (`testutil.UniqueTestPrincipal`), so the suites should stay green; if one breaks, it has the DF98
+  bug and that is the gate working."* In fact **61 of the 65 test files that construct a Layout set no
+  principal at all** — including nearly every per-backend suite (`runtime/{tart,docker,podman,apple,
+  seatbelt,containerd}/integration*_test.go`). Only the orchestrator tier goes through
+  `testutil.TartStoreLayout`/`testutil.backend.go`, which do set one. Acting on the old sentence would
+  send an implementer hunting DF98 instances in dozens of suites that merely never named a principal.
+  Corroborated in the wild: the tart conformance suite creates VMs named `yoloai-test-<subtest>` —
+  visibly unprincipaled, no `t000NNNN` segment.
 - **P3 — migration** behind a schema bump: rename or recreate per P1's findings, with the running-
   instance case handled explicitly.
 - **P4 — reject `""`.** `ParsePrincipalSegment` errors; `InstancePrefix` loses its branch. Separable
   from P2 and breaking for integrators independently, so it can land on its own schedule.
+  **Blast radius, measured 2026-07-16** (probe: make `InstancePrefix("")` panic, run `go test ./...`):
+  **11 packages fail, 42 pass** — `yoloai`, `copyflow`, `store`, `internal/git`,
+  `internal/cli/sandboxcmd`, `internal/orchestrator{,/launch,/lifecycle,/status}`, `runtime/tart`,
+  `runtime/seatbelt`. That is **unit tests only**, before any integration suite or the CLI itself.
+  Budget P4 accordingly; it is not a one-line change with a green suite behind it.
+
+  **Design gap in step 3, found while measuring.** "`InstancePrefix` loses its branch" does **not**
+  make `""` balk — it returns `"yoloai--"` (double dash), a malformed name, silently. `Layout.Principal`
+  is set via `WithPrincipal`, which takes a `PrincipalSegment` directly and never parses, so
+  `ParsePrincipalSegment`'s error (step 2) is not on that path at all. To actually get D126's "no
+  defaults", the balk has to live where the empty value can still be observed — `InstancePrefix`
+  panicking (the precedent is `config.NewLayout`, which already panics on an empty `dataDir`,
+  `layout.go:152-155`), or a Layout constructor that requires a principal. Decide which; step 3 as
+  written enforces nothing.
 - **P5 — sweep the surfaces** (rule 2): `internal/cli/helpcmd/help/*.md` (embedded, shipped, nothing
   typechecks it), README, docs examples, and anything showing `yoloai-<name>` in `docker ps` output.
   `make check` catches none of this.
@@ -228,6 +263,39 @@ built for exactly this class of change. This was an omission, not a trade-off an
 5. **Is `cli` the right name?** — **ANSWERED: yes, `cli`.** The owner's reason is the one this plan
    already gives: it matches the existing identifiers and machinery of the CLI (`TOP/cli`). Budget is
    fine at 3 chars (`7 + 3 + 1 + 56 = 67 ≤ 76`).
+
+## Trust boundary: what macOS established, and what a Linux implementer must not inherit
+
+This plan is meant to be picked up by an implementer on Linux who will rework both halves. Half the
+backends here are platform-locked, so some rows below can only ever be closed by the host that owns
+them. **The point of this section is that "verified" and "read the code and it looks right" are not
+the same claim, and the second one has already been wrong once in this plan** (the seatbelt row said
+"a directory + pidfile rename"; seatbelt needs no rename at all).
+
+**Established on Apple Silicon, 2026-07-16 — safe to build on:**
+
+| Claim | How |
+| --- | --- |
+| `tart rename` works on a **running** VM and a stopped one | ran both; exit 0, VM still listed running |
+| `docker rename` works on a **running** container and a stopped one | ran both against a live daemon; exit 0, container still running |
+| seatbelt needs **no** migration | read: dir is the bare name; `sandboxName()` = `TrimPrefix(instanceName, instancePrefix())` (`seatbelt.go:685-687`), `SandboxesDir()/<bare>` (`:160`) |
+| apple has **no rename verb** | ran `container --help`; the full subcommand list has no `rename`/`mv` |
+| DF115 is real and destructive | ran a **dry-run** unprincipaled tart prune with a faithful `known`: spares the developer's VM and the base image, still selects a planted `yoloai-acme-probe` |
+| the prune-predicate audit (which backends match by prefix vs label) | read every backend's prune; results in [DF115](../findings-unresolved.md) |
+
+**NOT established — do not treat as verified:**
+
+| Gap | Who can close it |
+| --- | --- |
+| **containerd cannot rename** (name = container id + snapshot key) | **Linux only.** D62:373 verified the *constraint* (`validate.go:34-42`, pinned `containerd/v2@v2.2.2`); nobody has verified what an actual rename attempt or a recreate does to a live sandbox. This is P1's last row and it gates P3's shape. |
+| **podman rename** | verb exists (podman 5.8.2, checked); never exercised — no machine was running on this host. Podman embeds `docker.Runtime`, so it *probably* inherits the working path, but "probably" is what this section exists to flag. |
+| **Do yoloAI's own handles survive a live rename?** | Both live renames were verified only as "the CLI accepts it and the instance stays listed running". Whether the live `tart run` host process re-binds, whether docker's labels/`DetectStatus`/an attached tmux session survive, and whether an agent mid-task notices — **none of that was tested**, on either platform. P3 must not assume it. This is the single largest hole. |
+| **containerd's netns sweep under a renamed principal** | `netnsNameFor` is `"yoloai-" + containerName` (`cni.go:128`), so netns names contain the instance name; a rename that does not also move `/var/run/netns/yoloai-<instance>` will orphan or mis-sweep it. Linux-only, untested, and easy to miss because the netns path is derived, not stored. |
+| **`yoloai-base` / profile image tags** | out of scope here (open question 4), but note `provisionedImageName` is a bare literal `"yoloai-base"` and the prune guard compares against it by equality — check it still holds once `InstancePrefix` loses its branch. |
+
+**One trap worth naming, because it cost time here.** `containerd/prune.go:111` and `selectOrphanNetns:132` contain a literal `"yoloai-"` and look exactly like a DF98 instance. They are not: they strip `netnsNameFor`'s *own* convention prefix, not the instance prefix. Verify before "fixing" them — and note that the same reading applies in reverse, since their *principal* scoping (`HasPrefix(containerName, instancePrefix)`) genuinely is DF115.
+
+**A green suite proves less than it looks here.** Every backend's tests already run under a non-empty principal (`testutil.UniqueTestPrincipal`), so the suites exercise the `yoloai-<p>-<name>` path and will stay green through P2 — that is the plan's own prediction and it is correct. It also means **the suites cannot detect the elision defect**, because nothing runs unprincipaled except the real CLI. Two consequences: a green tier after P2 is not evidence the migration works, and DF115's regression test must construct an unprincipaled layout deliberately (as the probe above did) or it will pass vacuously.
 
 ## Risks
 
