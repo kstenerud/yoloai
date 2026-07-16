@@ -84,11 +84,13 @@ type WorkDirSetup interface {
 // GitExecer is an optional interface for backends that run the copy-mode
 // work-copy git inside the sandbox's confinement rather than on the host. A
 // SandboxSide backend (Tart) MUST implement it because the work copy isn't on
-// the host at all; the container backends (Docker, Podman, Containerd) implement
-// it so an agent-controlled work-copy .git/config cannot execute filter/diff/
-// fsmonitor drivers on the host during diff/apply/status (audit C1). The set of
-// implementers is exactly GitRunsInConfinement; the git package dispatches
-// through it for those backends and runs host git for the rest (seatbelt, nil).
+// the host at all; Docker, Podman, Containerd and Apple implement it so an
+// agent-controlled work-copy .git/config cannot execute filter/diff/fsmonitor
+// drivers on the host during diff/apply/status (audit C1), and Seatbelt
+// implements it by wrapping git in a sandbox-exec profile, having no container
+// to exec into. The set of implementers is exactly GitRunsInConfinement, which
+// today is every backend; the git package dispatches through it for those and
+// falls back to host git only for a nil runtime.
 //
 // name is the resolved runtime instance name (container id), the same contract
 // as Exec — the git-package boundary resolves it from the principal. user is the

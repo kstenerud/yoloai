@@ -247,13 +247,15 @@ type BackendCaps struct {
 	KeepAliveModel     KeepAliveModel     // init/keep-alive model; see the type doc. Zero value = KeepAliveContainerInit.
 	// GitExecInConfinement makes the copy-mode work-copy git run inside the
 	// sandbox (via GitExecer) instead of on the host, for a backend whose work
-	// copy IS host-readable (LocalityHostSide) but which still has a container to
-	// exec into. It closes the host-code-execution path through an agent-planted
-	// .git filter/diff/fsmonitor driver (audit C1). Set by the container backends
-	// (docker/podman/containerd); seatbelt leaves it false (no container — host
-	// git, documented residual). Orthogonal to and additive with SandboxSide,
-	// which already forces in-confinement git; read both via
-	// GitRunsInConfinement, never this field directly.
+	// copy IS host-readable (LocalityHostSide) but which can still confine the
+	// git it runs. It closes the host-code-execution path through an agent-planted
+	// .git filter/diff/fsmonitor driver (audit C1). Set by docker, podman,
+	// containerd and apple, which exec git in the container, and by seatbelt,
+	// which has no container to exec into and wraps git in its own tight
+	// sandbox-exec profile instead — the same guarantee by other means, so it
+	// counts. Orthogonal to and additive with SandboxSide, which already forces
+	// in-confinement git; read both via GitRunsInConfinement, never this field
+	// directly.
 	GitExecInConfinement bool
 	// AgentFreeLaunch opts the backend into the D88 bring-up: the box comes up
 	// agent-free on a keepalive_only holder (the entrypoint writes .substrate-ready
@@ -302,10 +304,13 @@ func LocalityOf(rt Backend) FilesystemLocality {
 
 // GitRunsInConfinement reports whether rt runs the copy-mode work-copy git
 // inside the sandbox rather than on the host. True for SandboxSide backends
-// (the work copy isn't on the host) and for container backends that keep the
-// work copy host-readable but still exec git in-container so an agent-controlled
+// (the work copy isn't on the host) and for backends that keep the work copy
+// host-readable but still confine the git they run, so an agent-controlled
 // .git/config can't run filter/diff/fsmonitor drivers on the host (audit C1).
-// False for seatbelt (no container — host git, documented residual) and nil.
+// Every backend now satisfies one of those — seatbelt was the last holdout and
+// closed it with a sandbox-exec profile around git — so only a nil rt is false.
+// The unconfined branches downstream are therefore unreachable in production;
+// DF119 asks whether they still earn their keep.
 // A backend for which this is true MUST implement GitExecer. This is the
 // dispatch predicate for git.NewSandbox; it decouples git-exec locality from
 // FilesystemLocality (which still governs where work copies physically live).
