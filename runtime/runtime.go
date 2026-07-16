@@ -94,10 +94,18 @@ type InstanceConfig struct {
 	Resources   *ResourceLimits
 
 	// Labels are key/value metadata attached to the instance (e.g.
-	// com.yoloai.principal / com.yoloai.sandbox). Backends with native
-	// label support (Docker, containerd) apply them directly; backends
-	// that persist their config as JSON (Tart, Seatbelt) carry them in
-	// that record so an embedder can enumerate instances by owner.
+	// com.yoloai.principal / com.yoloai.sandbox). Backends with native label
+	// support (Docker, containerd, Apple) stamp them where the backend keeps
+	// them, which outlives the sandbox dir — that is what lets a prune sweep
+	// identify an instance by owner (IsOrphanCandidate). Tart and Seatbelt have
+	// no native labels and do not read this field; it is persisted only
+	// incidentally, as part of the whole InstanceConfig, inside the sandbox dir.
+	//
+	// So identity for those two is the instance name plus the DataDir the sandbox
+	// lives under, NOT this map — a record inside the sandbox dir cannot identify
+	// an instance whose sandbox dir is gone, which is exactly what an orphan is.
+	// Do not scope work on the assumption that these labels are readable back
+	// there; this comment promised precisely that until DF124.
 	Labels map[string]string
 
 	// Container/VM backends (Docker, Podman, containerd, Tart).
