@@ -3,12 +3,17 @@
 
 # Plan: the CLI is a principal — name it, and delete the empty-principal sentinel
 
-- **Status:** PLANNED — **P0 answered, P1 run, D-entry landed (2026-07-16); P2 onward not started.**
-  Scoped 2026-07-15 after DF98's third instance landed. The decision is
+- **Status:** IN-PROGRESS — **P2–P6 landed on `cli-is-a-principal` (2026-07-16); P7 Linux-docker
+  green, macOS releasetest + the tart/seatbelt/apple DF115 belt still owed.** Scoped 2026-07-15 after DF98's third instance landed. The decision is
   [D126](../../decisions/working-notes.md#d126--the-cli-is-a-principal-named-cli-the-empty-principal-sentinel-is-deleted-and--becomes-invalid),
   which supersedes D62's CLI-elision bullets and D59's default/empty segment. Breaking change under
-  [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2. Still owed:
-  BREAKING-CHANGES entry, the rule-2 sweep, the schema bump.
+  [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2. **Landed:** the CLI adopts
+  `cli`; `ParsePrincipalSegment("")` errors and `InstancePrefix` panics on empty; the optional
+  `runtime.Renamer` (docker/tart) + the v4→v5 `PrincipalRename` framework migrator; schema bump
+  4→5; `store.LegacyCLIInstanceName`; DF115's containerd `reconcileBlockingContainers` predicate;
+  the rule-2 sweep; the BREAKING-CHANGES entry. `make check` + docker integration tier green; the
+  real CLI migrate ran (empty realm → v5). **Owed:** releasetest on macOS (tart/seatbelt/apple) and
+  the containerd/podman Linux tiers; the tart/seatbelt/apple DF115 label-equality belt (macOS).
 - **Depends on:** —
 
 ## The one-sentence version
@@ -287,8 +292,8 @@ the same claim, and the second one has already been wrong once in this plan** (t
 
 | Gap | Who can close it |
 | --- | --- |
-| **containerd cannot rename** (name = container id + snapshot key) | **Linux only.** D62:373 verified the *constraint* (`validate.go:34-42`, pinned `containerd/v2@v2.2.2`); nobody has verified what an actual rename attempt or a recreate does to a live sandbox. This is P1's last row and it gates P3's shape. |
-| **podman rename** | verb exists (podman 5.8.2, checked); never exercised — no machine was running on this host. Podman embeds `docker.Runtime`, so it *probably* inherits the working path, but "probably" is what this section exists to flag. |
+| ~~**containerd cannot rename**~~ | **CLOSED on Linux (2026-07-16):** yoloAI's containerd backend creates the container via the containerd Go client with `WithID(cfg.Name)` and `WithNewSnapshot(cfg.Name, …)` (`lifecycle.go:244,258`) — the instance name *is* the immutable container id and snapshot key, no nerdctl name-indirection. So rename is impossible and the migrator recreates-or-refuses; there is no `runtime.Renamer` for containerd. |
+| ~~**podman rename**~~ | **CLOSED:** there is no separate podman backend — podman rides `docker.Runtime` (docker-compatible API), so it inherits `docker.Rename` (SDK `ContainerRename`) and the label-equality prune, and needs no separate verb. The plan's "6 backends" is really 5. |
 | **Do yoloAI's own handles survive a live rename?** | Both live renames were verified only as "the CLI accepts it and the instance stays listed running". Whether the live `tart run` host process re-binds, whether docker's labels/`DetectStatus`/an attached tmux session survive, and whether an agent mid-task notices — **none of that was tested**, on either platform. P3 must not assume it. This is the single largest hole. |
 | **containerd's netns sweep under a renamed principal** | `netnsNameFor` is `"yoloai-" + containerName` (`cni.go:128`), so netns names contain the instance name; a rename that does not also move `/var/run/netns/yoloai-<instance>` will orphan or mis-sweep it. Linux-only, untested, and easy to miss because the netns path is derived, not stored. |
 | **`yoloai-base` / profile image tags** | out of scope here (open question 4), but note `provisionedImageName` is a bare literal `"yoloai-base"` and the prune guard compares against it by equality — check it still holds once `InstancePrefix` loses its branch. |
