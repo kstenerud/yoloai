@@ -60,6 +60,7 @@ internal/envsetup/       → Layer (D91): stages agent-specific sandbox contents
 internal/orchestrator/profiles/    → Leaf: profile image building (dependency order, staleness)
 internal/orchestrator/runtimeconfig/ → Leaf: ContainerConfig assembly for the runtime layer
 internal/orchestrator/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
+internal/orchestrator/baseline/    → Leaf: the one place a copy-mode work copy's diff baseline is established; shared by create and reset so they cannot disagree (DF120)
 copyflow/       → Git-format diff/apply machinery for :copy and :rw modes
 internal/orchestrator/state/       → Leaf: shared value types (DirSpec, State, Deps, IsolationPerms/Perms) every F5 leaf imports
 store/       → On-disk sandbox state: paths, Meta record, SandboxState completion flags

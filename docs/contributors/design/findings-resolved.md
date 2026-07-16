@@ -7,6 +7,62 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF120 — every reset baselines a dirty source at HEAD where create commits it, so `diff` reports the user's own uncommitted work as the agent's and `apply` then refuses (RESOLVED 2026-07-16)
+
+- **Resolved by removing the second opinion, not by editing three call sites.** `baseline.WorkCopy`
+  (`internal/orchestrator/baseline`) is now the only place a copy-mode work copy's baseline is
+  established, and create and all three reset paths call it. The entry's own remedy said to prefer
+  the shared helper over the three edits precisely because create's one site and reset's three
+  drifting apart is what produced this; a fourth caller would have done it again.
+- **Verified:** `TestResyncWorkCopy_DirtySource_BaselinesLikeCreate` asserts the property that
+  actually matters rather than the mechanism — after a reset of a dirty source, `git diff <baseline>`
+  is **empty**, because the agent has done nothing. It fails against the old `HeadSHA`. The helper's
+  own tests cover the four shapes a work copy arrives in (dirty repo, clean repo, non-repo, repo with
+  no commits).
+- **Two more defects surfaced while fixing it**, both filed and both fixed here: DF121 (`:rw` stored
+  a baseline it does not track) and DF122 (reset baselined before the SandboxSide check, so a tart
+  reset skipped the VM's work-dir setup). DF122 was found only because consolidating the sites forced
+  a reading of the deferral's placement — the shared helper paid for itself before it shipped.
+
+- **Discovered:** 2026-07-16 · **Workstream:** none — noticed while reading the baseline logic for [DF117](findings-resolved.md), investigated on request rather than left as a hunch.
+- **Severity:** MEDIUM — it fails closed, and nothing is corrupted or lost: `apply` refuses and the host repo is untouched. But `diff` does not fail closed, it answers **wrongly**, and a sandbox reset against a dirty repo cannot deliver its work until the user commits or reverts on the host. Not CRITICAL by the policy above (no data loss, no security, no regression — this is long-standing).
+- **Disposition:** PARKED — filed, not fixed. The fix is small and named below, but it changes what every reset records as its baseline, which wants its own change and its own tests rather than a ride on a docs pass.
+- **Description:** Create commits a dirty source's work tree into the copy's own repo before handing it to the agent — `createBaselineForGitRepo` → `BaselineUncommittedChanges` (`prepare_dirs.go:357`), the "yoloai: pre-session state" commit — so the agent starts from a clean tree and a diff shows only what the agent did. **No reset does this.** All three reset baseline sites take `HeadSHA` instead: `reset.go:188` (restart, workdir), `:223` (restart, aux dirs), `:438` (in-place, via `resyncWorkCopy`). So after a reset the baseline is the source's HEAD while the work tree holds the source's *uncommitted* content, and everything downstream reads that difference as the agent's doing.
+- **Verified by execution, 2026-07-16**, against the real functions with the same fixture (a repo with one commit, `app.js` modified but not committed):
+  - **create** (`setupWorkdir`): baseline `dfc53e04` ≠ source HEAD `1b3a037c`; work copy `git status --porcelain` → **empty**; last commit → `"yoloai: pre-session state"`.
+  - **reset** (`resyncWorkCopy`): baseline `90d42e0b` **==** source HEAD; work copy status → **`M app.js`**; last commit → `"initial"`.
+  - `yoloai diff` after that reset, with the agent having done **nothing**: `app.js | 3 ++-`, `1 file changed, 2 insertions(+), 1 deletion(-)` — the user's own work in progress, attributed to the agent.
+  - **`apply` then refuses.** The patch's context is HEAD's content, but the host work tree already holds those lines, so it cannot apply. Reproduced with raw git: `git apply` → **exit 1**, `git apply --check` → **exit 1**, host file unchanged. That is the same command yoloAI gates on — `CheckPatch` runs `git apply --check` (`ops.go:145-149`) and `ApplyDiff` calls it before doing anything (`copyflow/apply.go:95-99`) — so the refusal happens inside yoloAI's own precondition, not by luck.
+- **Why this is a real sequence, not a contrived one.** Create *warns* about a dirty source and continues (`checkDirtyRepos`, plus the "changes will be visible to the agent and could be modified or lost" notice), so working from a dirty repo is expected and handled. The reset docs describe the intended use as "host repo got new upstream commits… user wants to update the agent's copy" (`commands.md`) — i.e. reset is for the case where the host has moved on, which is exactly when a developer is also likely to have work in progress.
+- **Fix:** have the reset paths baseline the way create does, via `BaselineUncommittedChanges` rather than `HeadSHA`. It commits into the **work copy's** repo, never the source's, so it is safe by the same argument that makes create safe — and since DF116, a work copy can no longer hold a `.git` that points anywhere else. Best done by giving create and reset one shared "baseline this work copy" helper: the three sites drifting from create's one is what produced this, and a fourth caller will do it again. Not verified: whether `:rw` mode has an analogous gap (its baseline is `HeadSHA` of the *source*, `prepare_dirs.go:296`, which may well be right for a live mount) — the check is to reset a `:rw` sandbox against a dirty repo and read what `diff` reports.
+- **Pointer:** `internal/orchestrator/lifecycle/reset.go:188`, `:223`, `:438`; `internal/orchestrator/create/prepare_dirs.go:350-360` (`createBaselineForGitRepo`, the behaviour reset should share), `:296` (the `:rw` baseline, unchecked); `internal/git/ops.go:58-79` (`BaselineUncommittedChanges`), `:145-149` (`CheckPatch`); `copyflow/apply.go:95-99` (apply's precondition). Related: DF117 (same function, fixed; this was found reading it).
+
+### DF121 — `:rw` records a baseline it declares it does not track, so `sandbox info` prints one while `yoloai baseline` denies it exists (RESOLVED 2026-07-16)
+
+- **Discovered:** 2026-07-16 · **Workstream:** none — found by checking whether `:rw` shared DF120's gap, which was asked for explicitly. It does not; it has a different defect.
+- **Severity:** LOW — nothing misbehaves and no decision rests on the value. It is a product that answers a question two ways.
+- **Disposition:** ADDRESSED-IN-PLACE, recorded here per rule 7.
+- **Description:** `createDirBaseline`'s default branch recorded `HeadSHA(dir.Path)` — the source's HEAD at create — for `:rw` and `:ro`. **Nothing reads it.** `diff` substitutes the literal `"HEAD"` for a live mount (`copyflow/diff.go:268`), `tags` does the same (`tags.go:47`), `dirWorkReason` returns early for non-copy modes, `reset` refuses `:rw` outright, and `checkBaselineMode` rejects it with a user-facing "baseline is not tracked for :rw directories" (`copyflow/baseline.go:184-185`). One consumer used it: `sandbox info` printed it.
+- **Verified by execution against the real CLI, 2026-07-16.** A `:rw` sandbox over a repo with uncommitted work:
+  - `environment.json` → `mode=rw  baseline_sha=a713fff7…`
+  - `yoloai baseline advance rwprobe` → **"baseline is not tracked for :rw directories"**
+  - `yoloai baseline log rwprobe` → **same refusal**
+  - `yoloai sandbox rwprobe info` → **`Baseline:    a713fff7b5464e09381114b158af650f579d24d6`**
+  - So the product both denies and displays the same baseline, depending on which command is asked. The displayed value is also inert: `RWDiff` runs `git diff HEAD` against the live directory, so it goes stale the moment the user commits, and the number `info` shows then describes nothing at all.
+- **`:rw` does not have DF120's gap**, which was the question that started this: there is no work copy to baseline, and the user's edits and the agent's are literally the same edits to the same files, so a live mount cannot separate them and no baseline could. `git diff HEAD` is the honest answer and is what it does.
+- **Resolved:** the default branch records nothing, which is what the rest of the code already believed. `sandbox info` prints the Baseline line only when one exists, so `:rw` sandboxes stop claiming one. No consumer changes, because there were none. Tests: `TestCreateDirBaseline_RWTracksNoBaseline`, `TestCreateDirBaseline_RODirTracksNoBaseline`.
+- **Pointer:** `internal/orchestrator/create/prepare_dirs.go` (`createDirBaseline`, the default branch); `copyflow/baseline.go:182-190` (`checkBaselineMode`, the contract); `copyflow/diff.go:268` and `internal/orchestrator/tags.go:47` (both substituting `"HEAD"`); `internal/git/ops.go` (`RWDiff`, `git diff HEAD`); `internal/cli/sandboxcmd/info.go:154-156` (the one printer).
+
+### DF122 — reset baselined before checking for a SandboxSide backend, so a tart reset re-copied on the host and left the VM untouched (RESOLVED 2026-07-16)
+
+- **Discovered:** 2026-07-16 · **Workstream:** none — surfaced while consolidating the baseline call sites for DF120. Reading the three together is what made the ordering visible; none of them is wrong on its own.
+- **Severity:** MEDIUM — a reset that silently does not reset. Filed as MEDIUM rather than higher because it fails *quietly* rather than destructively: the VM keeps its old work copy, so nothing is lost, but the user is told the sandbox was reset and it was not.
+- **Disposition:** ADDRESSED-IN-PLACE, recorded here per rule 7.
+- **Description:** `resetCopyWorkdir` checked `IsGitRepo(workDir) → HeadSHA` **before** the SandboxSide deferral, where create checks the deferral **first** (`createCopyBaseline`). For a SandboxSide backend (tart) the work copy on the host is staging, and the baseline belongs in the VM after start — signalled by an **empty** SHA, which `Reset` keys off to run `ExecuteVMWorkDirSetup` (`reset.go:369`, `Mode == "copy" && BaselineSHA == ""`). But tart is `LocalitySandboxSide`, so `GitRunsInConfinement` is true, so `PreserveGit` keeps history, so the staging copy **has** a `.git` — so `IsGitRepo` passed, `HeadSHA` returned a SHA, the deferral was never reached, and the non-empty SHA suppressed the VM setup. The host-side re-copy happened; the VM's work dir did not change.
+- **Verified:** `TestResetCopyWorkdir_SandboxSide_DefersBaseline` builds exactly that configuration (SandboxSide + confined git + a git-repo source) and asserts the returned SHA is empty. It fails against the old ordering. **Not verified on real tart hardware** — the check that would settle the user-visible half is a `yoloai reset` on a tart sandbox followed by reading whether the VM's work dir actually changed; it was not run because the only tart sandbox to hand holds a developer's live work.
+- **Resolved:** the deferral is checked first, matching create, and the baseline then goes through the shared `baseline.WorkCopy`. Since DF120 put both callers on one helper, this ordering is now stated once instead of twice.
+- **Pointer:** `internal/orchestrator/lifecycle/reset.go` (`resetCopyWorkdir`); `internal/orchestrator/create/prepare_dirs.go` (`createCopyBaseline`, the correct ordering it should have matched); `reset.go:369` (the empty-SHA trigger); `runtime/tart/tart.go:62` (`LocalitySandboxSide`). Related: DF120 (found while fixing it).
+
 ### DF116 — a linked worktree as a `:copy-all` workdir commits into the user's real repo, host-side, before the sandbox starts — reintroducing Q91 (RESOLVED 2026-07-16)
 
 - **Resolved:** a work copy can no longer hold a `.git` that names anything outside itself.
@@ -102,7 +158,7 @@ active file stays a working set. Newest first.
   - `git log -1` in `work` → **`fatal: bad object HEAD`**. The ref points at an object that no longer exists.
   - `HeadSHA` returns that SHA **without error**, so `resyncWorkCopy` would record a baseline naming a missing object and `diff` would fail later, far from the cause.
 - **Production reachability, honestly.** The coincidence is rare, and the common paths escape it: a `:copy` work copy's `.git` is a CoW clone of the host's, so their refs start identical, and any divergence (agent commits, or the user commits) moves one ref's mtime and rsync then copies. The exposed case is a work copy whose `.git` is structurally unrelated to the host's — `--copy-strict`, or a fresh baseline — resynced within a second of the host's last ref write. The reproduction hit it instantly only because a test does everything in the same second. **Not verified against a real backend**; the check that would settle how often this bites is a `--copy-strict` sandbox reset in a loop against a repo committed to concurrently.
-- **Pointer:** `internal/orchestrator/lifecycle/reset.go:481` (`rsyncDir`), `resyncWorkCopy` (which reads `HeadSHA` from whatever the merge left behind); `internal/git/ops.go:23-28` (`HeadSHA`, which reports a ref without proving its object exists). The test that must not assert through this: `TestResyncWorkCopy_FromNormalRepo_AdoptsHostHistory` in `internal/orchestrator/lifecycle/reset_worktree_test.go`, which starts from an empty work copy for exactly this reason. Related: DF117 (same call site).
+- **Pointer:** `internal/orchestrator/lifecycle/reset.go:481` (`rsyncDir`), `resyncWorkCopy` (which reads `HeadSHA` from whatever the merge left behind); `internal/git/ops.go:23-28` (`HeadSHA`, which reports a ref without proving its object exists). The test that must not assert through this: `TestResyncWorkCopy_FromNormalRepo_AdoptsHostHistory` in `internal/orchestrator/lifecycle/reset_resync_test.go`, which starts from an empty work copy for exactly this reason. Related: DF117 (same call site).
 
 ### DF111 — in-VM git fails exit 69 because tart setup switches `xcode-select` onto the mounted Xcode *before* accepting its licence — ADDRESSED-IN-PLACE (root cause found; the original diagnosis was wrong)
 
