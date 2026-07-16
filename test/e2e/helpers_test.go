@@ -160,7 +160,7 @@ func e2eSetup(t *testing.T) string {
 	// TOP/library and stamp both realms at their current versions so the
 	// gate reads both OK and proceeds.
 	top := filepath.Join(tmpHome, ".yoloai")
-	layout := config.NewLayout(filepath.Join(top, "library"))
+	layout := config.NewLayout(filepath.Join(top, "library")).WithPrincipal(config.CLIPrincipal)
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	// DF56: the checksum is keyed per image store; docker's Setup checks the
 	// "docker" key, so the pre-seed must use it (an empty/mismatched key makes the

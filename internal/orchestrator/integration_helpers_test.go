@@ -110,7 +110,7 @@ func warmDockerBase(ctx context.Context) error {
 			return
 		}
 		defer os.RemoveAll(home) //nolint:errcheck // best-effort cleanup
-		layout := config.NewLayout(filepath.Join(home, ".yoloai"))
+		layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 		if err := os.MkdirAll(layout.CacheDir(), 0750); err != nil { //nolint:forbidigo // test-edge dir create
 			dockerWarmErr = fmt.Errorf("warm docker: cache dir: %w", err)
 			return
@@ -145,7 +145,7 @@ func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	// processEnv; without it, `sudo make integration` runs git as root against a
 	// SUDO_UID-owned work copy with no SUDO_UID in git's env, and git rejects it
 	// with "dubious ownership" (mirrors sysexec.GitEnv). A no-op off-sudo.
-	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars))
+	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal).WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars))
 
 	// Pre-seed the build-inputs checksum in the per-test HOME. Same
 	// rationale as the TestMain bootstrap (integration_main_test.go:41):
@@ -196,7 +196,7 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 	// processEnv; without it, `sudo make integration` runs git as root against a
 	// SUDO_UID-owned work copy with no SUDO_UID in git's env, and git rejects it
 	// with "dubious ownership" (mirrors sysexec.GitEnv). A no-op off-sudo.
-	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars))
+	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal).WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars))
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "docker")
 
@@ -241,7 +241,7 @@ func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	// processEnv; without it, `sudo make integration` runs git as root against a
 	// SUDO_UID-owned work copy with no SUDO_UID in git's env, and git rejects it
 	// with "dubious ownership" (mirrors sysexec.GitEnv). A no-op off-sudo.
-	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars))
+	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal).WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars))
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 	dockerrt.RecordBuildChecksum(layout, "podman")
 

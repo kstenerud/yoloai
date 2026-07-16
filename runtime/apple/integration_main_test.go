@@ -28,7 +28,7 @@ import (
 func TestMain(m *testing.M) {
 	tmp, _ := os.MkdirTemp("", "apple-probe-*")
 	defer os.RemoveAll(tmp) //nolint:errcheck // best-effort cleanup
-	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")))
+	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")).WithPrincipal(config.CLIPrincipal))
 	if err != nil {
 		// The apple `container` backend is macOS-only (macOS 26 + Apple Silicon).
 		// On any non-macOS host it is structurally impossible, not merely absent —

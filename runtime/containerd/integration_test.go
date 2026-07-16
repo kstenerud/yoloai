@@ -61,7 +61,7 @@ func requireAvailable(t *testing.T) {
 func testLayout(t *testing.T) config.Layout {
 	t.Helper()
 	home := testutil.IsolatedHome(t)
-	return config.NewLayout(filepath.Join(home, ".yoloai"))
+	return config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 }
 
 // testSandboxDir creates a temporary directory that acts as a sandbox dir.

@@ -141,7 +141,7 @@ func TestIntegration_Podman_DirectDeliveryOnMacOS(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	instance := store.InstanceName("", name)
+	instance := store.InstanceName(mgr.Layout().Principal, name)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), instance, 15*time.Second)
 
 	// No injector is started for a podman-macOS sandbox — brokering degraded.
@@ -224,7 +224,7 @@ func TestIntegration_CredentialBroker_Isolated(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	instance := store.InstanceName("", name)
+	instance := store.InstanceName(mgr.Layout().Principal, name)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), instance, 15*time.Second)
 
 	var envDump string
@@ -335,7 +335,7 @@ func TestIntegration_NetworkIsolation_TamperResistant(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	instance := store.InstanceName("", name)
+	instance := store.InstanceName(mgr.Layout().Principal, name)
 	testutil.WaitForActive(ctx, t, mgr.Runtime(), instance, 15*time.Second)
 
 	// The brokered base_url the agent was handed (the injector endpoint).
@@ -471,7 +471,7 @@ func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Cont
 			})
 			require.NoError(t, err)
 
-			instance := store.InstanceName("", name)
+			instance := store.InstanceName(mgr.Layout().Principal, name)
 			testutil.WaitForActive(ctx, t, mgr.Runtime(), instance, 15*time.Second)
 
 			// Poll until the agent has dumped its env.

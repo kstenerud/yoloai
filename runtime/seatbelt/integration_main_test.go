@@ -24,7 +24,7 @@ import (
 func TestMain(m *testing.M) {
 	tmp, _ := os.MkdirTemp("", "seatbelt-probe-*")
 	defer os.RemoveAll(tmp) //nolint:errcheck // best-effort cleanup
-	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")), tmp)
+	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")).WithPrincipal(config.CLIPrincipal), tmp)
 	if err != nil {
 		// Seatbelt (sandbox-exec) is macOS-only. On any non-macOS host it is
 		// structurally impossible, not merely absent — outside the mandatory-infra

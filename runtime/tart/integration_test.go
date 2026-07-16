@@ -89,6 +89,7 @@ func TestTartConformance(t *testing.T) {
 	home, err := os.UserHomeDir()
 	require.NoError(t, err)
 	layout := config.NewLayoutFor(filepath.Join(t.TempDir(), ".yoloai"), home).
+		WithPrincipal(config.CLIPrincipal).
 		WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars))
 	rt, err := New(ctx, layout)
 	require.NoError(t, err, "tart backend must be available on this platform")

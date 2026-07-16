@@ -23,7 +23,7 @@ func seatbeltSetup(t *testing.T) (*Runtime, context.Context) {
 	home := testutil.IsolatedHome(t)
 	ctx := context.Background()
 
-	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")), home)
+	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal), home)
 	require.NoError(t, err, "seatbelt backend must be available on this platform")
 
 	return rt, ctx

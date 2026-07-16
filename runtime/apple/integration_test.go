@@ -31,7 +31,7 @@ func appleSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
 	home := testutil.IsolatedHome(t)
 	ctx := context.Background()
-	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")))
+	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal))
 	require.NoError(t, err, "apple backend must be available (macOS 26 + Apple Silicon + container CLI)")
 	_, _ = rt.runContainer(ctx, "system", "start") // idempotent
 	return rt, ctx
@@ -181,7 +181,7 @@ func TestApple_SetupBuildsBase(t *testing.T) {
 
 	// A real CacheDir so the staleness marker persists (production has one;
 	// os.WriteFile won't mkdir).
-	layout := config.NewLayout(t.TempDir())
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0o755))
 
 	var buf bytes.Buffer
