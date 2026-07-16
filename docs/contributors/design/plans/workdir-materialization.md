@@ -59,12 +59,44 @@ gap is purely that no single owner sequences them.
 - `baseline.WorkCopy` — establish the baseline: commit dirty / adopt HEAD / fresh (DF120)
 - `runtime.WorkDirSetup` + `LocalityOf` — the host-vs-VM seam
 
+## Verified against the code, 2026-07-16 — the API does not grow
+
+The risk with any consolidation is that the callers turn out to need subtly different things, so
+the "one" function grows a boolean per caller and the chaos is moved, not removed. So before
+committing to the shape, every materialization site was read in full and diffed. There are exactly
+**five**: create-workdir and create-aux (`prepare_dirs.go` `setupDirContent`+`createCopyBaseline`),
+reset-restart-workdir and reset-restart-aux (`reset.go` `resetCopyWorkdir`, `resetAuxCopyDir`), and
+reset-in-place-workdir (`resyncWorkCopy`). No others — `migrate`/overlay do not materialize.
+
+**What actually varies across the five, and where it goes:**
+
+| Apparent knob | Real? | Resolution — *not* a per-caller bool |
+| --- | --- | --- |
+| wipe vs copy-in-place | **yes** | one `Strategy` enum. `WipeAndCopy` = create **and** reset-restart (a `RemoveAll(dst)` is a no-op on create's absent dst, so they unify); `InPlaceAndPrune` = reset-in-place. Orthogonal to mode and locality — not per-caller. |
+| prune the destination | no | *inherent* to `InPlaceAndPrune` (you prune only because you did not wipe). Not a separate flag. |
+| defer baseline for SandboxSide | no | the coordinator **always** does the `LocalityOf` check. This *fixes* divergence (a): `resetAuxCopyDir` omits it today. |
+| emit history-dropped warning | no | a **return value** (`HistoryNotice`), not a param. Create surfaces it; reset ignores it today (and could surface it too, uniformly). This is the one that would have been a `bool emitWarnings` — avoided. |
+| input is `DirSpec` vs `DirEnvironment` | trivial | both carry `{path, mode, IncludeIgnored, StripHistory}`; a 4-field `Spec` with a 2-line adapter at each call site. |
+| build a `DirEnvironment` / set `InceptionSHA` | out of scope | metadata packing stays in the caller. The coordinator returns a SHA, nothing else. |
+| aux vs workdir | no | aux is just another dir; materialization is identical. The only aux/workdir differences (`DirEnvironment` assembly, the caller's loop) are caller-side. |
+
+**Verdict:** the coordinator's only behavioural parameter is the `Strategy` enum, which is a genuine
+physical axis (a live bind-mount cannot be `RemoveAll`'d), shared across callers rather than one-per.
+Everything else either unifies, moves to a return, or stays in the caller as a thin adapter. The
+callers get *shorter and dumber* — the kill-criterion passes. And the exercise found real drift the
+consolidation erases: divergence (a) above, plus [DF123](../findings-unresolved.md) (in-place reset
+skips aux dirs entirely — a live bug, filed separately because it is a missing caller *loop*, not a
+materialization defect, so the coordinator alone does not fix it).
+
 ## The proposal
 
-One entry point, roughly:
+One entry point:
 
 ```
-Materialize(ctx, dir DirSpec, dst string, backend, strategy) (baselineSHA string, err error)
+Materialize(ctx, spec Spec, dst string, strategy Strategy, g, backend) (baselineSHA string, notice HistoryNotice, err error)
+//   Spec       = { Src string; Mode DirMode; IncludeIgnored, StripHistory bool }   — adapted from DirSpec or DirEnvironment
+//   Strategy   = WipeAndCopy | InPlaceAndPrune
+//   baselineSHA = "" means deferred to the VM (SandboxSide); notice carries "history not preserved" + reason, or none
 ```
 
 that owns the sequence and the two axes, and that every caller invokes instead of re-deriving it:
@@ -98,8 +130,11 @@ an equivalence test.
 2. **Move `reset --restart`** (`resetCopyWorkdir`, `resetAuxCopyDir`) onto it with `WipeAndCopy`.
    Guard: a test that a reset-restart work copy is byte-identical to a fresh create of the same
    source+mode (the `TestProjectFileSet_MatchesCopyProjectDir` idea, one level up).
-3. **Move `reset` in-place** (`resyncWorkCopy`) onto it with `InPlaceAndPrune`. Guard: same
-   equivalence assertion, plus the DF117/DF120 property tests already written.
+3. **Move `reset` in-place** (`resyncWorkCopy`) onto it with `InPlaceAndPrune`, **and add the aux
+   loop `resetInPlace` is missing** so it resets aux `:copy` dirs like the restart path — fixing
+   DF123 in the same stage, since the loop body is now one `Materialize` call. Guard: same
+   equivalence assertion, the DF117/DF120 property tests, plus a test that an in-place reset
+   refreshes an aux dir (the DF123 repro, inverted).
 4. **Delete** the now-empty per-site variants. Success metric: the locality/mode/strategy branch
    count in `reset.go` + `prepare_dirs.go` drops to the single `Materialize` body, and
    `grep LocalitySandboxSide internal/orchestrator` no longer returns four independent sites.
@@ -109,12 +144,15 @@ and still removed real duplication.
 
 ## Risks / open questions
 
-- **The aux-dir path** (`resetAuxCopyDir`, `setupAuxDirs`) is a fourth near-copy; confirm it folds
-  into the same entry point rather than needing a variant. It probably does — it is `:copy` with a
-  different destination — but it is unverified.
-- **Over-abstraction.** If `Materialize` grows a parameter per caller, it has failed: that is the
-  open-coded matrix with extra steps. The test is whether callers get *shorter and dumber*. If they
-  do not, stop.
+- **The aux-dir path** — *resolved by the code read.* `resetAuxCopyDir` and `setupAuxDir`'s copy
+  branch are the same materialization as the workdir with a different destination; they fold into
+  `Materialize` with no variant. Two things surfaced doing this: divergence (a), the missing aux
+  baseline-deferral, which the coordinator erases by construction; and DF123, in-place reset not
+  looping aux dirs at all, which the coordinator does **not** fix on its own — stage 3 must also add
+  the aux loop to `resetInPlace`, so DF123 rides in with it rather than as a separate change.
+- **Over-abstraction** — *checked, passes* (see "Verified against the code"). One `Strategy` enum,
+  no per-caller bool. If a later change adds one, it has failed and should stop; the callers must
+  keep getting shorter.
 - **The consume side stays split**, deliberately (see "What this is NOT"). Someone will be tempted
   to pull `diff`/`tags`/`mounts` in "while we're here". Resist without a finding to justify it.
 
