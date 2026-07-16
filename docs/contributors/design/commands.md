@@ -717,7 +717,18 @@ This eliminates the need to diagnose *why* a sandbox isn't running before choosi
 By default, the agent stays running and retains its conversational context while the workspace is reset underneath it. Cache and files directories are cleared. Use case: host repo got new upstream commits (user merged a PR, fetched), user wants to update the agent's copy without losing conversational context.
 
 1. Re-sync workdir from host while container is running:
-   - `rsync -a --delete` from original host dir to `work/<encoded-path>/` on the host (bind-mount makes changes immediately visible in container)
+   - Re-copy through `CopyProjectDir` — the same dispatch `create` uses — into
+     `work/<encoded-path>/` on the host, then prune that copy to the file set the
+     copy would have written. Re-copying honors the dir's mode, so a reset cannot
+     re-import the `.gitignore`d files `:copy` excludes or the history
+     `:copy-strict` strips; pruning removes the agent's additions and anything
+     the source no longer has (DF117).
+   - The copy overwrites in place and never replaces `work/<encoded-path>/`
+     itself, so the inode the container's bind-mount resolves to survives and the
+     changes are immediately visible to the running agent.
+   - `.git` is replaced as a unit rather than copied over, since copying it entry
+     by entry unions two repos and can leave a ref naming an object that is gone
+     (DF118).
 2. Re-create git baseline
 3. Update `baseline_sha` in `meta.json`
 4. Clear cache directory (unless `--keep-cache`)

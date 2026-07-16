@@ -9,7 +9,7 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
-	"strings"
+	"sync"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
@@ -17,7 +17,6 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
 	"github.com/kstenerud/yoloai/internal/orchestrator/workprobe"
-	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
@@ -376,24 +375,65 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	return nil
 }
 
-// resyncWorkCopy mirrors hostPath into the work copy at workDir and returns the
-// copy's new baseline SHA: its own HEAD when it carries a real repo, a fresh
-// baseline otherwise. The bind-mount makes the synced files visible in the
-// container.
+// resyncWorkCopy re-copies dir's host directory into the work copy at workDir
+// and returns the copy's new baseline SHA: its own HEAD when it carries a real
+// repo, a fresh baseline otherwise. The bind-mount makes the result visible to
+// the running container.
 //
-// rsync mirrors the host tree verbatim, so unlike CopyProjectDir it will land a
-// linked worktree's .git file in the work copy — over the top of the baseline
-// repo the sandbox was created with, since rsync --delete reconciles the type
-// change. From the host that link still resolves to the user's real repo, which
-// is where HeadSHA would then read its answer. Severing it first keeps the
-// baseline the copy's own (DF116).
-func resyncWorkCopy(ctx context.Context, g *git.Git, env []string, hostPath, workDir string) (string, error) {
-	if err := rsyncDir(env, hostPath, workDir); err != nil {
-		return "", fmt.Errorf("rsync workdir: %w", err)
+// It re-copies through CopyProjectDir — the same dispatch create uses — so a
+// reset reproduces the copy create would have made, rather than approximating it
+// with a second set of rules that can disagree. That is the whole fix for DF117:
+// the previous `rsync -a --delete` mirrored the host tree verbatim and honored
+// none of the copy's semantics, so one reset re-imported the .gitignore'd
+// secrets :copy exists to exclude and the history --copy-strict exists to strip.
+//
+// Copying in place is what makes this safe against a live agent, and is why
+// there is no RemoveAll of workDir here: CopyProjectDir overwrites entries
+// without replacing the directory itself, so the inode the container's
+// bind-mount resolves to survives. Wiping first would leave the agent looking at
+// a deleted directory for the rest of the session.
+func resyncWorkCopy(ctx context.Context, g *git.Git, dir store.DirEnvironment, workDir string, rt runtime.Backend) (string, error) {
+	src := dir.HostPath
+	preserveGit, _ := workspace.PreserveGit(dir.StripHistory, runtime.GitRunsInConfinement(rt))
+
+	// One enumeration answers both the copy and the prune. They must agree: a
+	// second `git ls-files` could return a different answer if the host changed
+	// under us, and the prune would then delete a file the copy just wrote.
+	var (
+		once     sync.Once
+		lsFiles  []string
+		lsIsRepo bool
+		lsErr    error
+	)
+	listProjectFiles := func() ([]string, bool, error) {
+		once.Do(func() { lsFiles, lsIsRepo, lsErr = g.ListProjectFiles(ctx, src) })
+		return lsFiles, lsIsRepo, lsErr
 	}
-	if _, err := workspace.RemoveGitLink(workDir); err != nil {
-		return "", fmt.Errorf("sever git link in work copy: %w", err)
+
+	files, err := workspace.ProjectFileSet(src, dir.IncludeIgnored, listProjectFiles)
+	if err != nil {
+		return "", fmt.Errorf("enumerate project files of %s: %w", src, err)
 	}
+
+	// .git is replaced as a unit, never merged. Copying it entry by entry over an
+	// existing repo unions the two: stale objects go, but a 41-byte ref whose
+	// mtime happens to match is skipped, leaving it pointing at an object that is
+	// no longer there (DF118). Removing it first also restores the CoW clone,
+	// which needs a fresh destination.
+	if err := os.RemoveAll(filepath.Join(workDir, ".git")); err != nil {
+		return "", fmt.Errorf("remove work copy .git: %w", err)
+	}
+	if err := workspace.CopyProjectDir(src, workDir, dir.IncludeIgnored, preserveGit, listProjectFiles); err != nil {
+		return "", fmt.Errorf("re-copy workdir: %w", err)
+	}
+
+	// Copying refreshes what the source still has; only pruning removes what the
+	// agent added, what the source dropped, and anything an older and laxer sync
+	// should never have put here — a leaked secret included (DF117).
+	if err := workspace.PruneToFileSet(workDir, files); err != nil {
+		return "", fmt.Errorf("prune work copy: %w", err)
+	}
+
 	if git.IsGitRepo(workDir) {
 		sha, err := g.HeadSHA(ctx, workDir)
 		if err != nil {
@@ -419,9 +459,8 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 
 	workDir := store.WorkDir(sandboxDir, meta.Workdir().HostPath)
 	g := git.NewHost(d.Layout)
-	rsyncEnv := d.Layout.Env().EnvForHostTool()
 
-	newSHA, err := resyncWorkCopy(ctx, g, rsyncEnv, meta.Workdir().HostPath, workDir)
+	newSHA, err := resyncWorkCopy(ctx, g, *meta.Workdir(), workDir, d.Runtime)
 	if err != nil {
 		return err
 	}
@@ -463,25 +502,6 @@ func clearCacheAndFiles(d state.Deps, opts ResetOptions) error {
 		if err := fileutil.MkdirAllPerm(filesDir, perms.Dir); err != nil {
 			return fmt.Errorf("recreate files: %w", err)
 		}
-	}
-	return nil
-}
-
-// rsyncDir syncs contents of src into dst using rsync.
-// Trailing slashes ensure rsync copies contents, not the directory itself.
-//
-// Why rsync and not RemoveAll+CopyDir (as the restart path does): in-place
-// reset runs while the agent's container is live with dst bind-mounted in. A
-// differential sync (rsync --delete) never leaves a window where the tree has
-// vanished out from under the running container; a wipe-then-copy would. rsync
-// is therefore a deliberate runtime dependency on container backends (see
-// CLAUDE.md "Runtime dependencies"); the one backend where host-side access is
-// impossible — Tart, whose workdir lives inside the VM — is excluded by
-// resetInPlace before reaching here.
-func rsyncDir(env []string, src, dst string) error {
-	cmd := sysexec.Command(env, "rsync", "-a", "--delete", src+"/", dst+"/")
-	if output, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("rsync: %s: %w", strings.TrimSpace(string(output)), err)
 	}
 	return nil
 }

@@ -38,6 +38,12 @@ type lifecycleMockRuntime struct {
 	// (LocalityHostSide) suits host-side reset/baseline tests, SandboxSide the
 	// VM tests (git dispatched in-sandbox, host probe blind).
 	locality runtime.FilesystemLocality
+	// gitExecInConfinement controls the other half of GitRunsInConfinement, which
+	// gates whether a :copy dir keeps its history. Every real backend sets this
+	// (DF119), so a test that cares about history preservation must set it too or
+	// it models a backend that does not exist. Zero value keeps the older tests,
+	// which do not care, exactly as they were.
+	gitExecInConfinement bool
 }
 
 func (m *lifecycleMockRuntime) Stop(ctx context.Context, name string) error {
@@ -128,9 +134,10 @@ func (m *lifecycleMockRuntime) Descriptor() runtime.BackendDescriptor {
 		Type:         "mock",
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
-			NetworkIsolation:   true,
-			CapAdd:             true,
-			FilesystemLocality: m.locality,
+			NetworkIsolation:     true,
+			CapAdd:               true,
+			FilesystemLocality:   m.locality,
+			GitExecInConfinement: m.gitExecInConfinement,
 		},
 	}
 }
