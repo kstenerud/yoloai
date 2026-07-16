@@ -277,11 +277,6 @@ func materializeCopyDir(ctx context.Context, g *git.Git, dir *DirSpec, workCopyD
 	if err != nil {
 		return "", fmt.Errorf("materialize %s: %w", dir.Path, err)
 	}
-	if notice.HistoryDowngraded {
-		slog.Warn("git history not preserved on this backend; using copy-strict (fresh baseline)",
-			"event", "sandbox.copy.history_downgraded", "backend", rt.Descriptor().Type,
-			"dir", dir.Path, "detail", "work-copy git is not confined on this backend; see confine-host-side-git")
-	}
 	if notice.SourceIsGitLink {
 		slog.Warn("git history not preserved: this directory keeps its git dir outside itself (linked worktree or submodule); the sandbox starts from a fresh baseline",
 			"event", "sandbox.copy.gitlink_history_dropped", "dir", dir.Path)

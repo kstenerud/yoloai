@@ -79,16 +79,21 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 
 	// --- Property invariants (no VM needed) ---
 
-	// A backend that runs the work-copy git in confinement (Tart's VM, or a
-	// container backend — audit C1) MUST implement GitExecer; git.NewSandbox
-	// dispatches the work-copy git through it for exactly that set of backends.
-	t.Run("ConfinementImpliesGitExecer", func(t *testing.T) {
+	// Every backend MUST run the work-copy git in confinement (audit C1): git
+	// operates on agent-controlled content, and its attribute-bound filter/textconv
+	// drivers cannot be disabled without breaking Git LFS/git-crypt, so the only
+	// defense is running that git where the agent's planted commands can't reach
+	// the host. This is a hard requirement, not a preference: the history-downgrade
+	// fallback that once degraded an unconfined backend to copy-strict was deleted
+	// (DF119) precisely because this invariant holds, so a backend that violated it
+	// would silently reintroduce the RCE (confine-host-side-git.md). A confining
+	// backend must also implement GitExecer, which git.NewSandbox dispatches through.
+	t.Run("BackendConfinesWorkCopyGit", func(t *testing.T) {
 		b := setup(t)
-		if !runtime.GitRunsInConfinement(b.Runtime) {
-			t.Skip("host-side git backend: no in-confinement git execution")
-		}
+		assert.True(t, runtime.GitRunsInConfinement(b.Runtime),
+			"every backend must confine work-copy git (SandboxSide filesystem or GitExecInConfinement); the unconfined fallback was removed in DF119")
 		_, isGitExecer := b.Runtime.(runtime.GitExecer)
-		assert.True(t, isGitExecer, "GitRunsInConfinement backend must implement runtime.GitExecer (git runs in the sandbox)")
+		assert.True(t, isGitExecer, "a confining backend must implement runtime.GitExecer (git runs in the sandbox)")
 	})
 
 	// A SandboxSide backend additionally keeps its work copy inside the sandbox,

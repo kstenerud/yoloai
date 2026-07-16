@@ -38,11 +38,10 @@ type lifecycleMockRuntime struct {
 	// (LocalityHostSide) suits host-side reset/baseline tests, SandboxSide the
 	// VM tests (git dispatched in-sandbox, host probe blind).
 	locality runtime.FilesystemLocality
-	// gitExecInConfinement controls the other half of GitRunsInConfinement, which
-	// gates whether a :copy dir keeps its history. Every real backend sets this
-	// (DF119), so a test that cares about history preservation must set it too or
-	// it models a backend that does not exist. Zero value keeps the older tests,
-	// which do not care, exactly as they were.
+	// gitExecInConfinement is the other half of GitRunsInConfinement (the git.NewSandbox
+	// dispatch predicate). Every real backend confines work-copy git — required, not
+	// optional (DF119) — so a mock that stands in for one sets this true. Zero value
+	// suits tests that never construct a sandbox-git and so never read it.
 	gitExecInConfinement bool
 }
 

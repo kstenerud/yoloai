@@ -68,23 +68,6 @@ func copyProjectContent(src, dst string, includeIgnored, preserveGit bool, listP
 	return nil
 }
 
-// PreserveGit reports whether a :copy directory should keep the source repo's
-// real .git. History is preserved unless the user opted out (stripHistory) or
-// the backend does not run work-copy git in confinement (confined == false),
-// where a writable agent-controlled .git would widen the host-side RCE surface
-// (see confine-host-side-git.md). downgraded is true when history was wanted but
-// the backend gate forced a strip — the caller surfaces a one-time notice.
-// Call only for :copy dirs; :copy-all always copies .git via CopyDir.
-func PreserveGit(stripHistory, confined bool) (preserve, downgraded bool) {
-	if stripHistory {
-		return false, false
-	}
-	if !confined {
-		return false, true
-	}
-	return true, false
-}
-
 // copyGitDir CoW-clones src/.git into dst so the work copy keeps the source
 // repo's history (log/blame/bisect) and filter config. Only a real .git
 // *directory* is copied; a gitlink file (linked worktree / submodule) is

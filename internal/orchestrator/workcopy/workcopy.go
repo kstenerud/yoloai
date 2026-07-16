@@ -46,13 +46,9 @@ type Spec struct {
 
 // HistoryNotice reports why the source's git history did not come along, if it
 // did not. It is returned rather than logged so each caller decides whether and
-// how to surface it — create warns, reset may stay quiet. Both fields false
-// means history was preserved (or there was none to begin with).
+// how to surface it — create warns, reset stays quiet. A zero value means history
+// was preserved (or there was none to begin with).
 type HistoryNotice struct {
-	// HistoryDowngraded: the backend does not confine work-copy git, so history
-	// was stripped to a fresh baseline to avoid widening the host-side git RCE
-	// surface. Distinct from the user asking for :copy-strict, which is silent.
-	HistoryDowngraded bool
 	// SourceIsGitLink: the source is a linked worktree or submodule, whose git
 	// dir lives outside the copied tree, so no copy of it carries history.
 	SourceIsGitLink bool
@@ -70,11 +66,12 @@ type HistoryNotice struct {
 // rest — history detection, the copy, the SandboxSide deferral, the baseline —
 // is identical either way, which is what makes this one owner rather than two.
 func Materialize(ctx context.Context, spec Spec, dst string, strategy Strategy, g *git.Git, backend runtime.Backend) (string, HistoryNotice, error) {
-	preserveGit, downgraded := workspace.PreserveGit(spec.StripHistory, runtime.GitRunsInConfinement(backend))
-	notice := HistoryNotice{
-		HistoryDowngraded: downgraded,
-		SourceIsGitLink:   workspace.IsGitLink(spec.Src),
-	}
+	// Preserve the source's .git unless the user asked to strip it (:copy-strict).
+	// This is always safe because every backend runs work-copy git in confinement
+	// (enforced by the runtime conformance suite), so an agent-writable .git on a
+	// host-side work copy is only ever operated on by confined git.
+	preserveGit := !spec.StripHistory
+	notice := HistoryNotice{SourceIsGitLink: workspace.IsGitLink(spec.Src)}
 
 	// One enumeration serves both the copy and the prune; they must agree, or the
 	// prune could delete a file the copy just wrote (the host could change under a
