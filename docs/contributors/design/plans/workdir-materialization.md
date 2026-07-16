@@ -4,8 +4,11 @@
 
 # Plan: one owner for work-copy materialization
 
-- **Status:** PLANNED — designed here, not built. The pieces it sequences already exist and are
-  on `main` (see "The toolbox"); what is missing is the coordinator that sequences them once.
+- **Status:** IN-PROGRESS — **stage 1 landed** (2026-07-16): `internal/orchestrator/workcopy`
+  `Materialize` extracted with `WipeAndCopy`, create its only caller, no behaviour change (create's
+  existing DF116/DF120/DF121 guards pass through it unchanged; `prepare_dirs.go` −53 lines). Stages
+  2 (reset --restart) and 3 (reset in-place + DF123 aux loop) not started. The `InPlaceAndPrune`
+  strategy is deliberately unbuilt until stage 3 supplies its caller — no speculative code.
 - **Depends on:** —
 
 ## The problem, stated as a pattern rather than a bug
