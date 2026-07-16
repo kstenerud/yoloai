@@ -55,7 +55,7 @@ func (r *Runtime) listEntries(ctx context.Context) ([]tartListEntry, error) {
 // would imply `prune --images` deletes them, which it never does. This keeps
 // the IMAGES column reconcilable with what prune actually frees.
 //
-// Live sandbox clones (yoloai-<name>) are excluded for the same reason: they
+// Live sandbox clones (yoloai-cli-<name>) are excluded for the same reason: they
 // are instances removed by Remove / the orphan Prune sweep, not by prune
 // --images.
 func (r *Runtime) CacheUsage(ctx context.Context) (runtime.CacheUsage, error) {

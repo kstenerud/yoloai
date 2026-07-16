@@ -61,7 +61,7 @@ func (r *Runtime) NetLiveness(ctx context.Context) (runtime.NetLivenessReport, e
 // running, so the extra existence/running check would be redundant.
 func (r *Runtime) SandboxNetHealth(ctx context.Context, name string) (runtime.VMNetHealth, error) {
 	// Callers pass the sandbox name (e.g. "mybox"); the Tart VM is named with
-	// the instance prefix (e.g. "yoloai-mybox"). Same idiom as GitExec.
+	// the instance prefix (e.g. "yoloai-cli-mybox"). Same idiom as GitExec.
 	vmName := r.instanceName(name)
 	state, detail := r.probeNetLiveness(ctx, vmName)
 	return runtime.VMNetHealth{

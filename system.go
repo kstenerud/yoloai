@@ -672,7 +672,7 @@ type PruneItem struct {
 	// Kind classifies the resource type — see PruneKind* constants for
 	// the shipping set. Open-set: backends can introduce new kinds.
 	Kind PruneItemKind
-	// Name is the resource identifier (e.g. "yoloai-mybox" for a
+	// Name is the resource identifier (e.g. "yoloai-cli-mybox" for a
 	// container, the Tart VM name for a VM, the temp-dir path).
 	Name string
 	// BytesReclaimed is the space freed by removing this item; 0 when the

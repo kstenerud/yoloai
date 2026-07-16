@@ -100,10 +100,11 @@ type ClientCreateOptions struct {
 	// without colliding on the runtime backend. Client-scoped, not per-call —
 	// the Client is the principal-scoped handle (D58/D59).
 	//
-	// Empty ("") is the default no-principal sentinel: instance names elide the
-	// segment (yoloai-<name>) and behavior is identical to today. Non-empty
-	// must be ≤8 alphanumeric chars (parsed at construction; invalid is
-	// rejected with a *UsageError). See D62.
+	// Required: every embedder names itself, so an empty Principal is rejected
+	// with a *UsageError — there is no default and no elision (D126, superseding
+	// D62's empty sentinel). Instance names are "yoloai-<principal>-<name>" (the
+	// CLI uses "cli"). Must be ≤8 alphanumeric chars, parsed at construction.
+	// See D62 / D126.
 	Principal string
 
 	// SecretsStagingDir is the host directory under which the library stages a

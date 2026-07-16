@@ -46,10 +46,10 @@ STUCK STATE: CONTAINERD TASK IN "CREATED" STATE
      sudo kill -KILL <PID>
 
      # 3. Force-delete the task (now containerd will accept it)
-     sudo ctr -n yoloai tasks delete --force yoloai-<sandbox-name>
+     sudo ctr -n yoloai tasks delete --force yoloai-cli-<sandbox-name>
 
      # 4. Delete the container record
-     sudo ctr -n yoloai containers delete yoloai-<sandbox-name>
+     sudo ctr -n yoloai containers delete yoloai-cli-<sandbox-name>
 
   After these four steps, `yoloai destroy <sandbox-name>` will
   succeed (or report not-found, which is fine).
@@ -59,9 +59,10 @@ STUCK STATE: LEFTOVER NETWORK NAMESPACE
   Symptom: `sudo ip netns list | grep yoloai` shows a namespace
   whose sandbox is already destroyed.
 
-  Fix:
+  Fix (the netns wraps the container id, so it is doubly prefixed;
+  use the exact name `ip netns list` printed):
 
-     sudo ip netns delete yoloai-<sandbox-name>
+     sudo ip netns delete yoloai-yoloai-cli-<sandbox-name>
 
   This is safe — netns deletion only succeeds if no process is
   using it.

@@ -575,7 +575,7 @@ func (r *Runtime) translateWorkDirToVMPath(workDir string) string {
 // container user.
 func (r *Runtime) GitExec(ctx context.Context, name, _, workDir string, args ...string) (string, error) {
 	// Callers in the sandbox package pass the sandbox name (e.g. "mybox").
-	// The Tart VM is named with the instance prefix (e.g. "yoloai-mybox").
+	// The Tart VM is named with the instance prefix (e.g. "yoloai-cli-mybox").
 	vmName := r.instanceName(name)
 	if !r.isRunning(ctx, vmName) {
 		return "", runtime.ErrNotRunning
