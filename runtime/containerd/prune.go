@@ -246,11 +246,17 @@ func (r *Runtime) reconcileBlockingContainers(ctx context.Context, dryRun bool, 
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
 	}
-	prefix := config.InstancePrefix(r.layout.Principal)
-
 	var running, stopped []string
 	for _, ctr := range containers {
-		if !strings.HasPrefix(ctr.ID(), prefix) {
+		// Scope by label equality, not name prefix (D62/DF115): the principal
+		// label matches only this principal's containers, so a secondary
+		// principal's are never stopped/removed here. A prefix match would treat
+		// "yoloai-" as a superset of "yoloai-acme-" whenever a principal is empty.
+		labels, lErr := ctr.Labels(ctx)
+		if lErr != nil {
+			continue // labels unreadable (container vanishing mid-sweep) — skip
+		}
+		if !runtime.IsOrphanCandidate(labels, r.layout.Principal) {
 			continue
 		}
 		if r.containerRunning(ctx, ctr) {
