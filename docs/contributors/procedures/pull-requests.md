@@ -113,7 +113,6 @@ Absent tooling **fails**; it does not skip (D112). Install all of it:
 
 | Tool | Used by |
 | --- | --- |
-| `rsync` | in-place `reset` lifecycle tests |
 | `uv` | the Python surface (`python-test`, `python-typecheck`) |
 | `hadolint` | Dockerfile lint |
 | `actionlint` | workflow lint |
