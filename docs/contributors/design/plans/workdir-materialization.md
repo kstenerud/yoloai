@@ -4,11 +4,13 @@
 
 # Plan: one owner for work-copy materialization
 
-- **Status:** IN-PROGRESS — **stage 1 landed** (2026-07-16): `internal/orchestrator/workcopy`
-  `Materialize` extracted with `WipeAndCopy`, create its only caller, no behaviour change (create's
-  existing DF116/DF120/DF121 guards pass through it unchanged; `prepare_dirs.go` −53 lines). Stages
-  2 (reset --restart) and 3 (reset in-place + DF123 aux loop) not started. The `InPlaceAndPrune`
-  strategy is deliberately unbuilt until stage 3 supplies its caller — no speculative code.
+- **Status:** IN-PROGRESS — **stages 1 & 2 landed** (2026-07-16). Stage 1: `Materialize` extracted
+  with `WipeAndCopy`, create routed through it (`prepare_dirs.go` −53 lines). Stage 2:
+  reset `--restart` (`resetCopyWorkdir`, `resetAuxCopyDir`) routed through it (`reset.go` −12 lines);
+  no observable change (restart-path guards pass), and it erased divergence (a) — aux dirs now get
+  the SandboxSide baseline deferral the aux path used to omit. Added the previously-absent
+  `resetAuxCopyDir` tests. **Stage 3** (reset in-place `resyncWorkCopy` → `InPlaceAndPrune`, plus
+  the DF123 aux loop) not started; `InPlaceAndPrune` is still unbuilt until it lands.
 - **Depends on:** —
 
 ## The problem, stated as a pattern rather than a bug
