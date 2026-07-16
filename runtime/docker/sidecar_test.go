@@ -14,17 +14,19 @@ import (
 // A leaked sidecar must satisfy IsOrphanCandidate so `yoloai system prune`
 // reaps it. That needs LabelSandbox set; the principal label mirrors the
 // launch path (present only for a non-default principal).
+// TestSidecarLabels_MakesLeakOrphanReapable: a sidecar that crash-leaks carries
+// enough identity for its OWN principal's sweep to reap it, and not enough for
+// anyone else's. The default-principal case this used to cover is gone with D126
+// — sidecarLabels("") cannot occur now that every principal is non-empty.
 func TestSidecarLabels_MakesLeakOrphanReapable(t *testing.T) {
-	// Default principal: LabelSandbox present, LabelPrincipal omitted.
-	labels := sidecarLabels("yoloai-box-netns-sidecar", "")
-	assert.Equal(t, "yoloai-box-netns-sidecar", labels[runtime.LabelSandbox])
-	_, hasPrincipal := labels[runtime.LabelPrincipal]
-	assert.False(t, hasPrincipal, "default principal must not add the principal label")
-	assert.True(t, runtime.IsOrphanCandidate(labels, ""), "leaked sidecar must be an orphan candidate")
+	const name = "yoloai-box-netns-sidecar"
+	labels := sidecarLabels(name, config.CLIPrincipal)
+	assert.Equal(t, name, labels[runtime.LabelSandbox])
+	assert.Equal(t, string(config.CLIPrincipal), labels[runtime.LabelPrincipal])
+	assert.True(t, runtime.IsOrphanCandidate(labels, config.CLIPrincipal), "leaked sidecar must be an orphan candidate")
 
-	// Non-default principal: label present and scoping honored.
-	scoped := sidecarLabels("yoloai-box-netns-sidecar", config.PrincipalSegment("alice"))
+	scoped := sidecarLabels(name, config.PrincipalSegment("alice"))
 	assert.Equal(t, "alice", scoped[runtime.LabelPrincipal])
 	assert.True(t, runtime.IsOrphanCandidate(scoped, "alice"))
-	assert.False(t, runtime.IsOrphanCandidate(scoped, ""), "a different principal must not reap it")
+	assert.False(t, runtime.IsOrphanCandidate(scoped, config.CLIPrincipal), "a different principal must not reap it")
 }
