@@ -3,17 +3,20 @@
 
 # Plan: the CLI is a principal — name it, and delete the empty-principal sentinel
 
-- **Status:** IN-PROGRESS — **P2–P6 landed on `cli-is-a-principal` (2026-07-16); P7 Linux-docker
-  green, macOS releasetest + the tart/seatbelt/apple DF115 belt still owed.** Scoped 2026-07-15 after DF98's third instance landed. The decision is
+- **Status:** IN-PROGRESS — **P2–P6 landed on `cli-is-a-principal` (2026-07-16); P7 Linux green
+  (docker + containerd + podman + orchestrator + cli integration, 0 panics), macOS releasetest +
+  the tart/seatbelt/apple DF115 belt still owed.** Scoped 2026-07-15 after DF98's third instance landed. The decision is
   [D126](../../decisions/working-notes.md#d126--the-cli-is-a-principal-named-cli-the-empty-principal-sentinel-is-deleted-and--becomes-invalid),
   which supersedes D62's CLI-elision bullets and D59's default/empty segment. Breaking change under
   [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2. **Landed:** the CLI adopts
   `cli`; `ParsePrincipalSegment("")` errors and `InstancePrefix` panics on empty; the optional
   `runtime.Renamer` (docker/tart) + the v4→v5 `PrincipalRename` framework migrator; schema bump
   4→5; `store.LegacyCLIInstanceName`; DF115's containerd `reconcileBlockingContainers` predicate;
-  the rule-2 sweep; the BREAKING-CHANGES entry. `make check` + docker integration tier green; the
-  real CLI migrate ran (empty realm → v5). **Owed:** releasetest on macOS (tart/seatbelt/apple) and
-  the containerd/podman Linux tiers; the tart/seatbelt/apple DF115 label-equality belt (macOS).
+  the rule-2 sweep; the BREAKING-CHANGES entry. `make check` + `go vet -tags 'integration e2e'` +
+  the full Linux `make integration` (docker/containerd/orchestrator/cli) + `make integration-podman`
+  all green, 0 panics; the real CLI migrate ran (empty realm → v5). **Owed:** releasetest on macOS
+  (tart/seatbelt/apple); the tart/seatbelt/apple DF115 label-equality belt (macOS); the Linux `make
+  e2e` tier.
 - **Depends on:** —
 
 ## The one-sentence version
