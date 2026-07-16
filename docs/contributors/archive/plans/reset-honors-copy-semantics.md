@@ -4,9 +4,9 @@
 
 # Plan: in-place reset must honor the copy's semantics
 
-- **Status:** PLANNED — mechanism chosen and its evidence recorded below; the `.git` half is
-  still open, and nothing is implemented. DF117 is CRITICAL and escalated, so this is queued to
-  build, not to admire.
+- **Status:** IMPLEMENTED 2026-07-16 — DF117 and DF118 both closed. **The mechanism below is not
+  what shipped:** this planned to keep rsync and feed it an allowlist; implementation dropped
+  rsync from reset entirely. See "What actually shipped".
 - **Depends on:** —
 
 ## The defect
@@ -49,7 +49,47 @@ wrong twice over:
    --ignored`), which is a different query that can drift from create's answer. Two sources of
    truth for "what belongs in the copy" is how they disagree.
 
-## The mechanism: allowlist, then prune
+## What actually shipped
+
+Not this. The plan below kept rsync because `rsyncDir`'s comment said rsync was load-bearing, and
+that premise went unexamined until someone asked whether rsync was worth the hassle. It was not.
+
+**rsync is gone from reset.** `resyncWorkCopy` removes the work copy's `.git`, re-copies through
+`CopyProjectDir` — create's own dispatch — and prunes the result to `ProjectFileSet`'s answer.
+Reset runs create's copy code, so "reset honors the copy's semantics" is true by construction
+rather than by a gate.
+
+**The premise did not survive contact.** rsync was justified by "a differential sync never leaves
+a window where the tree has vanished". But `CopyDir` and `copyFileList` overwrite **in place**:
+they never replace the destination directory, so the inode the container's bind-mount resolves to
+survives — verified with `os.SameFile`, and asserted by `TestResyncWorkCopy_PreservesWorkDirInode`.
+The property rsync was there to protect holds without rsync. The comment named a window; the thing
+that actually mattered was inode identity, and nothing in reset was ever going to wipe the
+directory anyway.
+
+**Dropping it retired the hazards rather than managing them.** No patterns means no `weird[1].env`
+escape and no version-dependent escaping. It also disarmed a trap this plan would have walked into:
+`rsync -a --files-from` does **not** recurse into a listed directory, but `rsync -a -r --files-from`
+**does** — so a later hand adding an `-r` that looks redundant beside `-a` would have silently
+re-imported `node_modules` and friends. That flag no longer exists to add. And rsync stopped being
+a host runtime dependency: its required-tooling row and two `exec.LookPath("rsync")` test
+preconditions went with it. Tart's in-VM rsync is the guest's and is untouched.
+
+**What survived from the plan:** the allowlist *idea* (enumerate what belongs, never enumerate what
+does not), the prune, `.git` replaced as a unit, and the acceptance property. `ProjectFileSet` is
+still needed — the prune has to be driven by something — and `TestProjectFileSet_MatchesCopyProjectDir`
+still gates it against what `CopyProjectDir` writes.
+
+**The cost, accepted:** unchanged files are re-copied, so a reset costs what a create costs. A
+size+mtime skip in `copyFile` would restore differential speed and would make create's re-copy
+faster too, but it is the same quick check that caused DF118, so it was not added on speculation.
+If reset latency ever bites on a large tree, that is the lever.
+
+The rest of this file is the reasoning as it stood before implementation. It is kept because the
+refuted options are still refuted — the denylist analysis below is why the allowlist idea survived
+even though its rsync vehicle did not.
+
+## The mechanism as planned: allowlist, then prune (superseded — rsync dropped)
 
 **Allowlist, because it fails closed.** With `--files-from`, the copy contains exactly what we
 enumerated. A file we forget to list is *missing from the sandbox* (a functionality bug, loud and
