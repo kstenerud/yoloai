@@ -187,7 +187,7 @@ func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir
 	}
 	// SandboxSide backends (e.g. Tart) keep the work copy inside the sandbox, so
 	// the baseline is created in-VM after start; return the empty SHA that signals
-	// deferral. Checked before baselining, matching create's createCopyBaseline —
+	// deferral. Checked before baselining, matching create's workcopy.Materialize —
 	// otherwise a work copy carrying a .git baselines to a host-side SHA that the
 	// recreate then overwrites. That overwrite is why this is only a consistency
 	// tidy and not a fix: recreateContainer re-runs the VM setup unconditionally,

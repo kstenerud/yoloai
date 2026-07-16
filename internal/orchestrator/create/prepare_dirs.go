@@ -16,10 +16,10 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
-	"github.com/kstenerud/yoloai/internal/orchestrator/baseline"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
+	"github.com/kstenerud/yoloai/internal/orchestrator/workcopy"
 	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
@@ -247,96 +247,46 @@ func checkDirtyRepos(ctx context.Context, g *git.Git, workdir *DirSpec, auxDirs 
 func setupWorkdir(ctx context.Context, g *git.Git, sandboxDir string, workdir *DirSpec, rt runtime.Backend) (string, string, error) {
 	workCopyDir := store.WorkDir(sandboxDir, workdir.Path)
 
-	if err := setupDirContent(ctx, g, sandboxDir, workdir, workCopyDir, rt); err != nil {
-		return "", "", err
-	}
-
-	baselineSHA, err := createDirBaseline(ctx, g, workdir, workCopyDir, rt)
-	if err != nil {
-		return "", "", err
-	}
-
-	return workCopyDir, baselineSHA, nil
-}
-
-// setupDirContent creates the appropriate host-side directory structure for
-// a :copy dir. For other modes the workCopyDir is created as a plain directory
-// (used only as a placeholder; the actual mount is a live bind-mount).
-// sandboxDir is the sandbox root, dir is the DirSpec, and workCopyDir is the
-// pre-computed store.WorkDir path for dir.
-func setupDirContent(ctx context.Context, g *git.Git, sandboxDir string, dir *DirSpec, workCopyDir string, rt runtime.Backend) error {
-	switch dir.Mode {
-	case "copy":
-		preserveGit, downgraded := workspace.PreserveGit(dir.StripHistory, runtime.GitRunsInConfinement(rt))
-		if downgraded {
-			slog.Warn("git history not preserved on this backend; using copy-strict (fresh baseline)",
-				"event", "sandbox.copy.history_downgraded", "backend", rt.Descriptor().Type,
-				"dir", dir.Path, "detail", "work-copy git is not confined on this backend; see confine-host-side-git")
-		}
-		// A linked worktree or submodule keeps its git dir outside the directory
-		// being copied, so no copy of that directory can carry its history and
-		// the sandbox gets a fresh baseline instead. Keyed off the source, not
-		// the copy: :copy never copies the link in the first place, so by the
-		// time the copy exists there is nothing left to notice (DF116).
-		if workspace.IsGitLink(dir.Path) {
-			slog.Warn("git history not preserved: this directory keeps its git dir outside itself (linked worktree or submodule); the sandbox starts from a fresh baseline",
-				"event", "sandbox.copy.gitlink_history_dropped", "dir", dir.Path)
-		}
-		err := workspace.CopyProjectDir(dir.Path, workCopyDir, dir.IncludeIgnored, preserveGit, func() ([]string, bool, error) {
-			return g.ListProjectFiles(ctx, dir.Path)
-		})
+	if workdir.Mode == DirModeCopy {
+		sha, err := materializeCopyDir(ctx, g, workdir, workCopyDir, rt)
 		if err != nil {
-			return fmt.Errorf("copy dir: %w", err)
+			return "", "", err
 		}
-	default:
-		if err := fileutil.MkdirAll(workCopyDir, 0750); err != nil {
-			return fmt.Errorf("create work dir: %w", err)
-		}
+		return workCopyDir, sha, nil
 	}
-	return nil
+
+	// :rw / :ro: the real mount is a live bind-mount; this is only a placeholder
+	// directory. No work copy, no baseline (DF121).
+	if err := fileutil.MkdirAll(workCopyDir, 0750); err != nil {
+		return "", "", fmt.Errorf("create work dir: %w", err)
+	}
+	return workCopyDir, "", nil
 }
 
-// createDirBaseline creates or resolves the git baseline SHA for a dir.
-func createDirBaseline(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDir string, rt runtime.Backend) (string, error) {
-	switch dir.Mode {
-	case "copy":
-		return createCopyBaseline(ctx, g, workCopyDir, rt)
-	default:
-		// :rw and :ro track no baseline, and this used to record the source's
-		// HEAD anyway. Nothing read it — diff and tags substitute the literal
-		// "HEAD" for a live mount, and `yoloai baseline` rejects these modes
-		// outright with "baseline is not tracked for :rw directories" — but
-		// `sandbox info` printed it, so the product answered both ways depending
-		// on which command you asked, with a value that went stale on the next
-		// commit. Recording nothing is what the rest of the code already
-		// believes (DF121).
-		return "", nil
+// materializeCopyDir runs the shared work-copy materialization for a :copy dir
+// and surfaces the history warnings create emits. rw/ro dirs never reach here —
+// their callers dispatch on mode first. This is the single create-side seam onto
+// workcopy.Materialize, so the workdir and each aux :copy dir go through the same
+// sequence create and reset share (design/plans/workdir-materialization.md).
+func materializeCopyDir(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDir string, rt runtime.Backend) (string, error) {
+	sha, notice, err := workcopy.Materialize(ctx, workcopy.Spec{
+		Src:            dir.Path,
+		IncludeIgnored: dir.IncludeIgnored,
+		StripHistory:   dir.StripHistory,
+	}, workCopyDir, g, rt)
+	if err != nil {
+		return "", fmt.Errorf("materialize %s: %w", dir.Path, err)
 	}
-}
-
-// createCopyBaseline creates the git baseline for a copy-mode workdir.
-// For SandboxSide backends (e.g., Tart) the work copy lives inside the sandbox,
-// so baseline creation is deferred until the VM starts and this returns empty SHA.
-func createCopyBaseline(ctx context.Context, g *git.Git, workCopyDir string, rt runtime.Backend) (string, error) {
-	// A SandboxSide backend (e.g. Tart) keeps the work copy inside the sandbox:
-	// it is staged via VirtioFS, moved to local VM storage, and baselined inside
-	// the VM after start. A HostSide backend (Docker) baselines on the host
-	// immediately after copying.
-	if runtime.LocalityOf(rt) == runtime.LocalitySandboxSide {
-		// Baseline will be created in-sandbox after start; return empty SHA to
-		// signal deferral.
-		slog.Debug("setupWorkdir: SandboxSide backend, deferring baseline to sandbox",
-			"backend", rt.Descriptor().Type)
-		return "", nil
+	if notice.HistoryDowngraded {
+		slog.Warn("git history not preserved on this backend; using copy-strict (fresh baseline)",
+			"event", "sandbox.copy.history_downgraded", "backend", rt.Descriptor().Type,
+			"dir", dir.Path, "detail", "work-copy git is not confined on this backend; see confine-host-side-git")
 	}
-	slog.Debug("setupWorkdir: HostSide backend, creating baseline on host",
-		"backend", rt.Descriptor().Type)
-
-	// The work copy keeps the source's history where it can (git log/blame/bisect
-	// inside the sandbox), so this baselines whatever the copy ended up with —
-	// a real repo, an empty one, or no repo at all. Shared with reset, which must
-	// answer this identically or a diff stops meaning "what the agent did".
-	return baseline.WorkCopy(ctx, g, workCopyDir)
+	if notice.SourceIsGitLink {
+		slog.Warn("git history not preserved: this directory keeps its git dir outside itself (linked worktree or submodule); the sandbox starts from a fresh baseline",
+			"event", "sandbox.copy.gitlink_history_dropped", "dir", dir.Path)
+	}
+	return sha, nil
 }
 
 // setupAuxDirs prepares each auxiliary directory and returns its DirEnvironment
@@ -369,10 +319,7 @@ func setupAuxDir(ctx context.Context, g *git.Git, sandboxDir string, rt runtime.
 	switch ad.Mode {
 	case DirModeCopy:
 		workCopyDir := store.WorkDir(sandboxDir, ad.Path)
-		if err := setupDirContent(ctx, g, sandboxDir, ad, workCopyDir, rt); err != nil {
-			return store.DirEnvironment{}, err
-		}
-		baselineSHA, err := createDirBaseline(ctx, g, ad, workCopyDir, rt)
+		baselineSHA, err := materializeCopyDir(ctx, g, ad, workCopyDir, rt)
 		if err != nil {
 			return store.DirEnvironment{}, err
 		}
