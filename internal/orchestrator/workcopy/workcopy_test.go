@@ -17,28 +17,24 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
-// fakeBackend is the minimal backend Materialize reads: only its capabilities,
-// via GitRunsInConfinement and LocalityOf. The embedded nil Backend panics on
-// anything else, proving Materialize touches nothing more.
+// fakeBackend is the minimal backend Materialize reads: only its filesystem
+// locality, via LocalityOf. The embedded nil Backend panics on anything else,
+// proving Materialize touches nothing more.
 type fakeBackend struct {
 	runtime.Backend
-	locality    runtime.FilesystemLocality
-	confinedGit bool
+	locality runtime.FilesystemLocality
 }
 
 func (f fakeBackend) Descriptor() runtime.BackendDescriptor {
 	return runtime.BackendDescriptor{
-		Type: "fake",
-		Capabilities: runtime.BackendCaps{
-			FilesystemLocality:   f.locality,
-			GitExecInConfinement: f.confinedGit,
-		},
+		Type:         "fake",
+		Capabilities: runtime.BackendCaps{FilesystemLocality: f.locality},
 	}
 }
 
-// hostSide is a real backend's shape: host-readable work copy, confined git.
+// hostSide is a host-filesystem backend (the work copy is host-readable).
 func hostSide() fakeBackend {
-	return fakeBackend{locality: runtime.LocalityHostSide, confinedGit: true}
+	return fakeBackend{locality: runtime.LocalityHostSide}
 }
 
 func hostGit(t *testing.T) *git.Git { t.Helper(); return git.NewTestHostWithEnv(testutil.GitEnv()) }
@@ -96,9 +92,8 @@ func TestMaterialize_CopyAll_IncludesIgnored(t *testing.T) {
 	assert.True(t, exists(filepath.Join(dst, ".env")), ":copy-all includes gitignored files")
 }
 
-// copy-strict is the user asking to strip history; it is silent — the downgrade
-// notice is only for a backend that forces the strip.
-func TestMaterialize_CopyStrict_FreshBaselineNoDowngradeNotice(t *testing.T) {
+// copy-strict is the user asking to strip history; it is silent (no notice).
+func TestMaterialize_CopyStrict_FreshBaselineSilent(t *testing.T) {
 	src := repo(t)
 	dst := filepath.Join(t.TempDir(), "work")
 
@@ -107,26 +102,8 @@ func TestMaterialize_CopyStrict_FreshBaselineNoDowngradeNotice(t *testing.T) {
 
 	assert.Len(t, sha, 40)
 	assert.NotEqual(t, testutil.RunGitOutput(t, src, "rev-parse", "HEAD"), sha, "fresh baseline, not source HEAD")
-	assert.False(t, notice.HistoryDowngraded, "user-requested strip is not a downgrade")
+	assert.Equal(t, HistoryNotice{}, notice, "copy-strict is a user choice, silent — no notice")
 	assert.Equal(t, "yoloai baseline", testutil.RunGitOutput(t, dst, "log", "-1", "--format=%s"))
-}
-
-// An unconfined backend forces the strip and must say so — the path no real
-// backend takes today (DF119), so only a fake reaches it.
-func TestMaterialize_UnconfinedBackend_DowngradesWithNotice(t *testing.T) {
-	src := repo(t)
-	dst := filepath.Join(t.TempDir(), "work")
-	backend := fakeBackend{locality: runtime.LocalityHostSide, confinedGit: false}
-
-	sha, notice, err := Materialize(context.Background(), Spec{Src: src}, dst, WipeAndCopy, hostGit(t), backend)
-	require.NoError(t, err)
-
-	assert.True(t, notice.HistoryDowngraded, "an unconfined backend reports the forced strip")
-	assert.Len(t, sha, 40)
-	// History not preserved: the copy has a fresh baseline repo of its own, not
-	// the source's history — the "initial" commit is gone, only the baseline remains.
-	assert.Equal(t, "yoloai baseline", testutil.RunGitOutput(t, dst, "log", "-1", "--format=%s"))
-	assert.Equal(t, "1", testutil.RunGitOutput(t, dst, "rev-list", "--count", "HEAD"), "one commit: the baseline")
 }
 
 func TestMaterialize_Worktree_SeversLinkAndReportsIt(t *testing.T) {
@@ -169,7 +146,7 @@ func TestMaterialize_NonRepo_FreshBaseline(t *testing.T) {
 func TestMaterialize_SandboxSide_DefersBaseline(t *testing.T) {
 	src := repo(t)
 	dst := filepath.Join(t.TempDir(), "work")
-	backend := fakeBackend{locality: runtime.LocalitySandboxSide, confinedGit: true}
+	backend := fakeBackend{locality: runtime.LocalitySandboxSide}
 
 	sha, _, err := Materialize(context.Background(), Spec{Src: src}, dst, WipeAndCopy, hostGit(t), backend)
 	require.NoError(t, err)

@@ -307,13 +307,16 @@ func LocalityOf(rt Backend) FilesystemLocality {
 // (the work copy isn't on the host) and for backends that keep the work copy
 // host-readable but still confine the git they run, so an agent-controlled
 // .git/config can't run filter/diff/fsmonitor drivers on the host (audit C1).
-// Every backend now satisfies one of those — seatbelt was the last holdout and
-// closed it with a sandbox-exec profile around git — so only a nil rt is false.
-// The unconfined branches downstream are therefore unreachable in production;
-// DF119 asks whether they still earn their keep.
-// A backend for which this is true MUST implement GitExecer. This is the
-// dispatch predicate for git.NewSandbox; it decouples git-exec locality from
-// FilesystemLocality (which still governs where work copies physically live).
+//
+// This is now a **requirement**, not a capability that varies: every backend
+// must confine work-copy git, enforced by the runtime conformance suite
+// (BackendConfinesWorkCopyGit). The history-downgrade fallback that once
+// degraded an unconfined backend to a fresh baseline was deleted (DF119), so a
+// backend returning false here is a conformance failure, not a supported mode —
+// only a nil rt is false. A confining backend MUST implement GitExecer.
+//
+// This is the dispatch predicate for git.NewSandbox; it decouples git-exec
+// locality from FilesystemLocality (which still governs where work copies live).
 func GitRunsInConfinement(rt Backend) bool {
 	if rt == nil {
 		return false

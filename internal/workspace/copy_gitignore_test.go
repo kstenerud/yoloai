@@ -1,7 +1,7 @@
 // ABOUTME: CopyProjectDir's git-aware filtering: honors git's tracked and
 // ABOUTME: untracked file list by default, --include-ignored copies everything,
-// ABOUTME: falls back to a full copy outside a repo, and PreserveGit keeps or
-// ABOUTME: drops .git history.
+// ABOUTME: falls back to a full copy outside a repo, and the preserveGit flag
+// ABOUTME: keeps or drops .git history.
 package workspace
 
 import (
@@ -149,24 +149,4 @@ func TestCopyProjectDir_StripHistoryDropsGitDir(t *testing.T) {
 	assert.False(t, exists(filepath.Join(dst, ".git")), "preserveGit=false leaves no .git (fresh-baseline path)")
 	assert.True(t, exists(filepath.Join(dst, "a.txt")))
 	assert.False(t, exists(filepath.Join(dst, "ignored.log")), "gitignored file still excluded")
-}
-
-func TestPreserveGit(t *testing.T) {
-	cases := []struct {
-		name                        string
-		stripHistory, confined      bool
-		wantPreserve, wantDowngrade bool
-	}{
-		{"default on confined backend preserves", false, true, true, false},
-		{"default on unconfined backend strips + downgrades", false, false, false, true},
-		{"opt-out on confined backend strips, no downgrade", true, true, false, false},
-		{"opt-out on unconfined backend strips, no downgrade", true, false, false, false},
-	}
-	for _, c := range cases {
-		t.Run(c.name, func(t *testing.T) {
-			preserve, downgraded := PreserveGit(c.stripHistory, c.confined)
-			assert.Equal(t, c.wantPreserve, preserve)
-			assert.Equal(t, c.wantDowngrade, downgraded)
-		})
-	}
 }

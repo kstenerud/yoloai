@@ -456,6 +456,10 @@ func (m *mockDockerRuntime) Descriptor() runtime.BackendDescriptor {
 		BaseModeName: runtime.IsolationModeContainer,
 		Capabilities: runtime.BackendCaps{
 			FilesystemLocality: runtime.LocalityHostSide,
+			// Confines work-copy git, like real docker — required of every backend
+			// (DF119). Modelling it host-side-unconfined described a backend that
+			// no longer exists.
+			GitExecInConfinement: true,
 		},
 	}
 }
