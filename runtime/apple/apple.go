@@ -457,23 +457,24 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	return nil
 }
 
-// Prune sweeps orphaned apple containers — `yoloai-*` instances (scoped to this
-// runtime's principal) that no longer correspond to a known sandbox. Mirrors the
-// tart/docker sweep: list, filter to this principal's prefix, skip known, then
-// stop+delete the rest. The base image is an OCI image (not a container), so it
-// never appears in `container list` and needs no special exclusion.
+// Prune sweeps orphaned apple containers — instances this principal created that
+// no longer correspond to a known sandbox. Mirrors the docker/containerd sweep:
+// list with labels, filter by label equality, skip known, then stop+delete the
+// rest. The base image is an OCI image (not a container), so it never appears in
+// `container list` and needs no special exclusion.
 func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
-	out, err := r.runContainer(ctx, "list", "--all", "--quiet")
+	out, err := r.runContainer(ctx, "list", "--all", "--format", "json")
 	if err != nil {
 		return runtime.PruneResult{}, fmt.Errorf("list containers: %w", err)
 	}
 
-	// Scope the sweep to this runtime's principal so a test or secondary
-	// principal never reclaims containers owned by a different principal (DF19).
-	prefix := config.InstancePrefix(r.layout.Principal)
+	orphans, err := orphanInstances(out, r.layout.Principal, knownInstances)
+	if err != nil {
+		return runtime.PruneResult{}, err
+	}
 
 	var result runtime.PruneResult
-	for _, name := range orphanInstances(out, prefix, knownInstances) {
+	for _, name := range orphans {
 		if !dryRun {
 			// delete --force handles a running container; stop first is best-effort.
 			_, _ = r.runContainer(ctx, "stop", name)
@@ -487,23 +488,48 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 	return result, nil
 }
 
-// orphanInstances parses `container list --quiet` output and returns the names
-// belonging to this principal (matching prefix) that aren't in known — the
-// orphans to sweep. Pure, so the filtering is testable without the live CLI.
-func orphanInstances(listOutput, prefix string, known []string) []string {
+// containerListEntry is the subset of `container list --format json` this sweep
+// reads: the instance name and the labels Create stamps via `-l k=v`. The daemon
+// holds the labels, so they outlive the sandbox dir — which is precisely what
+// makes label-based identification possible for apple and not for tart, whose
+// labels live in the sandbox dir that an orphan by definition no longer has
+// (DF124).
+type containerListEntry struct {
+	ID            string `json:"id"`
+	Configuration struct {
+		Labels map[string]string `json:"labels"`
+	} `json:"configuration"`
+}
+
+// orphanInstances parses `container list --all --format json` and returns the
+// names this principal created that aren't in known — the orphans to sweep.
+// Candidates are identified by the canonical com.yoloai.* labels
+// (runtime.IsOrphanCandidate, D62), never the yoloai-* name prefix: a foreign
+// container merely named yoloai-* is left alone, and the principal label scopes
+// the sweep by equality rather than containment, so another principal's
+// instances are never reaped (DF19, DF115). Pure, so the filtering is testable
+// without the live CLI. A parse failure is an error rather than an empty sweep —
+// prune deletes things, so an unreadable listing must fail closed.
+func orphanInstances(listOutput string, principal config.PrincipalSegment, known []string) ([]string, error) {
+	var entries []containerListEntry
+	if err := json.Unmarshal([]byte(listOutput), &entries); err != nil {
+		return nil, fmt.Errorf("parse container list: %w", err)
+	}
 	knownSet := make(map[string]bool, len(known))
 	for _, n := range known {
 		knownSet[n] = true
 	}
 	var out []string
-	for line := range strings.SplitSeq(listOutput, "\n") {
-		name := strings.TrimSpace(line)
-		if name == "" || !strings.HasPrefix(name, prefix) || knownSet[name] {
+	for _, e := range entries {
+		if e.ID == "" || knownSet[e.ID] {
 			continue
 		}
-		out = append(out, name)
+		if !runtime.IsOrphanCandidate(e.Configuration.Labels, principal) {
+			continue
+		}
+		out = append(out, e.ID)
 	}
-	return out
+	return out, nil
 }
 
 // --- platform helpers ---
