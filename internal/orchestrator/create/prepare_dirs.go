@@ -272,6 +272,15 @@ func setupDirContent(ctx context.Context, g *git.Git, sandboxDir string, dir *Di
 				"event", "sandbox.copy.history_downgraded", "backend", rt.Descriptor().Type,
 				"dir", dir.Path, "detail", "work-copy git is not confined on this backend; see confine-host-side-git")
 		}
+		// A linked worktree or submodule keeps its git dir outside the directory
+		// being copied, so no copy of that directory can carry its history and
+		// the sandbox gets a fresh baseline instead. Keyed off the source, not
+		// the copy: :copy never copies the link in the first place, so by the
+		// time the copy exists there is nothing left to notice (DF116).
+		if workspace.IsGitLink(dir.Path) {
+			slog.Warn("git history not preserved: this directory keeps its git dir outside itself (linked worktree or submodule); the sandbox starts from a fresh baseline",
+				"event", "sandbox.copy.gitlink_history_dropped", "dir", dir.Path)
+		}
 		err := workspace.CopyProjectDir(dir.Path, workCopyDir, dir.IncludeIgnored, preserveGit, func() ([]string, bool, error) {
 			return g.ListProjectFiles(ctx, dir.Path)
 		})

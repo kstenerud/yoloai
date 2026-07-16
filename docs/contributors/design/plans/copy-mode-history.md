@@ -182,6 +182,14 @@ history is effectively free.
 - **Submodules:** the main `.git` is cloned, but submodule *working trees* are not checked out
   (existing `:copy` limitation — `copyFileList` skips gitlink dirs). `git log` on the
   superproject works; submodule blame/log does not. Documented limitation, unchanged.
+- **A linked worktree as the workdir gets no history at all** — not a clone of a smaller `.git`,
+  none. Its `.git` is a pointer file and its objects live in the main repo's common dir, outside
+  the copied tree, so there is nothing here to clone; the work copy is severed from the link and
+  given a fresh baseline, and create warns that history was not preserved. Keeping the pointer
+  instead is what DF116 was: on the host it resolves, and the baseline commit lands in the user's
+  real repo. Preserving worktree history properly needs the common dir and is a separate design —
+  [worktree-history.md](worktree-history.md). The same applies to a submodule directory named
+  directly as the workdir, for the same reason.
 - **Non-CoW filesystems** pay a real `.git` copy at create (see §4).
 - The apply path is unchanged: `ApplySeries`/`ApplyPatch` still run host git via
   `git.NewHost` against the user's **own** (user-controlled, not agent-controlled) real repo,

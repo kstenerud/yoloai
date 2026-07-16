@@ -376,6 +376,38 @@ func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, s
 	return nil
 }
 
+// resyncWorkCopy mirrors hostPath into the work copy at workDir and returns the
+// copy's new baseline SHA: its own HEAD when it carries a real repo, a fresh
+// baseline otherwise. The bind-mount makes the synced files visible in the
+// container.
+//
+// rsync mirrors the host tree verbatim, so unlike CopyProjectDir it will land a
+// linked worktree's .git file in the work copy — over the top of the baseline
+// repo the sandbox was created with, since rsync --delete reconciles the type
+// change. From the host that link still resolves to the user's real repo, which
+// is where HeadSHA would then read its answer. Severing it first keeps the
+// baseline the copy's own (DF116).
+func resyncWorkCopy(ctx context.Context, g *git.Git, env []string, hostPath, workDir string) (string, error) {
+	if err := rsyncDir(env, hostPath, workDir); err != nil {
+		return "", fmt.Errorf("rsync workdir: %w", err)
+	}
+	if _, err := workspace.RemoveGitLink(workDir); err != nil {
+		return "", fmt.Errorf("sever git link in work copy: %w", err)
+	}
+	if git.IsGitRepo(workDir) {
+		sha, err := g.HeadSHA(ctx, workDir)
+		if err != nil {
+			return "", fmt.Errorf("read HEAD of resynced workdir: %w", err)
+		}
+		return sha, nil
+	}
+	sha, err := g.Baseline(ctx, workDir)
+	if err != nil {
+		return "", fmt.Errorf("re-create git baseline: %w", err)
+	}
+	return sha, nil
+}
+
 // resetInPlace resets the workspace while the agent is still running.
 // Syncs files from host, recreates git baseline, and notifies the agent via tmux.
 func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *store.Environment, sandboxDir string) error {
@@ -389,25 +421,9 @@ func resetInPlace(ctx context.Context, d state.Deps, opts ResetOptions, meta *st
 	g := git.NewHost(d.Layout)
 	rsyncEnv := d.Layout.Env().EnvForHostTool()
 
-	// Re-sync workdir from host (bind-mount makes changes visible in container)
-	if err := rsyncDir(rsyncEnv, meta.Workdir().HostPath, workDir); err != nil {
-		return fmt.Errorf("rsync workdir: %w", err)
-	}
-
-	// Record baseline — preserve git history if source is a git repo
-	var newSHA string
-	if git.IsGitRepo(workDir) {
-		sha, err := g.HeadSHA(ctx, workDir)
-		if err != nil {
-			return fmt.Errorf("read HEAD of resynced workdir: %w", err)
-		}
-		newSHA = sha
-	} else {
-		sha, err := g.Baseline(ctx, workDir)
-		if err != nil {
-			return fmt.Errorf("re-create git baseline: %w", err)
-		}
-		newSHA = sha
+	newSHA, err := resyncWorkCopy(ctx, g, rsyncEnv, meta.Workdir().HostPath, workDir)
+	if err != nil {
+		return err
 	}
 
 	// Update environment.json
