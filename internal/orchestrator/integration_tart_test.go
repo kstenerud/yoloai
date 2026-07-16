@@ -390,6 +390,79 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 	assert.Contains(t, diffResult, "test.txt")
 }
 
+// TestIntegrationTart_ResetRefreshesVMWorkDir asserts that a reset of a tart
+// sandbox refreshes the VM's work copy: a marker planted inside the VM is swept
+// and a host-side upstream change arrives. This began as DF122's hardware proof
+// and instead disproved DF122 — it passes against the pre-fix code too, because
+// a tart reset recreates the container, and recreateContainer re-runs
+// ExecuteVMWorkDirSetup *unconditionally* (restart.go, "Always re-run when
+// recreating … even if BaselineSHA is already set"). So the reset.go baseline-gate
+// DF122 was about is redundant for tart, and the VM is refreshed regardless of
+// what resetCopyWorkdir returns. The test is kept as the guard for that real
+// behaviour: it fails if recreateContainer's unconditional refresh is ever gated.
+func TestIntegrationTart_ResetRefreshesVMWorkDir(t *testing.T) {
+	mgr, ctx := tartIntegrationSetup(t)
+	if mgr == nil {
+		return // skipped
+	}
+
+	projectDir := testutil.GoProject(t)
+
+	sandboxName := "tart-reset-vmworkdir"
+	_, err := createSandbox(ctx, mgr, orchestrator.CreateOptions{
+		Name:    sandboxName,
+		Workdir: orchestrator.DirSpec{Path: projectDir},
+		Agent:   "test",
+		Version: "test",
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
+
+	_, err = startSandbox(ctx, mgr, sandboxName, orchestrator.StartOptions{})
+	require.NoError(t, err)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, sandboxName), 90*time.Second)
+
+	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
+	require.NoError(t, err)
+	vmLocalPath := meta.Workdir().MountPath
+	instance := store.InstanceName(mgr.Layout().Principal, sandboxName)
+
+	// Plant a marker inside the VM's work copy. A reset that refreshes the VM
+	// work dir must sweep it away; the buggy reset, which skipped VM setup, left
+	// it in place.
+	_, err = mgr.Runtime().Exec(ctx, instance,
+		[]string{"bash", "-c", "echo agent-marker > " + vmLocalPath + "/agent-marker.txt"}, "admin")
+	require.NoError(t, err)
+
+	// Move the host source on: an upstream commit reset is supposed to deliver.
+	testutil.WriteFile(t, projectDir, "upstream.txt", "from the host\n")
+	testutil.GitAdd(t, projectDir, ".")
+	testutil.GitCommit(t, projectDir, "upstream change")
+
+	_, resetErr := resetSandbox(ctx, mgr, orchestrator.ResetOptions{Name: sandboxName})
+	require.NoError(t, resetErr)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), instance, 90*time.Second)
+
+	// The marker must be gone: the VM work dir was actually refreshed.
+	markerCheck, err := mgr.Runtime().Exec(ctx, instance,
+		[]string{"bash", "-c", "test -e " + vmLocalPath + "/agent-marker.txt && echo PRESENT || echo GONE"}, "admin")
+	require.NoError(t, err)
+	assert.Equal(t, "GONE", strings.TrimSpace(markerCheck.Stdout),
+		"a tart reset recreates the VM and must refresh its work dir, sweeping the planted marker")
+
+	// And the upstream change must have arrived inside the VM.
+	upstreamCheck, err := mgr.Runtime().Exec(ctx, instance,
+		[]string{"bash", "-c", "test -e " + vmLocalPath + "/upstream.txt && echo PRESENT || echo MISSING"}, "admin")
+	require.NoError(t, err)
+	assert.Equal(t, "PRESENT", strings.TrimSpace(upstreamCheck.Stdout),
+		"a tart reset must deliver the host's upstream change into the VM")
+
+	// The reset must have re-baselined in the VM, not left the SHA empty/stale.
+	meta, err = store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
+	require.NoError(t, err)
+	assert.NotEmpty(t, meta.Workdir().BaselineSHA, "VM work-dir setup records a fresh baseline on reset")
+}
+
 // TestIntegrationTart_VMLocalStorageVerification verifies work directory is on local VM storage, not VirtioFS.
 func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 	mgr, ctx := tartIntegrationSetup(t)

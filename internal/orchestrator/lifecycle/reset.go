@@ -186,12 +186,12 @@ func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir
 		return "", fmt.Errorf("re-copy workdir: %w", err)
 	}
 	// SandboxSide backends (e.g. Tart) keep the work copy inside the sandbox, so
-	// the baseline is created in-VM after start and the empty SHA is the signal
-	// that ExecuteVMWorkDirSetup keys off. Checked before baselining, the way
-	// create does it: this used to baseline first, which returned a SHA for any
-	// work copy carrying a .git — and a non-empty SHA is precisely what
-	// suppresses the VM setup, so a tart reset re-copied on the host and then
-	// left the VM untouched (DF122).
+	// the baseline is created in-VM after start; return the empty SHA that signals
+	// deferral. Checked before baselining, matching create's createCopyBaseline —
+	// otherwise a work copy carrying a .git baselines to a host-side SHA that the
+	// recreate then overwrites. That overwrite is why this is only a consistency
+	// tidy and not a fix: recreateContainer re-runs the VM setup unconditionally,
+	// so the ordering here never changed what the VM ended up with (DF122, retracted).
 	if runtime.LocalityOf(d.Runtime) == runtime.LocalitySandboxSide {
 		return "", nil
 	}

@@ -311,9 +311,11 @@ func TestResyncWorkCopy_DirtySource_BaselinesLikeCreate(t *testing.T) {
 		"the agent has done nothing, so yoloai diff must report nothing")
 }
 
-// DF122: a SandboxSide backend baselines inside the VM after start, and the empty
-// SHA is the signal that triggers it. Baselining here would return one and
-// silently suppress the VM's work-dir setup.
+// A SandboxSide backend baselines inside the VM after start, so resetCopyWorkdir
+// returns the empty deferral signal rather than a host-side SHA. This asserts the
+// mechanism, matching create's ordering. (It does not guard a bug: the recreate
+// path re-runs the VM setup unconditionally, so this ordering never changed what
+// the VM ended up with — see DF122's retraction.)
 func TestResetCopyWorkdir_SandboxSide_DefersBaseline(t *testing.T) {
 	src := filepath.Join(t.TempDir(), "orig")
 	require.NoError(t, os.MkdirAll(src, 0o750))
