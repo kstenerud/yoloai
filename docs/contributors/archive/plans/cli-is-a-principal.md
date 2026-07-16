@@ -3,20 +3,20 @@
 
 # Plan: the CLI is a principal — name it, and delete the empty-principal sentinel
 
-- **Status:** IN-PROGRESS — **P2–P6 landed on `cli-is-a-principal` (2026-07-16); P7 Linux green
-  (docker + containerd + podman + orchestrator + cli integration, 0 panics), macOS releasetest +
-  the tart/seatbelt/apple DF115 belt still owed.** Scoped 2026-07-15 after DF98's third instance landed. The decision is
+- **Status:** IMPLEMENTED — **P2–P7 complete (2026-07-16); `releasetest` green on Linux and macOS.**
+  Scoped 2026-07-15 after DF98's third instance landed. The decision is
   [D126](../../decisions/working-notes.md#d126--the-cli-is-a-principal-named-cli-the-empty-principal-sentinel-is-deleted-and--becomes-invalid),
   which supersedes D62's CLI-elision bullets and D59's default/empty segment. Breaking change under
   [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2. **Landed:** the CLI adopts
   `cli`; `ParsePrincipalSegment("")` errors and `InstancePrefix` panics on empty; the optional
   `runtime.Renamer` (docker/tart) + the v4→v5 `PrincipalRename` framework migrator; schema bump
   4→5; `store.LegacyCLIInstanceName`; DF115's containerd `reconcileBlockingContainers` predicate;
-  the rule-2 sweep; the BREAKING-CHANGES entry. `make check` + `go vet -tags 'integration e2e'` +
-  the full Linux `make integration` (docker/containerd/orchestrator/cli) + `make integration-podman`
-  all green, 0 panics; the real CLI migrate ran (empty realm → v5). **Owed:** releasetest on macOS
-  (tart/seatbelt/apple); the tart/seatbelt/apple DF115 label-equality belt (macOS); the Linux `make
-  e2e` tier.
+  the rule-2 sweep; the BREAKING-CHANGES entry. **Verified:** `make check`, `go vet -tags
+  'integration e2e'`, the full Linux integration set (docker/containerd/podman/orchestrator/cli,
+  0 panics), a real `system migrate` (empty realm → v5), and `releasetest` on **both** Linux and
+  macOS. **Not owed by this plan:** the tart/seatbelt/apple label-equality belt is
+  [DF115](../../design/findings-unresolved.md)'s remaining half — the rename already removed the
+  hazard structurally; the predicate is the separate belt D62:379 always wanted.
 - **Depends on:** —
 
 ## The one-sentence version
@@ -289,7 +289,7 @@ the same claim, and the second one has already been wrong once in this plan** (t
 | seatbelt needs **no** migration | read: dir is the bare name; `sandboxName()` = `TrimPrefix(instanceName, instancePrefix())` (`seatbelt.go:685-687`), `SandboxesDir()/<bare>` (`:160`) |
 | apple has **no rename verb** | ran `container --help`; the full subcommand list has no `rename`/`mv` |
 | DF115 is real and destructive | ran a **dry-run** unprincipaled tart prune with a faithful `known`: spares the developer's VM and the base image, still selects a planted `yoloai-acme-probe` |
-| the prune-predicate audit (which backends match by prefix vs label) | read every backend's prune; results in [DF115](../findings-unresolved.md) |
+| the prune-predicate audit (which backends match by prefix vs label) | read every backend's prune; results in [DF115](../../design/findings-unresolved.md) |
 
 **NOT established — do not treat as verified:**
 
@@ -327,6 +327,6 @@ on the common path, which is the poka-yoke answer rather than the lint answer.
 
 D58, D59, [D62](../../decisions/working-notes.md#d62--principal-namespacing-deterministic-yoloai-principal-name-p8n56-no-library-hashing)
 (principal namespacing), D117 (BREAKING-CHANGES marker), D119 (verify before asserting),
-D121 (don't denormalize); [DF98](../findings-unresolved.md) (the three instances);
+D121 (don't denormalize); [DF98](../../design/findings-unresolved.md) (the three instances);
 `internal/config/names.go`, `internal/cli/cliutil/layout.go`, `internal/orchestrator/launch/launch.go:146`,
 `client.go:124`.
