@@ -156,3 +156,40 @@ func TestSetupWorkdir_CopyAllFromNormalRepo_PreservesHistory(t *testing.T) {
 	assert.Equal(t, headOf(t, dir), sha, "a real repo's history survives, so its HEAD is the baseline")
 	assert.Equal(t, "initial", testutil.RunGitOutput(t, workCopyDir, "log", "-1", "--format=%s"))
 }
+
+// DF121: :rw tracks no baseline. `yoloai baseline` says so to the user's face
+// ("baseline is not tracked for :rw directories") and diff substitutes the
+// literal HEAD for a live mount, so recording the source's HEAD here produced a
+// value nothing read, that `sandbox info` printed anyway, and that went stale on
+// the next commit.
+func TestCreateDirBaseline_RWTracksNoBaseline(t *testing.T) {
+	dir := t.TempDir()
+	testutil.InitGitRepo(t, dir)
+	writeTestFile(t, dir, "app.js", "v1")
+	testutil.RunGit(t, dir, "add", "-A")
+	gitCommit(t, dir, "initial")
+
+	sha, err := createDirBaseline(context.Background(),
+		git.NewTestHostWithEnv(testutil.GitEnv()),
+		&DirSpec{Path: dir, Mode: DirMode("rw")},
+		filepath.Join(t.TempDir(), "unused"),
+		&mockDockerRuntime{})
+	require.NoError(t, err)
+	assert.Empty(t, sha, "a live mount has no work copy to baseline, and the rest of the code already agrees")
+}
+
+func TestCreateDirBaseline_RODirTracksNoBaseline(t *testing.T) {
+	dir := t.TempDir()
+	testutil.InitGitRepo(t, dir)
+	writeTestFile(t, dir, "app.js", "v1")
+	testutil.RunGit(t, dir, "add", "-A")
+	gitCommit(t, dir, "initial")
+
+	sha, err := createDirBaseline(context.Background(),
+		git.NewTestHostWithEnv(testutil.GitEnv()),
+		&DirSpec{Path: dir, Mode: DirMode("ro")},
+		filepath.Join(t.TempDir(), "unused"),
+		&mockDockerRuntime{})
+	require.NoError(t, err)
+	assert.Empty(t, sha)
+}

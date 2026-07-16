@@ -13,6 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
+	"github.com/kstenerud/yoloai/internal/orchestrator/baseline"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
@@ -184,24 +185,17 @@ func resetCopyWorkdir(ctx context.Context, d state.Deps, sandboxName, sandboxDir
 	}); err != nil {
 		return "", fmt.Errorf("re-copy workdir: %w", err)
 	}
-	if git.IsGitRepo(workDir) {
-		sha, err := g.HeadSHA(ctx, workDir)
-		if err != nil {
-			return "", fmt.Errorf("read HEAD of re-copied workdir: %w", err)
-		}
-		return sha, nil
-	}
-	// SandboxSide backends (e.g. Tart) require the container running to exec setup
-	// commands inside the sandbox. HostSide backends baseline on the host before start.
+	// SandboxSide backends (e.g. Tart) keep the work copy inside the sandbox, so
+	// the baseline is created in-VM after start and the empty SHA is the signal
+	// that ExecuteVMWorkDirSetup keys off. Checked before baselining, the way
+	// create does it: this used to baseline first, which returned a SHA for any
+	// work copy carrying a .git — and a non-empty SHA is precisely what
+	// suppresses the VM setup, so a tart reset re-copied on the host and then
+	// left the VM untouched (DF122).
 	if runtime.LocalityOf(d.Runtime) == runtime.LocalitySandboxSide {
-		// Defer baseline creation — executeVMWorkDirSetup will call it after container start
 		return "", nil
 	}
-	sha, err := g.Baseline(ctx, workDir)
-	if err != nil {
-		return "", fmt.Errorf("re-create git baseline: %w", err)
-	}
-	return sha, nil
+	return baseline.WorkCopy(ctx, g, workDir)
 }
 
 // resetAuxCopyDir resets a single aux :copy dir and returns the new baseline SHA.
@@ -219,16 +213,9 @@ func resetAuxCopyDir(ctx context.Context, g *git.Git, sandboxDir string, d store
 	}); err != nil {
 		return "", fmt.Errorf("re-copy aux dir %s: %w", d.HostPath, err)
 	}
-	if git.IsGitRepo(auxWorkDir) {
-		sha, err := g.HeadSHA(ctx, auxWorkDir)
-		if err != nil {
-			return "", fmt.Errorf("read HEAD of re-copied aux dir %s: %w", d.HostPath, err)
-		}
-		return sha, nil
-	}
-	sha, err := g.Baseline(ctx, auxWorkDir)
+	sha, err := baseline.WorkCopy(ctx, g, auxWorkDir)
 	if err != nil {
-		return "", fmt.Errorf("git baseline for aux dir %s: %w", d.HostPath, err)
+		return "", fmt.Errorf("baseline aux dir %s: %w", d.HostPath, err)
 	}
 	return sha, nil
 }
@@ -434,18 +421,7 @@ func resyncWorkCopy(ctx context.Context, g *git.Git, dir store.DirEnvironment, w
 		return "", fmt.Errorf("prune work copy: %w", err)
 	}
 
-	if git.IsGitRepo(workDir) {
-		sha, err := g.HeadSHA(ctx, workDir)
-		if err != nil {
-			return "", fmt.Errorf("read HEAD of resynced workdir: %w", err)
-		}
-		return sha, nil
-	}
-	sha, err := g.Baseline(ctx, workDir)
-	if err != nil {
-		return "", fmt.Errorf("re-create git baseline: %w", err)
-	}
-	return sha, nil
+	return baseline.WorkCopy(ctx, g, workDir)
 }
 
 // resetInPlace resets the workspace while the agent is still running.

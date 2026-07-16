@@ -16,6 +16,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/netpolicy"
+	"github.com/kstenerud/yoloai/internal/orchestrator/baseline"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -301,8 +302,15 @@ func createDirBaseline(ctx context.Context, g *git.Git, dir *DirSpec, workCopyDi
 	case "copy":
 		return createCopyBaseline(ctx, g, workCopyDir, rt)
 	default:
-		sha, _ := g.HeadSHA(ctx, dir.Path)
-		return sha, nil
+		// :rw and :ro track no baseline, and this used to record the source's
+		// HEAD anyway. Nothing read it — diff and tags substitute the literal
+		// "HEAD" for a live mount, and `yoloai baseline` rejects these modes
+		// outright with "baseline is not tracked for :rw directories" — but
+		// `sandbox info` printed it, so the product answered both ways depending
+		// on which command you asked, with a value that went stale on the next
+		// commit. Recording nothing is what the rest of the code already
+		// believes (DF121).
+		return "", nil
 	}
 }
 
@@ -324,41 +332,11 @@ func createCopyBaseline(ctx context.Context, g *git.Git, workCopyDir string, rt 
 	slog.Debug("setupWorkdir: HostSide backend, creating baseline on host",
 		"backend", rt.Descriptor().Type)
 
-	// Docker: preserve original git history so the agent (and user) can
-	// git log, git show, git blame, etc. inside the sandbox.
-	// If the source was a git repo with commits, just record HEAD as baseline.
-	// For non-git directories or empty repos, create a fresh repo.
-	if git.IsGitRepo(workCopyDir) {
-		return createBaselineForGitRepo(ctx, g, workCopyDir)
-	}
-	sha, err := g.Baseline(ctx, workCopyDir)
-	if err != nil {
-		return "", fmt.Errorf("git baseline: %w", err)
-	}
-	return sha, nil
-}
-
-// createBaselineForGitRepo creates a baseline for a directory that is already a git repo.
-func createBaselineForGitRepo(ctx context.Context, g *git.Git, workCopyDir string) (string, error) {
-	_, err := g.HeadSHA(ctx, workCopyDir)
-	if err != nil {
-		// Git repo exists but has no commits (or is broken).
-		// Remove .git and create fresh baseline.
-		if rmErr := workspace.RemoveGitDirs(workCopyDir); rmErr != nil {
-			return "", fmt.Errorf("remove invalid git dir: %w", rmErr)
-		}
-		sha, baselineErr := g.Baseline(ctx, workCopyDir)
-		if baselineErr != nil {
-			return "", fmt.Errorf("git baseline after removing invalid repo: %w", baselineErr)
-		}
-		return sha, nil
-	}
-	// Commit any pre-existing dirty changes so agent diffs are clean.
-	sha, baselineErr := g.BaselineUncommittedChanges(ctx, workCopyDir)
-	if baselineErr != nil {
-		return "", fmt.Errorf("baseline pre-session state: %w", baselineErr)
-	}
-	return sha, nil
+	// The work copy keeps the source's history where it can (git log/blame/bisect
+	// inside the sandbox), so this baselines whatever the copy ended up with —
+	// a real repo, an empty one, or no repo at all. Shared with reset, which must
+	// answer this identically or a diff stops meaning "what the agent did".
+	return baseline.WorkCopy(ctx, g, workCopyDir)
 }
 
 // setupAuxDirs prepares each auxiliary directory and returns its DirEnvironment

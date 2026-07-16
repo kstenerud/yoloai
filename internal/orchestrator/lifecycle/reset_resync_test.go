@@ -282,3 +282,58 @@ func TestReset_InPlace_DoesNotImportIgnoredSecrets(t *testing.T) {
 	assert.False(t, exists(filepath.Join(workDir, "node_modules")))
 	assert.True(t, exists(filepath.Join(workDir, "app.js")), "and the project still arrives")
 }
+
+// DF120: reset must baseline the way create does. A source with uncommitted work
+// is copied dirty, and a baseline of HEAD would make the user's own edits read as
+// the agent's from the moment the reset finished.
+func TestResyncWorkCopy_DirtySource_BaselinesLikeCreate(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "orig")
+	require.NoError(t, os.MkdirAll(src, 0o750))
+	testutil.InitGitRepo(t, src)
+	testutil.WriteFile(t, src, "app.js", "v1\n")
+	testutil.GitAdd(t, src, ".")
+	testutil.GitCommit(t, src, "initial")
+	srcHead := gitHEAD(t, src)
+	testutil.WriteFile(t, src, "app.js", "v1\nthe user's work in progress\n")
+
+	workDir := newWorkCopy(t, "v1\n")
+	sha, err := resync(t, store.DirEnvironment{HostPath: src, Mode: "copy"}, workDir)
+	require.NoError(t, err)
+
+	assert.NotEqual(t, srcHead, sha, "the baseline must move past HEAD to cover the dirty state")
+	assert.Empty(t, testutil.RunGitOutput(t, workDir, "status", "--porcelain"),
+		"the agent starts clean, so a diff shows only the agent's work")
+	assert.Equal(t, "yoloai: pre-session state", testutil.RunGitOutput(t, workDir, "log", "-1", "--format=%s"))
+
+	// The property that actually matters: a diff right after reset is empty.
+	testutil.RunGit(t, workDir, "add", "-A")
+	assert.Empty(t, testutil.RunGitOutput(t, workDir, "diff", sha),
+		"the agent has done nothing, so yoloai diff must report nothing")
+}
+
+// DF122: a SandboxSide backend baselines inside the VM after start, and the empty
+// SHA is the signal that triggers it. Baselining here would return one and
+// silently suppress the VM's work-dir setup.
+func TestResetCopyWorkdir_SandboxSide_DefersBaseline(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "orig")
+	require.NoError(t, os.MkdirAll(src, 0o750))
+	testutil.InitGitRepo(t, src)
+	testutil.WriteFile(t, src, "app.js", "v1\n")
+	testutil.GitAdd(t, src, ".")
+	testutil.GitCommit(t, src, "initial")
+
+	tmpDir := t.TempDir()
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "vmbox")
+	meta := &store.Environment{
+		Name:      "vmbox",
+		CreatedAt: time.Now(),
+		Dirs:      []store.DirEnvironment{{HostPath: src, MountPath: src, Mode: "copy"}},
+	}
+	// SandboxSide, and confined git so the work copy keeps a .git — which is
+	// exactly the case that used to return a SHA and skip the VM setup.
+	mock := &lifecycleMockRuntime{locality: runtime.LocalitySandboxSide, gitExecInConfinement: true}
+
+	sha, err := resetCopyWorkdir(context.Background(), newLifecycleDeps(mock, tmpDir), "vmbox", sandboxDir, meta)
+	require.NoError(t, err)
+	assert.Empty(t, sha, "an empty SHA is what tells reset to run the VM work-dir setup")
+}
