@@ -307,6 +307,49 @@ func removeBuildArtifacts(root string) error {
 	return nil
 }
 
+// IsGitLink reports whether dir keeps its git directory somewhere else: dir/.git
+// is a gitlink (the `gitdir:` file of a linked worktree or a submodule) or a
+// symlink, rather than a real .git directory. Such a directory does not contain
+// its own history, so copying it does not copy its repository — the caller is
+// expected to tell the user that history was left behind.
+//
+// The link's target is deliberately not read. It may be absolute (a worktree),
+// relative (a submodule, or a worktree under git 2.48+ `worktree.useRelativePaths`),
+// or a symlink, and no form of it is usable from a work copy — so the kind of
+// the .git entry decides this, never the text inside it.
+func IsGitLink(dir string) bool {
+	info, err := os.Lstat(filepath.Join(dir, ".git"))
+	return err == nil && !info.IsDir()
+}
+
+// RemoveGitLink removes dir/.git when it is a gitlink or symlink rather than a
+// real .git directory, reporting whether one was removed. A missing .git and a
+// real .git directory are both left alone.
+//
+// A work copy must never keep such a link. It names a git directory outside the
+// copy, and on the host that target still resolves to the source repository — so
+// git run against the copy reads and writes the user's real objects, index and
+// branch refs (DF116). Inside the sandbox the same link resolves to nothing.
+// Removing it leaves the copy without a repository, which is the state Baseline
+// expects and which makes IsGitRepo report false.
+func RemoveGitLink(dir string) (removed bool, err error) {
+	gitPath := filepath.Join(dir, ".git")
+	info, err := os.Lstat(gitPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		return false, fmt.Errorf("stat .git in %s: %w", dir, err)
+	}
+	if info.IsDir() {
+		return false, nil
+	}
+	if err := os.Remove(gitPath); err != nil {
+		return false, fmt.Errorf("remove git link %s: %w", gitPath, err)
+	}
+	return true, nil
+}
+
 // RemoveGitDirs recursively removes all .git entries (files and directories)
 // from root. This strips git metadata from a copied working tree so that
 // hooks, LFS filters, submodule links, and worktree links don't interfere

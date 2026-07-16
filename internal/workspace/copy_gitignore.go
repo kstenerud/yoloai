@@ -31,7 +31,24 @@ import (
 //
 // The same dispatch runs at initial setup and at reset, so a re-copy reproduces
 // the same file set.
+//
+// However src is copied, the result never keeps a .git link: see RemoveGitLink.
+// Only the :copy-all branch can produce one, since the gitignore-honoring branch
+// never copies .git at all. The sever is unconditional anyway, so the invariant
+// holds for the function rather than for one branch of it (DF116).
 func CopyProjectDir(src, dst string, includeIgnored, preserveGit bool, listProjectFiles func() (files []string, isRepo bool, err error)) error {
+	if err := copyProjectContent(src, dst, includeIgnored, preserveGit, listProjectFiles); err != nil {
+		return err
+	}
+	if _, err := RemoveGitLink(dst); err != nil {
+		return err
+	}
+	return nil
+}
+
+// copyProjectContent performs CopyProjectDir's mode dispatch, leaving the
+// work copy's .git invariant to its caller.
+func copyProjectContent(src, dst string, includeIgnored, preserveGit bool, listProjectFiles func() (files []string, isRepo bool, err error)) error {
 	if includeIgnored {
 		return CopyDir(src, dst)
 	}
