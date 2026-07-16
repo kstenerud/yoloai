@@ -352,7 +352,7 @@ Best for: local development where the developer wants the lightest-weight connec
 
 | Backend | Supported | Notes |
 |---|---|---|
-| Docker | Yes | Container name `yoloai-<name>` is directly attachable |
+| Docker | Yes | Container name `yoloai-cli-<name>` is directly attachable |
 | Podman | Yes | VS Code Dev Containers supports Podman |
 | containerd | No | VS Code does not support attaching to containerd containers |
 | Tart | No | VM, not a Docker container |

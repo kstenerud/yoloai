@@ -60,10 +60,9 @@ func TestParseSandboxName(t *testing.T) {
 }
 
 func TestParsePrincipalSegment(t *testing.T) {
-	t.Run("empty is the default sentinel", func(t *testing.T) {
-		got, err := ParsePrincipalSegment("")
-		assert.NoError(t, err)
-		assert.Equal(t, PrincipalSegment(""), got)
+	t.Run("empty is rejected — no default principal (D126)", func(t *testing.T) {
+		_, err := ParsePrincipalSegment("")
+		assert.ErrorContains(t, err, "principal is required")
 	})
 
 	t.Run("valid", func(t *testing.T) {
@@ -84,5 +83,21 @@ func TestParsePrincipalSegment(t *testing.T) {
 			_, err := ParsePrincipalSegment(p)
 			assert.Error(t, err, "expected %q to be invalid", p)
 		}
+	})
+}
+
+func TestInstancePrefix(t *testing.T) {
+	t.Run("scopes by principal, unconditionally", func(t *testing.T) {
+		assert.Equal(t, "yoloai-cli-", InstancePrefix(CLIPrincipal))
+		assert.Equal(t, "yoloai-acme-", InstancePrefix("acme"))
+	})
+
+	// D126 poka-yoke: no principal can ever yield a bare "yoloai-", so the
+	// DF98 prefix-stripping class is unwritable. An empty principal is "unset",
+	// not a legal input, and fails loudly rather than emitting "yoloai--".
+	t.Run("panics on the empty principal", func(t *testing.T) {
+		assert.PanicsWithValue(t,
+			"config.InstancePrefix: principal is required (empty is invalid; every embedder names itself per D126, and boundaries validate via ParsePrincipalSegment before a Layout is built)",
+			func() { InstancePrefix("") })
 	})
 }

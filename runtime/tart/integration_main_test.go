@@ -28,7 +28,7 @@ func TestMain(m *testing.M) {
 	// path isn't actually used here.
 	tmp, _ := os.MkdirTemp("", "tart-probe-*")
 	defer os.RemoveAll(tmp) //nolint:errcheck // best-effort cleanup
-	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")))
+	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")).WithPrincipal(config.CLIPrincipal))
 	if err != nil {
 		// Tart is macOS + Apple Silicon only. On any non-macOS host it is
 		// structurally impossible, not merely absent — outside the mandatory-infra

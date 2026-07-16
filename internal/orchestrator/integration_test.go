@@ -48,7 +48,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for container to become active
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, sandboxName), 15*time.Second)
 
 	// Verify directory structure
 	sandboxDir := mgr.Layout().SandboxDir(sandboxName)
@@ -67,12 +67,12 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.FileExists(t, filepath.Join(workDir, "main.go"))
 
 	// Verify container is running
-	status, err := orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
+	status, err := orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, orchestrator.StatusActive, status)
 
 	// Exec inside running container
-	result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName), []string{"echo", "lifecycle-test"}, "yoloai")
+	result, err := mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, sandboxName), []string{"echo", "lifecycle-test"}, "yoloai")
 	require.NoError(t, err)
 	assert.Equal(t, "lifecycle-test", result.Stdout)
 	assert.Equal(t, 0, result.ExitCode)
@@ -92,21 +92,21 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	// Stop container and verify
 	require.NoError(t, stopSandbox(ctx, mgr, sandboxName))
 
-	status, err = orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
+	status, err = orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, orchestrator.StatusStopped, status)
 
 	// Restart container and verify
 	_, startErr := startSandbox(ctx, mgr, sandboxName, orchestrator.StartOptions{})
 	require.NoError(t, startErr)
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", sandboxName), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, sandboxName), 15*time.Second)
 
-	status, err = orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
+	status, err = orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, orchestrator.StatusActive, status)
 
 	// Exec again after restart
-	result, err = mgr.Runtime().Exec(ctx, store.InstanceName("", sandboxName), []string{"echo", "after-restart"}, "yoloai")
+	result, err = mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, sandboxName), []string{"echo", "after-restart"}, "yoloai")
 	require.NoError(t, err)
 	assert.Equal(t, "after-restart", result.Stdout)
 	assert.Equal(t, 0, result.ExitCode)
@@ -136,7 +136,7 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be gone
-	status, err = orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", sandboxName), mgr.Layout().SandboxDir(sandboxName))
+	status, err = orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, sandboxName), mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)
 	assert.Equal(t, orchestrator.StatusRemoved, status)
 }
@@ -349,7 +349,7 @@ func TestIntegration_Reset(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for container to become active
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "resettest"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "resettest"), 15*time.Second)
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("resettest"))
 	require.NoError(t, err)
@@ -368,7 +368,7 @@ func TestIntegration_Reset(t *testing.T) {
 
 	// Reset is synchronous (stop+restore+start completes before returning), so
 	// just wait for the container to be active again.
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "resettest"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "resettest"), 15*time.Second)
 
 	// new_file.txt should be gone after reset
 	assert.NoFileExists(t, filepath.Join(workDir, "new_file.txt"))
@@ -395,10 +395,10 @@ func TestIntegration_Exec(t *testing.T) {
 	require.NoError(t, err)
 
 	// Wait for container to become active
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "exectest"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "exectest"), 15*time.Second)
 
 	// Exec a command
-	result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", "exectest"), []string{"echo", "integration-test"}, "yoloai")
+	result, err := mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, "exectest"), []string{"echo", "integration-test"}, "yoloai")
 	require.NoError(t, err)
 	assert.Equal(t, "integration-test", result.Stdout)
 	assert.Equal(t, 0, result.ExitCode)
@@ -735,7 +735,7 @@ func TestIntegration_DestroyCleanup(t *testing.T) {
 	assert.NoDirExists(t, sandboxDir)
 
 	// Container should be removed
-	status, err := orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName("", "destroyme"), mgr.Layout().SandboxDir("destroyme"))
+	status, err := orchestrator.DetectStatus(ctx, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "destroyme"), mgr.Layout().SandboxDir("destroyme"))
 	require.NoError(t, err)
 	assert.Equal(t, orchestrator.StatusRemoved, status)
 }
@@ -769,7 +769,7 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 	_, err = startSandbox(ctx, mgr, "netisolated", orchestrator.StartOptions{})
 	require.NoError(t, err)
 
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "netisolated"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "netisolated"), 15*time.Second)
 
 	// The entrypoint applies iptables rules before starting the agent, but
 	// WaitForActive only confirms the container process is running, not that
@@ -779,7 +779,7 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 	// curl to a well-known external IP should be blocked by the iptables REJECT rule.
 	// Exec returns a non-nil error when the command exits non-zero, so we discard
 	// the error and check ExitCode directly.
-	external, _ := mgr.Runtime().Exec(ctx, store.InstanceName("", "netisolated"),
+	external, _ := mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, "netisolated"),
 		[]string{"curl", "-sf", "--max-time", "5", "https://1.1.1.1"}, "yoloai")
 	assert.NotEqual(t, 0, external.ExitCode,
 		"curl to external IP should be blocked by network isolation")
@@ -788,7 +788,7 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 	// Nothing listens on 127.0.0.1:80, so curl gets "connection refused" (exit 7),
 	// which is distinct from an iptables timeout (exit 28). The point is that loopback
 	// traffic is not blocked by our rules.
-	lo, _ := mgr.Runtime().Exec(ctx, store.InstanceName("", "netisolated"),
+	lo, _ := mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, "netisolated"),
 		[]string{"curl", "-sf", "--max-time", "5", "http://127.0.0.1"}, "yoloai")
 	assert.NotEqual(t, 28, lo.ExitCode, "loopback should not time out (iptables must allow lo)")
 }
@@ -817,12 +817,12 @@ func TestIntegration_NetworkIsolation_LivePatchViaSidecar(t *testing.T) {
 
 	_, err = startSandbox(ctx, mgr, "netlive", orchestrator.StartOptions{})
 	require.NoError(t, err)
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "netlive"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "netlive"), 15*time.Second)
 
 	// The agent container itself cannot mutate or even read the ipset (no
 	// NET_ADMIN) — confirm, so the test can't pass vacuously through an
 	// in-container exec.
-	_, agentErr := mgr.Runtime().Exec(ctx, store.InstanceName("", "netlive"),
+	_, agentErr := mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, "netlive"),
 		[]string{"sudo", "-n", "ipset", "add", "-exist", "allowed-domains", "203.0.113.7"}, "yoloai")
 	require.Error(t, agentErr, "agent must not be able to mutate the ipset directly")
 
@@ -856,11 +856,11 @@ func TestIntegration_ReadOnlyMountVerified(t *testing.T) {
 	_, err = startSandbox(ctx, mgr, "romount", orchestrator.StartOptions{})
 	require.NoError(t, err)
 
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "romount"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "romount"), 15*time.Second)
 
 	// Attempt to write to the read-only aux dir from inside the container.
 	// The mount target mirrors the host path by default.
-	result, _ := mgr.Runtime().Exec(ctx, store.InstanceName("", "romount"),
+	result, _ := mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, "romount"),
 		[]string{"sh", "-c", "echo pwned > " + auxDir + "/attack.txt"}, "yoloai")
 	assert.NotEqual(t, 0, result.ExitCode,
 		"write to read-only aux dir mount should fail inside the container")
@@ -905,7 +905,7 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 	})
 	require.NoError(t, err)
 
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "credinject"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "credinject"), 15*time.Second)
 
 	// Poll until the prompt has written the credential file. The test agent
 	// runs sh -c "PROMPT" via tmux; on slow CI runners a fixed sleep was
@@ -913,7 +913,7 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 	var credOutput string
 	deadline := time.Now().Add(15 * time.Second)
 	for time.Now().Before(deadline) {
-		r, execErr := mgr.Runtime().Exec(ctx, store.InstanceName("", "credinject"),
+		r, execErr := mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, "credinject"),
 			[]string{"cat", "/tmp/cred-check"}, "yoloai")
 		if execErr == nil && r.ExitCode == 0 && r.Stdout != "" {
 			credOutput = r.Stdout
@@ -971,12 +971,12 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 	_, err = startSandbox(ctx, mgr, "stubworkflow", orchestrator.StartOptions{})
 	require.NoError(t, err)
 
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "stubworkflow"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "stubworkflow"), 15*time.Second)
 
 	// Simulate agent output: create a new file inside the container.
 	// Exec runs in the container's WorkingDir (= project bind-mount), so the
 	// file appears in the work copy on the host side via the bind-mount.
-	result, err := mgr.Runtime().Exec(ctx, store.InstanceName("", "stubworkflow"), []string{"touch", "agent-output.txt"}, "yoloai")
+	result, err := mgr.Runtime().Exec(ctx, store.InstanceName(mgr.Layout().Principal, "stubworkflow"), []string{"touch", "agent-output.txt"}, "yoloai")
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.ExitCode)
 
@@ -1028,7 +1028,7 @@ func TestIntegration_Clone(t *testing.T) {
 	// the change seeded next then reads as an uncommitted diff against it.
 	_, err = startSandbox(ctx, mgr, "clone-a", orchestrator.StartOptions{})
 	require.NoError(t, err)
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "clone-a"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "clone-a"), 15*time.Second)
 
 	// Seed a change in A's work copy (bind-mounted, so the running container's git
 	// sees it) after the baseline is committed.
@@ -1049,7 +1049,7 @@ func TestIntegration_Clone(t *testing.T) {
 	// Start clone-b: diff/apply run git in-confinement, so the container must run.
 	_, err = startSandbox(ctx, mgr, "clone-b", orchestrator.StartOptions{})
 	require.NoError(t, err)
-	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName("", "clone-b"), 15*time.Second)
+	testutil.WaitForActive(ctx, t, mgr.Runtime(), store.InstanceName(mgr.Layout().Principal, "clone-b"), 15*time.Second)
 
 	// Diff on clone should show the seeded change
 	diffResult, err := copyflow.GenerateDiff(ctx, copyflow.DiffOptions{Name: "clone-b", Layout: mgr.Layout(), Runtime: mgr.Runtime()})

@@ -19,9 +19,9 @@ import (
 )
 
 func TestSandboxName(t *testing.T) {
-	r := &Runtime{}
-	assert.Equal(t, "mysandbox", r.sandboxName("yoloai-mysandbox"))
-	assert.Equal(t, "test-box", r.sandboxName("yoloai-test-box"))
+	r := &Runtime{layout: config.Layout{}.WithPrincipal(config.CLIPrincipal)}
+	assert.Equal(t, "mysandbox", r.sandboxName("yoloai-cli-mysandbox"))
+	assert.Equal(t, "test-box", r.sandboxName("yoloai-cli-test-box"))
 	assert.Equal(t, "plain", r.sandboxName("plain")) // no prefix — returns as-is
 }
 

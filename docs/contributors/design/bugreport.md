@@ -369,8 +369,8 @@ Global config (`~/.yoloai/config.yaml`) and active profile config, each in a fen
 **`runtime-config.json`** — In `safe` mode, parsed with `encoding/json`, `setup_commands` and `allowed_domains` fields deleted, then re-serialized (may reveal internal infrastructure). In `unsafe` mode, full contents included verbatim.
 
 **Container log** — full output from the container runtime:
-- docker: `docker logs yoloai-<name> 2>&1`
-- podman: `podman logs yoloai-<name> 2>&1`
+- docker: `docker logs yoloai-cli-<name> 2>&1`
+- podman: `podman logs yoloai-cli-<name> 2>&1`
 - tart/seatbelt: noted as "not available for this backend"
 
 Errors from a non-running container are included rather than silently omitted.

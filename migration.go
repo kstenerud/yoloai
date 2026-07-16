@@ -142,14 +142,23 @@ func (s *System) ApplyMigration(ctx context.Context, d MigrationDecision) (Migra
 // location (SandboxesDir) — by the time the framework applies, MigrateCLI has
 // run (F7 case 2).
 func (s *System) frameworkMigrators() ([]migrate.Migrator, func()) {
+	runtimeFor := func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error) {
+		return runtime.New(ctx, backend, s.layout) // each sandbox's own backend
+	}
 	flatten := orchestrator.NewOverlayFlatten(
 		s.layout,
 		s.layout.DataDir,        // home: scratch + lock, same FS as sandboxes
 		s.layout.SandboxesDir(), // F7-resolved sandboxes root
 		goruntime.GOOS,
-		func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error) {
-			return runtime.New(ctx, backend, s.layout) // each overlay sandbox's own backend
-		},
+		runtimeFor,
 	)
-	return []migrate.Migrator{flatten}, flatten.Cleanup
+	// Ordered: the overlay flatten (v3->v4) runs before the principal rename
+	// (v4->v5), so the realm advances one step at a time and each migrator sees
+	// the prior one's result.
+	rename := orchestrator.NewPrincipalRename(s.layout, s.layout.SandboxesDir(), runtimeFor)
+	cleanup := func() {
+		flatten.Cleanup()
+		rename.Cleanup()
+	}
+	return []migrate.Migrator{flatten, rename}, cleanup
 }

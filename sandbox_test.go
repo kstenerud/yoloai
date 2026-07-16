@@ -93,7 +93,7 @@ func TestClient_Sandbox_NotFound(t *testing.T) {
 
 func TestSandbox_ExchangePaths(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir, Principal: "cli"})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -110,7 +110,7 @@ func TestSandbox_ExchangePaths(t *testing.T) {
 
 func TestSandbox_LogPaths(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir, Principal: "cli"})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -132,7 +132,7 @@ func TestSandbox_LogPaths(t *testing.T) {
 // live-holder paths are covered by store/lock_test.go.
 func TestSandbox_Unlock_Noop(t *testing.T) {
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir, Principal: "cli"})
 	require.NoError(t, err)
 	defer c.Close() //nolint:errcheck
 
@@ -150,7 +150,7 @@ func TestSandbox_Unlock_Noop(t *testing.T) {
 func vscodeClient(t *testing.T, meta *store.Environment) *Client {
 	t.Helper()
 	dir := t.TempDir()
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: dir, HomeDir: dir, Principal: "cli"})
 	require.NoError(t, err)
 	t.Cleanup(func() { _ = c.Close() })
 	if meta != nil {
@@ -164,6 +164,7 @@ func vscodeClient(t *testing.T, meta *store.Environment) *Client {
 func TestVscodeAttach_Supported(t *testing.T) {
 	c := vscodeClient(t, &store.Environment{
 		Name:        "box",
+		Principal:   "cli",
 		BackendType: BackendDocker,
 		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	})
@@ -173,7 +174,7 @@ func TestVscodeAttach_Supported(t *testing.T) {
 	attach, err := sb.VscodeAttach()
 	require.NoError(t, err)
 	assert.True(t, attach.Supported)
-	assert.Equal(t, store.InstanceName("", "box"), attach.ContainerName)
+	assert.Equal(t, store.InstanceName("cli", "box"), attach.ContainerName)
 	assert.Equal(t, "/proj", attach.WorkdirPath)
 	assert.True(t, strings.HasPrefix(attach.FolderURI, "vscode-remote://attached-container+"))
 	assert.True(t, strings.HasSuffix(attach.FolderURI, "/proj"))

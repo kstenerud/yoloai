@@ -3,12 +3,20 @@
 
 # Plan: the CLI is a principal — name it, and delete the empty-principal sentinel
 
-- **Status:** PLANNED — **P0 answered, P1 run, D-entry landed (2026-07-16); P2 onward not started.**
+- **Status:** IMPLEMENTED — **P2–P7 complete (2026-07-16); `releasetest` green on Linux and macOS.**
   Scoped 2026-07-15 after DF98's third instance landed. The decision is
   [D126](../../decisions/working-notes.md#d126--the-cli-is-a-principal-named-cli-the-empty-principal-sentinel-is-deleted-and--becomes-invalid),
   which supersedes D62's CLI-elision bullets and D59's default/empty segment. Breaking change under
-  [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2. Still owed:
-  BREAKING-CHANGES entry, the rule-2 sweep, the schema bump.
+  [AGENTS.md rule 1](../../../../AGENTS.md); name invalidation under rule 2. **Landed:** the CLI adopts
+  `cli`; `ParsePrincipalSegment("")` errors and `InstancePrefix` panics on empty; the optional
+  `runtime.Renamer` (docker/tart) + the v4→v5 `PrincipalRename` framework migrator; schema bump
+  4→5; `store.LegacyCLIInstanceName`; DF115's containerd `reconcileBlockingContainers` predicate;
+  the rule-2 sweep; the BREAKING-CHANGES entry. **Verified:** `make check`, `go vet -tags
+  'integration e2e'`, the full Linux integration set (docker/containerd/podman/orchestrator/cli,
+  0 panics), a real `system migrate` (empty realm → v5), and `releasetest` on **both** Linux and
+  macOS. **Not owed by this plan:** the tart/seatbelt/apple label-equality belt is
+  [DF115](../../design/findings-unresolved.md)'s remaining half — the rename already removed the
+  hazard structurally; the predicate is the separate belt D62:379 always wanted.
 - **Depends on:** —
 
 ## The one-sentence version
@@ -281,14 +289,14 @@ the same claim, and the second one has already been wrong once in this plan** (t
 | seatbelt needs **no** migration | read: dir is the bare name; `sandboxName()` = `TrimPrefix(instanceName, instancePrefix())` (`seatbelt.go:685-687`), `SandboxesDir()/<bare>` (`:160`) |
 | apple has **no rename verb** | ran `container --help`; the full subcommand list has no `rename`/`mv` |
 | DF115 is real and destructive | ran a **dry-run** unprincipaled tart prune with a faithful `known`: spares the developer's VM and the base image, still selects a planted `yoloai-acme-probe` |
-| the prune-predicate audit (which backends match by prefix vs label) | read every backend's prune; results in [DF115](../findings-unresolved.md) |
+| the prune-predicate audit (which backends match by prefix vs label) | read every backend's prune; results in [DF115](../../design/findings-unresolved.md) |
 
 **NOT established — do not treat as verified:**
 
 | Gap | Who can close it |
 | --- | --- |
-| **containerd cannot rename** (name = container id + snapshot key) | **Linux only.** D62:373 verified the *constraint* (`validate.go:34-42`, pinned `containerd/v2@v2.2.2`); nobody has verified what an actual rename attempt or a recreate does to a live sandbox. This is P1's last row and it gates P3's shape. |
-| **podman rename** | verb exists (podman 5.8.2, checked); never exercised — no machine was running on this host. Podman embeds `docker.Runtime`, so it *probably* inherits the working path, but "probably" is what this section exists to flag. |
+| ~~**containerd cannot rename**~~ | **CLOSED on Linux (2026-07-16):** yoloAI's containerd backend creates the container via the containerd Go client with `WithID(cfg.Name)` and `WithNewSnapshot(cfg.Name, …)` (`lifecycle.go:244,258`) — the instance name *is* the immutable container id and snapshot key, no nerdctl name-indirection. So rename is impossible and the migrator recreates-or-refuses; there is no `runtime.Renamer` for containerd. |
+| ~~**podman rename**~~ | **CLOSED:** there is no separate podman backend — podman rides `docker.Runtime` (docker-compatible API), so it inherits `docker.Rename` (SDK `ContainerRename`) and the label-equality prune, and needs no separate verb. The plan's "6 backends" is really 5. |
 | **Do yoloAI's own handles survive a live rename?** | Both live renames were verified only as "the CLI accepts it and the instance stays listed running". Whether the live `tart run` host process re-binds, whether docker's labels/`DetectStatus`/an attached tmux session survive, and whether an agent mid-task notices — **none of that was tested**, on either platform. P3 must not assume it. This is the single largest hole. |
 | **containerd's netns sweep under a renamed principal** | `netnsNameFor` is `"yoloai-" + containerName` (`cni.go:128`), so netns names contain the instance name; a rename that does not also move `/var/run/netns/yoloai-<instance>` will orphan or mis-sweep it. Linux-only, untested, and easy to miss because the netns path is derived, not stored. |
 | **`yoloai-base` / profile image tags** | out of scope here (open question 4), but note `provisionedImageName` is a bare literal `"yoloai-base"` and the prune guard compares against it by equality — check it still holds once `InstancePrefix` loses its branch. |
@@ -319,6 +327,6 @@ on the common path, which is the poka-yoke answer rather than the lint answer.
 
 D58, D59, [D62](../../decisions/working-notes.md#d62--principal-namespacing-deterministic-yoloai-principal-name-p8n56-no-library-hashing)
 (principal namespacing), D117 (BREAKING-CHANGES marker), D119 (verify before asserting),
-D121 (don't denormalize); [DF98](../findings-unresolved.md) (the three instances);
+D121 (don't denormalize); [DF98](../../design/findings-unresolved.md) (the three instances);
 `internal/config/names.go`, `internal/cli/cliutil/layout.go`, `internal/orchestrator/launch/launch.go:146`,
 `client.go:124`.

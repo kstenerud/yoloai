@@ -73,7 +73,7 @@ func seatbeltMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	home := testutil.IsolatedHome(t)
 	env := testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)
 	env["HOME"] = home
-	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithEnv(env)
+	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal).WithEnv(env)
 
 	rt, err := seatbelt.New(ctx, layout, home)
 	require.NoError(t, err, "seatbelt backend must be available on this platform")
@@ -100,7 +100,7 @@ func appleMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	ctx := context.Background()
 
 	home := testutil.IsolatedHome(t)
-	layout := config.NewLayout(filepath.Join(home, ".yoloai"))
+	layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 
 	rt, err := apple.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "apple container backend must be available (macOS 26 + Apple Silicon)")

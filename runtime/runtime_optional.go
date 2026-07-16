@@ -357,6 +357,27 @@ func RecreateAdvisoryFor(ctx context.Context, rt Backend) string {
 
 // ===== 3. Optional operations =====
 
+// Renamer is an optional backend interface: rename an existing instance in
+// place, preserving its running state and process. Implemented by the backends
+// whose rename is a metadata-only operation — docker (docker rename) and tart
+// (tart rename), both verified to keep a running instance running with its PID
+// intact. The v4->v5 principal-rename migration (D126) uses it to move a
+// "yoloai-<name>" instance to "yoloai-cli-<name>" without recreating it, so a
+// mid-task agent is never interrupted.
+//
+// Backends whose instance identity is immutable simply do NOT implement this —
+// containerd (the name is both the container id and the snapshot key, daemon-
+// enforced) and apple (its CLI has no rename verb). The migration type-asserts
+// for Renamer and falls back to recreate-or-refuse for those. seatbelt needs no
+// rename at all (its on-disk dir is the bare sandbox name, carrying no prefix),
+// so it also does not implement it.
+type Renamer interface {
+	// Rename changes an instance's name from oldName to newName. Returns
+	// ErrNotFound if oldName does not exist. A successful rename leaves a running
+	// instance running.
+	Rename(ctx context.Context, oldName, newName string) error
+}
+
 // ExitStatus is the result of a launched process exiting. Signaled and Signal
 // are populated when the backend can report signal death; docker exec cannot,
 // so it always reports Signaled=false.

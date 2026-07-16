@@ -136,6 +136,20 @@ func InstanceName(principal config.PrincipalSegment, name string) string {
 	return config.InstancePrefix(principal) + name
 }
 
+// LegacyCLIInstanceName returns the pre-D126 instance name for a CLI sandbox —
+// "yoloai-<name>", the empty-principal form the CLI produced before it adopted
+// the "cli" principal. It exists ONLY for migrations that operate on instances
+// created under the old naming: the v3->v4 overlay flatten and the v4->v5
+// principal rename, both of which must address a still-"yoloai-<name>" instance.
+//
+// This is the one legitimate use of the bare "yoloai-" prefix that D126/DF98
+// otherwise make unwritable: it names historical data in a frozen, one-way
+// migration, never a live path derived from the current principal. New code must
+// use InstanceName(principal, name) — which cannot emit a bare "yoloai-".
+func LegacyCLIInstanceName(name string) string {
+	return "yoloai-" + name
+}
+
 // Per-sandbox subdirectory helpers. Each takes a sandboxDir (typically
 // obtained via layout.SandboxDir(name)) and returns the subpath.
 

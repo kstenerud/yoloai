@@ -13,9 +13,9 @@ import (
 // ceiling is containerd's identifier maxLength (76) minus the "yoloai-"
 // prefix (7) and the largest principal segment plus its separator
 // (MaxPrincipalLength + 1 = 9): 76 - 7 - 9 = 60, rounded down to 56 to keep
-// a margin. The default (no-principal) instance name "yoloai-<name>" then
-// tops out at 7 + 56 = 63, and a fully-namespaced
-// "yoloai-<principal>-<name>" at 7 + 8 + 1 + 56 = 72 ≤ 76. See D62.
+// a margin. A fully-namespaced instance name "yoloai-<principal>-<name>" then
+// tops out at 7 + 8 + 1 + 56 = 72 ≤ 76; the CLI's "yoloai-cli-<name>" is
+// 7 + 3 + 1 + 56 = 67. Every instance name is principal-scoped (D126). See D62.
 const MaxNameLength = 56
 
 // MaxPrincipalLength is the maximum allowed principal-segment length. Kept
@@ -67,30 +67,48 @@ func ParseSandboxName(name string) (SandboxName, error) {
 }
 
 // PrincipalSegment is a parsed, validated principal identifier used to namespace
-// runtime instance names across multiple principals (tenants). The empty value
-// is the reserved default ("no principal"): it elides from the instance name so
-// a single-principal embedder (the CLI) behaves exactly as before. A non-empty
-// segment is a single alphanumeric run of at most MaxPrincipalLength. See D62.
+// runtime instance names across multiple principals (tenants). Every embedder
+// names itself; there is no default or elision (D126, superseding D62's empty
+// sentinel). A segment is a single alphanumeric run of at most
+// MaxPrincipalLength. The empty string is not a valid segment — it is the
+// "unset" value that ParsePrincipalSegment rejects and InstancePrefix panics on.
+// See D62 / D126.
 type PrincipalSegment string
 
-// InstancePrefix returns the runtime instance-name prefix for the given principal.
-// With an empty principal it returns "yoloai-" (the historical default); with a
-// non-empty principal it returns "yoloai-<principal>-". This is the single source
-// of truth for the prefix used by both store.InstanceName and the backend orphan
-// sweeps — every prune predicate calls this so principal-scoping is centrally
-// maintained. See D62 / DF19.
+// CLIPrincipal is the principal the yoloai CLI operates under. The CLI is an
+// embedder like any other and names itself (D126): its runtime instances are
+// "yoloai-cli-<name>". It already owns TOP/cli on the filesystem axis (D59);
+// this carries that identity onto the runtime-namespace axis D62 exists to fix.
+const CLIPrincipal PrincipalSegment = "cli"
+
+// InstancePrefix returns the runtime instance-name prefix for the given
+// principal: "yoloai-<principal>-", unconditionally. Every principal is
+// non-empty (D126), so this cannot emit a bare "yoloai-" for anyone to hardcode
+// — the poka-yoke that makes DF98's prefix-stripping class unwritable. This is
+// the single source of truth for the prefix used by both store.InstanceName and
+// the backend orphan sweeps, so principal-scoping stays centrally maintained.
+//
+// Panics on an empty principal. Like config.NewLayout panicking on an empty
+// dataDir, the empty value is "unset", not a legal input: public boundaries
+// (yoloai.NewClient) validate the principal and return *UsageError via
+// ParsePrincipalSegment before any Layout is constructed, so a "" reaching here
+// is a programming bug — an unprincipaled Layout — and it fails loudly at the
+// point of use rather than silently producing the malformed "yoloai--". See
+// D62 / D126 / DF19.
 func InstancePrefix(p PrincipalSegment) string {
 	if p == "" {
-		return "yoloai-"
+		panic("config.InstancePrefix: principal is required (empty is invalid; every embedder names itself per D126, and boundaries validate via ParsePrincipalSegment before a Layout is built)")
 	}
 	return "yoloai-" + string(p) + "-"
 }
 
 // ParsePrincipalSegment validates a principal identifier and returns it as a
-// PrincipalSegment. The empty string is accepted as the default sentinel.
+// PrincipalSegment. The empty string is rejected (D126): there is no default
+// principal, so an embedder that omits one gets a *UsageError rather than a
+// silent sentinel.
 func ParsePrincipalSegment(principal string) (PrincipalSegment, error) {
 	if principal == "" {
-		return "", nil
+		return "", yoerrors.NewUsageError("a principal is required: pass a non-empty ClientCreateOptions.Principal (the CLI uses %q)", CLIPrincipal)
 	}
 	if len(principal) > MaxPrincipalLength {
 		return "", yoerrors.NewUsageError("invalid principal %q: must be at most %d characters (got %d)", principal, MaxPrincipalLength, len(principal))

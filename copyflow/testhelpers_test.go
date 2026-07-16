@@ -15,7 +15,7 @@ import (
 // testLayout returns a config.Layout rooted at tmpDir/.yoloai/ — matches the
 // HOME=tmpDir convention used by patch tests.
 func testLayout(tmpDir string) config.Layout {
-	return config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	return config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 }
 
 func initGitRepo(t *testing.T, dir string)    { t.Helper(); testutil.InitGitRepo(t, dir) }

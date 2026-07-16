@@ -144,7 +144,7 @@ func TestSelectOrphanProcs(t *testing.T) {
 }
 
 func TestReapOrphanProcs_NormalizesKnownReapsGroupAndSkipsSelf(t *testing.T) {
-	r := &Runtime{layout: config.NewLayout(t.TempDir())}
+	r := &Runtime{layout: config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)}
 	sandboxes := r.layout.SandboxesDir()
 
 	procs := []sandboxProc{
@@ -178,7 +178,7 @@ func TestReapOrphanProcs_NormalizesKnownReapsGroupAndSkipsSelf(t *testing.T) {
 }
 
 func TestReapOrphanProcs_EnumerationFailureIsNonFatal(t *testing.T) {
-	r := &Runtime{layout: config.NewLayout(t.TempDir())}
+	r := &Runtime{layout: config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)}
 	restore := stubEnumErr()
 	defer restore()
 	assert.Nil(t, r.reapOrphanProcs(nil, false, io.Discard))

@@ -23,7 +23,7 @@ func tartSetup(t *testing.T) (*Runtime, context.Context) {
 	home := testutil.IsolatedHome(t)
 	ctx := context.Background()
 
-	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")))
+	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal))
 	require.NoError(t, err, "tart backend must be available on this platform")
 
 	return rt, ctx

@@ -247,6 +247,7 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 		Agent:       agent.GetAgent("test"),
 		NetworkMode: "isolated",
 		Isolation:   "container-enhanced",
+		Layout:      config.Layout{Principal: config.CLIPrincipal},
 	}
 
 	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil, brokerOutcome{}, false)
@@ -266,6 +267,7 @@ func TestBuildInstanceConfig_BrokerOutcome(t *testing.T) {
 		Name:    "test",
 		Workdir: &state.DirSpec{Path: "/project", Mode: store.DirMode("copy")},
 		Agent:   agent.GetAgent("test"),
+		Layout:  config.Layout{Principal: config.CLIPrincipal},
 	}
 	desc := runtime.BackendDescriptor{Type: "mock"}
 
@@ -298,6 +300,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 				Agent:       agent.GetAgent("test"),
 				NetworkMode: "isolated",
 				Isolation:   isolation,
+				Layout:      config.Layout{Principal: config.CLIPrincipal},
 			}
 			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, CapAdd: true}}, st, nil, nil, brokerOutcome{}, false)
 			require.NoError(t, err)

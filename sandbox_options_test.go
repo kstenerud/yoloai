@@ -56,7 +56,7 @@ func TestSandboxCreateOptions_toInternal_PreservesExplicitWorkdir(t *testing.T) 
 // sandbox.TestEngine_NewEngine_DoesNotOpen; here we assert the public contract:
 // construction succeeds with no BackendType.
 func TestNewClient_BackendOptional(t *testing.T) {
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir(), Principal: "cli"})
 	require.NoError(t, err, "empty Backend is allowed — the Client is backend-less")
 	require.NotNil(t, c)
 }
@@ -64,7 +64,7 @@ func TestNewClient_BackendOptional(t *testing.T) {
 // A backend-bound operation on a backend-less Client returns ErrBackendRequired
 // (a *UsageError) instead of the old panic footgun.
 func TestBackendBoundOp_OnBackendlessClient_ReturnsErrBackendRequired(t *testing.T) {
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir(), Principal: "cli"})
 	require.NoError(t, err)
 
 	_, err = c.ListSandboxes(context.Background())
@@ -77,7 +77,7 @@ func TestBackendBoundOp_OnBackendlessClient_ReturnsErrBackendRequired(t *testing
 // ErrBackendRequired is a stable sentinel: a backend-bound op on a backend-less
 // Client matches it via errors.Is, the form embedders use to branch.
 func TestErrBackendRequired_IsSentinel(t *testing.T) {
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir(), Principal: "cli"})
 	require.NoError(t, err)
 	_, err = c.ListSandboxes(context.Background())
 	assert.True(t, errors.Is(err, ErrBackendRequired))
@@ -86,7 +86,7 @@ func TestErrBackendRequired_IsSentinel(t *testing.T) {
 // Close on a Client whose backend was never opened is a no-op (no panic, no
 // error) — the lazy core must not dereference a nil runtime.
 func TestClose_OnUnopenedClient_IsNoop(t *testing.T) {
-	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir()})
+	c, err := NewClient(context.Background(), ClientCreateOptions{DataDir: t.TempDir(), HomeDir: t.TempDir(), Principal: "cli"})
 	require.NoError(t, err)
 	require.NoError(t, c.Close(), "Close on an unopened Client must be a no-op")
 }

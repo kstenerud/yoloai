@@ -294,7 +294,7 @@ Before creating the sandbox (all checks run before any state is created on disk)
    - Resource limits from defaults + profile
    - API key(s) injected via file-based bind mount at `/run/secrets/` — env var names from agent definition (see [security.md](security.md#credential-management))
    - `CAP_NET_ADMIN` added when `--network-isolated` is used (required for iptables rules)
-   - Container name: `yoloai-<name>`
+   - Container name: `yoloai-cli-<name>`
    - User: `yoloai` (UID/GID matching host user)
    - `/yoloai/` internal directory for sandbox context file, overlay working directories, and bind-mounted state files (`log.txt`, `prompt.txt`, `config.json`)
 4. Run `setup` commands from config (if any).

@@ -76,7 +76,7 @@ esac
 	binPath := filepath.Join(dir, "tart")
 	require.NoError(t, os.WriteFile(binPath, []byte(script), 0700)) //nolint:gosec // test stub must be executable
 
-	layout := config.NewLayout(filepath.Join(dir, ".yoloai"))
+	layout := config.NewLayout(filepath.Join(dir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0700))
 	// Pin the host major to tahoe (26) so resolveBaseImage deterministically
 	// returns defaultBaseImage regardless of the machine running the test.
@@ -114,28 +114,28 @@ func TestPruneRemovesOrphanButKeepsBase(t *testing.T) {
 	// unrelated VM that doesn't carry the yoloai- prefix.
 	r, deleteLog := fakeTart(t, []string{
 		provisionedImageName, // yoloai-base — must survive
-		"yoloai-keep",        // known sandbox — must survive
-		"yoloai-orphan",      // orphan — must be removed
+		"yoloai-cli-keep",    // known sandbox — must survive
+		"yoloai-cli-orphan",  // orphan — must be removed
 		"some-other-vm",      // not ours — must be ignored
 	})
 
-	result, err := r.Prune(context.Background(), []string{"yoloai-keep"}, false, os.Stderr)
+	result, err := r.Prune(context.Background(), []string{"yoloai-cli-keep"}, false, os.Stderr)
 	require.NoError(t, err)
 
-	require.Equal(t, []string{"yoloai-orphan"}, deletedNames(t, deleteLog))
+	require.Equal(t, []string{"yoloai-cli-orphan"}, deletedNames(t, deleteLog))
 	require.Len(t, result.Items, 1)
-	require.Equal(t, "yoloai-orphan", result.Items[0].Name)
+	require.Equal(t, "yoloai-cli-orphan", result.Items[0].Name)
 }
 
 func TestPruneDryRunDeletesNothing(t *testing.T) {
-	r, deleteLog := fakeTart(t, []string{provisionedImageName, "yoloai-orphan"})
+	r, deleteLog := fakeTart(t, []string{provisionedImageName, "yoloai-cli-orphan"})
 
 	result, err := r.Prune(context.Background(), nil, true, os.Stderr)
 	require.NoError(t, err)
 
 	require.Empty(t, deletedNames(t, deleteLog))
 	require.Len(t, result.Items, 1) // reported, not removed
-	require.Equal(t, "yoloai-orphan", result.Items[0].Name)
+	require.Equal(t, "yoloai-cli-orphan", result.Items[0].Name)
 }
 
 // TestPrunePrincipalScope verifies that a Runtime with a non-empty principal

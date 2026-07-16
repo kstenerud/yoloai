@@ -127,6 +127,7 @@ func newCreateClient(cmd *cobra.Command, version string) (*yoloai.Client, error)
 	c, err := yoloai.NewClient(cmd.Context(), yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
+		Principal:   string(l.Principal),
 		BackendType: yoloai.BackendType(cliutil.ResolveBackend(cmd)),
 		Input:       cmd.InOrStdin(),
 		Output:      mgrOutput,

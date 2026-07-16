@@ -10,7 +10,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"strconv"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -149,9 +148,12 @@ func (o *OverlayFlatten) Apply(ctx context.Context, d migrate.Decision) (migrate
 			return report, err
 		}
 	}
-	if err := fileutil.AtomicWriteFile(o.layout.SchemaVersionPath(),
-		[]byte(strconv.Itoa(config.LibrarySchemaVersion)), 0600); err != nil {
-		return report, fmt.Errorf("stamp library v%d: %w", config.LibrarySchemaVersion, err)
+	// Stamp v4 (this migrator's own target), never LibrarySchemaVersion — the
+	// realm may need the later principal-rename migrator (v4->v5) after this, and
+	// stamping the ceiling here would skip it. Guarded so a re-run on an already-
+	// higher realm never lowers the stamp.
+	if err := stampSchemaAdvancing(o.layout, config.SchemaOverlayFlattened); err != nil {
+		return report, err
 	}
 	return report, nil
 }
@@ -286,7 +288,7 @@ func (o *OverlayFlatten) flattenRunning(ctx context.Context, name string) (migra
 	// Stop the container: its overlay mount now points at swapped-away dirs. A
 	// failed stop is non-fatal — the on-disk form is already :copy and a restart
 	// mounts copy cleanly — but is reported as a lingering container.
-	if err := rt.Stop(ctx, store.InstanceName("", name)); err != nil {
+	if err := rt.Stop(ctx, store.LegacyCLIInstanceName(name)); err != nil {
 		report.Notes = append(report.Notes, fmt.Sprintf("sandbox %q: could not stop the container after flattening (%v); remove it manually", name, err))
 	} else {
 		report.Notes = append(report.Notes, fmt.Sprintf("stopped sandbox %q to finalize overlay->copy; restart to resume in copy mode", name))
@@ -357,7 +359,7 @@ func (o *OverlayFlatten) captureMerged(ctx context.Context, name, hostPath strin
 	uid, gid := fileutil.HostUID(), fileutil.HostGID()
 	script := fmt.Sprintf("set -e; rm -rf %s; mkdir -p %s; cp -a %s/. %s/; chown -R %d:%d %s; chmod -R u+rwX %s",
 		stage, stage, merged, stage, uid, gid, stage, stage)
-	res, err := rt.Exec(ctx, store.InstanceName("", name), []string{"sh", "-c", script}, "root")
+	res, err := rt.Exec(ctx, store.LegacyCLIInstanceName(name), []string{"sh", "-c", script}, "root")
 	if err != nil {
 		return "", fmt.Errorf("capture merged tree for %q: %w", name, err)
 	}
@@ -392,7 +394,7 @@ func (o *OverlayFlatten) reclaimOverlayLayers(ctx context.Context, rt runtime.Ba
 	script := fmt.Sprintf(
 		`for d in %s/upper %s/ovlwork; do chown -R %d:%d "$d"; chmod -R u+rwX "$d"; done 2>/dev/null || true`,
 		base, base, fileutil.HostUID(), fileutil.HostGID())
-	if _, err := rt.Exec(ctx, store.InstanceName("", name), []string{"sh", "-c", script}, "root"); err != nil {
+	if _, err := rt.Exec(ctx, store.LegacyCLIInstanceName(name), []string{"sh", "-c", script}, "root"); err != nil {
 		return fmt.Errorf("reclaim overlay layer ownership for %q: %w", name, err)
 	}
 	return nil
@@ -524,7 +526,7 @@ func (o *OverlayFlatten) status(ctx context.Context, name string) (status.Status
 	if err != nil {
 		return "", err
 	}
-	return status.DetectStatus(ctx, rt, store.InstanceName("", name), o.layout.SandboxDir(name))
+	return status.DetectStatus(ctx, rt, store.LegacyCLIInstanceName(name), o.layout.SandboxDir(name))
 }
 
 func hasOverlayDir(env *store.Environment) bool {

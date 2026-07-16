@@ -42,10 +42,10 @@ func TestWithNamespace(t *testing.T) {
 
 // TestSandboxDirForName verifies the sandbox directory path derivation.
 func TestSandboxDirForName(t *testing.T) {
-	r := &Runtime{layout: config.NewLayout("/home/testuser/.yoloai")}
-	dir := r.sandboxDirForName("yoloai-mybox")
+	r := &Runtime{layout: config.NewLayout("/home/testuser/.yoloai").WithPrincipal(config.CLIPrincipal)}
+	dir := r.sandboxDirForName("yoloai-cli-mybox")
 	assert.Contains(t, dir, "mybox")
-	assert.NotContains(t, dir, "yoloai-mybox") // prefix stripped
+	assert.NotContains(t, dir, "yoloai-cli-mybox") // prefix stripped
 }
 
 // TestSandboxDirForName_IsPrincipalScoped pins the prefix to the layout rather

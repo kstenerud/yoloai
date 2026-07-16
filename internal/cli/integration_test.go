@@ -51,7 +51,7 @@ func cliSetup(t *testing.T) (projectDir string) {
 	// already exists in the service storage that imageExists queries via
 	// the socket, so seeding the checksum lets Setup skip the build.
 	if bt := testutil.IntegrationBackendType(); bt == "" || bt == "docker" || bt == "podman" {
-		layout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
+		layout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome).WithPrincipal(config.CLIPrincipal)
 		require.NoError(t, os.MkdirAll(layout.CacheDir(), 0750))
 		// DF56: seed the ACTIVE backend's checksum key (the CLI subset runs under
 		// both docker and podman); a fixed "docker" key mismatches under podman and
@@ -118,7 +118,7 @@ func waitActive(t *testing.T, name string) {
 	t.Helper()
 	rt := testutil.NewIntegrationRuntime(context.Background(), t)
 	defer rt.Close() //nolint:errcheck // test cleanup
-	testutil.WaitForActive(context.Background(), t, rt, store.InstanceName("", name), 15*time.Second)
+	testutil.WaitForActive(context.Background(), t, rt, store.InstanceName(config.CLIPrincipal, name), 15*time.Second)
 }
 
 func TestCLI_NewAndDestroy(t *testing.T) {
@@ -214,7 +214,7 @@ func TestCLI_StartStop(t *testing.T) {
 	// Wait for container to become active
 	rt := testutil.NewIntegrationRuntime(context.Background(), t)
 	defer rt.Close() //nolint:errcheck // test cleanup
-	testutil.WaitForActive(context.Background(), t, rt, store.InstanceName("", "cli-startstop"), 15*time.Second)
+	testutil.WaitForActive(context.Background(), t, rt, store.InstanceName(config.CLIPrincipal, "cli-startstop"), 15*time.Second)
 
 	_, _, err = runCLI(t, "stop", "cli-startstop")
 	require.NoError(t, err)
@@ -454,7 +454,7 @@ func TestCLI_StartAfterDone(t *testing.T) {
 	defer rt.Close() //nolint:errcheck // test cleanup
 
 	testutil.WaitForStatus(context.Background(), t, func(ctx context.Context) (string, error) {
-		s, err := orchestrator.DetectStatus(ctx, rt, store.InstanceName("", "cli-startdone"), cliutil.Layout().SandboxDir("cli-startdone"))
+		s, err := orchestrator.DetectStatus(ctx, rt, store.InstanceName(config.CLIPrincipal, "cli-startdone"), cliutil.Layout().SandboxDir("cli-startdone"))
 		return string(s), err
 	}, string(yoloai.StatusDone), 60*time.Second)
 

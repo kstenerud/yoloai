@@ -79,12 +79,13 @@ type Layout struct {
 
 	// Principal namespaces this Layout's runtime instances so multiple
 	// principals (tenants) served from one process don't collide on the
-	// runtime container name. The zero value is the reserved default
-	// ("no principal"): InstanceName elides it, so a single-principal
-	// embedder (the CLI) produces the same "yoloai-<name>" ids as before.
-	// A daemon scopes each client to a principal by setting this once via
-	// WithPrincipal. The Layout *is* the principal-scoped handle (D58/D59);
-	// the principal is client-scoped, never per-call. See D62.
+	// runtime container name. Every embedder names itself — the CLI is
+	// config.CLIPrincipal ("cli"), a daemon scopes each client to its
+	// tenant — so there is no default and the zero value is invalid: a
+	// Layout that reaches InstanceName/InstancePrefix without a principal
+	// panics (D126, superseding D62's empty sentinel). The principal is set
+	// once via WithPrincipal. The Layout *is* the principal-scoped handle
+	// (D58/D59); the principal is client-scoped, never per-call. See D62.
 	Principal PrincipalSegment
 
 	// SecretsStagingDir is the parent directory under which the short-lived
@@ -125,9 +126,10 @@ func (l Layout) CreateTemp(pattern string) (*os.File, error) {
 }
 
 // WithPrincipal returns a copy of the Layout scoped to the given principal.
-// The empty segment is the default (no-principal) scope. The principal is set
-// in exactly one place per client, so every InstanceName derived from this
-// Layout shares the same scope.
+// The principal must be non-empty (D126) — it is validated at the boundary via
+// ParsePrincipalSegment; a Layout left unprincipaled panics when an instance
+// name is derived from it. The principal is set in exactly one place per client,
+// so every InstanceName derived from this Layout shares the same scope.
 func (l Layout) WithPrincipal(p PrincipalSegment) Layout {
 	l.Principal = p
 	return l

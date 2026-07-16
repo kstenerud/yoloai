@@ -87,7 +87,7 @@ func Layout() config.Layout {
 // TOP is rerooted (e.g. /var/lib/yoloai under a service install).
 func LayoutForDataDir(dataDir string) config.Layout {
 	l := config.NewLayoutFor(filepath.Join(dataDir, libraryNamespace), resolveHome())
-	return l.WithEnv(processEnv())
+	return l.WithPrincipal(config.CLIPrincipal).WithEnv(processEnv())
 }
 
 // processEnv snapshots the process environment into a map for the

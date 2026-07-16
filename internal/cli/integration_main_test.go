@@ -166,7 +166,7 @@ func runCLIMain(m *testing.M) int {
 	// image already exists in the service storage that imageExists queries
 	// via the socket, so seeding the checksum lets Setup skip the build.
 	if bt := testutil.IntegrationBackendType(); bt == "" || bt == "docker" || bt == "podman" {
-		integLayout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome)
+		integLayout := config.NewLayoutFor(filepath.Join(tmpHome, ".yoloai", "library"), tmpHome).WithPrincipal(config.CLIPrincipal)
 		if err := os.MkdirAll(integLayout.CacheDir(), 0750); err != nil {
 			fmt.Fprintf(os.Stderr, "failed to create cache dir: %v\n", err)
 			return 1

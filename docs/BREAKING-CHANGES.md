@@ -49,6 +49,33 @@ set a leaf or map entry (`tart.image`, `env.NAME`, or `model_aliases.NAME`)
 rather than a whole section. Edit the YAML file directly when replacing a
 structured section as a unit.
 
+### Runtime instance names are principal-scoped; the empty principal is invalid
+
+**Previous behavior:** the CLI named its backend instances `yoloai-<name>` — a
+Docker container, Tart VM, or containerd container for the sandbox `mybox` was
+`yoloai-mybox`. The library treated an empty `ClientCreateOptions.Principal` as a
+default that elided from the name, so an embedder that omitted a principal got the
+same `yoloai-<name>` form.
+
+**New behavior:** the CLI is a principal named `cli`, so its instances are
+`yoloai-cli-<name>` (`yoloai-cli-mybox`). Every embedder must name itself: an
+empty `Principal` is rejected with a `*UsageError` — there is no default and no
+elision. Instance names are always `yoloai-<principal>-<name>` (D126).
+
+**Impact:** third-party scripts that match `yoloai-<name>` in `docker ps` /
+`podman ps` / `tart list` / `ctr` output (or in the manual-cleanup steps under
+`yoloai x cleanup`) must match `yoloai-cli-<name>`. Library embedders that
+constructed a `Client` without a `Principal` now receive a construction error.
+Existing sandboxes are migrated automatically (see below); their running
+containers/VMs are renamed in place where the backend supports it.
+
+**Migration:** run `yoloai system migrate` after upgrading. It moves each
+existing sandbox's instance from `yoloai-<name>` to `yoloai-cli-<name>`:
+docker/podman/tart rename in place (a running agent is not interrupted); a
+stopped containerd or apple sandbox is recreated under its new name on next start
+(pass `--yes`), and a running one must be stopped first. Library embedders must
+pass a non-empty `Principal` (≤8 alphanumeric characters) to `NewClient`.
+
 ## v0.8.0
 
 ### Credential brokering is now the default for Gemini and Codex (not just Claude)

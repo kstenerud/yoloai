@@ -302,12 +302,12 @@ func TestSandboxName(t *testing.T) {
 		input    string
 		expected string
 	}{
-		{"yoloai-mybox", "mybox"},
-		{"yoloai-test-sandbox", "test-sandbox"},
+		{"yoloai-cli-mybox", "mybox"},
+		{"yoloai-cli-test-sandbox", "test-sandbox"},
 		{"noprefix", "noprefix"},
 	}
 
-	r := &Runtime{}
+	r := &Runtime{layout: config.Layout{}.WithPrincipal(config.CLIPrincipal)}
 	for _, tt := range tests {
 		got := r.sandboxName(tt.input)
 		if got != tt.expected {

@@ -187,7 +187,7 @@ func makeTestState(sandboxDir string) *state.State {
 		},
 		Agent:     agent.GetAgent("test"),
 		ImageRef:  "yoloai-base:test",
-		Layout:    config.NewLayout(filepath.Join(sandboxDir, ".yoloai")),
+		Layout:    config.NewLayout(filepath.Join(sandboxDir, ".yoloai")).WithPrincipal(config.CLIPrincipal),
 		Isolation: runtime.IsolationModeContainer,
 	}
 }
