@@ -23,16 +23,15 @@ var _ runtime.NetnsSidecarRunner = (*Runtime)(nil)
 // sidecarLabels stamps the canonical com.yoloai.* identity on a netns sidecar so
 // one that crash-leaks past the defer/name cleanup stays an orphan-sweep
 // candidate (runtime.IsOrphanCandidate, D62). Mirrors instanceLabels on the
-// launch path: LabelSandbox always, LabelPrincipal only for a non-default
-// principal. Keyed on the sidecar's OWN name (not the target's), so it never
-// collides with the target's com.yoloai.sandbox label in listings; the sweep
-// still reaps a leak because that name is never in the known-sandboxes set.
+// launch path: both labels, always. Keyed on the sidecar's OWN name (not the
+// target's), so it never collides with the target's com.yoloai.sandbox label in
+// listings; the sweep still reaps a leak because that name is never in the
+// known-sandboxes set.
 func sidecarLabels(name string, principal config.PrincipalSegment) map[string]string {
-	labels := map[string]string{runtime.LabelSandbox: name}
-	if principal != "" {
-		labels[runtime.LabelPrincipal] = string(principal)
+	return map[string]string{
+		runtime.LabelSandbox:   name,
+		runtime.LabelPrincipal: string(principal),
 	}
-	return labels
 }
 
 // RunNetnsSidecar runs spec.Argv in a throwaway container joined to the target's

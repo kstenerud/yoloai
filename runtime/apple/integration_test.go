@@ -198,3 +198,98 @@ func TestApple_SetupBuildsBase(t *testing.T) {
 	assert.NotContains(t, buf2.String(), "Building base image", "re-run must skip")
 	assert.NotContains(t, buf2.String(), "rebuilding", "re-run must not hit NeedsBuild")
 }
+
+// newPrincipalRuntime builds a Runtime scoped to its own unique test principal
+// and data dir — the shape a separate embedder has (D59/D62), so a sweep run by
+// one can be observed against instances owned by the other.
+func newPrincipalRuntime(t *testing.T, ctx context.Context) (*Runtime, config.PrincipalSegment) {
+	t.Helper()
+	principal := testutil.UniqueTestPrincipal(t)
+	home := testutil.IsolatedHome(t)
+	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(principal))
+	require.NoError(t, err)
+	return rt, principal
+}
+
+// TestApple_PruneSparesForeignPrincipal plants an instance under a FOREIGN
+// principal and asserts this principal's sweep spares it, against the live CLI.
+//
+// It has to build that situation on purpose. Nothing in a normal run — or in any
+// other test here — creates a cross-principal container, so the hazard is
+// invisible to a green suite; only a test that constructs it can fail (DF115).
+// What it guards is a regression from label equality back to name-prefix
+// matching, which would delete another embedder's running VMs.
+//
+// Both principals are UniqueTestPrincipals: the `container` daemon is global (an
+// isolated HOME does not partition it), so a sweep run under the real CLI
+// principal here would reap the developer's own yoloai-cli-* containers (DF19).
+func TestApple_PruneSparesForeignPrincipal(t *testing.T) {
+	rt, ctx := appleSetup(t)
+	buildSleepImage(t, rt, ctx)
+
+	ownRT, ownPrincipal := newPrincipalRuntime(t, ctx)
+	foreignRT, foreignPrincipal := newPrincipalRuntime(t, ctx)
+	require.NotEqual(t, ownPrincipal, foreignPrincipal)
+
+	create := func(r *Runtime, principal config.PrincipalSegment, sandbox string) string {
+		name := config.InstancePrefix(principal) + sandbox
+		require.NoError(t, r.Create(ctx, runtime.InstanceConfig{
+			Name:     name,
+			ImageRef: itestImage,
+			Labels: map[string]string{
+				runtime.LabelSandbox:   sandbox,
+				runtime.LabelPrincipal: string(principal),
+			},
+		}))
+		t.Cleanup(func() { _ = r.Remove(context.Background(), name) })
+		return name
+	}
+
+	foreignName := create(foreignRT, foreignPrincipal, "probe")
+	ownName := create(ownRT, ownPrincipal, "orphan")
+
+	// A container the USER ran by hand that merely happens to sit in this
+	// principal's namespace: no com.yoloai.* labels, because yoloai never created
+	// it. This is the case that actually discriminates the two predicates on live
+	// hardware — see the note above the foreign-principal assertion below.
+	handRunName := config.InstancePrefix(ownPrincipal) + "handrun"
+	_, err := ownRT.runContainer(ctx, "create", "--name", handRunName, itestImage)
+	require.NoError(t, err)
+	t.Cleanup(func() { _, _ = ownRT.runContainer(context.Background(), "delete", "--force", handRunName) })
+
+	// known is empty, so ownName is an orphan by construction; foreignName is not
+	// ours to reap at all.
+	var out bytes.Buffer
+	res, err := ownRT.Prune(ctx, nil, false, &out)
+	require.NoError(t, err)
+
+	var pruned []string
+	for _, it := range res.Items {
+		pruned = append(pruned, it.Name)
+	}
+	assert.Contains(t, pruned, ownName, "this principal's unknown instance is an orphan and must be swept")
+
+	// THE discriminating assertion. Prefix matching reaps this (it is in our
+	// namespace by name); label equality spares it (yoloai never created it, so it
+	// carries no com.yoloai.sandbox). Every other assertion here also holds under
+	// the old prefix predicate — verified by mutation, not assumed — because
+	// principals are alphanumeric (config.principalSegmentRe) and InstancePrefix
+	// appends a delimiting "-", which makes distinct namespaces structurally
+	// non-prefixing. So this is the assertion that fails on a regression.
+	assert.NotContains(t, pruned, handRunName, "a container yoloai did not create must never be swept")
+	_, err = ownRT.Inspect(ctx, handRunName)
+	assert.NoError(t, err, "the hand-run container must still exist after the sweep")
+
+	// Kept as a belt even though the prefix predicate satisfies it too: it pins
+	// cross-principal sparing to the predicate rather than to the name-shape
+	// accident that currently also delivers it.
+	assert.NotContains(t, pruned, foreignName, "another principal's instance must never be reported as swept")
+
+	// The report is a claim; the daemon is the fact. Assert the foreign instance
+	// actually survived rather than trusting the sweep's own accounting.
+	_, err = foreignRT.Inspect(ctx, foreignName)
+	assert.NoError(t, err, "another principal's instance must still exist after the sweep")
+
+	_, err = ownRT.Inspect(ctx, ownName)
+	assert.ErrorIs(t, err, runtime.ErrNotFound, "this principal's orphan must actually be gone")
+}

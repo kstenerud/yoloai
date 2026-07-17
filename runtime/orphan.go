@@ -15,14 +15,16 @@ import "github.com/kstenerud/yoloai/internal/config"
 //     `docker run --name yoloai-x`) is left alone, where the old name-prefix
 //     match would have removed it; and
 //   - false when the container belongs to a DIFFERENT principal — the
-//     com.yoloai.principal label is matched against `principal` (absent label ==
-//     the default ""), preserving the per-principal scoping the name prefix used
-//     to provide (DF19).
+//     com.yoloai.principal label is matched against `principal` by EQUALITY,
+//     preserving the per-principal scoping the name prefix used to provide
+//     (DF19). Equality, not prefix containment: an instance created before D126
+//     carries no principal label and so belongs to no principal now, which is
+//     the intended reading — it is not this principal's to reap.
 //
-// Every container yoloai creates is stamped with these labels at create time
-// (see instanceLabels in the launch path; LabelSandbox is always set, the
-// principal label only for non-default principals), so this matches the exact
-// set the yoloai-* name prefix did for real instances — only more precisely.
+// Every container yoloai creates is stamped with both labels at create time (see
+// instanceLabels in the launch path), so this matches the exact set the yoloai-*
+// name prefix did for real instances — only more precisely: the prefix also
+// matched containers yoloai never created, which this does not.
 func IsOrphanCandidate(labels map[string]string, principal config.PrincipalSegment) bool {
 	if labels[LabelSandbox] == "" {
 		return false

@@ -308,16 +308,19 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 	}
 }
 
+// TestInstanceLabels: both labels are stamped for every principal. The
+// omits-for-the-default-principal case this used to assert went with D126 —
+// there is no default principal to elide, and instanceLabels("") is now
+// unreachable (ParsePrincipalSegment rejects the empty string at the boundary
+// and InstancePrefix panics on it), so pinning its output pinned a scenario that
+// cannot occur.
 func TestInstanceLabels(t *testing.T) {
-	t.Run("default principal omits principal label", func(t *testing.T) {
-		labels := instanceLabels("", "mybox")
-		assert.Equal(t, "mybox", labels[runtime.LabelSandbox])
-		assert.NotContains(t, labels, runtime.LabelPrincipal)
-	})
-
-	t.Run("non-default principal stamps both labels", func(t *testing.T) {
-		labels := instanceLabels("acme", "mybox")
-		assert.Equal(t, "mybox", labels[runtime.LabelSandbox])
-		assert.Equal(t, "acme", labels[runtime.LabelPrincipal])
-	})
+	for _, principal := range []config.PrincipalSegment{config.CLIPrincipal, "acme"} {
+		t.Run("principal="+string(principal), func(t *testing.T) {
+			labels := instanceLabels(principal, "mybox")
+			assert.Equal(t, "mybox", labels[runtime.LabelSandbox])
+			assert.Equal(t, string(principal), labels[runtime.LabelPrincipal],
+				"every instance carries its owner, so a sweep never has to infer one")
+		})
+	}
 }

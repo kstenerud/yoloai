@@ -4,6 +4,9 @@ package apple
 
 import (
 	"context"
+	"encoding/json"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kstenerud/yoloai/runtime"
@@ -11,17 +14,86 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// TestOrphanInstances locks the Prune sweep's filter: only this-principal
-// (prefix-matching) names that aren't known are orphans; non-prefixed names,
-// known names, and blank/whitespace lines are skipped.
-func TestOrphanInstances(t *testing.T) {
-	list := "yoloai-alpha\nyoloai-beta\nother-thing\n\n  yoloai-gamma  \n"
-	got := orphanInstances(list, "yoloai-", []string{"yoloai-beta"})
-	assert.Equal(t, []string{"yoloai-alpha", "yoloai-gamma"}, got)
+// entryJSON renders one `container list --format json` entry with the given name
+// and labels — the shape the real CLI emits (verified against container 1.0.0:
+// labels ride at configuration.labels and survive the sandbox dir's deletion).
+func entryJSON(name string, labels map[string]string) string {
+	lbl, err := json.Marshal(labels)
+	if err != nil {
+		panic(err)
+	}
+	return fmt.Sprintf(`{"id":%q,"configuration":{"id":%q,"labels":%s}}`, name, name, lbl)
+}
 
-	// Everything known or non-matching → no orphans.
-	assert.Empty(t, orphanInstances("yoloai-x\nother\n", "yoloai-", []string{"yoloai-x"}))
-	assert.Empty(t, orphanInstances("", "yoloai-", nil))
+func yoloaiLabels(principal, sandbox string) map[string]string {
+	return map[string]string{
+		runtime.LabelSandbox:   sandbox,
+		runtime.LabelPrincipal: principal,
+	}
+}
+
+// TestOrphanInstances locks the Prune sweep's filter: an orphan is a container
+// yoloai created (com.yoloai.sandbox present) for THIS principal (principal label
+// equal) that isn't in the known set. Identity is the label set, never the name
+// prefix (D62, DF115).
+func TestOrphanInstances(t *testing.T) {
+	list := "[" + strings.Join([]string{
+		entryJSON("yoloai-cli-alpha", yoloaiLabels("cli", "alpha")),
+		entryJSON("yoloai-cli-beta", yoloaiLabels("cli", "beta")),
+		entryJSON("yoloai-cli-gamma", yoloaiLabels("cli", "gamma")),
+	}, ",") + "]"
+
+	got, err := orphanInstances(list, "cli", []string{"yoloai-cli-beta"})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"yoloai-cli-alpha", "yoloai-cli-gamma"}, got, "unknown instances of this principal are orphans")
+
+	// Empty listing is the CLI's real no-containers output, not an error.
+	got, err = orphanInstances("[]", "cli", nil)
+	require.NoError(t, err)
+	assert.Empty(t, got)
+}
+
+// TestOrphanInstances_SparesForeignPrincipal is the case this filter exists for,
+// and it must be built deliberately: nothing in a normal run produces a
+// cross-principal container, so a green suite proves nothing without it (DF115).
+// The name is deliberately inside THIS principal's namespace while the label says
+// otherwise — that isolates the predicate from the name, which is the whole point.
+// Prefix matching reaps both of these; label equality spares both.
+func TestOrphanInstances_SparesForeignPrincipal(t *testing.T) {
+	list := "[" + strings.Join([]string{
+		entryJSON("yoloai-acme-probe", yoloaiLabels("acme", "probe")),
+		entryJSON("yoloai-cli-liar", yoloaiLabels("acme", "liar")),
+		entryJSON("yoloai-cli-mine", yoloaiLabels("cli", "mine")),
+	}, ",") + "]"
+
+	got, err := orphanInstances(list, "cli", nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"yoloai-cli-mine"}, got, "another principal's instances must survive this principal's sweep")
+}
+
+// TestOrphanInstances_SparesForeignContainer covers the live win the label
+// predicate buys on top of principal scoping: a container merely NAMED yoloai-*
+// that yoloai never created (a hand-run `container run --name yoloai-cli-x`)
+// carries no com.yoloai.sandbox label. Prefix matching destroys it; label
+// equality leaves it alone (runtime.IsOrphanCandidate, D62).
+func TestOrphanInstances_SparesForeignContainer(t *testing.T) {
+	list := "[" + strings.Join([]string{
+		entryJSON("yoloai-cli-handrun", nil),
+		entryJSON("yoloai-cli-nolabels", map[string]string{"com.example.other": "x"}),
+		entryJSON("yoloai-cli-real", yoloaiLabels("cli", "real")),
+	}, ",") + "]"
+
+	got, err := orphanInstances(list, "cli", nil)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"yoloai-cli-real"}, got, "a container yoloai did not create must never be swept")
+}
+
+// TestOrphanInstances_MalformedFailsClosed: prune deletes things, so an
+// unreadable listing must error rather than silently sweep nothing (or worse,
+// fall back to names).
+func TestOrphanInstances_MalformedFailsClosed(t *testing.T) {
+	_, err := orphanInstances("not json", "cli", nil)
+	assert.Error(t, err)
 }
 
 // TestRegistered confirms the backend's init() registered a sane descriptor —

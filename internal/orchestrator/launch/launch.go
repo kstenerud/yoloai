@@ -913,15 +913,14 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 }
 
 // instanceLabels builds the runtime instance labels recording sandbox identity
-// and (when non-default) the owning principal. The sandbox label is always set;
-// the principal label is omitted for the default ("") principal so single-
-// principal instances carry no principal metadata (D62).
+// and the owning principal. Both are always set: every principal is non-empty
+// (D126), so there is no default to elide and no unlabelled instance for a sweep
+// to have to guess about (runtime.IsOrphanCandidate, D62).
 func instanceLabels(principal config.PrincipalSegment, name string) map[string]string {
-	labels := map[string]string{runtime.LabelSandbox: name}
-	if principal != "" {
-		labels[runtime.LabelPrincipal] = string(principal)
+	return map[string]string{
+		runtime.LabelSandbox:   name,
+		runtime.LabelPrincipal: string(principal),
 	}
-	return labels
 }
 
 // effectiveSecretsConsumedTimeout is the host's cap on waiting for the
