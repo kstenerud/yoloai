@@ -122,7 +122,7 @@ write_status "$NEW_STATUS" null
 ### 1.7 Known Issues
 
 **1. `idle_threshold` config is wired up but unused.**
-The `idle_threshold` field is actively parsed from YAML (`config/config.go`), propagated through profile resolution (`create_prepare.go`), and stored in environment.json (`meta.go`). Only the `DefaultIdleThreshold` constant is marked deprecated (`sandbox/inspect.go:32-35`). The field flows through the entire creation pipeline but is never read for any detection logic. Full removal scope documented in Phase 1.
+The `idle_threshold` field is actively parsed from YAML (`config/config.go`), propagated through profile resolution (`create_prepare.go`), and stored in environment.json (`store/environment.go`). Only the `DefaultIdleThreshold` constant is marked deprecated (`sandbox/inspect.go:32-35`). The field flows through the entire creation pipeline but is never read for any detection logic. Full removal scope documented in Phase 1.
 
 **2. Agents without ReadyPattern can never be detected as idle.**
 OpenCode, test, and shell agents have empty `ReadyPattern` and `HookIdle: false`. Once a prompt is sent, they show as "active" forever until the process exits.
@@ -393,7 +393,7 @@ Notes:
 
 1. **Remove `idle_threshold` plumbing:** The field is actively wired through the creation pipeline despite being unused. Full removal scope:
    - `sandbox/inspect.go`: `DefaultIdleThreshold` constant (marked deprecated)
-   - `sandbox/meta.go`: `IdleThreshold` field in `Meta` struct
+   - `store/environment.go`: `IdleThreshold` field in the `Environment` struct
    - `config/config.go`: `IdleThreshold` field in `YoloaiConfig`, `idle_threshold` in `knownSettings`
    - `config/profile.go`: `idle_threshold` in profile config
    - `sandbox/create_prepare.go`: `idleThreshold` resolution and propagation
@@ -560,7 +560,7 @@ The stability counters are per-detector and reset when the detector's result cha
 | `agent/agent.go` | Replace `HookIdle bool` + `ReadyPattern string` with `IdleSupport` struct |
 | `sandbox/create.go` | Compute detector stack at creation time, write to `config.json` |
 | `sandbox/inspect.go` | Remove `DefaultIdleThreshold`. The `parseStatusJSON` and `DetectStatus` functions don't change -- they read `status.json` regardless of how it was written |
-| `sandbox/meta.go` | Remove `IdleThreshold` field |
+| `store/environment.go` | Remove `IdleThreshold` field |
 | `config/config.go` | Remove `idle_threshold` key |
 | `config/profile.go` | Remove `idle_threshold` from profile config |
 | `sandbox/create_prepare.go` | Remove `idle_threshold` handling |

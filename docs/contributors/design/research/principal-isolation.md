@@ -37,6 +37,22 @@ Grounded in the code as of 2026-06-01 (pointers from a repo survey; trust-but-ve
 exact lines before relying on them in the plan). **None of this partitions by principal —
 that is expected; yoloAI is single-principal by design.**
 
+> **Overtaken in part, 2026-07-17 — the table below is the 2026-06-01 baseline and is left as
+> written, because it is the survey that motivated [D59](../../decisions/working-notes.md)/D62 and
+> rewriting it would erase the finding those decisions rest on.** Two rows have since been acted on
+> and no longer describe the code:
+>
+> - **Audit / attribution.** `environment.json` now carries `Principal`
+>   (`store/environment.go`, "Attribution + runtime namespace"), added by D62 and made mandatory by
+>   [D126](../../decisions/working-notes.md) — the CLI is the principal `cli`, the empty principal is
+>   invalid, and `config.InstancePrefix` panics on it. So "no record of *who* created a sandbox" is
+>   no longer true; the gap this row names is the one D62/D126 closed.
+> - **Instance naming.** Instances and profile image tags are principal-scoped
+>   (`yoloai-<principal>-<name>`, `yoloai-<principal>-<profile>`) per D62/D126/DF126.
+>
+> The rest of the table has not been re-surveyed. §B2's recommendation is still live and is cited by
+> DF126.
+
 | Surface | Current mechanism | Pointer | Multi-principal gap |
 |---|---|---|---|
 | Sandbox storage | `DataDir/sandboxes/<name>/`, flat namespace | `store/paths.go` | A can name/enumerate B's sandbox; name collisions |
@@ -44,11 +60,11 @@ that is expected; yoloAI is single-principal by design.**
 | Container listing | reads the sandboxes dir + groups by backend; **no label filter** | `status/status.go:ListSandboxesMultiBackend` | enumeration returns *all* principals' sandboxes |
 | Credentials (api keys) | written to ephemeral `/tmp/yoloai-secrets-*` (0600), bind-mounted RO at `/run/secrets/` | `provision/provision.go:CreateSecretsDir`, `mounts/mounts.go` | host temp dir is in **shared `/tmp`**, not the per-principal tree |
 | Seed files (`~/.claude`, etc.) | copied into `<sandboxDir>/agent-state/` + `home-seed/` | `provision/provision.go:CopySeedFiles` | live in the sandbox dir → a storage partition protects them *iff* the partition holds |
-| In-container uid | fixed `yoloai`/1001 (or host uid under podman keep-id / gVisor) | `store/meta.go:ContainerUser` | **all principals' containers run as the same uid** → no in-kernel user separation between them |
+| In-container uid | fixed `yoloai`/1001 (or host uid under podman keep-id / gVisor) | `store/environment.go:ContainerUser` | **all principals' containers run as the same uid** → no in-kernel user separation between them |
 | Network | per-container netns (Docker default) + per-sandbox allow-list (iptables/ipset in entrypoint) | `runtime/isolation.go`, `network.go` | netns separates by default, but allow-lists aren't principal-scoped; no explicit cross-sandbox deny |
 | Workdir / aux dirs | host path taken **as-is**; bind (`:rw`/`:ro`) or copy (`:copy`) or overlay | `state/state.go:DirSpec`, `mounts/mounts.go` | **no `filepath.Clean`/symlink canonicalization** on the host path |
 | `files/` exchange | `<sandboxDir>/files/` ↔ `/yoloai/files/`; **has** a traversal guard | `store/paths.go:FilesDir`, `files.go:validateExchangePath` | guard is per-sandbox; cross-principal rests on POSIX perms only |
-| Audit / attribution | **none**; `environment.json` has no owner/principal field | `store/meta.go:Meta` | no record of *who* created/accessed a sandbox |
+| Audit / attribution | **none**; `environment.json` has no owner/principal field *(no longer true — see the note above; D62/D126 added `Environment.Principal`)* | `store/environment.go:Environment` | no record of *who* created/accessed a sandbox |
 
 The forward-looking note in `yoloai.go` ("`/var/lib/yoloai`, multi-tenant per-user roots
 must pass this") confirms the seam was anticipated but **not enforced**: `Layout` takes a

@@ -53,7 +53,7 @@ old-binary sandboxes. Record the outcome here when run:
 |---|---|---|---|---|
 | `runtime-config.json` | `agent_launch_prefix` (W1a/W1b); `schema_version` (W2) | **No** — version written but not validated | Field-level tolerance only: unknown fields ignored. `agent_launch_prefix` is now the single source of truth for the launch wrap — the Python `prepare_launch_command` fallback is deleted (W1b) and the `system migrate` v1→v2 step backfills the field into every pre-W1a sandbox, so both launch paths read it unconditionally. `schema_version` is a reserved field for a future loud-fail. | `runtimeconfig.go:17,40,44`; `create.go`; `sandbox-setup.py` (single prefix path); `config/schema.go` (v1→v2 backfill) |
 | `agent-status.json` | `schema_version` (omitempty, W2) | **Yes** | `=0` (pre-W2) tolerated; any other mismatch rejected (loud-fail) | `status.go:182,190,241` |
-| `environment.json` | `version` (pre-existing) | **Yes** | `=0` legacy tolerated; `version > 1` (future/newer) rejected (loud-fail) | `meta.go:20,24,79` |
+| `environment.json` | `version` (pre-existing) | **Yes** | `=0` legacy tolerated; `version > 1` (future/newer) rejected (loud-fail) | `store/environment.go` (`metaVersion`, `LoadEnvironment`) |
 
 **Downgrade rule (the two enforced files).** For `agent-status.json` and `environment.json`, an
 older binary reading files written by a newer binary **hard-fails** with a specific

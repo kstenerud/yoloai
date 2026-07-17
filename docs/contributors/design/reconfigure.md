@@ -105,7 +105,7 @@ Starting sandbox my-task...
 Reconfigured.
 ```
 
-JSON (`--json`): emits the updated `Meta` after completion, same shape as `yoloai sandbox <name> info --json`.
+JSON (`--json`): emits the updated `Environment` after completion, same shape as `yoloai sandbox <name> info --json`.
 
 ## What is preserved
 
