@@ -36,6 +36,7 @@ var descriptor = runtime.BackendDescriptor{
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeContainerEnhanced, runtime.IsolationModeContainerPrivileged},
 	Capabilities: runtime.BackendCaps{
+		// IPv4 only — see the note in runtime/docker/docker.go (DF104).
 		NetworkIsolation:     true,
 		CapAdd:               true,
 		HostFilesystem:       false,

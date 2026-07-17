@@ -9,6 +9,14 @@
 
 **Status:** Design Proposal. Supersedes the in-container iptables approach currently described in [`security.md`](security.md) and implemented in `runtime/docker/resources/entrypoint.py`.
 
+> **Shipped behaviour is IPv4-only, on every backend that claims `NetworkIsolation: true`** —
+> nothing in the repo configures `ip6tables`, and the goals below are written as though address
+> family were not a variable. It is true by construction today only because the guests get no
+> routable IPv6, which is a property of the networks yoloAI creates rather than a guarantee this
+> design makes. See [DF104](findings-unresolved.md) for the live evidence and
+> [ipv6-network-isolation.md](plans/ipv6-network-isolation.md) for the plan that closes it. Read
+> every guarantee below as v4-scoped until it lands.
+
 ## Goals
 
 Define what `--network-isolated` means in yoloAI, what threats it defends against, and what guarantees it offers across all supported backends. The current implementation works well on plain Docker and Podman but silently no-ops on gVisor and was never enabled on Kata. This design unifies enforcement under a single mechanism and makes failure modes loud rather than silent.

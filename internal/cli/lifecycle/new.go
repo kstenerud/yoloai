@@ -52,7 +52,7 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("no-profile", false, "Use base image even if config sets a default profile")
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
-	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (iptables allowlist)")
+	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (IPv4 iptables allowlist; IPv6 is not filtered)")
 	cmd.Flags().StringSlice("network-allow", nil, "Extra domain to allow when network-isolated (repeatable, implies --network-isolated)")
 	cmd.Flags().StringSlice("port", nil, "Port mapping (host:container)")
 	cmd.Flags().StringSliceP("dir", "d", nil, "Auxiliary directory (repeatable, default read-only)")

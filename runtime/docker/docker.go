@@ -50,6 +50,9 @@ var descriptor = runtime.BackendDescriptor{
 	AgentProvisionedByBackend: true,
 	SupportedIsolationModes:   []runtime.IsolationMode{runtime.IsolationModeContainerEnhanced, runtime.IsolationModeContainerPrivileged},
 	Capabilities: runtime.BackendCaps{
+		// IPv4 only: the allowlist is iptables/ipset rules and no ip6tables
+		// rules are installed anywhere (DF104). True by construction today only
+		// because the guest gets no routable IPv6 — not a guarantee this makes.
 		NetworkIsolation:     true,
 		CapAdd:               true,
 		HostFilesystem:       false,

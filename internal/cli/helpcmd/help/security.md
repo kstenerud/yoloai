@@ -44,7 +44,7 @@ NETWORK ISOLATION
 
      yoloai new task . --network-none
 
-  Allow only agent API traffic (blocks everything else):
+  Allow only agent API traffic (blocks everything else over IPv4):
 
      yoloai new task . --network-isolated
 
@@ -54,6 +54,14 @@ NETWORK ISOLATION
 
   Each agent has a default allowlist (e.g., api.anthropic.com for
   Claude). Use --network-none for maximum isolation.
+
+  IPv6 IS NOT FILTERED. The allowlist is enforced with IPv4 iptables
+  rules only; no ip6tables rules are installed on any backend. On the
+  networks yoloAI creates today the guest gets no globally-routable
+  IPv6 address, so there is no v6 egress to restrict — but that is a
+  property of those networks, not a guarantee this flag makes. If your
+  guest has routable IPv6, the allowlist does not apply to it. Use
+  --network-none where that matters.
 
 ISOLATION MODES
 

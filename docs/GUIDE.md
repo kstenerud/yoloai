@@ -388,7 +388,7 @@ yoloai new task ./project --abandon-unapplied
 # Pass extra arguments directly to the agent CLI
 yoloai new task ./project -- --allowedTools "Edit,Write,Bash"
 
-# Network isolation (allow only agent API traffic)
+# Network isolation (allow only agent API traffic; IPv4 only — IPv6 is not filtered)
 yoloai new task ./project --network-isolated
 
 # Allow extra domains in network-isolated mode

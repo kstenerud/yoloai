@@ -58,7 +58,9 @@ var descriptor = runtime.BackendDescriptor{
 	HostFromContainer:       "",
 	SupportedIsolationModes: nil,
 	Capabilities: runtime.BackendCaps{
-		NetworkIsolation:   true, // in-guest iptables (own per-VM kernel) — verified
+		// in-guest iptables (own per-VM kernel) — verified. IPv4 only; vmnet
+		// hands the guest a ULA and no ip6tables rules exist (DF104).
+		NetworkIsolation:   true,
 		CapAdd:             true,
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalityHostSide,

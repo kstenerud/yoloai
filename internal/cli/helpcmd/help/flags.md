@@ -17,7 +17,8 @@ CREATING SANDBOXES (yoloai new)
   --dir, -d <path>    Auxiliary directory (repeatable)
   --port <h:c>        Port mapping (host:container)
   --network-none      Disable network access
-  --network-isolated  Allow only agent API traffic (iptables allowlist)
+  --network-isolated  Allow only agent API traffic (IPv4 iptables allowlist;
+                      IPv6 is not filtered)
   --network-allow     Extra domain to allow (repeatable, implies --network-isolated)
   --attach, -a        Auto-attach after creation
   --replace            Replace an existing sandbox of the same name
