@@ -59,8 +59,6 @@ finding or decision first, and lands here only if it should block the release.
 
 - [DF126](design/findings-resolved.md) — profile image tags carry no principal, so two principals
   with a same-named profile collide on one image
-- [DF113](design/findings-unresolved.md) — `destroy` frees the sandbox name while leaving the
-  instance behind, so the next `start` adopts a VM it never provisioned
 - [DF53](design/findings-unresolved.md) — Tart silently ignores `-p` port mappings (port-forwarding
   never wired into `tart run`)
 - [init-sentinel](design/plans/init-sentinel.md) — mark an in-progress TOP init, so a failed one is
@@ -70,7 +68,11 @@ finding or decision first, and lands here only if it should block the release.
 
 *None.* Decided out 2026-07-17 — each record's `**Rides:**` field says why:
 [module-split](design/plans/module-split.md), [session-carve](design/plans/session-carve.md) 1a-iv,
-[DF39](design/findings-unresolved.md), [DF104](design/findings-unresolved.md).
+[DF39](design/findings-unresolved.md), [DF104](design/findings-unresolved.md),
+[DF113](design/findings-unresolved.md).
+
+*(Descoping is not the same as finishing: this list carries scope, so a scope decision belongs here.
+The rule above is that **completion** never removes a line.)*
 
 ## In flight — started, not finished
 

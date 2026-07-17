@@ -58,14 +58,18 @@ against exactly that. A count is a second copy of what the list below already sa
 next entry, and nothing enforces it. The IDs don't drift, and a reader who wants the sample size can
 see it.
 
-**1. Execution catches my errors. Reading does not — but A8 sharpens which reading.** Every
-specimen where the agent caught itself by *running something* (A4, A5, A6) — a probe, a measurement,
-a comparison of two numbers — held. Every specimen that reached a durable artifact uncaught (A1, A2,
-A3) was written from something read: grep output, a subagent's report, a comment, an error string.
-**A8 is the exception that names the axis.** It was caught by reading — but by opening the *primary
-source*, having been caused by reading *prose about* the primary source. So the split is not
-execute-versus-read; it is **the artifact versus an account of the artifact**. Opening the file is
-cheap and works. The defence D119 already states — *"a finding parks its fix, never its
+**1. Execution catches my errors. Reading does not — and A8/A10 show reading can make it worse.**
+Every specimen where the agent caught itself by *running something* (A4, A5, A6, A10) — a probe, a
+measurement, a comparison, or being forced to turn a claim into code — held. Every specimen that
+reached a durable artifact uncaught (A1, A2, A3, A8) was written from something read: grep output, a
+subagent's report, a comment, an error string, a summary line.
+
+**A8 looked like the exception and A10 proved it was not.** A8 was "caught by reading the primary
+source", and its conclusion was still wrong — because the read answered the question being asked
+rather than the question that mattered. Reading is aimed by the premise, so it confirms the frame it
+starts in; running the thing is not, which is why it is the only reliable detector here. Note what
+this does to "check your work": A10 was checked three times and each check made it **more** wrong and
+**more** citable. The defence D119 already states — *"a finding parks its fix, never its
 verification"* — is loaded every session and failed anyway (see "how this gets written", below).
 
 **2. The false belief always arrives second-hand, and second-hand is invisible from the inside.**
@@ -119,6 +123,52 @@ Newest first. Every entry here is from a single session (2026-07-16/17) — the 
 attempt to record them, so the corpus is deep on one session and empty before it. That skew is
 itself worth knowing when reading pattern 4.
 
+### A10 — three corrections, each more fluent, all circling a struct I never opened (2026-07-17)
+
+- **Claimed:** that DF113's fix is schema-gated and must ride v0.9.0. Three times, in three
+  incompatible ways: (1) it needs a read-time backfill like `ImageRef`; (2) **A8** — no, it needs the
+  v4→v5 migration's backfill, *"the same bill DF126 pays"*; (3) no, it needs an `environment.json`
+  `metaVersion` 3→4 bump, which forces every sandbox through `system migrate`, and v0.9.0 already
+  forces that — so it is free now and costs a forced migration later.
+- **True:** no new field is needed at all. `store.Environment` already carries **`CreatedAt`**, and
+  `internal/orchestrator/create/create.go:701` writes `CreatedAt: time.Now()` — a per-sandbox
+  timestamp, on disk, written by the create that provisioned the instance, present on every record.
+  That is exactly the "fact on disk that `start` can read" I kept arguing had to be added. The
+  genuinely missing half is a **runtime capability** to report an instance's age or identity, which
+  is an optional interface — the shape D126 shipped for `runtime.Renamer`, with no schema bump.
+  Interfaces ship in any release. Nothing about DF113 was ever release-gated.
+- **Source of the false belief:** a one-line gloss on the staging page — *"wants a provenance field
+  in metadata, i.e. schema"* — which I then defended rather than checked. Every subsequent argument
+  refined the *consequences* of a new field; not one asked whether a field was needed. The premise
+  entered as someone's shorthand and was never again visible as a claim.
+- **Caught by:** myself, and only because building it forced me to decide the field's *shape* — at
+  which point I opened the struct and the field was already there. The trigger was **implementation**,
+  the same as A4/A5/A6: not scepticism, but the moment a claim had to become code and could no longer
+  stay a sentence.
+- **Cost:** high, and it is the most-travelled error in this corpus. It reached the finding (twice),
+  the staging page, a `**Rides:**` field, three commit messages, an entire release-scope decision,
+  and A8 — *an entry in this very file, filed as a lesson about being wrong, which was itself wrong.*
+  It shaped the build order and was about ten minutes from being built.
+- **The shape worth keeping: I was right first, and corrected myself into error, twice.** The
+  original instinct — "additive, ships anytime" — had the right conclusion and a wrong reason. Each
+  "correction" fixed the reason and broke the conclusion, and each read as *more* rigorous than the
+  last: A8 even cites the exact line and quotes the code's comment. **Fluency rose monotonically
+  while accuracy oscillated.** `research/llm-shaped-repos.md` Part 7 says "fluency is constant"; this
+  says something worse — under repeated self-correction, fluency *compounds*, because each pass adds
+  real detail to an unexamined premise. A wrong claim with three citations is far more dangerous than
+  a wrong claim with none, and I built it myself, incrementally, in good faith.
+- **Class:** No provenance on a fact, plus a candidate new row — *the premise is invisible to the
+  argument that rests on it*. Refinement operates on the reasoning; the assumption underneath is
+  never in the frame, so more thinking makes it *stronger*, not weaker. This is why "check your work"
+  is not a defence: I checked my work three times and each check made it worse.
+- **Gated now?** No, and none of the existing gates come close — every one of the three arguments
+  cited real files with real line numbers, and I had read those files, so `check_citation_provenance`
+  passes cleanly. The only thing that broke it was needing to write the code. The nearest thing to a
+  rule: **a claim that a thing must be *added* is a claim about absence, and absence is the one thing
+  reading cannot verify** — you can only check that it isn't there. `grep` for the field before
+  arguing about the field's cost. That is mechanisable in principle and unwritten in practice; it is
+  the same movement as pattern 3 (reasoning from the read site about a write site), one level up.
+
 ### A9 — the rule was in the sentence I was editing, and it did not fire (2026-07-17)
 
 - **Claimed:** nothing, explicitly. While adding A8 I updated this section's running tally of
@@ -154,6 +204,15 @@ itself worth knowing when reading pattern 4.
   keep current. An absent field cannot drift.
 
 ### A8 — the correction was the error; the page it corrected was right (2026-07-17)
+
+> **A8 is itself wrong, and is kept for that reason — see [A10](#a10--three-corrections-each-more-fluent-all-circling-a-struct-i-never-opened-2026-07-17).**
+> Its *fact* holds: the `ImageRef` backfill really does run inside `func migrate`, at the migration
+> boundary, deliberately. Its *conclusion* does not: no new field was ever needed, because
+> `Environment.CreatedAt` already existed, so the schema question A8 settles so carefully was moot.
+> The page it defends as "right" was wrong. The original claim it talks me out of had the right
+> conclusion and a bad reason, and A8 replaced a bad reason with a *good* reason for a **worse**
+> answer — which is exactly why it is left standing. An entry in a file about being wrong, written
+> as a lesson, wrong. Read the two together or neither.
 
 - **Claimed:** DF113's remedy is not schema-gated. A provenance field is "additive with a legacy
   backfill — exactly what `ImageRef` already does for pre-existing records (`environment.go:184-188`)",
