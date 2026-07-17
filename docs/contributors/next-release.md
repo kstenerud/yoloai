@@ -37,18 +37,25 @@ finding or decision first, and lands here only if it should block the release.
   rides a breaking release or it does not happen.
 - [init-sentinel](design/plans/init-sentinel.md) P1 — resolves DF128 rather than rewording it.
   Small; droppable if the cut is tight.
+- [DF113](design/findings-unresolved.md) — **the provenance stamp only, not the guard.** Writing the
+  stamp at `create` is inert and changes no behaviour; the guard that reads it has an unsettled
+  design (idempotency) and must not gate the cut. The stamp needs the migration's backfill, so it
+  rides now or costs a schema of its own later — and building it later leaves v0.9.0's own sandboxes
+  permanently unguessable too.
+- [DF53](design/findings-unresolved.md) — **make tart reject `-p`, nothing more.** Newly-rejected
+  input is a break (rule 1), so it is cheap only while something else already breaks. Actually
+  wiring softnet port-forwarding is a feature needing real macOS verification, and is not
+  release-gated — that half waits.
 
 ## Candidates — undecided
 
-- [DF104](design/findings-unresolved.md) — `--network-isolated` is IPv4-only and says so nowhere.
-- [DF53](design/findings-unresolved.md) — tart silently drops `-p`. Minimum: make it reject.
-- [DF113](design/findings-unresolved.md) — `destroy` frees the name; the next `start` adopts the
-  leftover. Wants a provenance field in metadata, i.e. schema.
 - [module-split](design/plans/module-split.md) — substrate store shape; self-described as "another
   versioned migration".
 - [session-carve](design/plans/session-carve.md) 1a-iv — `keepalive_only` default flip; reshapes
-  `runtime-config.json`.
-- [DF39](design/findings-unresolved.md) — `$HOME` credential mount becomes opt-in.
+  `runtime-config.json`. **Note:** it is fourth in a sequenced chain (`1a-i → ii → iii → iv`) whose
+  ii and iii are unbuilt, so it cannot jump the queue regardless of the scope test.
+- [DF39](design/findings-unresolved.md) — `$HOME` credential mount becomes opt-in. **Note:** this is
+  D95's build, not a default flip; its trigger (routine API-key/adversarial use) has not fired.
 
 ## In flight — started, not finished
 
