@@ -20,6 +20,7 @@ import (
 	"strconv"
 	"strings"
 	"testing"
+	"time"
 	"unicode/utf8"
 
 	"github.com/kstenerud/yoloai/internal/sysexec"
@@ -2229,4 +2230,100 @@ func TestRepoHygiene_ArchitectureDocSectionMatcher_ScopesRowsToTheirHeading(t *t
 	if !slices.Equal(got, want) {
 		t.Errorf("docSectionFileRefs = %v, want %v", got, want)
 	}
+}
+
+// deprecationEntryRe matches a register entry's heading under "## Register".
+var deprecationEntryRe = regexp.MustCompile(`(?m)^### (.+)$`)
+
+// deprecationIncurredRe matches the "- **Incurred:** YYYY-MM-DD" datum — the
+// FACT, recovered from git, that makes a due date defensible rather than invented.
+var deprecationIncurredRe = regexp.MustCompile(`- \*\*Incurred:\*\* (\d{4}-\d{2}-\d{2})`)
+
+// deprecationDueRe matches the "**Due:** YYYY-MM-DD" datum — the DECISION, chosen
+// per entry from the register's recommended grace periods, because the population
+// a compatibility waits on differs (stale data dirs vs people editing scripts).
+var deprecationDueRe = regexp.MustCompile(`\*\*Due:\*\* (\d{4}-\d{2}-\d{2})`)
+
+// TestRepoHygiene_DeprecationsAreDated enforces the FORMAT of the deprecation
+// register (D127): every entry carries a parseable date it was incurred and a
+// stated way to retire it.
+//
+// It deliberately does NOT fail on an overdue entry. The settling period is a
+// nag, not a gate — the owner decides when a deprecation converts into a
+// retirement, and a red bar lands that decision on whoever next runs `make
+// check` rather than on the person who can make it (D127, rejected (a)). What is
+// gated is only the thing a human cannot recover later: an entry added without
+// the date it was incurred is worthless the moment `git blame` on the register
+// stops matching the code's own history.
+func TestRepoHygiene_DeprecationsAreDated(t *testing.T) {
+	root := repoRoot(t)
+	path := filepath.Join(root, "docs", "contributors", "deprecations.md")
+	data, err := os.ReadFile(path) //nolint:gosec // G304: fixed repo-relative path
+	if err != nil {
+		t.Fatalf("read the deprecation register: %v", err)
+	}
+
+	// Only the Register section holds entries; "## Not deprecations" below it
+	// lists permanents that must NOT carry a date.
+	body := string(data)
+	start := strings.Index(body, "\n## Register\n")
+	if start < 0 {
+		t.Fatal("deprecations.md has no '## Register' section — the gate's corpus moved")
+	}
+	register := body[start:]
+	if end := strings.Index(register, "\n## Not deprecations\n"); end >= 0 {
+		register = register[:end]
+	}
+
+	entries := deprecationEntryRe.FindAllStringSubmatch(register, -1)
+	t.Logf("deprecation register scope: %d entries", len(entries))
+	if len(entries) == 0 {
+		t.Fatal("the deprecation register is empty — either every compatibility mechanism was " +
+			"retired (celebrate, then delete this gate) or the gate is checking nothing, which " +
+			"is the failure mode DF94 documents")
+	}
+
+	// Split the register into per-entry blocks so each entry's fields are checked
+	// against that entry, not against the section as a whole.
+	blocks := deprecationEntryRe.Split(register, -1)[1:] // [0] is the pre-heading preamble
+	for i, m := range entries {
+		title, block := m[1], blocks[i]
+		t.Run(title, func(t *testing.T) {
+			incurred, ok := deprecationDate(t, title, "Incurred", deprecationIncurredRe, block,
+				"A migration is a deprecation incurred the day it lands (D127); recover the date with "+
+					"`git log -S '<symbol>' --format='%as %h'` rather than estimating it — an estimated "+
+					"date cannot answer the only question the register exists to answer.")
+			due, dueOK := deprecationDate(t, title, "Due", deprecationDueRe, block,
+				"Pick one from the register's recommended grace periods (none / 6mo internal / 12mo "+
+					"user-facing) and say which you used — the grace is a property of the population "+
+					"stranded, not of how much the code annoys you.")
+			if ok && dueOK && due.Before(incurred) {
+				t.Errorf("entry %q is Due %s, before it was Incurred %s — one of the two dates is wrong",
+					title, due.Format("2006-01-02"), incurred.Format("2006-01-02"))
+			}
+			if !strings.Contains(block, "**Retire by:**") {
+				t.Errorf("entry %q states no '**Retire by:**' — an entry with no stated way out is a "+
+					"liability with no exit, which is the condition the register exists to end", title)
+			}
+		})
+	}
+}
+
+// deprecationDate pulls one dated field out of a register entry and parses it,
+// reporting a field-specific remedy rather than a bare regex miss — the entries
+// are written by whoever adds the compatibility, so the error has to teach the
+// convention at the moment it is broken.
+func deprecationDate(t *testing.T, title, field string, re *regexp.Regexp, block, remedy string) (time.Time, bool) {
+	t.Helper()
+	m := re.FindStringSubmatch(block)
+	if m == nil {
+		t.Errorf("entry %q has no parseable '**%s:** YYYY-MM-DD'.\n%s", title, field, remedy)
+		return time.Time{}, false
+	}
+	d, err := time.Parse("2006-01-02", m[1])
+	if err != nil {
+		t.Errorf("entry %q has an unparseable %s date %q: %v", title, field, m[1], err)
+		return time.Time{}, false
+	}
+	return d, true
 }

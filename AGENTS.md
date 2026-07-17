@@ -11,6 +11,12 @@ working on it. `CLAUDE.md` imports it. Keep it short; detail lives behind the po
 that date is more than ~3 months ago, say so, unprompted, before relying on a doc being right.
 Bump it when a sweep lands. Why this exists: `general-principles.md` §16.
 
+**Deprecations reviewed: 2026-07-17 (D127) — nothing due; next 2026-09-12.** Compatibility code
+is invisible once written, so it is never retired. `docs/contributors/deprecations.md` registers
+each with the date it was incurred and a per-entry due date. If today is past the date above,
+read the register and **say so, unprompted** — the owner decides what retires, but only if asked.
+This is a nag, not a gate: nothing fails, ever. Bump the date when a review lands.
+
 The marker is a claim, so treat it as one. When first written it named a sweep that had never
 opened `architecture/`, which at that moment documented a mode retired two releases earlier and
 a package that has never existed — the drift-detector's own first reading was wrong. D124 made
@@ -68,6 +74,11 @@ Full detail and the reasoning behind each rule:
    fix needs no plan. `design/plans/` holds only the unfinished three: once the work is done or
    dropped the plan is archaeology, and it moves whole to `archive/plans/` in the same PR. Gated,
    so none of it is something to remember.
+9. **Writing a migration? Register it** in `docs/contributors/deprecations.md` with the date you
+   incurred it (D127). A migration *is* a deprecation: it commits the project to supporting the
+   old form, on the day it lands. Same for any compatibility reader, alias, or shim. The entry
+   costs three lines and is the only thing that will ever make retiring it possible — the
+   register's own audit found 16 such mechanisms, of which **0** recorded a date.
 
 ## The quality gate
 

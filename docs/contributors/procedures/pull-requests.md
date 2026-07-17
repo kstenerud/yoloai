@@ -37,6 +37,19 @@ docker` exit 1 — a hard break — across nine changed files, none of them
 `docs/BREAKING-CHANGES.md`. The entry only existed because the maintainer asked for it in
 review. Nothing in the repo told the contributor it was needed.
 
+**The other half: a break you chose to defer is a deprecation, and it gets registered.** If
+instead of breaking you kept the old form working — a migration, a legacy reader, an alias — you
+did not avoid the break, you scheduled it. Add it to
+[`../deprecations.md`](../deprecations.md) with the date you incurred it and a due date (D127);
+`make check` gates the format, not the date. A migration counts: writing one commits the project
+to the old form from that day. The register's own audit found 16 such mechanisms and **0**
+recording a date, which is how "we'll clean it up later" reads after a year.
+
+**Retiring one is a plain rule-1 break**: `## Unreleased` entry, delete the register entry, done.
+The register is the staging area — *registered → settles → retired → recorded here*. When you cut
+a release, anything past its due date is a retire-or-extend call for the owner; nothing is
+automatic.
+
 ## 2. The name sweep — the surfaces
 
 A name the Go code owns is mirrored verbatim into text that no compiler, linter, or test
