@@ -401,11 +401,14 @@ func deliverPromptViaTmux(ctx context.Context, d state.Deps, name string, cfg ru
 	}
 
 	socket := runtime.TmuxSocketFor(d.Runtime, d.Layout.SandboxDir(name))
+	// paste-buffer -p: see sendResetNotification — brackets the paste so tmux's
+	// LF→CR rewrite never reaches an agent that asked for bracketed paste, which
+	// would otherwise join the re-injected prompt's lines.
 	script := fmt.Sprintf(`%s
 %s
 printf '%%s' "$1" > %s
 _tmux load-buffer %s
-_tmux paste-buffer -t main
+_tmux paste-buffer -p -t main
 sleep 0.5
 for key in %s; do
     _tmux send-keys -t main "$key"

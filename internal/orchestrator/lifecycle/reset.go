@@ -452,10 +452,14 @@ func sendResetNotification(ctx context.Context, d state.Deps, name, sandboxDir s
 		appendPrompt = `printf '\n\n' >> /tmp/yoloai-reset.txt; cat /yoloai/prompt.txt >> /tmp/yoloai-reset.txt`
 	}
 
+	// paste-buffer -p brackets the paste for an agent that requested bracketed
+	// paste mode; without it tmux rewrites each LF to a CR (tmux(1)) and a TUI
+	// inferring paste boundaries by timing joins the notification and prompt
+	// into one line. Inert for agents that never requested the mode.
 	script := fmt.Sprintf(`printf '%%s' "$1" > /tmp/yoloai-reset.txt
 %s
 tmux load-buffer /tmp/yoloai-reset.txt
-tmux paste-buffer -t main
+tmux paste-buffer -p -t main
 sleep 0.5
 for key in %s; do
     tmux send-keys -t main "$key"
