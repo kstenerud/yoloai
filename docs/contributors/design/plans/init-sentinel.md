@@ -5,9 +5,19 @@
 # Plan: mark an in-progress TOP init, so a failed one is a fact and not an inference
 
 - **Status:** IN-PROGRESS — P1 (record and diagnose) implemented 2026-07-17: `TOP/.initializing`
-  written/removed in `initFreshDataDir`, the gate short-circuits on it before the emptiness check,
-  and `MigrateCLI`'s switch recognizes it above its `default`. P2 (emptiness-gated destroy-and-retry)
-  remains undone and is not scheduled.
+  written/removed in `initFreshDataDir`, and all three sites taught it — `dirAbsentOrEmpty` counts a
+  sentinel-only TOP as fresh, `checkDataDirStatus`'s exactly-one-Fresh branch resumes an interrupted
+  build (and stays loud without a sentinel), and `MigrateCLI`'s switch recognizes it above its
+  `default`. P2 (emptiness-gated destroy-and-retry) remains undone and is not scheduled.
+- **Correction to §"The trap", learned in build:** the three sites are necessary but not sufficient.
+  A sentinel must **never** let the gate reach a realm at `LayoutMigrate`: `initFreshDataDir` ends in
+  `CreateFreshLibrary`, which stamps the current version unconditionally, so rebuilding on a stale
+  sentinel silently certifies data no migration ever converted (v4→v5 `PrincipalRename` skipped;
+  instances stay `yoloai-<name>`). That inverts D110's truth invariant and is worse than the
+  destruction §"The danger" warns about, because it is silent. The plan's own "retry" wording for the
+  exactly-one-Fresh branch reads as unconditional and would corrupt exactly this way — `resumableInit`
+  therefore also requires the surviving realm to be `LayoutOK`. **The sentinel records that a build
+  started; it never vouches for what the realms contain.**
 - **Depends on:** —
 - **Rides:** **any** release — nothing here is breaking or schema-touching. In v0.9.0's scope on value, not necessity; droppable if the cut is tight.
 

@@ -118,12 +118,14 @@ func MigrateCLI() error {
 		// on that reading, 2026-07-17).
 		return CreateFreshCLI()
 	case IsInitializing():
-		// A crashed initFreshDataDir left TOP/.initializing behind. Every
-		// realm reachable while it is present is, by construction, still
-		// skeletal (the sentinel is written before either realm exists), so
-		// initializing the CLI realm fresh is always safe here — the case
-		// above already caught a partially-built cli/ or library/ alongside
-		// it.
+		// A crashed initFreshDataDir left TOP/.initializing behind. Creating
+		// the CLI realm fresh is safe here not because the sentinel says so —
+		// it cannot, a stale one outlives its build — but because of where
+		// this case sits: the case above already returned for any TOP holding
+		// a library/ or cli/ dir, so neither realm exists at this point and
+		// there is nothing to preserve or migrate. Without this case such a
+		// TOP would fall to the default below and be refused as unrecognized,
+		// wedging the state the sentinel exists to make recoverable (DF128).
 		return CreateFreshCLI()
 	case dirAbsentOrEmpty(top):
 		// Nothing on disk yet: initialize the CLI realm fresh.

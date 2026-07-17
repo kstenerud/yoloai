@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
@@ -54,6 +55,15 @@ func sentinel(t *testing.T, top string) {
 	t.Helper()
 	require.NoError(t, os.MkdirAll(top, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(top, ".initializing"), nil, 0600))
+}
+
+// stampMtime returns a realm's .schema-version modification time, so a test can
+// tell "the gate left this alone" from "the gate rewrote the same value back".
+func stampMtime(t *testing.T, realmDir string) time.Time {
+	t.Helper()
+	info, err := os.Stat(config.SchemaVersionPathFor(realmDir))
+	require.NoError(t, err)
+	return info.ModTime()
 }
 
 func dummyCmd() *cobra.Command { return &cobra.Command{Use: "dummy"} }
@@ -266,16 +276,93 @@ func TestGate_SentinelPlusCLI_Initializes(t *testing.T) {
 
 // TestGate_SentinelPlusBothRealms_ClearsAndProceeds covers a crash after both
 // realms finished but before the final sentinel removal: the gate must clear
-// the stray sentinel and proceed, not treat it as still mid-build forever.
+// the stray sentinel and proceed, rebuilding nothing. Both realms are already
+// current, so a rebuild would be a no-op today — but the gate's contract is
+// that it only ever creates a genuinely fresh install or reads status, and a
+// stale sentinel is exactly the state where "rebuild anyway" stops being
+// harmless (see the old-populated-realm test below).
 func TestGate_SentinelPlusBothRealms_ClearsAndProceeds(t *testing.T) {
 	top := gateTestTop(t)
 	sentinel(t, top)
 	libStamp(t, top, config.LibrarySchemaVersion)
 	cliStamp(t, top, cliutil.CLISchemaVersion)
+	// Real content, so a rebuild that reached the realms would be visible.
+	require.NoError(t, os.MkdirAll(filepath.Join(top, "library", "sandboxes", "box1"), 0750))
+
+	libBefore := stampMtime(t, filepath.Join(top, "library"))
+	cliBefore := stampMtime(t, filepath.Join(top, "cli"))
 
 	require.NoError(t, runMigrationGate(dummyCmd()))
 
 	assert.NoFileExists(t, filepath.Join(top, ".initializing"))
+	assert.Equal(t, libBefore, stampMtime(t, filepath.Join(top, "library")),
+		"library stamp was rewritten on a dir the gate should only have read")
+	assert.Equal(t, cliBefore, stampMtime(t, filepath.Join(top, "cli")),
+		"cli stamp was rewritten on a dir the gate should only have read")
+	assert.DirExists(t, filepath.Join(top, "library", "sandboxes", "box1"))
+}
+
+// TestGate_SentinelPlusOldPopulatedRealm_RequiresMigrationAndDoesNotRestamp is
+// the pin on the sentinel's most dangerous failure mode: it must never
+// authorize the gate to bypass a migration.
+//
+// A stale sentinel (the final remove failed once) can outlive the build that
+// wrote it by arbitrarily long — long enough for the user to upgrade yoloai
+// and leave a populated realm needing migration. If the sentinel routed
+// straight to initFreshDataDir, CreateFreshLibrary would WriteSchemaVersion
+// at the current version without running a single migration step: the v4->v5
+// PrincipalRename would never run, instances would stay `yoloai-<name>` while
+// the CLI looked for `yoloai-cli-<name>`, and nothing would say so. That
+// inverts D110's truth invariant — the stamp is written last precisely so it
+// can never precede the data it certifies — and it does it silently.
+//
+// So the sentinel says "a build started", never "nothing here needs
+// migrating". A realm needing migration wins over it, always.
+func TestGate_SentinelPlusOldPopulatedRealm_RequiresMigrationAndDoesNotRestamp(t *testing.T) {
+	top := gateTestTop(t)
+	sentinel(t, top)
+	cliStamp(t, top, cliutil.CLISchemaVersion)
+	libStamp(t, top, config.LibrarySchemaVersion-1)
+	// Real content the skipped migration would have had to convert.
+	require.NoError(t, os.MkdirAll(filepath.Join(top, "library", "sandboxes", "box1"), 0750))
+
+	err := runMigrationGate(dummyCmd())
+	_, ok := errors.AsType[*yoerrors.MigrationRequiredError](err)
+	require.True(t, ok, "expected MigrationRequiredError, got %v", err)
+
+	// The load-bearing assertion: the gate must not have advanced the stamp.
+	libV, exists, err := config.ReadSchemaVersion(config.SchemaVersionPathFor(filepath.Join(top, "library")))
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, config.LibrarySchemaVersion-1, libV,
+		"the gate re-stamped a realm it never migrated — the stamp now certifies data that was never converted (D110)")
+}
+
+// TestGate_SentinelPlusOnlyAnOldRealm_RequiresMigration is the same hazard one
+// configuration over, reached through the exactly-one-realm-Fresh branch rather
+// than the migrate branch: a sentinel beside a single populated realm that needs
+// migrating, with the other realm absent.
+//
+// This is why resumableInit checks the surviving realm's status and not just the
+// sentinel. "Sentinel present -> retry the build" is true of an interrupted
+// first run — but a build creates realms at the CURRENT version, so a realm
+// needing migration was never left by the build this sentinel describes, and
+// re-creating it would stamp over unconverted data exactly as the migrate branch
+// would have. It is not an interrupted init, so it does not get an init.
+func TestGate_SentinelPlusOnlyAnOldRealm_RequiresMigration(t *testing.T) {
+	top := gateTestTop(t)
+	sentinel(t, top)
+	libStamp(t, top, config.LibrarySchemaVersion-1) // cli absent -> exactly one realm Fresh
+	require.NoError(t, os.MkdirAll(filepath.Join(top, "library", "sandboxes", "box1"), 0750))
+
+	err := runMigrationGate(dummyCmd())
+	require.Error(t, err, "a realm needing migration must never be silently rebuilt")
+
+	libV, exists, err2 := config.ReadSchemaVersion(config.SchemaVersionPathFor(filepath.Join(top, "library")))
+	require.NoError(t, err2)
+	require.True(t, exists)
+	assert.Equal(t, config.LibrarySchemaVersion-1, libV,
+		"the gate re-stamped a realm it never migrated (D110)")
 }
 
 func TestGate_BothCurrent_Proceeds(t *testing.T) {

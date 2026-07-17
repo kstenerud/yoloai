@@ -38,11 +38,17 @@ func ClearInitializing() error {
 }
 
 // IsInitializing reports whether TOP/.initializing is present: a fresh TOP
-// build was started and has not (yet, or successfully) finished. Every realm
-// reachable while it is present is, by construction, still skeletal —
-// MarkInitializing runs before either realm exists and ClearInitializing only
-// after both are built — so retrying the same idempotent build on top of
-// whatever partial state is on disk is always safe.
+// build was started and has not been observed to finish. That is the whole
+// claim — it is a fact about an event, not about what the realms contain.
+//
+// In particular it does NOT mean "the realms are skeletal, so a rebuild is
+// safe". The sentinel outlives its build whenever the final remove fails, and
+// a stale one can be arbitrarily old — old enough for the realms beneath it to
+// hold real work and to need migrating. Treating it as permission to re-create
+// or re-stamp a realm re-stamps data that was never converted, which is D110's
+// truth invariant inverted (the migration stamp is written last so it can never
+// precede the data it certifies; this one is written first, so it certifies
+// nothing at all). Callers must check what is actually on disk before acting.
 func IsInitializing() bool {
 	_, err := os.Stat(TopInitializingSentinelPath())
 	return err == nil

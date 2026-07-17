@@ -17,9 +17,10 @@ const (
 	// dir without its bookkeeping bleeding into the library's.
 	cliNamespace = "cli"
 
-	// initializingSentinelName is TOP/.initializing — see
-	// TopInitializingSentinelPath.
-	initializingSentinelName = ".initializing"
+	// InitializingSentinelName is the basename of TOP/.initializing — see
+	// TopInitializingSentinelPath. Exported so the gate can tell a TOP that
+	// holds nothing but the sentinel from one that holds real content.
+	InitializingSentinelName = ".initializing"
 )
 
 // TopDir returns the shared top data directory (TOP) — the parent of both
@@ -64,5 +65,5 @@ func CLISchemaVersionPath() string {
 // library is rooted at and confined to its own DataDir and must not speak
 // about TOP (D60/D61).
 func TopInitializingSentinelPath() string {
-	return filepath.Join(TopDir(), initializingSentinelName)
+	return filepath.Join(TopDir(), InitializingSentinelName)
 }

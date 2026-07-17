@@ -25,21 +25,20 @@ import (
 // The decision tree (TOP = the shared top data dir, parent of TOP/library and
 // TOP/cli):
 //
-//   - TOP/.initializing present -> a fresh build was started and never
-//     finished (crash, kill -9, disk full): retry the same idempotent build
-//     (see initFreshDataDir and DF128). Checked before everything else below,
-//     since a TOP whose only content is the sentinel is not "empty" by the
-//     next check, and without this it would misroute into MigrationRequired
-//     and wedge (system migrate recognizes no case for it — DF128).
-//   - TOP absent or empty  -> the only other fresh case: create both realms,
-//     proceed.
+//   - TOP absent, empty, or holding nothing but the TOP/.initializing sentinel
+//     -> the fresh cases: create both realms, proceed. The sentinel counts as
+//     empty here because nothing else exists beside it, so there is nothing a
+//     rebuild could damage (DF128).
 //   - TOP non-empty: check each realm (a too-new on-disk version surfaces as an
 //     error — the user ran an older binary and must upgrade):
 //   - both realms Fresh         -> MigrationRequired (a v0 flat install).
-//   - exactly one realm Fresh   -> InconsistentDataDir (a realm went missing;
-//     loud, does not point at migrate).
-//   - any realm needs Migrate   -> MigrationRequired.
-//   - both realms OK            -> proceed.
+//   - exactly one realm Fresh   -> an interrupted build when the sentinel is
+//     present and the other realm is current (retry it, quietly); otherwise
+//     InconsistentDataDir (a realm went missing; loud, does not point at
+//     migrate).
+//   - any realm needs Migrate   -> MigrationRequired. The sentinel NEVER
+//     overrides this; see checkDataDirStatus.
+//   - both realms OK            -> proceed (clearing a stale sentinel).
 //
 // The gate never sniffs flat/legacy markers; routing "all-Fresh on a non-empty
 // TOP" to migration is all it needs. Recognizing what that content actually is
@@ -47,10 +46,6 @@ import (
 func runMigrationGate(cmd *cobra.Command) error {
 	if gateExempt(cmd) {
 		return nil
-	}
-
-	if cliutil.IsInitializing() {
-		return initFreshDataDir()
 	}
 
 	top := cliutil.TopDir()
@@ -64,12 +59,20 @@ func runMigrationGate(cmd *cobra.Command) error {
 	return checkDataDirStatus(top)
 }
 
-// initFreshDataDir initializes both the CLI and library data directories for a
-// fresh install where TOP is absent, empty, or mid-build (TOP/.initializing
-// present). The sentinel is written before either realm is created and
-// removed only once both are, so every step here is safe to re-run on top of
-// whatever partial state a previous interrupted run left behind (D110's
-// stamp-written-last, mirrored — this one is written first; DF128).
+// initFreshDataDir initializes both the CLI and library data directories. It
+// creates realms at the current version and never converts anything, so its
+// callers must have established that there is nothing here to convert: TOP is
+// absent or empty, or holds only the sentinel, or holds one current realm and
+// one missing one (see resumableInit). It must not be reached for a realm at
+// LayoutMigrate — CreateFreshLibrary would stamp the current version over
+// unconverted data.
+//
+// The sentinel it writes brackets the build: MarkInitializing before either
+// realm exists, ClearInitializing only once both do. That is D110's
+// stamp-written-last mirrored — the migration stamp goes last so it can never
+// precede the data it certifies; this one goes first so an interrupted build
+// leaves a fact behind instead of a state the gate has to guess at (DF128).
+// It records that a build started; it certifies nothing about the result.
 func initFreshDataDir() error {
 	top := cliutil.TopDir()
 	if err := fileutil.MkdirAll(top, 0750); err != nil {
@@ -116,8 +119,19 @@ func checkDataDirStatus(top string) error {
 		// (v0) flat install. Migration relocates it.
 		return yoerrors.NewMigrationRequiredError("")
 	case cliFresh != libFresh:
+		if resumableInit(cliSt, libSt) {
+			// An interrupted initFreshDataDir: the sentinel says a build
+			// started, and the realm it did finish is at the current version,
+			// which is what our own build creates. Finishing it re-stamps that
+			// realm at the version it already carries (a no-op) and creates the
+			// missing one. Nothing is migrated, so nothing is mis-certified.
+			return initFreshDataDir()
+		}
 		// One realm fresh, the other populated — a realm went missing from an
 		// otherwise-present install. Too messy to reconcile automatically.
+		// Without a sentinel this is DF128's genuine anomaly and stays loud:
+		// the sentinel is what distinguishes it from a routine interrupted
+		// first run, and there isn't one.
 		fresh, populated := "cli", "library"
 		if libFresh {
 			fresh, populated = "library", "cli"
@@ -126,11 +140,38 @@ func checkDataDirStatus(top string) error {
 			"inconsistent data directory under %s: the %s realm is uninitialized but the %s realm is present; this should not happen — inspect the directory manually",
 			top, fresh, populated)
 	case cliSt == config.LayoutMigrate || libSt == config.LayoutMigrate:
+		// A realm needs migrating, and a sentinel does NOT override that — a
+		// stale one outlives its build indefinitely, so it cannot vouch for
+		// what the realms hold. Only `system migrate` converts data and stamps
+		// it afterwards (D110); a gate that stamped here would certify data it
+		// never converted.
 		return yoerrors.NewMigrationRequiredError(migratingNamespace(cliSt, libSt))
 	default:
-		// Both realms at the current version.
+		// Both realms at the current version. A sentinel here is the build
+		// whose final remove failed: clear it and proceed, rebuilding nothing.
+		if cliutil.IsInitializing() {
+			return cliutil.ClearInitializing()
+		}
 		return nil
 	}
+}
+
+// resumableInit reports whether an exactly-one-realm-Fresh TOP is an
+// initFreshDataDir that was interrupted partway, which the gate may safely
+// finish, rather than DF128's genuine anomaly, which it must report.
+//
+// Two things must hold. The sentinel must be present: it is the recorded fact
+// that a build started, and without it a missing realm is unexplained. And the
+// realm that does exist must be LayoutOK — a fresh build creates realms at the
+// current version, so one needing migration was not left by the build the
+// sentinel describes, and re-creating it would re-stamp unconverted data.
+// A realm at LayoutMigrate therefore falls through to the loud message, and
+// `system migrate` remains the only thing that may touch it.
+func resumableInit(cliSt, libSt config.LayoutStatus) bool {
+	if !cliutil.IsInitializing() {
+		return false
+	}
+	return cliSt != config.LayoutMigrate && libSt != config.LayoutMigrate
 }
 
 // migratingNamespace names the realm that needs migration for the diagnostic
@@ -164,10 +205,21 @@ func gateExempt(cmd *cobra.Command) bool {
 	return false
 }
 
-// dirAbsentOrEmpty reports whether dir does not exist or exists but contains no
-// entries — the gate's two "fresh install" cases. A non-"not exist" read error
-// (e.g. TOP is a plain file) is surfaced so the gate fails loudly rather than
-// treating garbage as fresh.
+// dirAbsentOrEmpty reports whether dir does not exist, or exists holding
+// nothing but (at most) the TOP/.initializing sentinel — the gate's "fresh
+// install" cases. A non-"not exist" read error (e.g. TOP is a plain file) is
+// surfaced so the gate fails loudly rather than treating garbage as fresh.
+//
+// The sentinel does not count against emptiness because a TOP holding only it
+// is one where a build wrote the sentinel and then died before creating either
+// realm: nothing exists that a rebuild could damage. Counting it would leave
+// that TOP wedged — not empty, so routed to checkDataDirStatus, where both
+// realms read Fresh and it becomes "run system migrate", which then recognizes
+// no case for it and refuses as an unrecognized data directory (DF128).
+//
+// This is the ONLY place the sentinel is allowed to mean "nothing is here".
+// Once anything else exists beside it, what is on disk decides — see
+// checkDataDirStatus.
 func dirAbsentOrEmpty(dir string) (bool, error) {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -176,5 +228,10 @@ func dirAbsentOrEmpty(dir string) (bool, error) {
 		}
 		return false, fmt.Errorf("inspect data dir %s: %w", dir, err)
 	}
-	return len(entries) == 0, nil
+	for _, entry := range entries {
+		if entry.Name() != cliutil.InitializingSentinelName {
+			return false, nil
+		}
+	}
+	return true, nil
 }
