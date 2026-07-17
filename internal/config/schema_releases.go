@@ -27,6 +27,7 @@ var LibrarySchemaReleases = []SchemaRelease{
 	{Schema: 1, Tag: "v0.3.0"}, // v0.3.0
 	{Schema: 2, Tag: "v0.4.0"}, // v0.4.0 – v0.5.2
 	{Schema: 4, Tag: "v0.6.0"}, // v0.6.0 (:overlay retired; schema 3 never published)
+	{Schema: 5, Tag: "v0.9.0"}, // v0.9.0 (principal rename; empty principal retired)
 }
 
 // PriorReleaseRange returns the release-tag range whose builds read a data dir at

@@ -23,6 +23,8 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+## v0.9.0
+
 ### `yoloai new <name>` refuses when a sandbox of that name has unreadable metadata
 
 **Previous behavior:** `yoloai new <name>` (no `--replace`) treated *any* failure
@@ -180,6 +182,7 @@ pass that renames instances, D126). It re-stamps each existing sandbox's
 recorded image reference from `yoloai-<profile>` to `yoloai-cli-<profile>`
 (`yoloai-base` records are left untouched) so the launch/restart path resolves
 a tag consistent with what a rebuild now produces.
+
 
 ## v0.8.0
 

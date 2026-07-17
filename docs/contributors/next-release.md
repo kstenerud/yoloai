@@ -4,9 +4,8 @@
 
 # Next release
 
-**Next release version: `v0.9.0`** — escalated from `v0.8.1` by the two breaks now sitting in
-[`BREAKING-CHANGES.md`](../BREAKING-CHANGES.md) `## Unreleased`: the config-command path validation
-(first, and what tripped it), and D126's principal-scoped instance names.
+**Next release version: `v0.9.1`** — the next point release after v0.9.0. Nothing breaking has
+landed on main since; the field escalates on its own to `v0.10.0` the moment something does.
 
 ## How this works
 
@@ -57,20 +56,11 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
-- [DF126](design/findings-resolved.md) — profile image tags carry no principal, so two principals
-  with a same-named profile collide on one image
-- [init-sentinel](design/plans/init-sentinel.md) — mark an in-progress TOP init, so a failed one is
-  a fact and not an inference
+*Nothing yet.*
 
 ## Candidates — undecided
 
-*None.* Decided out 2026-07-17 — each record's `**Rides:**` field says why:
-[module-split](design/plans/module-split.md), [session-carve](design/plans/session-carve.md) 1a-iv,
-[DF39](design/findings-unresolved.md), [DF104](design/findings-unresolved.md),
-[DF113](design/findings-unresolved.md), [DF53](design/findings-unresolved.md).
-
-*(Descoping is not the same as finishing: this list carries scope, so a scope decision belongs here.
-The rule above is that **completion** never removes a line.)*
+*Nothing yet.*
 
 ## In flight — started, not finished
 
@@ -81,17 +71,10 @@ jump; A is never resumed, and nothing records that it was interrupted or by what
 write the line here first**: what was abandoned, how far it got, what took priority. The jump is an
 event you can see; the intention to come back is not.
 
-## Taking stock — verified stale, do not redo (2026-07-17)
+## Taking stock — verified stale, do not redo
 
-Each looked like an item lost from an earlier release. Each had already landed; only the doc was
-stale (DF103's class — a claim about other work's state that nothing keeps in step).
-
-- `design/plans/release-migration.md`'s unticked `agent_files` box → the entries are in
-  BREAKING-CHANGES.
-- `design/plans/copy-mode-history.md`'s *"confirm the exact spellings"* → `copy-strict` shipped in
-  **v0.7.0**. Frozen user surface; renaming now would be a break, not a free choice.
-- `design/plans/post-merge-roadmap.md`'s *"no second migration needed"* → false twice; schema 4 and
-  5 both landed.
+*Nothing yet.* When a release is on the table, this holds what looked like lost work but had already
+landed — verified-stale doc claims not to "finish". Scoped to one release cycle; emptied at each cut.
 
 ## The release ritual
 
@@ -102,7 +85,7 @@ stale (DF103's class — a claim about other work's state that nothing keeps in 
      the tag if it is non-empty.
    - If a schema shipped, add `{Schema: N, Tag: "vX.Y.Z"}` to `LibrarySchemaReleases`
      (`internal/config/schema_releases.go`) — that table asserts *shipped* tags, so the entry cannot
-     be written before the tag exists. **Owed now: `{Schema: 5, Tag: "v0.9.0"}`.**
+     be written before the tag exists.
    - Glance at [deprecations.md](deprecations.md) — anything past its due date is a retire-or-extend
      call. *(Nothing due until 2026-09-12.)*
    - **Reset this file** to the initial state below, with the version field assuming the point
