@@ -8,7 +8,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -214,8 +216,14 @@ func (p *PrincipalRename) applyBackendOp(ctx context.Context, rt runtime.Backend
 // D126 fixed, so a record left unstamped would resolve a tag the rebuilt
 // (principal-scoped) image on the launch/restart path (launch.go, restart.go)
 // no longer produces. BaseImage is left alone — it is deliberately unscoped
-// (DF126 "Scope note"). Durable and written last, so its value is the
-// migration's idempotency marker.
+// (DF126 "Scope note").
+//
+// Written last, and durably: SaveEnvironment goes through AtomicWriteFile, so
+// this record reaches stable storage before Apply stamps the realm, and the
+// stamp cannot certify a conversion that did not survive. That is D110's truth
+// invariant, and it needs both halves — until 2026-07-17 this comment claimed
+// "durable" while the write underneath was a plain os.WriteFile with no fsync
+// and no atomic rename, which is the whole of what made the gap invisible.
 func (p *PrincipalRename) restampPrincipal(name string) error {
 	sandboxDir := p.layout.SandboxDir(name)
 	env, err := store.LoadEnvironment(sandboxDir)
@@ -275,9 +283,23 @@ func (p *PrincipalRename) unmigratedSandboxNames() ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		env, err := store.LoadEnvironment(p.layout.SandboxDir(e.Name()))
+		sandboxDir := p.layout.SandboxDir(e.Name())
+		if _, err := os.Stat(filepath.Join(sandboxDir, store.EnvironmentFile)); errors.Is(err, fs.ErrNotExist) {
+			continue // not a sandbox dir at all — nothing here claims to be one
+		}
+		env, err := store.LoadEnvironment(sandboxDir)
 		if err != nil {
-			continue // unreadable/foreign dir — status pass surfaces it if it matters
+			// A dir that HAS an environment.json we cannot read is never
+			// skippable. Skipping it drops it from the unit of work while Apply
+			// stamps the realm to v5 regardless, so the sandbox is left
+			// unconverted inside a realm that certifies it converted — and the
+			// gate then reads LayoutOK and never routes back here, which makes
+			// it unreachable forever. Every reason LoadEnvironment fails is a
+			// reason to stop: a torn record, one still below metaVersion (a
+			// half-finished MigrateAgentConfigs), or one from a newer binary.
+			// Aborting is recoverable; a false stamp is not. This matches
+			// MigrateAgentConfigs, which has always failed hard here.
+			return nil, fmt.Errorf("sandbox %q: %w", e.Name(), err)
 		}
 		if env.Principal == "" {
 			names = append(names, e.Name())

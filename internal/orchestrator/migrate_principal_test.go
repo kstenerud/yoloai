@@ -8,6 +8,7 @@ import (
 	"io"
 	"log/slog"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -251,6 +252,58 @@ func TestPrincipalRename_Apply_SeatbeltRestampOnly(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, rt.removeCalls, "seatbelt has no backend instance to touch")
 	env, err := store.LoadEnvironment(layout.SandboxDir("box"))
+	require.NoError(t, err)
+	assert.Equal(t, config.CLIPrincipal, env.Principal)
+}
+
+// An environment.json that will not load must abort the run, never be skipped.
+// Skipping drops the sandbox from the unit of work while Apply stamps the realm
+// to v5 anyway, so it is left unconverted inside a realm certifying it
+// converted — and the gate then reads LayoutOK and never routes back to
+// `system migrate`, the only thing allowed to fix it. The stamp assertion is the
+// point: an error alone would not prove the realm stayed honest.
+func TestPrincipalRename_Apply_UnreadableRecordAbortsAndDoesNotStamp(t *testing.T) {
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
+	seedSandbox(t, layout, "good", "yoloai-web")
+
+	// A record this binary cannot read. Verified 2026-07-17 to be the reachable
+	// trigger end-to-end: a torn record is caught earlier by MigrateAgentConfigs,
+	// which fails hard, but a record from a NEWER yoloai parses fine there and
+	// only LoadEnvironment rejects it — so this is the one that reached Apply and
+	// got silently skipped, stamping the realm to v5 over an unconverted sandbox.
+	tornDir := layout.SandboxDir("torn")
+	require.NoError(t, os.MkdirAll(tornDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(tornDir, store.EnvironmentFile),
+		[]byte(`{"version":99,"name":"torn","backend":"docker"}`), 0o600))
+
+	rt := &fakeBackend{keepAlive: runtime.KeepAliveHostKeepAlive}
+	_, err := newPrincipalRenameWith(layout, rt).Apply(context.Background(), migrate.Decision{})
+
+	require.Error(t, err, "an unreadable record must stop the migration")
+	assert.Contains(t, err.Error(), "torn", "the error must name the sandbox to investigate")
+
+	version, exists, readErr := config.ReadSchemaVersion(layout.SchemaVersionPath())
+	require.NoError(t, readErr)
+	if exists {
+		assert.NotEqual(t, config.SchemaPrincipalRenamed, version,
+			"the realm must not certify v5 while a sandbox was never converted")
+	}
+}
+
+// A directory with no environment.json is not a sandbox and never was — an
+// embedder's scratch dir, a stray mkdir. It must still be skipped silently, or
+// the stricter error above would make every migration fail on incidental
+// clutter.
+func TestPrincipalRename_Apply_IgnoresDirWithNoEnvironment(t *testing.T) {
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
+	seedSandbox(t, layout, "real", "yoloai-web")
+	require.NoError(t, os.MkdirAll(filepath.Join(layout.SandboxesDir(), "not-a-sandbox"), 0o750))
+
+	rt := &fakeBackend{keepAlive: runtime.KeepAliveHostKeepAlive}
+	_, err := newPrincipalRenameWith(layout, rt).Apply(context.Background(), migrate.Decision{})
+	require.NoError(t, err)
+
+	env, err := store.LoadEnvironment(layout.SandboxDir("real"))
 	require.NoError(t, err)
 	assert.Equal(t, config.CLIPrincipal, env.Principal)
 }

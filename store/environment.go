@@ -239,7 +239,21 @@ func MigrateEnvironment(meta *Environment) error {
 	return migrate(meta)
 }
 
-// SaveEnvironment writes environment.json to the given directory path.
+// SaveEnvironment writes environment.json to the given directory path, durably
+// and atomically.
+//
+// The durability is load-bearing, not belt-and-braces. This record is what the
+// v4->v5 migration re-stamps per sandbox, and the migration's correctness rests
+// on D110's truth invariant: the realm's schema stamp is written last, so it can
+// never certify data that was not converted. That invariant needs the record on
+// stable storage *before* the stamp, and program order alone does not give it —
+// the stamp goes through AtomicWriteFile's fsync, so an un-fsynced record here
+// could still be a dirty page when the stamp lands, and power loss would strand
+// a sandbox the realm claims is migrated (unreachable and unrecoverable, since
+// `system migrate` would no longer run). A plain os.WriteFile also truncates
+// before writing, so a crash mid-write leaves a torn record that no longer
+// parses. AtomicWriteFile closes both: temp + fsync + rename + dir fsync, so a
+// reader sees the old record or the new one, and never neither.
 func SaveEnvironment(dir string, meta *Environment) error {
 	meta.Version = metaVersion
 	data, err := json.MarshalIndent(meta, "", "  ")
@@ -248,7 +262,7 @@ func SaveEnvironment(dir string, meta *Environment) error {
 	}
 
 	path := filepath.Join(dir, EnvironmentFile)
-	if err := fileutil.WriteFile(path, data, 0600); err != nil {
+	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", EnvironmentFile, err)
 	}
 

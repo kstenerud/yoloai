@@ -509,9 +509,17 @@ func (o *OverlayFlatten) overlaySandboxNames() ([]string, error) {
 		if !e.IsDir() {
 			continue
 		}
-		env, err := store.LoadEnvironment(filepath.Join(o.sandboxesRoot, e.Name()))
+		sandboxDir := filepath.Join(o.sandboxesRoot, e.Name())
+		if _, err := os.Stat(filepath.Join(sandboxDir, store.EnvironmentFile)); errors.Is(err, fs.ErrNotExist) {
+			continue // not a sandbox dir at all — nothing here claims to be one
+		}
+		env, err := store.LoadEnvironment(sandboxDir)
 		if err != nil {
-			continue // unreadable/foreign dir — the status pass surfaces it if it matters
+			// Same reasoning as PrincipalRename.unmigratedSandboxNames: a dir
+			// holding an environment.json we cannot read must stop the run, not
+			// be dropped from it. Skipping it would leave an overlay sandbox
+			// unflattened while the realm stamps to v4 as though none remained.
+			return nil, fmt.Errorf("sandbox %q: %w", e.Name(), err)
 		}
 		if hasOverlayDir(env) {
 			names = append(names, e.Name())
