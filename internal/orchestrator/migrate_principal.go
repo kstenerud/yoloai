@@ -231,12 +231,22 @@ func (p *PrincipalRename) restampPrincipal(name string) error {
 }
 
 // restampedImageRef re-stamps a pre-v5 ImageRef with the target principal
-// (DF126). config.BaseImage and an empty ref are returned unchanged — the
-// base image is deliberately unscoped. Anything that isn't the bare
-// "yoloai-<profile>" shape the old hardcoded call sites always wrote (e.g. a
-// ref already principal-scoped by some other means) is also returned
-// unchanged: restamping is only ever correct for the shape those sites
-// produced.
+// (DF126). config.BaseImage and an empty ref are returned unchanged — the base
+// image is deliberately unscoped and shared by every principal.
+//
+// The bare CutPrefix below is sound only because of the caller's domain, not
+// because of anything this function checks. It runs solely on records whose
+// principal is empty (see unmigratedSandboxNames), and only the pre-D126 CLI
+// ever wrote those; it always wrote exactly "yoloai-<profile>". So the cut
+// yields the profile name and nothing else — including when the profile is
+// itself named something like "acme-web".
+//
+// It is NOT safe on an arbitrary ref, and must not be reused as though it were:
+// "yoloai-" is a prefix of every principal's namespace, so an already-scoped
+// "yoloai-acme-web" would be cut to "acme-web" and re-stamped to
+// "yoloai-cli-acme-web" — silently rewriting one principal's image to another's.
+// That is DF115's shape exactly, and D126 removed it structurally everywhere it
+// could reach. Restrict the input before calling this, or don't call it.
 func restampedImageRef(layout config.Layout, imageRef string) string {
 	if imageRef == "" || imageRef == config.BaseImage {
 		return imageRef

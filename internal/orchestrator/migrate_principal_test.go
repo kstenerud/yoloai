@@ -276,6 +276,42 @@ func TestPrincipalRename_Apply_RestampsProfileImageRef(t *testing.T) {
 	assert.Equal(t, config.BaseImage, env.ImageRef)
 }
 
+// A record that already carries a principal is not this migrator's business, and
+// that restriction is what makes restampedImageRef's bare CutPrefix sound: it can
+// only ever see refs the pre-D126 CLI wrote. Widen the domain and "yoloai-acme-web"
+// gets cut to "acme-web" and re-stamped to "yoloai-cli-acme-web" — DF115's
+// cross-principal rewrite, by hand. Pinned here so the comment saying so is not the
+// only thing holding it (D126, DF115, DF126).
+func TestPrincipalRename_Apply_LeavesForeignPrincipalUntouched(t *testing.T) {
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
+	seedSandbox(t, layout, "mine", "yoloai-web")
+
+	// An integrator's sandbox, already scoped, sharing the same store.
+	foreignDir := layout.SandboxDir("theirs")
+	require.NoError(t, os.MkdirAll(foreignDir, 0o750))
+	require.NoError(t, store.SaveEnvironment(foreignDir, &store.Environment{
+		Version:     3,
+		Name:        "theirs",
+		Principal:   "acme",
+		BackendType: "mock",
+		ImageRef:    "yoloai-acme-web",
+		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
+	}))
+
+	rt := &fakeBackend{keepAlive: runtime.KeepAliveHostKeepAlive}
+	_, err := newPrincipalRenameWith(layout, rt).Apply(context.Background(), migrate.Decision{})
+	require.NoError(t, err)
+
+	foreign, err := store.LoadEnvironment(foreignDir)
+	require.NoError(t, err)
+	assert.Equal(t, config.PrincipalSegment("acme"), foreign.Principal, "a foreign principal must not be adopted")
+	assert.Equal(t, "yoloai-acme-web", foreign.ImageRef, "a foreign principal's image must not be re-stamped")
+
+	mine, err := store.LoadEnvironment(layout.SandboxDir("mine"))
+	require.NoError(t, err)
+	assert.Equal(t, "yoloai-cli-web", mine.ImageRef, "the CLI's own record still migrates")
+}
+
 func TestPrincipalRename_Plan_RunningRecreateOnlyBlocks(t *testing.T) {
 	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
 	seedSandbox(t, layout, "box")

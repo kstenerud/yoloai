@@ -160,7 +160,9 @@ not a clock; an unreleased entry says `(pending)`.
 ### v4→v5 principal rename, and `store.LegacyCLIInstanceName`
 
 - **Incurred:** 2026-07-16 (`3ca2828e`) · **Shipped:** v0.9.0 (pending) · **Due:** 2027-01-16 (internal, 6mo)
-- **What:** `PrincipalRename` moves pre-D126 `yoloai-<name>` instances to `yoloai-cli-<name>`;
+- **What:** `PrincipalRename` moves pre-D126 `yoloai-<name>` instances to `yoloai-cli-<name>` and
+  re-stamps each record's `ImageRef` from `yoloai-<profile>` to `yoloai-cli-<profile>` (DF126;
+  `config.BaseImage` is deliberately left unscoped and shared);
   `LegacyCLIInstanceName` is the sanctioned use of the bare `yoloai-` prefix that D126 otherwise
   makes unwritable, and exists only for this migrator and the overlay one.
 - **Retire by:** the ladder floor. `LegacyCLIInstanceName` dies with the last migrator that
