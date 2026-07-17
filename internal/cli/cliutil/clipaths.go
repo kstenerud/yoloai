@@ -16,6 +16,10 @@ const (
 	// separation lets a second app embedding yoloai share the same top
 	// dir without its bookkeeping bleeding into the library's.
 	cliNamespace = "cli"
+
+	// initializingSentinelName is TOP/.initializing — see
+	// TopInitializingSentinelPath.
+	initializingSentinelName = ".initializing"
 )
 
 // TopDir returns the shared top data directory (TOP) — the parent of both
@@ -51,4 +55,14 @@ func CLIStatePath() string {
 // TOP/library/.schema-version stamp.
 func CLISchemaVersionPath() string {
 	return filepath.Join(CLIDir(), ".schema-version")
+}
+
+// TopInitializingSentinelPath returns TOP/.initializing — an empty marker
+// file, sibling to TOP/cli and TOP/library, that brackets a fresh TOP build
+// (see MarkInitializing). It lives directly under TOP rather than under
+// CLIDir because it describes the directory *above* the library's root; the
+// library is rooted at and confined to its own DataDir and must not speak
+// about TOP (D60/D61).
+func TopInitializingSentinelPath() string {
+	return filepath.Join(TopDir(), initializingSentinelName)
 }

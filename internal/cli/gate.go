@@ -11,6 +11,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -24,7 +25,14 @@ import (
 // The decision tree (TOP = the shared top data dir, parent of TOP/library and
 // TOP/cli):
 //
-//   - TOP absent or empty  -> the only fresh cases: create both realms, proceed.
+//   - TOP/.initializing present -> a fresh build was started and never
+//     finished (crash, kill -9, disk full): retry the same idempotent build
+//     (see initFreshDataDir and DF128). Checked before everything else below,
+//     since a TOP whose only content is the sentinel is not "empty" by the
+//     next check, and without this it would misroute into MigrationRequired
+//     and wedge (system migrate recognizes no case for it — DF128).
+//   - TOP absent or empty  -> the only other fresh case: create both realms,
+//     proceed.
 //   - TOP non-empty: check each realm (a too-new on-disk version surfaces as an
 //     error — the user ran an older binary and must upgrade):
 //   - both realms Fresh         -> MigrationRequired (a v0 flat install).
@@ -41,6 +49,10 @@ func runMigrationGate(cmd *cobra.Command) error {
 		return nil
 	}
 
+	if cliutil.IsInitializing() {
+		return initFreshDataDir()
+	}
+
 	top := cliutil.TopDir()
 	empty, err := dirAbsentOrEmpty(top)
 	if err != nil {
@@ -53,8 +65,19 @@ func runMigrationGate(cmd *cobra.Command) error {
 }
 
 // initFreshDataDir initializes both the CLI and library data directories for a
-// fresh install where TOP is absent or empty.
+// fresh install where TOP is absent, empty, or mid-build (TOP/.initializing
+// present). The sentinel is written before either realm is created and
+// removed only once both are, so every step here is safe to re-run on top of
+// whatever partial state a previous interrupted run left behind (D110's
+// stamp-written-last, mirrored — this one is written first; DF128).
 func initFreshDataDir() error {
+	top := cliutil.TopDir()
+	if err := fileutil.MkdirAll(top, 0750); err != nil {
+		return fmt.Errorf("create data dir: %w", err)
+	}
+	if err := cliutil.MarkInitializing(); err != nil {
+		return fmt.Errorf("mark data dir initializing: %w", err)
+	}
 	if err := cliutil.CreateFreshCLI(); err != nil {
 		return fmt.Errorf("initialize cli data dir: %w", err)
 	}
@@ -65,7 +88,7 @@ func initFreshDataDir() error {
 	if err := sys.CreateDataDir(); err != nil {
 		return fmt.Errorf("initialize library data dir: %w", err)
 	}
-	return nil
+	return cliutil.ClearInitializing()
 }
 
 // checkDataDirStatus reads both realm statuses on a non-empty TOP and decides

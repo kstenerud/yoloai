@@ -77,6 +77,12 @@ func CreateFreshCLI() error {
 // Idempotent: an already-stamped layout is a no-op. It validates that TOP is
 // something it recognizes and errors on unrecognized content rather than
 // relocating arbitrary files (e.g. when --data-dir points at the wrong path).
+//
+// A TOP/.initializing sentinel (DF128) is also recognized: `system migrate`
+// is gate-exempt, so it never sees runMigrationGate's own sentinel handling,
+// and without a case here a sentinel-marked TOP falls to the "not a
+// recognized yoloai data directory" default — the exact wedge the sentinel
+// exists to make recoverable.
 func MigrateCLI() error {
 	stampPath := CLISchemaVersionPath()
 	current, exists, err := config.ReadSchemaVersion(stampPath)
@@ -110,6 +116,14 @@ func MigrateCLI() error {
 		// gate calls that state InconsistentDataDir and refuses; this branch is
 		// what repairs it. Do not delete it as dead code (it was nearly retired
 		// on that reading, 2026-07-17).
+		return CreateFreshCLI()
+	case IsInitializing():
+		// A crashed initFreshDataDir left TOP/.initializing behind. Every
+		// realm reachable while it is present is, by construction, still
+		// skeletal (the sentinel is written before either realm exists), so
+		// initializing the CLI realm fresh is always safe here — the case
+		// above already caught a partially-built cli/ or library/ alongside
+		// it.
 		return CreateFreshCLI()
 	case dirAbsentOrEmpty(top):
 		// Nothing on disk yet: initialize the CLI realm fresh.

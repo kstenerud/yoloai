@@ -4,7 +4,10 @@
 
 # Plan: mark an in-progress TOP init, so a failed one is a fact and not an inference
 
-- **Status:** PLANNED — designed 2026-07-17 (owner's proposal), not started. Small, self-contained.
+- **Status:** IN-PROGRESS — P1 (record and diagnose) implemented 2026-07-17: `TOP/.initializing`
+  written/removed in `initFreshDataDir`, the gate short-circuits on it before the emptiness check,
+  and `MigrateCLI`'s switch recognizes it above its `default`. P2 (emptiness-gated destroy-and-retry)
+  remains undone and is not scheduled.
 - **Depends on:** —
 - **Rides:** **any** release — nothing here is breaking or schema-touching. In v0.9.0's scope on value, not necessity; droppable if the cut is tight.
 
@@ -121,11 +124,11 @@ injection needed — that is the point of a fact on disk):
 
 ## Open questions
 
-1. **Durability.** The sentinel must be durable *before* the realms are created, or a crash could
-   lose it and keep them — which reads as the alarming case. `fileutil.AtomicWriteFile` fsyncs the
-   file; whether the containing directory needs its own fsync for the entry to survive is the
-   question D110 already fought on APFS (`F_FULLFSYNC` on a directory fd). Check what
-   `AtomicWriteFile` already does before adding anything.
+1. **Durability. Answered 2026-07-17: already solved, nothing to add.** `fileutil.AtomicWriteFile`
+   (`internal/fileutil/durable.go`) writes the temp file, fsyncs its contents, renames it over the
+   target, then calls `FsyncDir` on the parent — the same `F_FULLFSYNC`-on-darwin path D110 already
+   fought for the migration framework's own directory-entry durability. The sentinel write
+   (`cliutil.MarkInitializing`) is a plain `AtomicWriteFile` call and needs no bespoke fsync code.
 2. **Content.** Empty file, or a timestamp/pid? A timestamp lets a message distinguish "an install
    started 2 seconds ago" (another process, maybe) from "3 months ago" (definitely dead), and costs
    one line. Nothing needs it yet — YAGNI says empty, and the timestamp is trivially addable later

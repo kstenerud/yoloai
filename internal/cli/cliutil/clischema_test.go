@@ -5,6 +5,7 @@ package cliutil_test
 
 import (
 	"bytes"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
@@ -132,6 +133,37 @@ func TestMigrateCLI_UnrecognizedTop_Errors(t *testing.T) {
 	// Nothing was relocated.
 	assert.NoDirExists(t, filepath.Join(top, "library"))
 	assert.FileExists(t, filepath.Join(top, "random-stuff", "x"))
+}
+
+// TestMigrateCLI_SentinelOnly_NotWedged pins the wedge the sentinel exists to
+// avoid: `system migrate` is gate-exempt and reaches MigrateCLI directly, so
+// it must recognize a sentinel-only TOP itself rather than falling to "not a
+// recognized yoloai data directory" (DF128).
+func TestMigrateCLI_SentinelOnly_NotWedged(t *testing.T) {
+	top := isolatedTop(t)
+	require.NoError(t, os.MkdirAll(top, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(top, ".initializing"), nil, 0600))
+
+	require.NoError(t, cliutil.MigrateCLI())
+
+	version, exists, err := config.ReadSchemaVersion(cliutil.CLISchemaVersionPath())
+	require.NoError(t, err)
+	require.True(t, exists)
+	assert.Equal(t, cliutil.CLISchemaVersion, version)
+}
+
+// TestMigrateCLI_SentinelPlusCLI_NotWedged covers the same wedge with a
+// built cli/ realm alongside the sentinel — caught by MigrateCLI's
+// pre-existing "adopt a namespaced layout" branch (dirExists(CLIDir())),
+// not the new sentinel case, but the requirement is the same: no wedge.
+func TestMigrateCLI_SentinelPlusCLI_NotWedged(t *testing.T) {
+	top := isolatedTop(t)
+	require.NoError(t, cliutil.CreateFreshCLI())
+	require.NoError(t, os.WriteFile(filepath.Join(top, ".initializing"), nil, 0600))
+
+	err := cliutil.MigrateCLI()
+	require.NoError(t, err)
+	assert.NotContains(t, fmt.Sprint(err), "not a recognized yoloai data directory")
 }
 
 func TestCLIStatus(t *testing.T) {

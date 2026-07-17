@@ -47,6 +47,15 @@ func cliStamp(t *testing.T, top string, version int) {
 	require.NoError(t, config.WriteSchemaVersion(config.SchemaVersionPathFor(dir), version))
 }
 
+// sentinel writes TOP/.initializing directly, without going through
+// initFreshDataDir — constructing on disk exactly the state a crashed
+// initFreshDataDir would have left behind (DF128).
+func sentinel(t *testing.T, top string) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(top, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(top, ".initializing"), nil, 0600))
+}
+
 func dummyCmd() *cobra.Command { return &cobra.Command{Use: "dummy"} }
 
 // gateExemptAllowlist is the COMPLETE set of yoloai commands that may bypass the
@@ -201,6 +210,72 @@ func TestGate_OneFreshOnePopulated_Inconsistent(t *testing.T) {
 	_, ok := errors.AsType[*yoerrors.InconsistentDataDirError](err)
 	require.True(t, ok, "expected InconsistentDataDirError, got %v", err)
 	assert.NotContains(t, err.Error(), "yoloai system migrate", "inconsistent dir must not point at migrate")
+}
+
+// TestGate_CLIOnlyNoSentinel_StillLoud is the DF128 anomaly the sentinel must
+// NOT silence: a populated cli/ with no library/ and no sentinel is exactly
+// as alarming as before — a realm may have gone missing from an otherwise
+// live install, and the gate has no fact on disk saying otherwise.
+func TestGate_CLIOnlyNoSentinel_StillLoud(t *testing.T) {
+	top := gateTestTop(t)
+	cliStamp(t, top, cliutil.CLISchemaVersion)
+
+	err := runMigrationGate(dummyCmd())
+	_, ok := errors.AsType[*yoerrors.InconsistentDataDirError](err)
+	require.True(t, ok, "expected InconsistentDataDirError, got %v", err)
+	assert.NotContains(t, err.Error(), "yoloai system migrate", "inconsistent dir must not point at migrate")
+}
+
+// TestGate_SentinelOnly_Initializes covers the wedge the sentinel exists to
+// avoid: a TOP whose only content is TOP/.initializing must initialize
+// rather than being routed to MigrationRequired (where system migrate would
+// find no case it recognizes — the trap the plan pins).
+func TestGate_SentinelOnly_Initializes(t *testing.T) {
+	top := gateTestTop(t)
+	sentinel(t, top)
+
+	require.NoError(t, runMigrationGate(dummyCmd()))
+
+	assert.NoFileExists(t, filepath.Join(top, ".initializing"))
+	cliV, ok, err := config.ReadSchemaVersion(config.SchemaVersionPathFor(filepath.Join(top, "cli")))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, cliutil.CLISchemaVersion, cliV)
+	libV, ok, err := config.ReadSchemaVersion(config.SchemaVersionPathFor(filepath.Join(top, "library")))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, config.LibrarySchemaVersion, libV)
+}
+
+// TestGate_SentinelPlusCLI_Initializes covers a crash after the CLI realm
+// finished but before the library realm started: the gate must finish the
+// build (create the missing library realm) rather than refuse.
+func TestGate_SentinelPlusCLI_Initializes(t *testing.T) {
+	top := gateTestTop(t)
+	sentinel(t, top)
+	cliStamp(t, top, cliutil.CLISchemaVersion)
+
+	require.NoError(t, runMigrationGate(dummyCmd()))
+
+	assert.NoFileExists(t, filepath.Join(top, ".initializing"))
+	libV, ok, err := config.ReadSchemaVersion(config.SchemaVersionPathFor(filepath.Join(top, "library")))
+	require.NoError(t, err)
+	require.True(t, ok)
+	assert.Equal(t, config.LibrarySchemaVersion, libV)
+}
+
+// TestGate_SentinelPlusBothRealms_ClearsAndProceeds covers a crash after both
+// realms finished but before the final sentinel removal: the gate must clear
+// the stray sentinel and proceed, not treat it as still mid-build forever.
+func TestGate_SentinelPlusBothRealms_ClearsAndProceeds(t *testing.T) {
+	top := gateTestTop(t)
+	sentinel(t, top)
+	libStamp(t, top, config.LibrarySchemaVersion)
+	cliStamp(t, top, cliutil.CLISchemaVersion)
+
+	require.NoError(t, runMigrationGate(dummyCmd()))
+
+	assert.NoFileExists(t, filepath.Join(top, ".initializing"))
 }
 
 func TestGate_BothCurrent_Proceeds(t *testing.T) {
