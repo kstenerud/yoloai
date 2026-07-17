@@ -23,6 +23,36 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `yoloai reset` refuses a sandbox with unapplied changes
+
+**Previous behavior:** `reset` re-copied the workdir from the host over the
+sandbox's work copy and reset the diff baseline, with no check for work the host
+had never seen and no way to express consent. `destroy` has always refused such
+a sandbox unless `--abandon-unapplied` authorized the discard; `reset` destroys
+the same work, from the same directories, read by the same probes, and asked
+nothing.
+
+**New behavior:** `reset` refuses a sandbox holding unapplied changes with the
+same typed error `destroy` uses, and `--abandon-unapplied` authorizes the
+discard. As with `destroy`, there is no prompt to widen the scope and therefore
+no `--yes`. The library equivalent is `SandboxResetOptions.AbandonUnappliedWork`.
+
+**Impact:** a scripted `yoloai reset` on a sandbox whose agent has made changes
+now exits with the active-work code instead of silently discarding them. In the
+intended flow nothing changes: `apply` the work and it is no longer unapplied,
+so `reset` proceeds untouched.
+
+**Also note — `reset` covers more than it used to.** Since v0.8.0 it re-copies
+every tracked directory, meaning aux `--dir <path>:copy` dirs as well as the
+workdir; previously an in-place reset touched only the workdir and left aux dirs
+alone. That widening is a fix (a reset that resets some of the tracked dirs is
+the surprising one), but it landed unannounced and made the missing guard sharper
+— work in an aux dir was destroyed by a command whose help said "workdir". The
+help text now says what it does.
+
+**Migration:** run `yoloai diff` / `yoloai apply` to keep the work, or pass
+`--abandon-unapplied` to discard it deliberately.
+
 ### `yoloai system migrate` now refuses to operate on a data dir it can't fully read
 
 **Previous behavior:** the v3->v4 and v4->v5 migrators skipped any sandbox whose

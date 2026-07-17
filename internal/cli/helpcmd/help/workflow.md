@@ -35,10 +35,17 @@ APPLY
 
 RESET
 
-  Re-copy the original and start over:
+  Re-copy the originals and start over. Every tracked directory is
+  re-copied from the host — the workdir and each --dir :copy dir — so
+  the agent's changes to all of them are discarded:
 
      yoloai reset my-task
      yoloai reset my-task --clear-state  # also wipe agent state
+
+  Reset refuses when the sandbox holds unapplied changes, the same way
+  destroy does. Apply what you want to keep first, or discard it:
+
+     yoloai reset my-task --abandon-unapplied
 
 FILES
 

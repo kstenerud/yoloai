@@ -15,26 +15,28 @@ import (
 )
 
 type resetOpts struct {
-	noPrompt   bool
-	restart    bool
-	clearState bool
-	keepCache  bool
-	keepFiles  bool
-	attach     bool
-	debug      bool
-	env        []string
+	abandonUnapplied bool
+	noPrompt         bool
+	restart          bool
+	clearState       bool
+	keepCache        bool
+	keepFiles        bool
+	attach           bool
+	debug            bool
+	env              []string
 }
 
 func NewResetCmd() *cobra.Command {
 	opts := &resetOpts{}
 	cmd := &cobra.Command{
 		Use:     "reset <name>",
-		Short:   "Re-copy workdir into sandbox and reset diff baseline",
+		Short:   "Re-copy tracked dirs into sandbox and reset diff baseline",
 		GroupID: cliutil.GroupLifecycle,
 		Args:    cobra.ArbitraryArgs,
 		RunE:    func(cmd *cobra.Command, args []string) error { return runReset(cmd, args, opts) },
 	}
 
+	cmd.Flags().BoolVar(&opts.abandonUnapplied, "abandon-unapplied", false, "Reset even when the sandbox has unapplied changes")
 	cmd.Flags().BoolVar(&opts.noPrompt, "no-prompt", false, "Skip re-sending prompt after reset")
 	cmd.Flags().BoolVar(&opts.restart, "restart", false, "Stop and restart the container")
 	cmd.Flags().BoolVar(&opts.clearState, "clear-state", false, "Wipe agent runtime state (implies --restart)")
@@ -83,6 +85,11 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 			NoPrompt:         opts.noPrompt,
 			Debug:            opts.debug,
 			Env:              envMap,
+			// Reset overwrites every tracked work copy from the host, so it
+			// destroys unapplied work exactly as destroy does — and authorizes it
+			// the same way. Like destroy, there is no prompt to widen the scope
+			// and therefore no --yes to paper over it (see destroy.go).
+			AbandonUnappliedWork: opts.abandonUnapplied,
 		})
 		if res != nil {
 			cliutil.RenderNotices(cmd, res.Notices)

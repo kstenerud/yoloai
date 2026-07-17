@@ -266,3 +266,47 @@ func TestSandbox_LiveHandle_PassesGuard(t *testing.T) {
 	_, err = sb.Metadata()
 	assert.NotErrorIs(t, err, ErrSandboxDestroyed, "a live handle must not trip the destroyed guard")
 }
+
+// Reset overwrites every tracked work copy from the host, so it destroys
+// unapplied work exactly as Destroy does — and must refuse it the same way.
+// This pins the refusal against a backend-less client: the guard has to fire
+// before any runtime IO, or it is not a guard, it is a race. The fixture uses
+// the broken-sandbox path (a work/ dir with content and no readable
+// environment.json), which unappliedWorkReason resolves via ProbeWorkData —
+// chosen because it needs no live backend to produce a genuine "there is work
+// here" signal.
+func TestSandbox_Reset_RefusesUnappliedWork(t *testing.T) {
+	c := vscodeClient(t, nil) // backend-less; the guard must short-circuit before any IO
+	sbDir := c.layout.SandboxDir("box")
+	workDir := filepath.Join(sbDir, "work", "proj")
+	require.NoError(t, os.MkdirAll(workDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "agent-wrote-this.txt"), []byte("unreviewed"), 0o600))
+
+	sb := &Sandbox{engine: c.engine, name: "box"}
+
+	_, err := sb.Reset(context.Background(), SandboxResetOptions{})
+	require.Error(t, err, "reset must refuse a sandbox holding work the host has never seen")
+	var activeWork *ActiveWorkError
+	assert.True(t, errors.As(err, &activeWork),
+		"the refusal must be a typed *ActiveWorkError so callers can offer --abandon-unapplied; got %T", err)
+}
+
+// The flag is the authorization, and it is the ONLY authorization — destroy.go
+// is explicit that there is no prompt to widen the scope and therefore no --yes
+// to paper over it. With it set, Reset must get past the guard; it then fails on
+// the absent backend, which is proof enough that the guard is not what stopped
+// it (an *ActiveWorkError here would mean the flag did nothing).
+func TestSandbox_Reset_AbandonUnappliedWorkPassesTheGuard(t *testing.T) {
+	c := vscodeClient(t, nil)
+	sbDir := c.layout.SandboxDir("box")
+	workDir := filepath.Join(sbDir, "work", "proj")
+	require.NoError(t, os.MkdirAll(workDir, 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(workDir, "agent-wrote-this.txt"), []byte("unreviewed"), 0o600))
+
+	sb := &Sandbox{engine: c.engine, name: "box"}
+
+	_, err := sb.Reset(context.Background(), SandboxResetOptions{AbandonUnappliedWork: true})
+	var activeWork *ActiveWorkError
+	assert.False(t, errors.As(err, &activeWork),
+		"AbandonUnappliedWork must authorize the discard, not be ignored; got %v", err)
+}

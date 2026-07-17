@@ -51,5 +51,6 @@ LIFECYCLE
   yoloai destroy <name> --abandon-unapplied  Destroy despite unapplied work
   yoloai reset <name> --clear-state  Reset and wipe agent state
   yoloai reset <name> --no-prompt Don't re-send prompt on reset
+  yoloai reset <name> --abandon-unapplied  Reset despite unapplied work
 
 More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md

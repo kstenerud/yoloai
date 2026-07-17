@@ -309,22 +309,37 @@ func waitConditionMet(st Status, cond WaitCondition) bool {
 	}
 }
 
-// Reset re-copies the workdir into the sandbox, resets the diff baseline, and
-// (per opts) optionally restarts the container and wipes agent state. Use for
-// "start over" workflows that abandon the agent's current changes.
+// Reset re-copies every tracked directory — the workdir and each aux :copy dir
+// — from the host into the sandbox, resets the diff baseline, and (per opts)
+// optionally restarts the container and wipes agent state. Use for "start over"
+// workflows that abandon the agent's current changes.
+//
+// With opts.AbandonUnappliedWork false it refuses a sandbox that HasActiveWork,
+// returning a typed *ActiveWorkError carrying the reason — the same contract
+// Destroy has, because both verbs destroy the same thing: work the host has
+// never seen. Atomic: no check-then-act gap.
 func (s *Sandbox) Reset(ctx context.Context, opts SandboxResetOptions) (*ResetResult, error) {
 	if err := s.checkNotDestroyed(); err != nil {
 		return nil, err
 	}
+	if !opts.AbandonUnappliedWork {
+		if active, reason := s.HasActiveWork(ctx); active {
+			return nil, yoerrors.NewActiveWorkError("%s", reason)
+		}
+	}
 	return s.engine.Reset(ctx, opts.toInternal(s.name))
 }
 
-// HasActiveWork reports whether destroying the sandbox would lose unapplied
-// work — a dirty workdir or commits beyond the baseline — and a human-readable
-// reason (empty when there's none). A running agent alone does not count: a live
-// but clean sandbox has nothing to lose. It's a pure query with no side effects;
-// use it to pre-flight a batch of sandboxes before prompting once. For the
-// single-sandbox case prefer Destroy's atomic typed refusal.
+// HasActiveWork reports whether the sandbox holds unapplied work — a dirty
+// workdir or aux :copy dir, or commits beyond the baseline — and a
+// human-readable reason (empty when there's none). It answers "would discarding
+// this sandbox's state lose something the host has never seen", which is the
+// question both Destroy and Reset must ask: one throws the sandbox away, the
+// other overwrites its work copy from the host, and the work is equally gone
+// either way. A running agent alone does not count: a live but clean sandbox has
+// nothing to lose. It's a pure query with no side effects; use it to pre-flight
+// a batch of sandboxes before prompting once. For the single-sandbox case prefer
+// Destroy's or Reset's atomic typed refusal.
 func (s *Sandbox) HasActiveWork(ctx context.Context) (bool, string) {
 	return s.engine.NeedsConfirmation(ctx, s.name)
 }
@@ -492,6 +507,19 @@ type SandboxResetOptions struct {
 	// recreated (RestartContainer). Merged over the resolved config+profile env,
 	// never persisted — re-supply it on each restart that needs it.
 	Env map[string]string
+	// AbandonUnappliedWork proceeds even when the sandbox holds work that was
+	// never applied back to the host. Reset re-copies each tracked directory
+	// from the host over the sandbox's work copy, so that work is destroyed —
+	// which is the verb's purpose, and exactly why it is gated: the copy/apply
+	// review flow exists so work is reviewed before it is discarded, and reset
+	// is the other way work leaves a sandbox. With it false, Reset refuses such
+	// a sandbox with a typed *ActiveWorkError, the same contract Destroy has.
+	//
+	// In the intended flow this is not in the way: `apply` the work and it is no
+	// longer unapplied, so reset proceeds untouched. It bites only when reset
+	// would silently take something no one has looked at.
+	// (The CLI's --abandon-unapplied flag maps onto this field at the boundary.)
+	AbandonUnappliedWork bool
 }
 
 func (o SandboxResetOptions) toInternal(name string) orchestrator.ResetOptions {
