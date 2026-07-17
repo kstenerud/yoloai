@@ -44,8 +44,10 @@ See [Security](docs/GUIDE.md#security) for the full model, including honest limi
 Download the archive for your platform from the [latest release](https://github.com/kstenerud/yoloai/releases/latest), extract the `yoloai` binary, and put it on your `PATH`:
 
 ```bash
-# Linux x86-64 (swap in linux_arm64 / darwin_amd64 / darwin_arm64 as needed)
-VERSION=0.7.0
+# Linux x86-64 (swap in linux_arm64 / darwin_amd64 / darwin_arm64 as needed).
+# Set VERSION to the tag shown on the latest-release page linked above, without
+# the leading "v" — e.g. VERSION=1.2.3 for tag v1.2.3.
+VERSION=X.Y.Z
 curl -fsSL "https://github.com/kstenerud/yoloai/releases/download/v${VERSION}/yoloai_${VERSION}_linux_amd64.tar.gz" \
   | tar -xz yoloai
 sudo install yoloai /usr/local/bin/
@@ -76,7 +78,7 @@ Requires Go 1.26+. The binary is placed in `$GOPATH/bin` (typically `~/go/bin`).
 ```bash
 git clone https://github.com/kstenerud/yoloai.git
 cd yoloai
-git checkout v0.7.0   # or stay on main for the latest development version
+git checkout "$(git describe --tags --abbrev=0)"   # newest release tag; or stay on main for the development version
 make build
 sudo install yoloai /usr/local/bin/
 ```

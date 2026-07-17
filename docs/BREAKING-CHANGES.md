@@ -23,6 +23,32 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `yoloai system migrate` now refuses to operate on a data dir it can't fully read
+
+**Previous behavior:** the v3->v4 and v4->v5 migrators skipped any sandbox whose
+`environment.json` would not load, and then stamped the realm's schema version
+anyway. A record the migration could not read was therefore dropped silently
+from the work and the realm certified as migrated regardless. Reproduced against
+a real data dir: a sandbox record written by a newer yoloai reported `No pending
+framework migrations. Data directory migrated successfully.` and advanced the
+stamp, leaving that sandbox unconverted — and unreachable, because the startup
+gate then reads the realm as current and never routes back to `system migrate`,
+the only command permitted to repair it.
+
+**New behavior:** a directory containing an `environment.json` that cannot be
+loaded aborts the migration at plan time, before anything is changed, naming the
+sandbox and the reason. A directory with no `environment.json` at all is still
+skipped — it is not a sandbox. This matches what the agent-config migration has
+always done.
+
+**Impact:** a `system migrate` that previously reported success on a data dir
+holding an unreadable record now fails instead. The realm is left at its
+existing version and no sandbox is modified. The most likely cause is a sandbox
+created by a newer yoloai than the one being run; the error says so.
+
+**Migration:** run the yoloai version named in the error, or move the offending
+sandbox directory aside and re-run. Nothing is discarded automatically.
+
 ### Config commands reject unknown paths; `config set` requires a leaf key
 
 **Previous behavior:** `yoloai config set` accepted arbitrary paths, including
