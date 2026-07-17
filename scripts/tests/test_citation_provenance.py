@@ -222,3 +222,23 @@ def test_carrying_an_existing_source_citation_is_not_a_new_claim(tmp_path: Path)
     t = _transcript(tmp_path, [("Read", {"file_path": "/repo/unrelated.md"})])
     payload = _edit(t, f"reworded, still `{_SRC}`", old_string=f"was `{_SRC}`", file_path=_FINDINGS)
     assert unread_citations(payload) == []
+
+
+# --- authorship (DF133) ------------------------------------------------------
+
+def test_authoring_a_doc_this_session_counts_as_knowing_it(tmp_path: Path) -> None:
+    """The hook blocked its own author: a research doc composed with Write, cited
+    from a second file minutes later, refused as never opened. Writing a file is
+    stronger provenance than reading one."""
+    t = _transcript(tmp_path, [("Write", {"file_path": f"/repo/{_DOC}", "content": "# a doc"})])
+    payload = _edit(t, f"documented in `{_DOC}`", file_path="AGENTS.md")
+    assert unread_citations(payload) == []
+
+
+def test_a_write_whose_body_merely_mentions_the_doc_is_not_authorship(tmp_path: Path) -> None:
+    """Only the PATH of a Write counts. Counting bodies would let the edit under
+    test clear itself by containing the citation that triggered it — the exact
+    reason WRITE_TOOLS is excluded from READ_TOOLS."""
+    t = _transcript(tmp_path, [("Write", {"file_path": "/repo/notes.md", "content": f"see {_DOC}"})])
+    payload = _edit(t, f"documented in `{_DOC}`", file_path="AGENTS.md")
+    assert unread_citations(payload) == ["llm-shaped-repos.md"]

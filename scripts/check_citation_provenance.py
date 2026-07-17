@@ -92,6 +92,21 @@ READ_TOOLS = frozenset({"Read", "Grep", "Glob", "Bash", "Task", "Agent", "WebFet
 
 WRITE_TOOLS = ("Write", "Edit")
 
+# Authoring a file is the strongest provenance there is — stronger than reading
+# one — but only its PATH counts, never its content. That split is the whole
+# subtlety: `Write(file_path=research/x.md)` means this session composed x.md and
+# knows what it says; a write whose *body* merely mentions x.md means nothing, and
+# counting bodies would let the edit under test clear itself, which is why
+# WRITE_TOOLS is excluded from READ_TOOLS in the first place.
+#
+# Found by the hook blocking its own author (2026-07-17): a research doc was
+# written with Write, cited from a second file minutes later, and refused —
+# "nothing in this session opened that file". The existing exemption covers only
+# the file currently being edited, not one authored earlier in the session, so
+# creating a doc and wiring it into an index was unpassable except by opening the
+# file you had just composed. See DF133.
+AUTHORED_TOOLS = frozenset({"Write"})
+
 # Where research docs live. A citation naming no file here is not a citation: it
 # is prose about citations, and this hook's first live firing was against exactly
 # that — the `research/x.md` placeholder in D122's own text, which explains the
@@ -160,9 +175,15 @@ def read_tool_inputs(transcript_path: Path) -> str | None:
                 for block in content:
                     if not isinstance(block, dict) or block.get("type") != "tool_use":
                         continue
-                    if block.get("name") not in READ_TOOLS:
-                        continue
-                    chunks.append(json.dumps(block.get("input", {})))
+                    name = block.get("name")
+                    tool_input = block.get("input", {})
+                    if name in READ_TOOLS:
+                        chunks.append(json.dumps(tool_input))
+                    elif name in AUTHORED_TOOLS and isinstance(tool_input, dict):
+                        # Path only, never the body — see AUTHORED_TOOLS.
+                        path = tool_input.get("file_path")
+                        if isinstance(path, str):
+                            chunks.append(path)
     except OSError:
         return None
     return "\n".join(chunks)

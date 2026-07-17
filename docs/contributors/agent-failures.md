@@ -25,6 +25,20 @@ is the process working. An entry belongs here when the false belief **reached a 
 someone catching it. Volume is the enemy: a log of every fumble is unreadable and therefore
 unanalysable.
 
+**This file is only half the story, and the darker half.** A failure leaves wreckage to find; the
+other kind of bump leaves nothing — the owner says one offhand sentence, a complex plan collapses
+into a simple one, and there is no scar to file. Those go in
+[`design/research/uncanny-valley.md`](design/research/uncanny-valley.md), which collects moments the
+interaction stopped resembling a human one **in either direction**. Do not let the existence of this
+file imply the interesting moments are the failures; on the evidence so far they are not.
+
+**This file is only half the story, and the darker half.** A failure leaves wreckage to find; the
+other kind of bump leaves nothing — the owner says one offhand sentence, a complex plan collapses
+into a simple one, and there is no scar to file. Those go in
+[`design/research/uncanny-valley.md`](design/research/uncanny-valley.md), which collects moments the
+interaction stopped resembling a human one **in either direction**. Do not let the existence of this
+file imply the interesting moments are the failures; on the evidence so far they are not.
+
 ## Fields, and the one that matters
 
 - **Claimed / True** — the gap.
@@ -63,16 +77,42 @@ examined the code that *consumes* a value or state and asserted a fact about wha
 "Who writes this?" is a grep, not a model — which is why it is mechanisable and why the failure is
 embarrassing rather than deep.
 
-**4. The catch rate of the mechanisms, on this corpus, is zero for the interpretive class.** A1,
-A2 and A3 were each caught by the owner asking a plain question. No hook, test, or gate fired on
-any of them. That is the finding this file exists to make visible, and it should be re-checked
-every time an entry is added: if it stays zero, the gates are guarding the wrong class.
+**4. The catch rate of the mechanisms, on this corpus, is one — and it arrived within an hour of
+the file existing.** A1, A2 and A3 (the interpretive class) were each caught by the owner asking a
+plain question; no hook, test or gate fired on any of them. Then **A0** was caught by
+`check_citation_provenance.py`, on a live edit, unprompted — and it was a *false accusation* that
+was nonetheless worth complying with. Two things follow, and both should be re-checked as entries
+accumulate: the gates do fire, and so far they fire on **citation provenance**, not on the
+interpretive class that does the damage. If that split holds, it says the guardable surface and the
+dangerous surface are not yet the same surface.
 
 ## Specimens
 
 Newest first. Every entry here is from a single session (2026-07-16/17) — the first sustained
 attempt to record them, so the corpus is deep on one session and empty before it. That skew is
 itself worth knowing when reading pattern 4.
+
+### A0 — the gate fired on its own author, and was right anyway (2026-07-17)
+
+- **Claimed:** implicitly — that citing a research doc this session had *composed* needed no
+  further provenance.
+- **True:** the hook disagreed and blocked the edit: *"You just cited uncanny-valley.md, but nothing
+  in this session opened that file."* It exempted the file being edited, but nothing authored earlier
+  in the session, and `Write` is excluded from `READ_TOOLS` by design. It could not tell "I wrote it"
+  from "I never saw it" (DF133, fixed).
+- **Caught by:** **`check_citation_provenance.py`** — a mechanism, on a live edit, unprompted. The
+  first entry in this corpus whose Caught-by is not "the owner asked".
+- **Cost:** none. It cost one file read and produced a fix plus a finding.
+- **Class:** a *false accusation* — the failure mode D122 named as the one that gets a hook disabled.
+  Its trigger was ordinary (write a doc, wire it into an index); it had simply never fired because no
+  research doc had been authored since the hook landed two days earlier.
+- **Worth keeping for the shape, not the bug.** The demand was absurd — *open the file you wrote ten
+  minutes ago* — and the action it forced was legitimate: the read verified that the claim being made
+  about the doc actually matched its ABOUTME. **A gate can be wrong about its reason and right about
+  its remedy.** The reflex on being blocked by an obviously-confused gate is to delete or bypass it;
+  the check was worth doing regardless of the confusion, and complying cost ten seconds.
+- **Gated now?** It *is* the gate. Fixed to count authorship (path only, never body), with tests
+  pinning both halves.
 
 ### A1 — seatbelt was recorded as a defect it structurally cannot have (2026-07-17)
 
