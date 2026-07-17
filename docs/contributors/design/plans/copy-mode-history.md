@@ -16,7 +16,7 @@
   (see "Backend gating").
 - **Depends on:** confine-host-side-git.md
 
-Related: [copy-mode-git-rce.md](copy-mode-git-rce.md) (why work-copy git must run
+Related: [copy-mode-git-rce.md](../../archive/plans/copy-mode-git-rce.md) (why work-copy git must run
 in-confinement; the filter/textconv/fsmonitor RCE class), [config.md](../config.md) (the
 three config surfaces), [security.md](../security.md).
 
@@ -63,7 +63,7 @@ preserve the real `.git`.
 ## Why preserving the real `.git` is now the right default
 
 The historical reason to avoid a writable real `.git` in the work copy was the RCE class in
-[copy-mode-git-rce.md](copy-mode-git-rce.md): host-side git ran `add`/`diff`/`status` against
+[copy-mode-git-rce.md](../../archive/plans/copy-mode-git-rce.md): host-side git ran `add`/`diff`/`status` against
 the agent-controlled work copy, so a planted `filter.*.clean` / `diff.*.textconv` /
 `core.fsmonitor` driver executed **on the host**. The 2026-06-29 fix moved those operations
 **in-confinement** for docker/podman/containerd (and tart was always in-VM). Once git only

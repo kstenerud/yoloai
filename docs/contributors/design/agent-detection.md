@@ -5,7 +5,7 @@
 # Agent-owned detection + fall-to-shell + resume — the build contracts
 
 **Status:** Design converged 2026-06-25 (Phase 0 of
-[plans/agent-owned-detection.md](plans/agent-owned-detection.md)), not yet
+[plans/agent-owned-detection.md](../archive/plans/agent-owned-detection.md)), not yet
 implemented. This is the **build-facing contract doc** the plan's Phase 0 calls
 for: it pins DD1–DD6 to concrete shapes so Phases 1–4 implement against a spec,
 not an improvisation. The *rationale* lives in the converged layer designs — this
@@ -240,7 +240,7 @@ extension of D89's mechanism-vs-payload — detection is a per-agent *mechanism*
 
 ## Cross-references
 
-- **Plan:** [plans/agent-owned-detection.md](plans/agent-owned-detection.md) (the
+- **Plan:** [plans/agent-owned-detection.md](../archive/plans/agent-owned-detection.md) (the
   4-phase build with Docker checkpoints; this doc is its Phase 0).
 - **Rationale (converged):** [session-layer.md](session-layer.md) (fall-to-shell,
   tier-2, the carve's `ProcSpec`), [agent-layer.md](agent-layer.md) (Resume

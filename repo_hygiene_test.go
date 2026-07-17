@@ -67,6 +67,12 @@ import (
 //     it documented a mode retired two releases earlier, a package that has
 //     never existed, a file that is not on disk, and ~30 absent functions —
 //     green the entire time, because nothing executes prose.
+//  7. Every relative markdown link (`[text](path.md)`) in a live tracked *.md
+//     file resolves to a real file. D124 gated this for architecture/ alone and
+//     said so out loud: "No other tier has that backstop." It didn't: a
+//     plan-archival move left 41 links across decisions/ and design/ pointing at
+//     files that had moved out from under them. docs/contributors/archive/** is
+//     exempt — frozen history, not a live tier; see isLiveMarkdownDoc.
 //
 // (docs/contributors/**/*.md USED to be listed here as deliberately not gated,
 // on the grounds that the bulk-add was "a known, tracked bulk-add task". It was
@@ -2229,6 +2235,163 @@ func TestRepoHygiene_ArchitectureDocSectionMatcher_ScopesRowsToTheirHeading(t *t
 	}
 	if !slices.Equal(got, want) {
 		t.Errorf("docSectionFileRefs = %v, want %v", got, want)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Repo-wide markdown link-resolution gate
+// ---------------------------------------------------------------------------
+
+// isLiveMarkdownDoc reports whether path is a tracked Markdown file this gate
+// should hold to account.
+//
+// docs/contributors/archive/** is the one exemption, and for the same reason
+// isGatedContributorDoc carves it out of the ABOUTME gate: it is frozen
+// history. A link inside it pointed at something real on the day the page was
+// written; the plan-archival move that broke 96 of its links didn't make that
+// page wrong about its own past, and repointing them would make the archive
+// assert a location it never actually lived at when the words were written.
+// AGENTS.md rule 2 draws the same line for name sweeps — archive/ is exempt
+// there too, and for the identical reason. Every other tracked *.md is prose a
+// reader follows today, so a link in it is a claim about today's tree.
+func isLiveMarkdownDoc(path string) bool {
+	return strings.HasSuffix(path, ".md") && !strings.HasPrefix(path, "docs/contributors/archive/")
+}
+
+var (
+	// mdLinkRe matches a markdown link's target: `[text](target)`.
+	mdLinkRe = regexp.MustCompile(`\[[^\]]*\]\(([^)]+)\)`)
+	// mdCodeSpanRe matches an inline code span, stripped before link-matching so
+	// a literal example like `` `[text](url)` `` or a backticked regex whose
+	// character class looks link-shaped (`` `(?:[._-]...)` ``) is not mistaken
+	// for a real link — the same reason docSymbolRefs only reads fenced blocks
+	// and docCallRe requires backticks: code syntax being discussed is not code
+	// syntax being used.
+	mdCodeSpanRe = regexp.MustCompile("`[^`]*`")
+)
+
+// mdRelativeLinkTargets returns every relative-link target body names, with
+// any #anchor stripped and http(s)/mailto links excluded. Fenced code blocks
+// and inline code spans are stripped first, mirroring docSymbolRefs's fence
+// handling — a link shown as a syntax example is prose about markdown, not a
+// claim the doc is making.
+func mdRelativeLinkTargets(body string) []string {
+	var out []string
+	inFence := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") || strings.HasPrefix(strings.TrimSpace(line), "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		clean := mdCodeSpanRe.ReplaceAllString(line, "")
+		for _, m := range mdLinkRe.FindAllStringSubmatch(clean, -1) {
+			if target := mdRelativeLinkTarget(m[1]); target != "" {
+				out = append(out, target)
+			}
+		}
+	}
+	return out
+}
+
+// mdRelativeLinkTarget normalizes a single raw link target, or returns "" if
+// it names something this gate does not check: an external URL, a mailto:, a
+// same-page anchor, or a bare anchor-only target.
+func mdRelativeLinkTarget(raw string) string {
+	target := strings.TrimSpace(raw)
+	if target == "" || strings.HasPrefix(target, "#") {
+		return ""
+	}
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") ||
+		strings.HasPrefix(target, "mailto:") {
+		return ""
+	}
+	if i := strings.Index(target, "#"); i >= 0 {
+		target = target[:i]
+	}
+	if target == "" || strings.ContainsAny(target, " \t") {
+		// A relative path never carries whitespace; anything that does is
+		// prose an over-eager match swept up, not a link the author meant to
+		// be followed (e.g. a malformed reference-style stand-in).
+		return ""
+	}
+	return target
+}
+
+// TestRepoHygiene_MarkdownLinks_Resolve is the repo-wide link gate: every
+// relative link in a live tracked *.md file must resolve to a real file.
+//
+// D124 built the architecture/-only version of this and said, out loud, "No
+// other tier has that backstop." That was true the day it was written and
+// stopped being true the next time a doc moved: an archival sweep (commits
+// cf52b743/19b11c00) relocated ~10 finished plans into archive/plans/ without
+// repointing the links that named their old home, breaking 41 links across
+// decisions/working-notes.md and design/**. Nothing failed, because nothing
+// checked — the same failure mode D124 exists to close, one tier over.
+//
+// This gate does not follow #anchors (a moved heading inside a page that still
+// exists is a much smaller miss than a page that no longer does), and it does
+// not check archive/ (isLiveMarkdownDoc explains why). Everything else with a
+// relative markdown link is in scope.
+func TestRepoHygiene_MarkdownLinks_Resolve(t *testing.T) {
+	root := repoRoot(t)
+	files := trackedFiles(t, root)
+	var docs []string
+	for _, p := range files {
+		if isLiveMarkdownDoc(p) {
+			docs = append(docs, p)
+		}
+	}
+	sort.Strings(docs)
+	if len(docs) == 0 {
+		t.Fatal("no live tracked *.md files — the gate's corpus went quiet, which means it is " +
+			"checking nothing (the failure mode DF94 documents)")
+	}
+
+	links := 0
+	for _, rel := range docs {
+		body, err := os.ReadFile(filepath.Join(root, rel)) //nolint:gosec // G304: path from git ls-files under repoRoot
+		if err != nil {
+			t.Fatalf("read %s: %v", rel, err)
+		}
+		dir := filepath.Dir(rel)
+		for _, target := range mdRelativeLinkTargets(string(body)) {
+			links++
+			resolved := filepath.ToSlash(filepath.Join(dir, target))
+			if _, statErr := os.Stat(filepath.Join(root, resolved)); statErr != nil {
+				t.Errorf("%s links to %q, which resolves to %q — that file does not exist. Repoint "+
+					"the link to where the target actually lives, or drop the link.", rel, target, resolved)
+			}
+		}
+	}
+	t.Logf("markdown link gate scope: %d live docs, %d relative links", len(docs), links)
+}
+
+// TestRepoHygiene_MarkdownLinkMatcher_IgnoresCodeSpansAndFences pins the
+// matcher's one load-bearing property: a link-shaped span that is markdown
+// syntax being *discussed* (an inline-code example, a regex character class
+// that happens to contain balanced brackets and parens) must not be read as a
+// link the doc is *making*. Without this, standards.md's own “ `[text](url)`
+// “ example and a backticked regex like “ `(?:[._-]...)` “ both misparse as
+// broken links, and a gate that cries wolf on its own documentation gets
+// disabled rather than trusted.
+func TestRepoHygiene_MarkdownLinkMatcher_IgnoresCodeSpansAndFences(t *testing.T) {
+	body := "" +
+		"Standard Markdown `[text](url)` form is not a link to check.\n" +
+		"Nor is a backticked regex like `^[A-Za-z0-9]+(?:[._-](?:[A-Za-z0-9]+))*$`.\n" +
+		"But [real link](docs/target.md) is, and so is [with anchor](docs/target.md#section).\n" +
+		"```\n" +
+		"[fenced](docs/should-not-be-checked.md)\n" +
+		"```\n" +
+		"[external](https://example.com/x.md) and [mail](mailto:a@b.com) are skipped,\n" +
+		"and so is a bare [anchor-only](#section).\n"
+
+	got := mdRelativeLinkTargets(body)
+	want := []string{"docs/target.md", "docs/target.md"}
+	if !slices.Equal(got, want) {
+		t.Errorf("mdRelativeLinkTargets = %v, want %v", got, want)
 	}
 }
 

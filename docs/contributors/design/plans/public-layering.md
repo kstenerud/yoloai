@@ -19,8 +19,8 @@
 > **🚧 Merge gate (decided 2026-06-25).** This branch does **not** merge to `main`
 > until per-agent custom detection strategies are wired for every agent that
 > exposes a native turn-completion callback — see
-> [agent-detection-strategies.md](agent-detection-strategies.md). The shipped
-> fall-to-shell + resume work ([agent-owned-detection.md](agent-owned-detection.md))
+> [agent-detection-strategies.md](../../archive/plans/agent-detection-strategies.md). The shipped
+> fall-to-shell + resume work ([agent-owned-detection.md](../../archive/plans/agent-owned-detection.md))
 > deferred that strategy formalization to its own task; it is a release blocker, not
 > dropped.
 
@@ -198,7 +198,7 @@ remainder ([D99](../../decisions/working-notes.md)):
   `Launch`/`ProcSpec` contract, `AgentLaunchPrefix` off the public descriptor, slim
   `sandbox-setup.py` / neutral PID-1 default, **+ build one-shot `-p`/Tier-3** (control-eval).
   (1b) **Q104** agent/model → `sb.Agent().Type()/Model()` + `agent.json` + M2 migration
-  ([store-workload-split.md](store-workload-split.md)). (1c) `paths.go` helpers-only. (1d) re-home
+  ([store-workload-split.md](../../archive/plans/store-workload-split.md)). (1c) `paths.go` helpers-only. (1d) re-home
   the residual `entrypoint.py` secrets-read for legacy backends.
 - **Phase 2 — near-term consumer surface (control-eval).** **Done:** `yoloai wait` + `sandbox_wait`
   (pre-existing); `yoloai run` + headless/Tier-3 (D100/D101); structured diff `--json` +

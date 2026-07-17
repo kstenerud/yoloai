@@ -4,11 +4,11 @@
 # Plan: confine all host-side work-copy git (apple, seatbelt, broken-metadata probe)
 
 - **Status:** IN-PROGRESS — The 2026-06-29 fix
-  ([copy-mode-git-rce.md](copy-mode-git-rce.md)) closed the RCE for docker/podman/containerd
+  ([copy-mode-git-rce.md](../../archive/plans/copy-mode-git-rce.md)) closed the RCE for docker/podman/containerd
   and tart, but left **apple and seatbelt** running work-copy git host-side, and left a
   host-side `git status` in the broken-metadata recovery path on **all** backends. Fix 1
   (apple) and Fix 2 (seatbelt) below shipped and were verified on real macOS hardware
-  2026-07-05 (build brief: [confine-host-side-git-macos-build.md](confine-host-side-git-macos-build.md);
+  2026-07-05 (build brief: [confine-host-side-git-macos-build.md](../../archive/plans/confine-host-side-git-macos-build.md);
   tests: `internal/orchestrator/integration_macos_test.go`,
   `runtime/seatbelt/gitprofile_test.go`). Fix 3 (probe fsmonitor hardening) is done
   cross-platform, but the clean-filter-on-`git status` vector in the broken-metadata probe
@@ -188,7 +188,7 @@ quickly; Fix 2 requires real macOS iteration on the SBPL profile.
 
 ## Docs / decisions to update
 
-- **Fix the stale claim in [copy-mode-git-rce.md](copy-mode-git-rce.md):** its status says the
+- **Fix the stale claim in [copy-mode-git-rce.md](../../archive/plans/copy-mode-git-rce.md):** its status says the
   fix shipped for the container backends and lists seatbelt as the sole residual — it omits
   **apple** entirely, and does not note that host-side hardening leaves filters/textconv/fsmonitor
   live. Add apple; state the exact neutralization gap.

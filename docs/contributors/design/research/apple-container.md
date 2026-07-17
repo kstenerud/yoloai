@@ -146,7 +146,7 @@ sandbox, native on macOS, no Docker Desktop." Closes the weakest link in the
 current macOS isolation story (Docker Desktop's shared-kernel VM) without
 changing the image/profile workflow. Proceed to a backend design plan; the main
 engineering judgment is risk appetite for a v1 bespoke CLI. See
-[plans/apple-container-backend.md](../plans/apple-container-backend.md).
+[plans/apple-container-backend.md](../../archive/plans/apple-container-backend.md).
 
 ## Reproduction (spike commands)
 

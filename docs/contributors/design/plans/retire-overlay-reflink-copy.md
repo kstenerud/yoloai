@@ -5,7 +5,7 @@
 # Plan: retire `:overlay`, base `:copy` on reflink-aware copy
 
 - **Status:** PLANNED — decided (D109), not yet implemented. Supersedes the "gate `:overlay`"
-  direction in [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md) (H2/DF65).
+  direction in [overlay-sysadmin-escape.md](../../archive/plans/overlay-sysadmin-escape.md) (H2/DF65).
 - **Depends on:** —
 
 ## Why (the short version)
@@ -160,7 +160,7 @@ path and flips `Mode` in a separate file), so it cannot be made crash-safe by
 idempotency alone. It is built on the crash-safe migration substrate (exclusive
 whole-tree lock + resumable atomic-rename commit + keep-orig-whole repopulate +
 fsync discipline + stamp/form-flip-last) designed in
-[crash-safe-migration.md](crash-safe-migration.md) (DF68) — **no separate
+[crash-safe-migration.md](../../archive/crash-safe-migration.md) (DF68) — **no separate
 write-ahead journal or snapshot-rollback** (that first-cut design was superseded).
 The substrate lands with this migration; the existing agent.json split (v2→v3) is
 left **sealed as-is**, not retro-hardened.
@@ -233,7 +233,7 @@ upgrading; use `:copy`, ideally with the data dir on a CoW filesystem).
 ## Sequencing (a linear migration chain — D110)
 
 Sequenced by the crash-safe-migration chain ([D110](../../decisions/working-notes.md);
-[crash-safe-migration.md](crash-safe-migration.md)). Migrations are a **linear data-dir
+[crash-safe-migration.md](../../archive/crash-safe-migration.md)). Migrations are a **linear data-dir
 schema chain, decoupled from release numbers** — what matters is schema-step order, not
 which version ships them:
 
@@ -275,5 +275,5 @@ which version ships them:
   `copy_gitignore.go` (`CopyProjectDir`/`copyFileList`), `copy_darwin.go` /
   `copy_other.go` (`cloneDir`).
 - Overlay surface: see Phase 2 list above; H2 analysis in
-  [overlay-sysadmin-escape.md](overlay-sysadmin-escape.md); DF65.
+  [overlay-sysadmin-escape.md](../../archive/plans/overlay-sysadmin-escape.md); DF65.
 - Decision: D109 (working-notes.md).

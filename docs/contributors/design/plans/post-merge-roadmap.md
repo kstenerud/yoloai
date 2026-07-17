@@ -14,7 +14,7 @@
 The public-layering endgame (D99) is merged. This is the remaining work: the D99
 post-merge remainder and the open findings. (E1, a Linux/KVM **microvm** backend,
 was investigated and **retired** — see [D104](../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1)
-and the [archived plan](../archive/plans/microvm-backend.md).) Scoped 2026-06-27
+and the [archived plan](../../archive/plans/microvm-backend.md).) Scoped 2026-06-27
 by four read-only survey agents against the live designs; sizes are S/M/L/XL.
 
 None of this needs a second on-disk migration (the netpolicy relocation, D103,
@@ -75,7 +75,7 @@ Refined build order: `CredentialSource` + general `EnvSpec` credential-shape →
 _Original framing (superseded by D105): a single TLS-MITM L7 proxy; build CredentialSource → MITM process → default-deny netns → per-agent CA injection → strategy dispatch._
 
 ### E — New backends
-- **~~E1 microvm~~ — RETIRED (D104, 2026-06-28).** The QEMU `-M microvm` path was built and spiked, then retired: it can't boot a stock distro kernel (custom-kernel-only after the `6.12.94` bump), and a lighter microVM adds no isolation over the existing Kata `vm` backend and no boot benefit for long sessions. If a light VM tier is ever revived it's **libkrun** (bundled Red-Hat kernel via `libkrunfw`, virtio-fs, OCI-native, also macOS HVF), not QEMU-microvm — gated on Debian packaging + a macOS virtio-fs perm fix. See [D104](../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1) and the [archived plan](../archive/plans/microvm-backend.md). Spike preserved on the unmerged `microvm-backend` branch.
+- **~~E1 microvm~~ — RETIRED (D104, 2026-06-28).** The QEMU `-M microvm` path was built and spiked, then retired: it can't boot a stock distro kernel (custom-kernel-only after the `6.12.94` bump), and a lighter microVM adds no isolation over the existing Kata `vm` backend and no boot benefit for long sessions. If a light VM tier is ever revived it's **libkrun** (bundled Red-Hat kernel via `libkrunfw`, virtio-fs, OCI-native, also macOS HVF), not QEMU-microvm — gated on Debian packaging + a macOS virtio-fs perm fix. See [D104](../../decisions/working-notes.md#d104--retire-the-hand-rolled-qemu--m-microvm-backend-libkrun-is-the-tech-if-a-light-vm-tier-is-ever-added-e1) and the [archived plan](../../archive/plans/microvm-backend.md). Spike preserved on the unmerged `microvm-backend` branch.
 - **E2 apple-container (M–L, macOS):** all research resolved positively (virtiofs mounts, in-guest overlayfs, in-guest iptables, `--format json`, exit codes) — **implementation-ready**; one live confirmation (vmnet gateway in the isolation OUTPUT chain). Naming (`apple` vs `apple-container`) decided first.
 - **E3 podman + gVisor (M investigative):** R1 (does rootless podman + gVisor actually work, and how?) gates the design; R2 (macOS Podman Machine runsc) and R3 (compat-API `Runtime=runsc`) run in parallel once a runsc env exists. The codebase currently has an evidence-free blanket block to validate-or-lift.
 

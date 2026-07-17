@@ -33,8 +33,8 @@ seeding / build-infra learnings. The public surface should reflect what we now k
   (D89), `../netpolicy.md` (D90), `../envsetup.md` (D91), `../secure-secrets.md`
   (D95), `../copyflow-layer.md` (D86), `../agent-detection.md` (D96), and
   `../../decisions/working-notes.md` entries **D84–D96**.
-- **This branch's tail:** [agent-detection-strategies.md](agent-detection-strategies.md)
-  (merge gate + per-agent strategy outcomes), [agent-owned-detection.md](agent-owned-detection.md).
+- **This branch's tail:** [agent-detection-strategies.md](../../archive/plans/agent-detection-strategies.md)
+  (merge gate + per-agent strategy outcomes), [agent-owned-detection.md](../../archive/plans/agent-owned-detection.md).
 - **The code as it actually is:** `internal/runtime/` (the `Backend`/`Process`
   interfaces in `runtime.go`/`registry.go`, the six backends, `runtimeconfig`),
   `internal/store/`, `internal/agent/`, `internal/envsetup/`,
