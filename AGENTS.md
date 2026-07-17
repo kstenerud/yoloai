@@ -37,6 +37,12 @@ Two you will want by name: `architecture/where-to-change.md` maps a change onto 
 that make it. `backend-idiosyncrasies.md` catalogues backend behaviour that contradicts its
 own docs — read it *before* diagnosing any backend problem; add to it when you find more.
 
+`next-release.md` stages whatever ships next: it carries the next release version (a fact — it
+escalates on its own when something breaking lands) and points at the work considered for the cut.
+It is permanent and drains at each release, like `## Unreleased`. **It never carries an item's
+status** — *"what's left for this release?"* is answered by following its links and reading each
+record, never by trusting the page.
+
 `agent-failures.md` is its sibling for the component that writes the code. **The trigger is an
 owner correction**: when the owner contradicts a claim you made, or asks a question whose answer
 turns out to be "I was wrong", that is the event — record it there before moving on. Not every
@@ -56,7 +62,8 @@ Full detail and the reasoning behind each rule:
    or removed flags and config keys, changed defaults, newly-rejected input. That file's
    preamble has the format and the trap. *This is the most-missed rule here.* A **removed or
    renamed** config key or flag is now gated on the PR (`scripts/check_breaking_changes.py`);
-   a changed default or newly-rejected input is not, and stays yours to notice.
+   a changed default or newly-rejected input is not, and stays yours to notice. A break also
+   **escalates the next release version** — bump the field in `next-release.md` when you land one.
 2. **Invalidate a name, sweep every surface that names it.** Config keys, flags, and agent
    names are mirrored verbatim into shipped text that nothing typechecks — including
    `internal/cli/helpcmd/help/*.md`, which is `//go:embed`ed **shipped UI** despite living
