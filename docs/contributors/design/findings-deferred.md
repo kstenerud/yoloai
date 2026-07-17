@@ -9,6 +9,17 @@ potentially actionable and carries a **`Trigger:`** line — the condition that 
 back into [`findings-unresolved.md`](findings-unresolved.md). The trigger may be unlikely, but
 it must exist so the item can be evaluated for eviction later. Newest first.
 
+### DF127 — tart's legacy-CLI VM matcher is a heuristic that should not live forever
+
+- **Discovered:** 2026-07-17 · **Workstream:** fixing [DF125](findings-resolved.md) (pre-upgrade orphans left unreapable by D126)
+- **Severity:** LOW — it over-reaches only for a principal that has never existed (an integrator running tart under their own principal on a shared host, with a colliding sandbox name). Every other backend's half of DF125 is exact and permanent; this is the one heuristic.
+- **Disposition:** DEFERRED — deliberately kept, because the alternative is worse: without it, a tart VM whose sandbox dir is gone holds one of the host's **capped VM slots** forever with no yoloai command able to name it. Tart records no labels (DF124 — for a label-less backend the name is the identity), so there is nothing to read; the name is all there is, and the legacy form `yoloai-<S>` provably overlaps every principal namespace (DF125), so no exact matcher exists. `legacyCLIVMName` therefore claims `yoloai-<S>` minus the namespaces that have actually been minted — `yoloai-base`, `cli-*`, and the test principals' `tNNNNNNN-`.
+- **Trigger:** EITHER of —
+  1. **A second real principal on tart.** The moment an integrator can run tart under their own principal, the matcher can reach their VMs and must go. `TestPruneLegacyMatchOverreachesForAnUnseenPrincipal` pins this exact compromise and will fail, forcing the decision rather than letting a sweep quietly delete a VM.
+  2. **Legacy VMs are gone in practice** — a settling period long enough that pre-D126 (v0.8.0-and-earlier) installs are not still upgrading. **Explicitly NOT a release number** (owner, 2026-07-17): a user may upgrade v0.8.0 → v0.10.0 directly and still hold legacy VMs, so retiring this "next release" would abandon exactly the population it exists for. The condition is evidence, not a version.
+- **Description:** `runtime/tart/prune.go`'s `legacyCLIVMName` lets the CLI's orphan sweep reclaim VMs named `yoloai-<sandbox>` — the form tart VMs carried before the CLI adopted the `cli` principal (D126). It is gated on the CLI's own principal, so an integrator's sweep can never adopt the unprincipaled namespace (that would rebuild DF115 by hand). Retiring it is a deletion: drop the function, its call in the candidate condition, and the three tests that cover it, leaving the plain `InstancePrefix` match.
+- **Pointer:** `runtime/tart/prune.go` (`legacyCLIVMName`, `testPrincipalVMRe`); `runtime/tart/prune_test.go` (`TestPruneReclaimsLegacyCLIVMs`, `TestPruneSparesKnownLegacyVM`, `TestPruneLegacyMatchOverreachesForAnUnseenPrincipal`); [DF125](findings-resolved.md) (why it exists, and why the label backends need no equivalent); [DF124](findings-resolved.md) (why tart has nothing to read); D126.
+
 ### DF45 — base-image build lock is keyed by data-dir but the image tag is global to the docker daemon
 
 - **Discovered:** 2026-06-24 · **Workstream:** public-layering Shape (concurrency question raised during the smoke)

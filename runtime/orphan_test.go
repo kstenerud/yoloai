@@ -40,12 +40,32 @@ func TestIsOrphanCandidate(t *testing.T) {
 			want:      false,
 		},
 		{
-			// A pre-D126 instance carries no principal label, so it belongs to no
-			// principal and no principal reaps it. `yoloai system migrate` recreates
-			// it under its owner rather than leaving a sweep to guess.
-			name:      "pre-D126 instance (no principal label) belongs to nobody",
+			// A pre-D126 instance carries an empty principal label — what the CLI
+			// stamped before it adopted "cli" — and it is the CLI's to reap (DF125).
+			// The migration cannot have renamed it: it only walks sandboxes that
+			// still have a sandbox dir, and an orphan by definition has none. Left
+			// unclaimed, the debris is unreachable by any yoloai command forever.
+			name:      "pre-D126 CLI instance is the CLI's to reap (DF125)",
 			labels:    map[string]string{LabelSandbox: "mybox"},
 			principal: config.CLIPrincipal,
+			want:      true,
+		},
+		{
+			// Docker stores `--label com.yoloai.principal=` as present-but-empty,
+			// so the absent and empty forms must read identically.
+			name:      "pre-D126 CLI instance, principal label present but empty",
+			labels:    map[string]string{LabelSandbox: "mybox", LabelPrincipal: ""},
+			principal: config.CLIPrincipal,
+			want:      true,
+		},
+		{
+			// The safety gate on the clause above, and the reason it is not simply
+			// "an empty label matches anyone": the unprincipaled namespace was the
+			// CLI's alone. An integrator adopting it is DF115 rebuilt by hand — the
+			// CLI's sweep reaping every other principal's instances, in reverse.
+			name:      "an integrator must NOT adopt the pre-D126 namespace (DF115)",
+			labels:    map[string]string{LabelSandbox: "mybox", LabelPrincipal: ""},
+			principal: "alice",
 			want:      false,
 		},
 		{

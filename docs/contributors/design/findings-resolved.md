@@ -7,6 +7,54 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF125 — D126 made every pre-upgrade orphan permanently unreapable; `system prune` never learned the old prefix (RESOLVED 2026-07-17)
+
+- **Resolved 2026-07-17** by giving each sweep back the CLI's pre-D126 identity — the fix
+  [cli-is-a-principal.md](../archive/plans/cli-is-a-principal.md)'s Risks section asked for and the
+  implementation skipped. It is deliberately **two different things**, because the backends are:
+  - **Label backends (docker, podman, containerd, apple) — permanent, no expiry.** `IsOrphanCandidate`
+    now also claims an instance whose `com.yoloai.principal` label is empty, gated on the sweep running
+    as the CLI's principal. This is not a compatibility shim: the label is a fact the backend recorded,
+    so reading it stays exactly correct while the value simply stops occurring. It is D62's own rule —
+    *"enumeration filters by label, not by name-string splitting"* — applied to the identity the CLI
+    used to have.
+  - **Tart — a heuristic, and the only part with an eventual expiry.** Tart records nothing (DF124), and
+    the legacy name is provably ambiguous, so `legacyCLIVMName` claims `yoloai-<S>` minus the namespaces
+    that have ever actually been minted (`yoloai-base`, `cli-*`, the test principals' `tNNNNNNN-`). Its
+    retirement is tracked as [DF127](findings-deferred.md) with a **trigger, not a release**: a user may
+    upgrade 0.8.0 → 0.10.0 directly and still hold legacy VMs, so dropping it on a version schedule would
+    abandon exactly the people it exists for.
+- **The safety argument, which is why this is not a sandbox-shredder.** Claiming legacy instances is only
+  safe because a legacy-named instance is *provably debris* by the time a sweep can see one: `system prune`
+  is gated below the current schema, and the v4→v5 migration stamps v5 only after **every** sandbox is
+  migrated (any refusal returns before the stamp). Two things now hold that up mechanically rather than by
+  comment: `classifySandboxes` also names an unmigrated sandbox's legacy instance into `known` (so a live
+  sandbox that merely failed to migrate is protected even if the invariant slips), and
+  `TestGateExemptionsAreClosed` pins the gate's exemption set to exactly `help`, `version`, `system migrate`
+  — because exempting `prune` would run it below v5, where every LIVE sandbox still carries the legacy name
+  and matches nothing in `known`.
+- **Verified by execution (2026-07-17, real Docker, dry-run).** The same A/B that exposed the strand now
+  flips: `yoloai system prune --dry-run` reports **both** `yoloai-cli-newprobe` and the pre-D126
+  `yoloai-strandedprobe`, where before it saw only the former. The gate guard was verified the same way —
+  annotating `system prune` as exempt makes both new tests fail and name it.
+- Original finding follows.
+
+
+- **Discovered:** 2026-07-17 · **Workstream:** surveying what else should ride the v0.9.0 release; found by asking what the D126 migration does *not* walk
+- **Severity:** MEDIUM, and **time-boxed** — it is a regression this release introduces, and the remedy has a natural expiry (see Disposition). Not data loss: the stranded instance keeps running or sits stopped, holding disk and — on tart — a capped VM slot, which is the scarce resource. The user's recourse is a manual `docker rm` / `tart delete` / `ctr containers delete` **forever**, because no yoloAI command can name it again.
+- **Disposition:** FILED, not fixed. **[cli-is-a-principal.md](../archive/plans/cli-is-a-principal.md)'s own Risks section prescribed the fix and the implementation did not deliver it**: *"Mitigate: the migration is the only thing that may rename, it is idempotent, and `system prune` learns the old prefix for one release."* Idempotency landed; the prune half did not. **It must ship in v0.9.0 or not at all** — "for one release" is only meaningful in the release that causes the break; shipped later, the debris is already unreachable and the compatibility window has no one left to serve.
+- **Description:** D126's migrator (`internal/orchestrator/migrate_principal.go`) enumerates work from `sandboxesRoot` — it renames the instance of every sandbox that still has a **sandbox dir**. An *orphan* is by definition an instance whose sandbox dir is gone (crash debris, or [DF113](#df113--destroy-frees-the-sandbox-name-while-leaving-the-instance-behind-so-the-next-start-adopts-a-vm-it-never-provisioned)'s destroy-frees-the-name path). Such instances are therefore never migrated, keep their pre-D126 `yoloai-<name>` identity — and every post-D126 sweep now filters them out:
+  - **label-equality backends** (docker, podman, containerd's container sweep, apple since `da4d1106`): `instanceLabels` always stamped `LabelPrincipal`, so a pre-D126 CLI instance carries `com.yoloai.principal: ""`. `runtime.IsOrphanCandidate` (`runtime/orphan.go:26-30`) evaluates `"" == "cli"` → **false**.
+  - **prefix backends** (tart `prune.go:31,36`): `HasPrefix("yoloai-mybox", "yoloai-cli-")` → **false**.
+  - **containerd's netns sweep** (`prune.go:109,133`): requires the stripped name to carry `yoloai-cli-`; an old `yoloai-yoloai-mybox` netns does not.
+  - **seatbelt is unaffected** — its identity is a path under its own `SandboxesDir()` and a *bare* dir name, which never carried the prefix (the same property that kept it out of DF115).
+- **Verified by execution (2026-07-17, Linux + real Docker, dry-run).** Two identical orphans were planted, differing only in the principal label, and the real `yoloai system prune --dry-run` was run against them: `yoloai-strandedprobe` (`principal=""`, the pre-D126 shape) is **not** selected; `yoloai-cli-newprobe` (`principal="cli"`) **is** selected and reported as `container yoloai-cli-newprobe`. So the sweep is healthy and the omission is exactly the cross-version one. Docker was verified live; the tart/containerd/apple rows above are read from code, not executed.
+- **The legacy identity is NOT recoverable from the instance name — proved, not assumed (2026-07-17).** The pre-D126 elided namespace `yoloai-<S>` **overlaps every principal namespace**, because a `SandboxName` may contain `-` while a `PrincipalSegment` may not. Verified by execution against the real grammars: `InstanceName("", "acme-probe")`, `InstanceName("", "cli-foo")` and `InstanceName("", "my-app")` are string-identical to principal `acme`+`probe`, `cli`+`foo`, and `my`+`app` respectively — every component a legal input the parsers accept. **D62's non-collision proof does not cover this**: *"the default value is forbidden as a real `PrincipalSegment`, so a real principal can never collide with the elided form"* establishes only that nobody can *register* `""`; the collision needs no such registration, only a hyphen in a sandbox name — and D62's own motivating example name is `my-app`. This is the third gap found in that proof's reach (DF115 found it silent on prefix *containment*; this is *segment ambiguity*). Note new-vs-new **is** disjoint — `principalSegmentRe` forbids separators, so the first `-` always delimits the principal — so D126's structural guarantee holds going forward; it is only legacy-vs-new that overlaps.
+- **Shape of the fix (not yet decided), which the above splits in two.**
+  - **Label backends (docker, podman, containerd, apple) — permanent and exact, no expiry.** `instanceLabels` has always stamped both labels, so `LabelSandbox` present **and** `LabelPrincipal == ""` is a *recorded fact* meaning "created by a pre-D126 CLI". Honouring it is not a compatibility hack and needs no sunset — it is precisely D62's own rule (*"runtime enumeration filters by label, not by name-string splitting"*) applied to a value that will simply stop occurring. Admit it **only** when the layout's principal is the CLI's.
+  - **Tart — the one real gap, and it must NOT be fixed by admitting `yoloai-<name>`.** That prefix matches `yoloai-acme-*` too, i.e. it rebuilds DF115 by hand. Tart stores no labels (DF124, resolved by retraction: for a label-less backend *"their identity is the instance name plus the DataDir"*), so the name is the only signal — and **that resolution's reasoning holds only for names minted after D126.** It rests on *"principal namespaces are disjoint at the parse boundary, so the name already carries the owner"*, which is exactly the property legacy names lack: they predate the parse boundary and overlap it. DF124 is not wrong; its guarantee simply starts at D126, and this finding is the debris on the far side of that line. The pragmatic matcher — sufficient for *what has actually existed*, which is the only population there has ever been — is: legacy ⟺ `yoloai-<S>` excluding `provisionedImageName` (`yoloai-base`), `cli-*`, and the test-principal shape `^t[0-9]{7}-`. Integrator principals on tart have never existed; if one ever does, this over-reaches, so **this half is dated and deleted next release** while the label half is not.
+- **Pointer:** `internal/orchestrator/migrate_principal.go` (`unmigratedSandboxNames` — what the migration walks, and does not); `runtime/orphan.go:26-30` (`IsOrphanCandidate`); `internal/orchestrator/launch/launch.go` (`instanceLabels`, which always stamps the principal, so pre-D126 = `""`); `runtime/tart/prune.go:31,36`; `runtime/containerd/prune.go:109,133`; `store/paths.go` (`LegacyCLIInstanceName`); [cli-is-a-principal.md](../archive/plans/cli-is-a-principal.md) § Risks; D126; [DF113](#df113--destroy-frees-the-sandbox-name-while-leaving-the-instance-behind-so-the-next-start-adopts-a-vm-it-never-provisioned) (which manufactures the debris this strands).
+
 ### DF115 — tart's and apple's prune match by name PREFIX, so the empty-principal CLI's sweep reaps every other principal's instances (RESOLVED 2026-07-17)
 
 - **Resolved** across D126 and the apple label-equality fix. Fix (a) landed with D126: the empty principal is gone, so no namespace contains another and the live hazard the title names cannot be constructed. Fix (b) landed for containerd's `reconcileBlockingContainers` and now for **apple**, which lists `container list --all --format json` and filters through `runtime.IsOrphanCandidate` — verified against the live CLI 1.0.0 on Apple Silicon: labels ride at `configuration.labels`, so one list call suffices and the feared per-name `container inspect` fanout was never needed. **seatbelt** was struck as never affected (2026-07-16). **tart** is closed by decision rather than by code — see below. containerd's netns sweep keeps name-matching by necessity: a netns carries no label to compare.

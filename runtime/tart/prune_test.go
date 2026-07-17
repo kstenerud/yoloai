@@ -138,11 +138,74 @@ func TestPruneDryRunDeletesNothing(t *testing.T) {
 	require.Equal(t, "yoloai-cli-orphan", result.Items[0].Name)
 }
 
+// TestPruneReclaimsLegacyCLIVMs covers DF125's tart half: a VM created before the
+// CLI adopted the "cli" principal keeps its "yoloai-<name>" identity, and the
+// migration cannot rename it (it only walks sandboxes that still have a sandbox
+// dir; an orphan has none). The CLI's sweep must still reclaim it, or it holds a
+// capped VM slot forever with no yoloai command able to name it.
+func TestPruneReclaimsLegacyCLIVMs(t *testing.T) {
+	r, deleteLog := fakeTart(t, []string{
+		provisionedImageName,       // yoloai-base — must survive
+		"yoloai-cli-current",       // current-scheme orphan — reclaimed
+		"yoloai-legacyorphan",      // pre-D126 orphan — reclaimed (DF125)
+		"yoloai-legacy-hyphenated", // pre-D126 orphan whose name has a '-' — reclaimed
+		"yoloai-cli-keep",          // known sandbox — must survive
+		"yoloai-t0000001-testvm",   // a test principal's VM — must survive
+		"some-other-vm",            // not ours — ignored
+	})
+
+	result, err := r.Prune(context.Background(), []string{"yoloai-cli-keep"}, false, os.Stderr)
+	require.NoError(t, err)
+
+	require.ElementsMatch(t,
+		[]string{"yoloai-cli-current", "yoloai-legacyorphan", "yoloai-legacy-hyphenated"},
+		deletedNames(t, deleteLog))
+	require.Len(t, result.Items, 3)
+}
+
+// TestPruneSparesKnownLegacyVM is the safety pair for the sweep above: a sandbox
+// the migration has NOT yet converted still has a live legacy-named VM, and it
+// must survive. classifySandboxes names such a VM via store.LegacyCLIInstanceName
+// so it lands in `known`. Without that, claiming legacy VMs would destroy a
+// running sandbox that merely failed to migrate.
+func TestPruneSparesKnownLegacyVM(t *testing.T) {
+	r, deleteLog := fakeTart(t, []string{"yoloai-unmigrated", "yoloai-legacyorphan"})
+
+	result, err := r.Prune(context.Background(), []string{"yoloai-unmigrated"}, false, os.Stderr)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"yoloai-legacyorphan"}, deletedNames(t, deleteLog),
+		"a known legacy-named VM is a live sandbox, not debris")
+	require.Len(t, result.Items, 1)
+}
+
+// TestPruneLegacyMatchOverreachesForAnUnseenPrincipal pins the ONE compromise in
+// DF125's tart half, so it cannot drift into a surprise. Tart stores no labels
+// (DF124), so the legacy identity is a heuristic on the name, and the legacy form
+// overlaps every principal namespace: "yoloai-acme-probe" is both a pre-D126
+// sandbox named "acme-probe" and principal "acme"'s sandbox "probe". The matcher
+// excludes the namespaces that have ACTUALLY existed (the CLI's own, and the test
+// principals') and claims the rest — so an integrator running tart under a
+// principal that has never shipped would be over-reached.
+//
+// If tart ever gains a real second principal, this test fails and forces the
+// decision rather than letting a sweep quietly delete someone's VM.
+func TestPruneLegacyMatchOverreachesForAnUnseenPrincipal(t *testing.T) {
+	r, deleteLog := fakeTart(t, []string{"yoloai-acme-probe"})
+
+	_, err := r.Prune(context.Background(), nil, false, os.Stderr)
+	require.NoError(t, err)
+
+	require.Equal(t, []string{"yoloai-acme-probe"}, deletedNames(t, deleteLog),
+		"documented over-reach: indistinguishable from a legacy CLI sandbox named \"acme-probe\"")
+}
+
 // TestPrunePrincipalScope verifies that a Runtime with a non-empty principal
 // only sweeps VMs whose names carry its own prefix ("yoloai-<principal>-*"),
 // leaving yoloai-base, other-principal VMs, and bare-yoloai VMs untouched.
 // This is the DF19 structural backstop: test-scoped prune can never touch the
-// developer's real resources.
+// developer's real resources — and the gate on DF125's legacy match, which is
+// why a bare-yoloai VM still survives a non-CLI principal's sweep.
 func TestPrunePrincipalScope(t *testing.T) {
 	r, deleteLog := fakeTart(t, []string{
 		provisionedImageName,  // yoloai-base — must survive (protected by name guard)

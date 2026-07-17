@@ -8,11 +8,61 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"regexp"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
+
+// testPrincipalVMRe matches the leading segment of a VM owned by a test
+// principal — testutil.UniqueTestPrincipal mints "tNNNNNNN" (config.MaxPrincipalLength
+// is 8), and those VMs are real on a developer's machine, not hypothetical.
+var testPrincipalVMRe = regexp.MustCompile(`^t[0-9]{7}-`)
+
+// legacyCLIVMName reports whether a VM name is a pre-D126 CLI instance
+// ("yoloai-<sandbox>", before the CLI adopted the "cli" principal), so the CLI's
+// sweep can still reclaim it (DF125). Without this, a VM whose sandbox dir is
+// already gone keeps its legacy name, no longer matches "yoloai-cli-", and holds
+// one of the host's capped VM slots forever with no yoloai command able to name
+// it.
+//
+// Tart is the ONLY backend that needs this, and the only one where it is a
+// heuristic rather than a fact: it stores no labels (DF124 — for a label-less
+// backend the name is the identity), so unlike the container backends there is
+// nothing recorded to read, and the name alone cannot decide it. The legacy form
+// `yoloai-<S>` overlaps every principal namespace, because a SandboxName may
+// contain '-' where a PrincipalSegment may not: `yoloai-acme-probe` is both the
+// legacy VM of a sandbox named "acme-probe" and principal "acme"'s sandbox
+// "probe" (DF125). So this deliberately matches only what has ACTUALLY existed —
+// the CLI ("") and the test principals — rather than pretending to be exact:
+// excluding the two namespaces that have ever been minted leaves the legacy CLI.
+//
+// It over-reaches only for a principal that has never existed: an integrator
+// running tart under their own principal, sharing this host, whose sandbox names
+// collide. If that ever ships, this must go. It is therefore the one part of the
+// DF125 fix with an expiry — but the expiry is a settling period, NOT a release:
+// a user may upgrade 0.8.0 -> 0.10.0 directly and still hold legacy VMs, so
+// dropping it "next release" would abandon exactly the people it exists for.
+// Retire it once legacy VMs are gone in practice, not on a version schedule.
+//
+// Gated on the CLI's principal for the same reason as the label path: the
+// unprincipaled namespace was the CLI's alone (DF115).
+func legacyCLIVMName(name string, principal config.PrincipalSegment) bool {
+	if principal != config.CLIPrincipal {
+		return false
+	}
+	rest, ok := strings.CutPrefix(name, "yoloai-")
+	if !ok {
+		return false
+	}
+	// A principal-namespaced VM is "yoloai-<principal>-<sandbox>". Exclude the
+	// namespaces that exist so what remains is the elided (legacy CLI) form.
+	if strings.HasPrefix(rest, string(config.CLIPrincipal)+"-") || testPrincipalVMRe.MatchString(rest) {
+		return false
+	}
+	return true
+}
 
 // Prune implements runtime.Backend.
 func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
@@ -33,7 +83,7 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 	var result runtime.PruneResult
 	for line := range strings.SplitSeq(out, "\n") {
 		name := strings.TrimSpace(line)
-		if name == "" || !strings.HasPrefix(name, prefix) {
+		if name == "" || (!strings.HasPrefix(name, prefix) && !legacyCLIVMName(name, r.layout.Principal)) {
 			continue
 		}
 		// The provisioned base template shares the yoloai- prefix and the

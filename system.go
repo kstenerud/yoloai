@@ -978,32 +978,59 @@ func (s *System) classifySandboxes(ctx context.Context) (known []string, broken 
 		name := entry.Name()
 		path := filepath.Join(dir, name)
 
-		if _, loadErr := store.LoadEnvironment(path); loadErr == nil {
-			known = append(known, store.InstanceName(s.layout.Principal, name))
+		env, loadErr := store.LoadEnvironment(path)
+		if loadErr == nil {
+			known = append(known, s.liveInstanceNames(name, env)...)
 			continue
-		} else {
-			state, detail := orchestrator.ProbeWorkData(ctx, git.NewHost(s.layout), path)
-			c := classifiedSandbox{name: name, path: path, detail: detail}
-			switch {
-			case state == orchestrator.WorkDataPresent:
-				c.action = actionRefuse
-			case errors.Is(loadErr, os.ErrNotExist) && state == orchestrator.WorkDataNone:
-				c.action = actionDelete
-				c.detail = "never initialized (no metadata, no work directory)"
-			default:
-				c.action = actionTrash
-				if c.detail == "" {
-					if errors.Is(loadErr, os.ErrNotExist) {
-						c.detail = "incomplete sandbox (no metadata; unclassifiable content)"
-					} else {
-						c.detail = "unreadable or corrupt metadata"
-					}
-				}
-			}
-			broken = append(broken, c)
 		}
+		broken = append(broken, s.classifyBrokenSandbox(ctx, name, path, loadErr))
 	}
 	return known, broken
+}
+
+// liveInstanceNames returns every runtime instance name a readable sandbox may
+// legitimately own, so the orphan sweep spares all of them.
+//
+// Normally that is one name. A sandbox with no stored principal predates D126 and
+// its instance still carries the legacy "yoloai-<name>" identity, so that name is
+// returned too — otherwise the sweep, which now claims the CLI's pre-D126
+// instances (DF125), would reap a LIVE sandbox that merely failed to migrate. The
+// v4->v5 migration stamps its version only once every sandbox is migrated, and
+// prune is gated below that version, so an unmigrated sandbox should be
+// unreachable here; naming it anyway costs nothing (a known instance is only ever
+// spared) while the cost of that invariant slipping is somebody's running work.
+func (s *System) liveInstanceNames(name string, env *store.Environment) []string {
+	names := []string{store.InstanceName(s.layout.Principal, name)}
+	if env.Principal == "" {
+		names = append(names, store.LegacyCLIInstanceName(name))
+	}
+	return names
+}
+
+// classifyBrokenSandbox decides what to do with a sandbox whose metadata would not
+// load, crossing the LoadEnvironment failure kind with what ProbeWorkData finds on
+// disk — refuse (data present), delete (never initialized), or quarantine
+// (anything ambiguous). See classifySandboxes' disposition matrix.
+func (s *System) classifyBrokenSandbox(ctx context.Context, name, path string, loadErr error) classifiedSandbox {
+	state, detail := orchestrator.ProbeWorkData(ctx, git.NewHost(s.layout), path)
+	c := classifiedSandbox{name: name, path: path, detail: detail}
+	switch {
+	case state == orchestrator.WorkDataPresent:
+		c.action = actionRefuse
+	case errors.Is(loadErr, os.ErrNotExist) && state == orchestrator.WorkDataNone:
+		c.action = actionDelete
+		c.detail = "never initialized (no metadata, no work directory)"
+	default:
+		c.action = actionTrash
+		if c.detail == "" {
+			if errors.Is(loadErr, os.ErrNotExist) {
+				c.detail = "incomplete sandbox (no metadata; unclassifiable content)"
+			} else {
+				c.detail = "unreadable or corrupt metadata"
+			}
+		}
+	}
+	return c
 }
 
 // trashSummary reports the current trash-dir entry count and total size.
