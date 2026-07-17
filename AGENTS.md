@@ -37,6 +37,15 @@ Two you will want by name: `architecture/where-to-change.md` maps a change onto 
 that make it. `backend-idiosyncrasies.md` catalogues backend behaviour that contradicts its
 own docs — read it *before* diagnosing any backend problem; add to it when you find more.
 
+`agent-failures.md` is its sibling for the component that writes the code. **The trigger is an
+owner correction**: when the owner contradicts a claim you made, or asks a question whose answer
+turns out to be "I was wrong", that is the event — record it there before moving on. Not every
+fumble; only what reached a durable artifact or would have. A correction is a fact about a
+repeating behaviour, and it is the only input from which the next gate gets built — the two
+`scripts/check_*.py` gates exist because someone wrote the specimen down. On the evidence so far,
+the owner's question is the most reliable detector in this repo, which is the problem the file
+exists to fix.
+
 ## Preparing a PR
 
 Full detail and the reasoning behind each rule:
