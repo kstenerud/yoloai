@@ -117,16 +117,6 @@ func MigrateCLI() error {
 		// what repairs it. Do not delete it as dead code (it was nearly retired
 		// on that reading, 2026-07-17).
 		return CreateFreshCLI()
-	case IsInitializing():
-		// A crashed initFreshDataDir left TOP/.initializing behind. Creating
-		// the CLI realm fresh is safe here not because the sentinel says so —
-		// it cannot, a stale one outlives its build — but because of where
-		// this case sits: the case above already returned for any TOP holding
-		// a library/ or cli/ dir, so neither realm exists at this point and
-		// there is nothing to preserve or migrate. Without this case such a
-		// TOP would fall to the default below and be refused as unrecognized,
-		// wedging the state the sentinel exists to make recoverable (DF128).
-		return CreateFreshCLI()
 	case dirAbsentOrEmpty(top):
 		// Nothing on disk yet: initialize the CLI realm fresh.
 		return CreateFreshCLI()
@@ -259,10 +249,21 @@ func dirExists(path string) bool {
 // dirAbsentOrEmpty reports whether dir does not exist or exists but contains no
 // entries. A read error other than "not exist" (e.g. dir is a plain file) reads
 // as non-empty so MigrateCLI's garbage branch can reject it.
+// dirAbsentOrEmpty reports whether dir holds nothing that yoloAI owns. The
+// initializing sentinel does not count: it is a marker that a first
+// initialization started, never content, so a TOP holding only it is as empty
+// as one holding nothing. Discounting it here is what keeps the sentinel out
+// of MigrateCLI's switch — migration has no business knowing the marker
+// exists, and a TOP that is merely mid-first-init has nothing to migrate.
 func dirAbsentOrEmpty(dir string) bool {
 	entries, err := os.ReadDir(dir)
 	if err != nil {
 		return errors.Is(err, fs.ErrNotExist)
 	}
-	return len(entries) == 0
+	for _, entry := range entries {
+		if entry.Name() != InitializingSentinelName {
+			return false
+		}
+	}
+	return true
 }

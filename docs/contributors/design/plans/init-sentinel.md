@@ -5,10 +5,23 @@
 # Plan: mark an in-progress TOP init, so a failed one is a fact and not an inference
 
 - **Status:** IN-PROGRESS — P1 (record and diagnose) implemented 2026-07-17: `TOP/.initializing`
-  written/removed in `initFreshDataDir`, and all three sites taught it — `dirAbsentOrEmpty` counts a
-  sentinel-only TOP as fresh, `checkDataDirStatus`'s exactly-one-Fresh branch resumes an interrupted
-  build (and stays loud without a sentinel), and `MigrateCLI`'s switch recognizes it above its
-  `default`. P2 (emptiness-gated destroy-and-retry) remains undone and is not scheduled.
+  written/removed in `initFreshDataDir`; `dirAbsentOrEmpty` (both of them) discounts the sentinel, so
+  a TOP holding only it is empty; `checkDataDirStatus`'s exactly-one-Fresh branch resumes an
+  interrupted build (and stays loud without a sentinel). P2 (emptiness-gated destroy-and-retry)
+  remains undone and is not scheduled.
+- **Scope rule (owner, 2026-07-17) — the sentinel is for FIRST INITIALIZATION ONLY.** It marks a
+  build of a TOP that did not exist. It has no role in migration, is not consulted by migration, and
+  must never influence a migration decision. **Migration's crash-safety is a solved problem
+  elsewhere and this must not duplicate it:** the established pattern is `internal/migrate` —
+  build a parallel tree in the scratch dir, then swap it in (`scratch.go`, `promote.go`:
+  *"repopulate → swap, with an exhaustive crash-recovery classifier"*). A migration that half-ran is
+  recovered by the swap, never by a marker saying it started. If you find yourself teaching this
+  sentinel about schema versions, you are rebuilding `promote.go` badly.
+- **What that changed.** The design below originally taught `MigrateCLI`'s switch to recognize the
+  sentinel (§"The trap", site 2). That is gone: migration does not know the marker exists. Instead
+  `dirAbsentOrEmpty` treats the sentinel as **not content**, so a TOP holding only it is empty and
+  `MigrateCLI`'s pre-existing empty case handles it. Same wedge fixed, no entanglement — and it is a
+  smaller change, which is the usual sign the scope rule was right.
 - **Correction to §"The trap", learned in build:** the three sites are necessary but not sufficient.
   A sentinel must **never** let the gate reach a realm at `LayoutMigrate`: `initFreshDataDir` ends in
   `CreateFreshLibrary`, which stamps the current version unconditionally, so rebuilding on a stale
@@ -92,12 +105,18 @@ so a TOP containing *only* `.initializing` is **not empty**. Today that routes: 
 A sentinel added without teaching these would take the exact state it exists to make recoverable and
 make it *unrecoverable*. Three places must learn it, and they are the whole change:
 
-1. `internal/cli/gate.go` — `dirAbsentOrEmpty`'s callers: a TOP whose only entry is the sentinel is
-   "fresh" (or better: an explicit third answer, "initializing").
-2. `internal/cli/cliutil/clischema.go` — `MigrateCLI`'s switch needs the sentinel case above its
-   `default`.
-3. `internal/cli/gate.go` — `checkDataDirStatus`'s exactly-one-Fresh branch: with a sentinel it is a
-   retry; without, it is DF128's genuine anomaly and keeps the loud message.
+> **Superseded in part — read the Scope rule above first.** Site 2 as written below (teach
+> `MigrateCLI` the sentinel) was **not built and must not be**: migration does not know this marker
+> exists. The wedge is fixed instead by having `dirAbsentOrEmpty` discount the sentinel as
+> non-content, which both the gate and `MigrateCLI` already call.
+
+1. `dirAbsentOrEmpty` — **both copies**, `internal/cli/gate.go` and
+   `internal/cli/cliutil/clischema.go` (same name, different packages, different signatures; a grep
+   finds one). A TOP whose only entry is the sentinel is empty. This is the only place the sentinel
+   may mean "nothing is here", and it is what unwedges `MigrateCLI` without telling it anything.
+2. `internal/cli/gate.go` — `checkDataDirStatus`'s exactly-one-Fresh branch: with a sentinel *and*
+   no realm needing migration it is a retry; without a sentinel it is DF128's genuine anomaly and
+   keeps the loud message. See the Correction above for why the migration guard is not optional.
 
 ## The danger, and the constraint that follows
 
