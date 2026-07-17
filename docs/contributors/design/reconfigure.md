@@ -121,7 +121,7 @@ The following survive `reconfigure` unchanged:
 
 Claude Code stores conversation history in `~/.claude/` (mapped to `agent-state/`), so interactive sessions survive container recreation without extra steps. When the new container starts, Claude Code loads prior session state from that directory automatically.
 
-If yoloai ever integrates Claude Code in stream-json headless mode (see `docs/contributors/design/research/agents.md` — Claude Code Streaming Protocol), session resumption would use the `--session-id <id>` flag. The session ID is emitted in the `result` message at the end of each turn. To survive a `reconfigure`, yoloai would need to save the last known session ID in `meta.json` or a sidecar file before stopping the container, then pass it on restart. This is an implementation detail for that future mode — no changes needed for current interactive mode.
+If yoloai ever integrates Claude Code in stream-json headless mode (see `docs/contributors/design/research/agents.md` — Claude Code Streaming Protocol), session resumption would use the `--session-id <id>` flag. The session ID is emitted in the `result` message at the end of each turn. To survive a `reconfigure`, yoloai would need to save the last known session ID in `environment.json` or a sidecar file before stopping the container, then pass it on restart. This is an implementation detail for that future mode — no changes needed for current interactive mode.
 
 ## Open questions
 

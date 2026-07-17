@@ -18,7 +18,7 @@
 - **Non-root user** (`yoloai`, UID/GID matching host user via entrypoint). Image builds with a placeholder user (UID 1001). At container start, the entrypoint runs as root: reads `host_uid`/`host_gid` from `/yoloai/config.json` via `jq`, runs `usermod -u <uid> yoloai && groupmod -g <gid> yoloai` (exit code 12 means "can't update /etc/passwd" — if the UID already matches the desired UID, this is a no-op; otherwise log a warning and continue), fixes ownership on container-managed directories, then drops privileges via `gosu yoloai`. Uses `tini` as PID 1 (`--init` or explicit `ENTRYPOINT`). Images are portable across machines since UID/GID are set at run time, not build time. Claude Code refuses `--dangerously-skip-permissions` as root; Codex does not enforce this but convention is non-root
 - **Entrypoint:** The Dockerfile, entrypoint scripts (`entrypoint.sh`, `entrypoint.py`, `sandbox-setup.py`, `status-monitor.py`), and default `tmux.conf` are embedded in the binary via `go:embed`. These are baked-in defaults — they are not written to disk and are not user-editable. The entrypoint reads all configuration from a bind-mounted `/yoloai/config.json` file containing `agent_command`, `startup_delay`, `ready_pattern`, `submit_sequence`, `tmux_conf`, `host_uid`, `host_gid`, and later `overlay_mounts`, `iptables_rules`, `setup_script`. No environment variables are used for configuration passing.
 
-**Profile images (`yoloai-<profile>`):** One per profile. Profile Dockerfiles must use `FROM yoloai-base`. The profile layers additional software and configuration on top while the yoloai runtime (entrypoint scripts, status monitor, sandbox setup) remains the baked-in version. Profiles without a Dockerfile use `yoloai-base` directly.
+**Profile images (`yoloai-cli-<profile>`):** One per profile. Profile Dockerfiles must use `FROM yoloai-base`. The profile layers additional software and configuration on top while the yoloai runtime (entrypoint scripts, status monitor, sandbox setup) remains the baked-in version. Profiles without a Dockerfile use `yoloai-base` directly.
 
 ```
 ~/.yoloai/
@@ -35,7 +35,7 @@
         └── Dockerfile
 ```
 
-**Auto-build on demand:** `yoloai new --profile <name>` automatically builds any missing or stale images before creating the sandbox. If `yoloai-base` doesn't exist, it is built first. If the profile has a Dockerfile and `yoloai-<profile>` doesn't exist or is older than `yoloai-base`, it is rebuilt. Profiles without a Dockerfile skip this step and use `yoloai-base`. Only the images needed for *this* sandbox are built — other profiles are untouched. This eliminates the need for users to manually run `yoloai build` before first use.
+**Auto-build on demand:** `yoloai new --profile <name>` automatically builds any missing or stale images before creating the sandbox. If `yoloai-base` doesn't exist, it is built first. If the profile has a Dockerfile and `yoloai-cli-<profile>` doesn't exist or is older than `yoloai-base`, it is rebuilt. Profiles without a Dockerfile skip this step and use `yoloai-base`. Only the images needed for *this* sandbox are built — other profiles are untouched. This eliminates the need for users to manually run `yoloai build` before first use.
 
 **Explicit rebuild:** `yoloai system build` with no arguments rebuilds the base image. `yoloai system build <profile>` rebuilds that profile's image (building base first if stale; error if profile has no Dockerfile). `yoloai system build --all` rebuilds everything (base first, then all profiles with Dockerfiles). Use explicit rebuild after editing a Dockerfile to pick up changes without creating a new sandbox.
 
@@ -167,7 +167,7 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 
 **File resolution.** For each file (Dockerfile, tmux.conf), the profile directory is checked first; if absent, the baked-in default is used. For `config.yaml`, the baked-in default config is loaded first, then the profile's config.yaml is merged on top.
 
-**Name validation:** Profile names must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. Profile names become Docker image tags (`yoloai-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
+**Name validation:** Profile names must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. Profile names become Docker image tags (`yoloai-cli-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
 
 **Implemented profile fields:** `agent`, `model`, `os`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `isolation`, `cap_add`, `devices`, `setup`, `auto_commit_interval`. Unknown fields are an error — `yoloai new` fails with a clear message listing the unrecognized keys. This catches typos and fields that have been renamed.
 
@@ -176,10 +176,10 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 **Backend handling:**
 - `os` — optional. Selects the guest OS for the sandbox. Valid values: `linux` (default), `mac`. `linux` is the default and requires no special hardware. `mac` requires a macOS host; the backend depends on `isolation`: `container` uses Seatbelt, `vm` uses Tart. Fails loudly on non-macOS hosts or if the required backend is not installed. CLI `--os` overrides.
 - `container_backend` — optional preference. Only meaningful for `--isolation container` or `container-enhanced`; ignored for `vm`, `vm-enhanced`, and `--os mac`.
-- `Dockerfile` — optional. Used with Docker and Podman backends to build a `yoloai-<profile>` image. Must use `FROM yoloai-base`. Ignored with Tart and Seatbelt backends. When absent, Docker/Podman backends use `yoloai-base`.
+- `Dockerfile` — optional. Used with Docker and Podman backends to build a `yoloai-cli-<profile>` image. Must use `FROM yoloai-base`. Ignored with Tart and Seatbelt backends. When absent, Docker/Podman backends use `yoloai-base`.
 - `tart.image` — optional. Used only with the Tart backend. Ignored with other backends.
 
-**Sandbox metadata:** When a profile is used, `meta.json` records the profile name and the resolved image ref. Lifecycle commands use the stored image ref — profile changes only take effect on new sandboxes.
+**Sandbox metadata:** When a profile is used, `environment.json` records the profile name and the resolved image ref. Lifecycle commands use the stored image ref — profile changes only take effect on new sandboxes.
 
 **Profile image building:** The sandbox manager calls `Runtime.EnsureImage()` for the base image, then uses container-backend build logic for profile images when Docker or Podman is active and the profile has a Dockerfile. Tart and Seatbelt skip profile image building.
 

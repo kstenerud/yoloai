@@ -20,7 +20,7 @@ Seven statuses defined in `sandbox/inspect.go:18-30`:
 | `failed` | Container up, agent exited with error (non-zero) |
 | `stopped` | Container stopped via `docker stop` |
 | `removed` | Container gone, sandbox dir remains |
-| `broken` | Sandbox dir exists, `meta.json` missing/invalid |
+| `broken` | Sandbox dir exists, `environment.json` missing/invalid |
 
 ### 1.2 Detection Architecture: Two Paths
 
@@ -122,7 +122,7 @@ write_status "$NEW_STATUS" null
 ### 1.7 Known Issues
 
 **1. `idle_threshold` config is wired up but unused.**
-The `idle_threshold` field is actively parsed from YAML (`config/config.go`), propagated through profile resolution (`create_prepare.go`), and stored in meta.json (`meta.go`). Only the `DefaultIdleThreshold` constant is marked deprecated (`sandbox/inspect.go:32-35`). The field flows through the entire creation pipeline but is never read for any detection logic. Full removal scope documented in Phase 1.
+The `idle_threshold` field is actively parsed from YAML (`config/config.go`), propagated through profile resolution (`create_prepare.go`), and stored in environment.json (`meta.go`). Only the `DefaultIdleThreshold` constant is marked deprecated (`sandbox/inspect.go:32-35`). The field flows through the entire creation pipeline but is never read for any detection logic. Full removal scope documented in Phase 1.
 
 **2. Agents without ReadyPattern can never be detected as idle.**
 OpenCode, test, and shell agents have empty `ReadyPattern` and `HookIdle: false`. Once a prompt is sent, they show as "active" forever until the process exits.

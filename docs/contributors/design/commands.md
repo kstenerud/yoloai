@@ -193,7 +193,7 @@ yoloai new my-task ./my-app=/opt/myapp -d ./shared-lib=/usr/local/lib/shared -d 
 ```
 
 Options:
-- `--profile <name>`: Use a profile's derived image and runtime config. No profile = base image + defaults only. The profile name and resolved image ref (`yoloai-<profile>`) are stored in `meta.json` so lifecycle commands recreate containers with the correct image. Auto-builds missing or stale images on demand (see [config.md](config.md#1-docker-images)).
+- `--profile <name>`: Use a profile's derived image and runtime config. No profile = base image + defaults only. The profile name and resolved image ref (`yoloai-cli-<profile>`) are stored in `environment.json` so lifecycle commands recreate containers with the correct image. Auto-builds missing or stale images on demand (see [config.md](config.md#1-docker-images)).
 - `--prompt` / `-p` `<text>`: Initial prompt/task for the agent (see Prompt Mechanism below). Use `--prompt -` to read from stdin. Mutually exclusive with `--prompt-file`.
 - `--prompt-file` / `-f` `<path>`: Read prompt from a file. Use `--prompt-file -` to read from stdin. Mutually exclusive with `--prompt`.
 - `--model` / `-m` `<model>`: Model to use. Passed to the agent's `--model` flag. If omitted, uses the agent's default. Accepts built-in aliases (see Agent Definitions) or full model names. Supports user-configurable aliases via `model_aliases` in config.yaml for version pinning and custom shortcuts.
@@ -251,7 +251,7 @@ The allowlist is agent-specific — each agent's definition includes its require
 1. Apply `:copy` suffix to workdir if no mode suffix (`:rw` or `:copy`) is given — `:force` is a modifier, not a mode, so `./my-app:force` is treated as `./my-app:copy:force`.
 2. Error if any two directories resolve to the same absolute container path (mirrored host path or custom `=<path>`).
 3. For each `:copy` directory, create an isolated writable copy:
-   - If the directory is a git repo, record the current HEAD SHA in `meta.json`.
+   - If the directory is a git repo, record the current HEAD SHA in `environment.json`.
    - Copy via `cp -rp` to `~/.yoloai/library/sandboxes/<name>/work/<encoded-path>/`, where `<encoded-path>` is the absolute host path with path separators and filesystem-unsafe characters encoded using [caret encoding](https://github.com/kstenerud/caret-encoding) (e.g., `/home/user/my-app` → `^2Fhome^2Fuser^2Fmy-app`). This is fully reversible and avoids collisions when multiple directories share the same basename. `cp -rp` preserves permissions, timestamps, and symlinks (POSIX-portable; `cp -a` is GNU-specific and unavailable on macOS). Everything is copied including `.git/` and files ignored by `.gitignore`, **except build artifacts** (`.build/`, `DerivedData/`, `node_modules/`, `__pycache__/`, `*.xcworkspace/xcuserdata/`, `*.xcodeproj/xcuserdata/`) which are excluded to prevent compilation failures from hardcoded paths and to improve copy performance.
    - If the copy already has a `.git/` directory (from the original repo), use the recorded SHA as the baseline — `yoloai diff` will diff against it.
    - If the copy has no `.git/`, `git init` + `git add -A` + `git commit -m "initial"` to create a baseline.
@@ -259,7 +259,7 @@ The allowlist is agent-specific — each agent's definition includes its require
 
    Note: `git add -A` naturally honors `.gitignore` if one is present, so gitignored files (e.g., `node_modules`) won't clutter `yoloai diff` output.
 4. If `auto_commit_interval` > 0, start a background auto-commit loop for `:copy` directories inside the container for recovery. The interval is passed to the container via `config.json`. Disabled by default.
-5. Store original paths, modes, and mapping in `meta.json`.
+5. Store original paths, modes, and mapping in `environment.json`.
 6. Start Docker container (see Container Startup below).
 
 ### Safety Checks
@@ -418,7 +418,7 @@ Runs entirely on the host — reads from `work/<encoded-path>/`. Does not requir
 
 **Default behavior (commit-preserving):**
 
-1. Get baseline SHA from `meta.json`.
+1. Get baseline SHA from `environment.json`.
 2. Check for commits beyond baseline (`git rev-list <baseline>..HEAD` in the work copy).
 3. If commits exist:
    - `git format-patch <baseline>..HEAD` in the work copy → temp directory.
@@ -496,7 +496,7 @@ Parent command for managing sandbox network allowlists.
 
 #### `yoloai sandbox <name> allow`
 
-`yoloai sandbox <name> allow <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json so they survive container restarts. If the container is running, ipset rules are live-patched via container exec (as root, using `dig` + `ipset add`).
+`yoloai sandbox <name> allow <domain>...` adds domains to the allowlist of a network-isolated sandbox. Changes are persisted to netpolicy.json and runtime-config.json so they survive container restarts. If the container is running, ipset rules are live-patched via container exec (as root, using `dig` + `ipset add`).
 
 Requires `network_mode == "isolated"`. Errors if the sandbox uses `--network-none` or has no network restrictions. Duplicate domains are silently skipped (idempotent). If the container is stopped, changes are saved and take effect on the next start.
 
@@ -507,11 +507,11 @@ Requires `network_mode == "isolated"`. Errors if the sandbox uses `--network-non
 - Text output: one domain per line, or "No network isolation" / "No domains allowed".
 - JSON output: `{"name": "...", "network_mode": "...", "domains": [...]}`.
 
-No runtime needed — pure file read from meta.json.
+No runtime needed — pure file read from netpolicy.json.
 
 #### `yoloai sandbox <name> deny`
 
-`yoloai sandbox <name> deny <domain>...` removes domains from the allowlist of a network-isolated sandbox. Changes are persisted to meta.json and config.json. If the container is running, ipset rules are live-patched (flush and re-add remaining IPs).
+`yoloai sandbox <name> deny <domain>...` removes domains from the allowlist of a network-isolated sandbox. Changes are persisted to netpolicy.json and runtime-config.json. If the container is running, ipset rules are live-patched (flush and re-add remaining IPs).
 
 Requires `network_mode == "isolated"`. Errors if a specified domain is not in the allowlist.
 
@@ -536,7 +536,7 @@ Commands for adding and removing bind mounts on a running sandbox, without teari
 
 **Mechanism:** `nsenter --mount --target <container-pid> -- mount --bind <host-path> <container-path>`. This enters the container's mount namespace from the host and performs the bind mount without restarting the container. Requires root — if yoloai is not running as root, the command fails with a clear error: `mount add requires root; try: sudo yoloai sandbox <name> mount add <path>`.
 
-**Persistence:** Live mounts are saved to `meta.json` (`live_mounts` field, same `DirMeta` structure as `directories`). On the next `yoloai start`, they are applied as regular Docker bind mounts during `ContainerCreate` — no nsenter needed on restart, since the container is freshly created with all mounts baked in. Live mounts survive stop/start cycles.
+**Persistence:** Live mounts are saved to `environment.json` (`live_mounts` field, same `DirMeta` structure as `directories`). On the next `yoloai start`, they are applied as regular Docker bind mounts during `ContainerCreate` — no nsenter needed on restart, since the container is freshly created with all mounts baked in. Live mounts survive stop/start cycles.
 
 **`sandbox info` output:** Live mounts appear in the Directories section, tagged `(live)` to distinguish them from mounts configured at creation.
 
@@ -559,7 +559,7 @@ Procedure:
 6. Create mount point inside container: `docker exec <instance> mkdir -p <container-path>`.
 7. Get container PID: `docker inspect --format '{{.State.Pid}}' <instance>`.
 8. Bind mount via nsenter: `nsenter --mount --target <pid> -- mount --bind <host-path> <container-path>` (append `,ro` remount for `--read-only`).
-9. Append to `live_mounts` in `meta.json`.
+9. Append to `live_mounts` in `environment.json`.
 10. Print: `<host-path> → <container-path>` (or `… (read-only)`).
 
 #### `yoloai sandbox <name> mount rm <container-path>`
@@ -572,7 +572,7 @@ Procedure:
 1. Require sandbox to be running.
 2. Look up `<container-path>` in `live_mounts`. Error if not found (with hint if it's an original mount).
 3. `nsenter --mount --target <pid> -- umount <container-path>`.
-4. Remove from `live_mounts` in `meta.json`.
+4. Remove from `live_mounts` in `environment.json`.
 5. Print: `Removed <container-path>`.
 
 ### `yoloai sandbox list` / `yoloai ls`
@@ -650,7 +650,7 @@ Needs setup:
 - **Seatbelt:** No-op (no central instance registry; processes are tied to sandbox dirs).
 - **Cross-backend:** `/tmp/yoloai-*` directories older than 1 hour (leaked secrets, apply, format-patch temps).
 
-**Broken sandbox warnings:** Sandbox directories with missing or corrupt `meta.json` are reported as warnings (with full path and suggested `yoloai destroy` command) but are NOT deleted — they may contain recoverable work.
+**Broken sandbox warnings:** Sandbox directories with missing or corrupt `environment.json` are reported as warnings (with full path and suggested `yoloai destroy` command) but are NOT deleted — they may contain recoverable work.
 
 **What is NOT pruned by default:** Container base/profile images (reclaim them with `--images`, which forces a base rebuild). Orphaned seatbelt processes (complex detection, low frequency).
 
@@ -689,7 +689,7 @@ Options:
 ### `yoloai start`
 
 `yoloai start [-a|--attach] [--resume] <name>` ensures the sandbox is running — idempotent "get it running, however needed". Like `new`, starts detached by default.
-- If the container has been removed: re-run full container creation from `meta.json` (skipping the copy step for `:copy` directories — state already exists in `work/`). Create a new credential temp file (ephemeral by design).
+- If the container has been removed: re-run full container creation from `environment.json` (skipping the copy step for `:copy` directories — state already exists in `work/`). Create a new credential temp file (ephemeral by design).
 - If the container is stopped: starts it. If `--network-isolated`, iptables rules are reapplied by the entrypoint.
 - If the container is running but the agent has exited: relaunches the agent in the existing tmux session.
 - If already running: no-op.
@@ -710,7 +710,7 @@ This eliminates the need to diagnose *why* a sandbox isn't running before choosi
 
 ### `yoloai reset`
 
-`yoloai reset <name>` re-copies the workdir from the original host directory and resets the git baseline. Also clears the cache and files directories by default. Sandbox configuration (`meta.json`) is preserved. Only affects `:copy` directories — `:rw` directories reference the original and have no sandbox copy to reset.
+`yoloai reset <name>` re-copies the workdir from the original host directory and resets the git baseline. Also clears the cache and files directories by default. Sandbox configuration (`environment.json`) is preserved. Only affects `:copy` directories — `:rw` directories reference the original and have no sandbox copy to reset.
 
 **Default behavior (in-place):**
 
@@ -730,7 +730,7 @@ By default, the agent stays running and retains its conversational context while
      by entry unions two repos and can leave a ref naming an object that is gone
      (DF118).
 2. Re-create git baseline
-3. Update `baseline_sha` in `meta.json`
+3. Update `baseline_sha` in `environment.json`
 4. Clear cache directory (unless `--keep-cache`)
 5. Clear files directory (unless `--keep-files`)
 6. Send notification to agent via tmux `send-keys`:
@@ -748,7 +748,7 @@ The container is stopped and restarted. The agent loses its conversational conte
 2. Delete `work/<encoded-path>/` contents
 3. Re-copy workdir from original host dir via `cp -rp`
 4. Re-create git baseline
-5. Update `baseline_sha` in `meta.json`
+5. Update `baseline_sha` in `environment.json`
 6. If `--clear-state`, also delete and recreate `agent-runtime/` directory
 7. Clear cache directory (unless `--keep-cache`)
 8. Clear files directory (unless `--keep-files`)
@@ -1021,5 +1021,5 @@ The cache persists across `stop`/`start` cycles and is destroyed with `yoloai de
 
 ### Image Cleanup
 
-Docker images (`yoloai-base`, `yoloai-<profile>`) accumulate indefinitely. A cleanup mechanism is needed but deferred pending research into Docker's image lifecycle: base images are shared parents of profile images, profile images may have running containers, layer caching means "removing" doesn't necessarily free space, and `docker image prune` vs `docker rmi` have different semantics. Half-baked pruning could break running sandboxes or nuke images the user spent time building.
+Docker images (`yoloai-base`, `yoloai-cli-<profile>`) accumulate indefinitely. A cleanup mechanism is needed but deferred pending research into Docker's image lifecycle: base images are shared parents of profile images, profile images may have running containers, layer caching means "removing" doesn't necessarily free space, and `docker image prune` vs `docker rmi` have different semantics. Half-baked pruning could break running sandboxes or nuke images the user spent time building.
 

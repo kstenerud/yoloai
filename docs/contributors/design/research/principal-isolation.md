@@ -48,7 +48,7 @@ that is expected; yoloAI is single-principal by design.**
 | Network | per-container netns (Docker default) + per-sandbox allow-list (iptables/ipset in entrypoint) | `runtime/isolation.go`, `network.go` | netns separates by default, but allow-lists aren't principal-scoped; no explicit cross-sandbox deny |
 | Workdir / aux dirs | host path taken **as-is**; bind (`:rw`/`:ro`) or copy (`:copy`) or overlay | `state/state.go:DirSpec`, `mounts/mounts.go` | **no `filepath.Clean`/symlink canonicalization** on the host path |
 | `files/` exchange | `<sandboxDir>/files/` ↔ `/yoloai/files/`; **has** a traversal guard | `store/paths.go:FilesDir`, `files.go:validateExchangePath` | guard is per-sandbox; cross-principal rests on POSIX perms only |
-| Audit / attribution | **none**; `meta.json` has no owner/principal field | `store/meta.go:Meta` | no record of *who* created/accessed a sandbox |
+| Audit / attribution | **none**; `environment.json` has no owner/principal field | `store/meta.go:Meta` | no record of *who* created/accessed a sandbox |
 
 The forward-looking note in `yoloai.go` ("`/var/lib/yoloai`, multi-tenant per-user roots
 must pass this") confirms the seam was anticipated but **not enforced**: `Layout` takes a
@@ -249,7 +249,7 @@ to the daemon.
 
 ### B7 — Audit / attribution *(LOW for isolation, but a gap)*
 
-No principal field in `meta.json`, no audit trail. Not an isolation *mechanism*, but a
+No principal field in `environment.json`, no audit trail. Not an isolation *mechanism*, but a
 multi-tenant deployment needs to attribute actions for incident response. **Recommended:**
 add an owner/principal field to sandbox metadata (also reinforces the partition — metadata
 can be cross-checked against the path segment as defense-in-depth), and note an audit-log
