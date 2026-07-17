@@ -42,7 +42,10 @@ escalates on its own when something breaking lands) and points at the work consi
 It is permanent and drains at each release, like `## Unreleased`. **It never carries an item's
 status, and never its own reason** — an entry there is an ID and the record's own title, nothing
 more. *"What's left for this release?"* and *"why is this in?"* are both answered by following its
-links, never by trusting the page. The scope reason lives in the record, in a `- **Rides:**` field
+links, never by trusting the page. **Finishing an item does not remove its line**; entries stay
+until the release drains the file, because "done" is the record's to say and a list that shortens
+as work lands is a checkbox wearing a disguise. Repoint the link if the record moved; leave the
+entry. The scope reason lives in the record, in a `- **Rides:**` field
 naming the kind of release the fix needs (**any** / **breaking** / **a migration**) and which half
 qualifies when only one does. Add that field to anything you propose for a release. It exists
 because a reason composed on the staging page cannot be checked against anything, so a right one and

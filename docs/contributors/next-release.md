@@ -26,6 +26,14 @@ and progress. A checkbox here would be a second copy of that state and would dri
 are none. **"What's left for this release?"** is answered by following the links and reading each
 record — never by trusting this page.
 
+**So an entry stays until the release drains it — finishing the work does not remove the line.**
+"Done" is the record's to say, not this list's. Removing an entry on completion looks like tidying
+and is the same mistake as a checkbox: it makes the page's *length* the status, so the page starts
+answering "what's left?" by itself, and the links stop being the answer. It also destroys the only
+record of what the release contained, at the exact moment that record becomes useful. If the record
+moved when it resolved (findings-unresolved.md → findings-resolved.md), repoint the link and leave
+the entry.
+
 **A line here is an ID and the record's own title. Nothing else — no reason, no scope note, no
 "just the small half".** Every entry below links to a record that owns *why* it is here, in a
 `- **Rides:**` field naming the kind of release its fix needs, and which half of it if only one
@@ -45,6 +53,9 @@ decide what is best slipped in before the cut. Anything discovered along the way
 finding or decision first, and lands here only if it should block the release.
 
 ## In scope
+
+*Entries stay until the release drains this file. Do not remove one because it is finished — see
+"This file points" above.*
 
 - [DF126](design/findings-resolved.md) — profile image tags carry no principal, so two principals
   with a same-named profile collide on one image
