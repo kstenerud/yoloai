@@ -49,8 +49,13 @@ finding or decision first, and lands here only if it should block the release.
 
 ## Candidates — undecided
 
-- [module-split](design/plans/module-split.md) — substrate store shape; self-described as "another
-  versioned migration".
+- [module-split](design/plans/module-split.md) — **the migration it was listed for does not exist.**
+  This line read "substrate store shape; self-described as *another versioned migration*" until
+  2026-07-17. That quote is real but comes from an **open question** (opaque-payload vs sidecar for
+  `AgentType`/`Model`), not from planned work — and Phase A, which closed the import edges the split
+  exists for, landed **"with no migration and no wire-format change"**. The plan says the reshape was
+  "not needed" and survives only as an option for a *separate* concern. Phase D, the remainder, is
+  depguard fences: no schema at all. Nothing here rides a breaking release.
 - [session-carve](design/plans/session-carve.md) 1a-iv — `keepalive_only` default flip; reshapes
   `runtime-config.json`. **Note:** it is fourth in a sequenced chain (`1a-i → ii → iii → iv`) whose
   ii and iii are unbuilt, so it cannot jump the queue regardless of the scope test.
