@@ -2,12 +2,14 @@ package orchestrator
 
 // ABOUTME: The v4->v5 principal-rename migrator — the CLI adopts the "cli"
 // ABOUTME: principal, so existing "yoloai-<name>" instances move to "yoloai-cli-<name>".
+// ABOUTME: Also re-stamps a principal-authored profile image's ImageRef (DF126).
 
 import (
 	"context"
 	"errors"
 	"fmt"
 	"os"
+	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -205,8 +207,15 @@ func (p *PrincipalRename) applyBackendOp(ctx context.Context, rt runtime.Backend
 
 // restampPrincipal rewrites the sandbox's environment.json with the target
 // principal, so every path that resolves an instance from the stored principal
-// (git-in-confinement, vscode attach) agrees with the live layout. Durable and
-// written last, so its value is the migration's idempotency marker.
+// (git-in-confinement, vscode attach) agrees with the live layout. It also
+// re-stamps ImageRef when it names a principal-authored profile image
+// (DF126): the pre-v5 sites that wrote it hardcoded the bare
+// "yoloai-<profile>" tag the same way they hardcoded the instance-name prefix
+// D126 fixed, so a record left unstamped would resolve a tag the rebuilt
+// (principal-scoped) image on the launch/restart path (launch.go, restart.go)
+// no longer produces. BaseImage is left alone — it is deliberately unscoped
+// (DF126 "Scope note"). Durable and written last, so its value is the
+// migration's idempotency marker.
 func (p *PrincipalRename) restampPrincipal(name string) error {
 	sandboxDir := p.layout.SandboxDir(name)
 	env, err := store.LoadEnvironment(sandboxDir)
@@ -214,10 +223,29 @@ func (p *PrincipalRename) restampPrincipal(name string) error {
 		return fmt.Errorf("load environment for %q: %w", name, err)
 	}
 	env.Principal = p.layout.Principal
+	env.ImageRef = restampedImageRef(p.layout, env.ImageRef)
 	if err := store.SaveEnvironment(sandboxDir, env); err != nil {
 		return fmt.Errorf("re-stamp principal for %q: %w", name, err)
 	}
 	return nil
+}
+
+// restampedImageRef re-stamps a pre-v5 ImageRef with the target principal
+// (DF126). config.BaseImage and an empty ref are returned unchanged — the
+// base image is deliberately unscoped. Anything that isn't the bare
+// "yoloai-<profile>" shape the old hardcoded call sites always wrote (e.g. a
+// ref already principal-scoped by some other means) is also returned
+// unchanged: restamping is only ever correct for the shape those sites
+// produced.
+func restampedImageRef(layout config.Layout, imageRef string) string {
+	if imageRef == "" || imageRef == config.BaseImage {
+		return imageRef
+	}
+	profileName, ok := strings.CutPrefix(imageRef, "yoloai-")
+	if !ok {
+		return imageRef
+	}
+	return config.ProfileImageTag(layout, profileName)
 }
 
 // unmigratedSandboxNames lists sandbox names whose stored principal is not yet

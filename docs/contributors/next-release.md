@@ -46,8 +46,6 @@ finding or decision first, and lands here only if it should block the release.
 
 ## In scope
 
-- [DF126](design/findings-unresolved.md) — profile image tags carry no principal, so two principals
-  with a same-named profile collide on one image
 - [DF113](design/findings-unresolved.md) — `destroy` frees the sandbox name while leaving the
   instance behind, so the next `start` adopts a VM it never provisioned
 - [DF53](design/findings-unresolved.md) — Tart silently ignores `-p` port mappings (port-forwarding

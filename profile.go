@@ -185,7 +185,7 @@ func (a *ProfileAdmin) infoBase() (*ProfileInfo, error) {
 	return &ProfileInfo{
 		Name:          "base",
 		Chain:         chain,
-		Image:         "yoloai-base",
+		Image:         config.BaseImage,
 		HasDockerfile: config.ProfileHasDockerfile(a.layout, "base"),
 		Merged:        resolvedProfileConfigFromMerged(merged),
 		// "base" has no parent; an empty config lets diff callers
@@ -271,7 +271,7 @@ func (a *ProfileAdmin) Delete(_ context.Context, name string) (*ProfileDeleteRes
 		return nil, fmt.Errorf("remove profile directory: %w", err)
 	}
 
-	image := "yoloai-" + name
+	image := config.ProfileImageTag(a.layout, name)
 	hints := make([]ImageCleanupHint, 0)
 	for _, desc := range runtime.Descriptors() {
 		if desc.CleanupHint == nil {

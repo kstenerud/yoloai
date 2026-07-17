@@ -76,6 +76,31 @@ stopped containerd or apple sandbox is recreated under its new name on next star
 (pass `--yes`), and a running one must be stopped first. Library embedders must
 pass a non-empty `Principal` (≤8 alphanumeric characters) to `NewClient`.
 
+### Profile image tags are principal-scoped
+
+**Previous behavior:** a custom profile's Docker image was tagged
+`yoloai-<profile>` with no principal, so two principals with a same-named
+profile (e.g. `web`) collided on one `yoloai-web` image in a shared daemon —
+the second build silently won and the first principal's sandboxes ran it
+(DF126). `yoloai-base`, yoloAI's own artifact and byte-identical for every
+principal, was and remains unaffected.
+
+**New behavior:** a principal-authored profile image is tagged
+`yoloai-<principal>-<profile>` (e.g. `yoloai-cli-web`), matching the
+`yoloai-<principal>-<name>` instance-name scoping D126 already applies to
+sandboxes. `yoloai-base` stays unscoped and shared.
+
+**Impact:** third-party scripts or `Dockerfile FROM`/cleanup steps that match
+`yoloai-<profile>` must match `yoloai-cli-<profile>`. Existing sandboxes are
+migrated automatically (see below); a profile image itself is not renamed —
+it is rebuilt under the new tag the next time its profile is used.
+
+**Migration:** run `yoloai system migrate` after upgrading (the same v4->v5
+pass that renames instances, D126). It re-stamps each existing sandbox's
+recorded image reference from `yoloai-<profile>` to `yoloai-cli-<profile>`
+(`yoloai-base` records are left untouched) so the launch/restart path resolves
+a tag consistent with what a rebuild now produces.
+
 ## v0.8.0
 
 ### Credential brokering is now the default for Gemini and Codex (not just Claude)

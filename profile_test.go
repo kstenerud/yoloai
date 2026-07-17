@@ -134,7 +134,7 @@ func TestProfiles_Info_Base(t *testing.T) {
 	require.NotNil(t, info)
 	assert.Equal(t, "base", info.Name)
 	assert.Equal(t, []string{"base"}, info.Chain)
-	assert.Equal(t, "yoloai-base", info.Image)
+	assert.Equal(t, config.BaseImage, info.Image)
 	require.NotNil(t, info.Merged, "Merged must be populated for callers that render it")
 	require.NotNil(t, info.Parent, "Parent must be non-nil so --diff callers don't nil-deref")
 }
@@ -159,7 +159,7 @@ func TestProfiles_Info_RealProfile_InheritsBaseImage(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, info)
 	assert.Equal(t, "demo", info.Name)
-	assert.Equal(t, "yoloai-base", info.Image, "no per-profile Dockerfile → inherits base image")
+	assert.Equal(t, config.BaseImage, info.Image, "no per-profile Dockerfile → inherits base image")
 	assert.False(t, info.HasDockerfile)
 	require.NotNil(t, info.Merged)
 	require.NotNil(t, info.Parent, "Parent must be non-nil for --diff callers")
@@ -177,7 +177,7 @@ func TestProfiles_Info_RealProfile_WithDockerfile(t *testing.T) {
 
 	info, err := c.Profiles().Info(ctx, "demo")
 	require.NoError(t, err)
-	assert.Equal(t, "yoloai-demo", info.Image)
+	assert.Equal(t, config.ProfileImageTag(c.layout, "demo"), info.Image, "principal-scoped tag (DF126)")
 	assert.True(t, info.HasDockerfile)
 }
 
@@ -255,7 +255,7 @@ func TestProfiles_Delete_RemovesDirAndReturnsHints(t *testing.T) {
 	assert.NotNil(t, result.ImageCleanupHints)
 	for _, h := range result.ImageCleanupHints {
 		assert.NotEmpty(t, h.BackendType, "hint must name its backend")
-		assert.Equal(t, "yoloai-demo", h.Image)
+		assert.Equal(t, config.ProfileImageTag(c.layout, "demo"), h.Image, "principal-scoped tag (DF126)")
 		assert.NotEmpty(t, h.Command, "hint must carry a removal command")
 	}
 }

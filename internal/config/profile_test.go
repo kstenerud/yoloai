@@ -24,7 +24,7 @@ func setupProfileDir(t *testing.T, name, content string) (string, Layout) {
 	if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600); err != nil {
 		t.Fatal(err)
 	}
-	return home, NewLayout(filepath.Join(home, ".yoloai"))
+	return home, NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(CLIPrincipal)
 }
 
 func TestValidateProfileName(t *testing.T) {
@@ -693,10 +693,10 @@ func TestResolveProfileImage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Profile with Dockerfile → yoloai-<name>
+	// Profile with Dockerfile → yoloai-<principal>-<name>, principal-scoped (DF126)
 	img := ResolveProfileImage(layout, "with-df", []string{"base", "with-df"})
-	if img != "yoloai-with-df" {
-		t.Errorf("image = %q, want %q", img, "yoloai-with-df")
+	if img != "yoloai-cli-with-df" {
+		t.Errorf("image = %q, want %q", img, "yoloai-cli-with-df")
 	}
 
 	// Profile without Dockerfile inherits parent
@@ -709,15 +709,52 @@ func TestResolveProfileImage(t *testing.T) {
 	}
 
 	img = ResolveProfileImage(layout, "no-df", []string{"base", "with-df", "no-df"})
-	if img != "yoloai-with-df" {
-		t.Errorf("image = %q, want %q (should inherit parent's)", img, "yoloai-with-df")
+	if img != "yoloai-cli-with-df" {
+		t.Errorf("image = %q, want %q (should inherit parent's)", img, "yoloai-cli-with-df")
 	}
 
-	// No Dockerfiles at all → base
+	// No Dockerfiles at all → base, unscoped (DF126 "Scope note")
 	_, layout3 := setupProfileDir(t, "plain", "agent: claude\n")
 	img = ResolveProfileImage(layout3, "plain", []string{"base", "plain"})
-	if img != "yoloai-base" {
-		t.Errorf("image = %q, want %q", img, "yoloai-base")
+	if img != BaseImage {
+		t.Errorf("image = %q, want %q", img, BaseImage)
+	}
+}
+
+func TestProfileImageTag(t *testing.T) {
+	layout := NewLayout(t.TempDir()).WithPrincipal(CLIPrincipal)
+	got := ProfileImageTag(layout, "web")
+	want := "yoloai-cli-web"
+	if got != want {
+		t.Errorf("ProfileImageTag = %q, want %q", got, want)
+	}
+
+	// Two principals with a same-named profile must not collide (DF126).
+	other := NewLayout(t.TempDir()).WithPrincipal(PrincipalSegment("other"))
+	gotOther := ProfileImageTag(other, "web")
+	if gotOther == got {
+		t.Errorf("ProfileImageTag for distinct principals collided: %q", got)
+	}
+	if gotOther != "yoloai-other-web" {
+		t.Errorf("ProfileImageTag = %q, want %q", gotOther, "yoloai-other-web")
+	}
+}
+
+func TestProfileImageTag_PanicsOnUnprincipaledLayout(t *testing.T) {
+	defer func() {
+		if recover() == nil {
+			t.Fatal("expected ProfileImageTag to panic on an unprincipaled Layout")
+		}
+	}()
+	ProfileImageTag(NewLayout(t.TempDir()), "web")
+}
+
+func TestBaseImage_IsUnscoped(t *testing.T) {
+	// BaseImage is a constant with no principal segment — it must not depend
+	// on, or be derivable from, any particular Layout's principal (DF126
+	// "Scope note").
+	if BaseImage != "yoloai-base" {
+		t.Errorf("BaseImage = %q, want %q", BaseImage, "yoloai-base")
 	}
 }
 

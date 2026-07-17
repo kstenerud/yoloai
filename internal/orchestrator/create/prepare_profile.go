@@ -51,7 +51,7 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 
 	if opts.Profile == "" {
 		// No profile specified: use base image
-		pr.imageRef = "yoloai-base"
+		pr.imageRef = config.BaseImage
 		return pr, nil
 	}
 

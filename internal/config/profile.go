@@ -259,10 +259,28 @@ func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	return cfg, nil
 }
 
+// BaseImage is yoloAI's own artifact: byte-identical for every principal, so
+// it stays unscoped and shared across a daemon rather than carrying a
+// principal segment (DF126 "Scope note") — unlike a principal-authored
+// profile image, which ProfileImageTag scopes.
+const BaseImage = "yoloai-base"
+
+// ProfileImageTag returns the principal-scoped Docker image tag for a
+// principal-authored profile image: "yoloai-<principal>-<profileName>". A
+// principal-authored build artifact needs a principal-scoped tag (see
+// research/principal-isolation.md §B2) so two principals with a same-named
+// profile don't collide on one image in a shared daemon (DF126). It goes
+// through InstancePrefix so the empty-principal panic (D126) covers it too —
+// the three call sites this replaces used to bypass that gate by
+// concatenating the "yoloai-" prefix themselves.
+func ProfileImageTag(layout Layout, profileName string) string {
+	return InstancePrefix(layout.Principal) + profileName
+}
+
 // ResolveProfileImage returns the Docker image tag for a sandbox using the
-// given profile. Walks the chain from child to root, returning "yoloai-<P>"
-// where P is the most-derived profile that has a Dockerfile. Falls back to
-// "yoloai-base" if none has a Dockerfile.
+// given profile. Walks the chain from child to root, returning the
+// principal-scoped tag of the most-derived profile that has a Dockerfile.
+// Falls back to BaseImage if none has a Dockerfile.
 func ResolveProfileImage(layout Layout, profileName string, chain []string) string {
 	// Walk from most-derived (last) to root (first), skip "base"
 	for _, name := range slices.Backward(chain) {
@@ -271,10 +289,10 @@ func ResolveProfileImage(layout Layout, profileName string, chain []string) stri
 			continue
 		}
 		if ProfileHasDockerfile(layout, name) {
-			return "yoloai-" + name
+			return ProfileImageTag(layout, name)
 		}
 	}
-	return "yoloai-base"
+	return BaseImage
 }
 
 // ResolveProfileChain walks the extends chain from the given profile back to

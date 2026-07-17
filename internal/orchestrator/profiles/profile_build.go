@@ -71,7 +71,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 			continue
 		}
 
-		tag := "yoloai-" + name
+		tag := config.ProfileImageTag(layout, name)
 		if force || builder.ProfileImageNeedsBuild(profileDir, prevDir) {
 			fmt.Fprintf(output, "Building profile image %s...\n", tag) //nolint:errcheck // best-effort output
 			if err := builder.BuildProfileImage(ctx, profileDir, tag, secrets, layout, output, logger); err != nil {

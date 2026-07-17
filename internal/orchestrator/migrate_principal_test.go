@@ -57,6 +57,24 @@ func TestClassifyPrincipalRename(t *testing.T) {
 	}
 }
 
+func TestRestampedImageRef(t *testing.T) {
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
+	tests := []struct {
+		name     string
+		imageRef string
+		want     string
+	}{
+		{"principal-authored profile image gets scoped", "yoloai-web", "yoloai-cli-web"},
+		{"base image is left unscoped", config.BaseImage, config.BaseImage},
+		{"empty ref is left alone", "", ""},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, restampedImageRef(layout, tc.imageRef))
+		})
+	}
+}
+
 func TestStampSchemaAdvancing(t *testing.T) {
 	t.Run("advances an unstamped realm", func(t *testing.T) {
 		layout := config.NewLayout(t.TempDir())
@@ -135,14 +153,21 @@ func (f *fakeRenamer) Rename(_ context.Context, oldName, newName string) error {
 }
 
 // seedSandbox writes an unmigrated (empty-principal) environment.json for name.
-func seedSandbox(t *testing.T, layout config.Layout, name string) {
+// An optional imageRef seeds Environment.ImageRef (pre-v5 bare "yoloai-<X>"
+// shape); omitted, it is left empty.
+func seedSandbox(t *testing.T, layout config.Layout, name string, imageRef ...string) {
 	t.Helper()
+	var ref string
+	if len(imageRef) > 0 {
+		ref = imageRef[0]
+	}
 	sandboxDir := layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0o750))
 	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
 		Version:     3,
 		Name:        name,
 		BackendType: "mock",
+		ImageRef:    ref,
 		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
 	}))
 }
@@ -228,6 +253,27 @@ func TestPrincipalRename_Apply_SeatbeltRestampOnly(t *testing.T) {
 	env, err := store.LoadEnvironment(layout.SandboxDir("box"))
 	require.NoError(t, err)
 	assert.Equal(t, config.CLIPrincipal, env.Principal)
+}
+
+func TestPrincipalRename_Apply_RestampsProfileImageRef(t *testing.T) {
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
+	seedSandbox(t, layout, "web", "yoloai-web")
+	seedSandbox(t, layout, "plain", config.BaseImage)
+	rt := &fakeBackend{keepAlive: runtime.KeepAliveHostKeepAlive} // no container/VM to touch
+	m := newPrincipalRenameWith(layout, rt)
+
+	_, err := m.Apply(context.Background(), migrate.Decision{})
+	require.NoError(t, err)
+
+	// A principal-authored profile image is re-stamped with the target principal.
+	env, err := store.LoadEnvironment(layout.SandboxDir("web"))
+	require.NoError(t, err)
+	assert.Equal(t, "yoloai-cli-web", env.ImageRef)
+
+	// The unscoped base image is left untouched.
+	env, err = store.LoadEnvironment(layout.SandboxDir("plain"))
+	require.NoError(t, err)
+	assert.Equal(t, config.BaseImage, env.ImageRef)
 }
 
 func TestPrincipalRename_Plan_RunningRecreateOnlyBlocks(t *testing.T) {
