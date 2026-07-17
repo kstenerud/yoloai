@@ -502,6 +502,59 @@ is worse than none because it also supplies the confidence.
 - **The class, not the instance.** Checked all six backends: **docker** converts ports (`ConvertPorts`, `docker.go:504`); **podman** embeds `*docker.Runtime` and inherits it; **apple** consumes `cfg.Ports` (`apple.go:214`). **tart** (DF53) and **containerd** (this) drop them. **seatbelt** has no port code either, but its sandbox is a host process with no NAT layer, so a host port is already the port — `-p` there is meaningless rather than broken, and needs a decision rather than a fix. Nothing declares any of this: `runtime.BackendCaps` has `NetworkIsolation`, `CapAdd`, `HostFilesystem`, `ContainerAttach` and others, and **no port-forwarding capability at all**, which is why two backends can silently not implement it.
 - **Pointer:** `runtime/containerd/cni.go:81` (the plugin config), `:222` (`setupCNI`, no ports parameter); `runtime/runtime.go:246-256` (`BackendCaps`, no port capability); `runtime/docker/docker.go:504,1058` (the working path); `runtime/podman/podman.go:87` (embeds docker); `runtime/apple/apple.go:214`. Related: DF53.
 
+### DF136 — on tart/seatbelt the whole sandbox dir is agent-writable, so an agent can redirect `apply` to any host path
+
+- **Discovered:** 2026-07-17 · **Workstream:** pre-release data-destruction audit (copy/diff/apply host surface)
+- **Severity:** HIGH (security — defeats the review gate that is the product's core safety property), **macOS-only** (tart, seatbelt). Latent: needs a compromised/prompt-injected agent.
+- **Disposition:** FILED, not fixed — needs a design decision, deferred to a macOS agent (owner's call, 2026-07-17). NOT a v0.9.0 blocker.
+- **Verified (by me):** the two mount facts. `runtime/tart/tart.go:703` shares the entire sandbox dir into the guest **read-write** (`--dir sharedDir:sandboxPath`, no `:ro`); `sandboxPath` is `SandboxesDir()/name`, the directory `environment.json` lives in. `runtime/seatbelt/profile.go:193` grants `(allow file-read* file-write* (subpath sandboxDir))` over that same directory, at the invoking user's uid. Docker/containerd/apple mount only specific subpaths — not exposed.
+- **The chain (traced by reading, not executed):** `store.LoadEnvironment` (`store/environment.go`) does a bare read+unmarshal with **no integrity check**. `copyflow.ApplyAll`/`ApplySeries` use the record's `Dirs[0].HostPath` **verbatim** as the target of a host-side `git apply` (`git.NewHost`). So an agent inside the confinement can rewrite `environment.json`'s `HostPath` to any path the invoking user can write (`~/.ssh`, another project), stage a matching fake work copy + `BaselineSHA`, and the next `yoloai apply` writes the agent's patch there. It defeats the gate via **raw file I/O, not git**, which is why DF35's hermetic-git-seal verification (git ops only) does not cover it.
+- **Corrects a stale claim:** DF67 asserts *"`.meta` lives outside the sandbox, so the agent can't corrupt it"* — false for this metadata; `environment.json` sits inside the seatbelt grant and the tart share.
+- **Shape of a fix (for the mac agent, not prescriptive):** mount the record read-only / keep it outside the writable share; or sign/verify it; or confirm the resolved apply target against the path recorded at create time before writing. `apply` also only prints its target *after* applying (`internal/cli/workflow/apply.go:364`) — showing it first would surface a redirect.
+- **Pointer:** `runtime/tart/tart.go:703`; `runtime/seatbelt/profile.go:193`; `store/environment.go` (`LoadEnvironment`, no integrity check); `copyflow/apply.go`; `internal/git/ops.go` (host apply). Related: DF35, DF67.
+
+### DF137 — plain `yoloai system prune` reclaims non-yoloai content on a shared daemon
+
+- **Discovered:** 2026-07-17 · **Workstream:** pre-release deletion-verb audit
+- **Severity:** MEDIUM (destroys unrelated daemon content, but only on a host shared with other Docker/Podman work; a yoloai-dedicated host is unaffected — which is the documented assumption)
+- **Disposition:** FILED, not fixed. Re-scoping touches reclaim accounting (`splitCacheBytes`) and the BuildKit cache cannot be label-scoped at all, so it needs its own change with real-backend verification — not a mid-release patch. Pre-existing (not a v0.9.0 regression).
+- **Verified (by me):** `system.go:847` calls `PruneCacheFor` **unconditionally** — `--images` sets only the *depth*, not whether it runs. So plain `yoloai system prune` reaches `runtime/docker/prune.go:157` `PruneCache`, which runs `ContainersPrune(filters.NewArgs())` (every stopped container), `BuildCachePrune(All:true)` (the whole cache), and `NetworksPrune(filters.NewArgs())` (all unused networks) — **all with empty filters**. Only `VolumesPrune` is label-scoped (`managedLabel`). Apple's `runtime/apple/prune.go` runs unscoped `container prune`/`image prune`/`builder delete --force` the same way.
+- **The gap it also exposes:** the source comment (`docker/prune.go:141-143`) admits *"Affects ALL backend content ... appropriate for a host dedicated to yoloai"* — the only guard is that comment. The user-facing `--help` (`internal/cli/system/prune.go`) puts the caveat on `--images`/`--stale-bases`, so a user reading help for plain `prune` gets no signal it reaches outside yoloai.
+- **Cheap partial mitigation (if wanted before the full fix):** scope `ContainersPrune`/`NetworksPrune` by `managedLabel` exactly as `VolumesPrune` already is; and move the "dedicated host" caveat onto plain `prune`'s help. The build-cache reclaim stays global (BuildKit cache is not per-project labelable) but forces only a rebuild, not data loss.
+- **Pointer:** `system.go:847` (unconditional call); `runtime/docker/prune.go:157-214`; `runtime/apple/prune.go:99-119`; `internal/cli/system/prune.go` (help text).
+
+### DF138 — `destroy --all` / wildcard resolves one backend for the whole batch, orphaning sandboxes on other backends
+
+- **Discovered:** 2026-07-17 · **Workstream:** pre-release deletion-verb audit
+- **Severity:** MEDIUM (orphans a real instance with the user's work still in it; the on-disk record is deleted, so no yoloai command tracks it until a later same-backend `prune` reaps it)
+- **Disposition:** FILED, not fixed — **reported by the audit, not independently verified by me.** The fix (per-sandbox backend from `environment.json`) is not trivial and touches destroy across backends; deferred.
+- **Description (audit-reported):** `internal/cli/lifecycle/destroy.go:74-86` resolves the backend once (config default / `SelectContainerBackend`) for a batch; per-sandbox `ResolveBackendForSandbox` is applied only to a single non-wildcard name. For a sandbox created under a *different* backend, `Stop`/`Remove` silently no-op (wrong backend), `HasActiveWork` reads work through the wrong backend's git path so its refusal is unreliable, and `forceRemoveAll(sandboxDir)` deletes the record anyway (`launch/teardown.go:62`). The real instance is left running, now untracked. The codebase already solved this exact hazard for clone (`engine_lifecycle.go:98-127` `DestroyForOverwrite` reads the destination's own `environment.json` backend); `Engine.Destroy` does not.
+- **Pointer:** `internal/cli/lifecycle/destroy.go:74-86`; `internal/orchestrator/launch/teardown.go:62`; `internal/orchestrator/engine_lifecycle.go:98-127` (the pattern it should follow). Related: DF113.
+
+### DF139 — seatbelt `killByPID` sends SIGKILL to a process group from an unverified, possibly-reused PID
+
+- **Discovered:** 2026-07-17 · **Workstream:** pre-release deletion-verb audit
+- **Severity:** MEDIUM (can signal an unrelated process group after PID reuse), **macOS-only**
+- **Disposition:** FILED, not fixed — **reported by the audit, not independently verified by me.** Deferred to the macOS agent with DF136.
+- **Description (audit-reported):** `runtime/seatbelt/seatbelt.go:711-753` `killByPID` reads a bare PID from a file and does `syscall.Kill(-pid, SIGTERM)` then `SIGKILL` (process-group kill, since the child ran `Setsid`), with **no** check that the PID still belongs to a process this sandbox launched (no start-time / argv identity). Called from `Stop()` (destroy, `reset --restart`, teardown). If the original `sandbox-exec` died and the OS reused the PID as a new group leader, the unrelated group is killed. Contrast `internal/broker/host.go:341-356`, which signals a single PID and explicitly acknowledges the reuse race.
+- **Pointer:** `runtime/seatbelt/seatbelt.go:711-753`; contrast `internal/broker/host.go:331-356`.
+
+### DF140 — a sandbox whose agent never came up can report Active / Idle / Done instead of failed
+
+- **Discovered:** 2026-07-17 · **Workstream:** pre-release broken-sandbox audit
+- **Severity:** MEDIUM (silent wrong status — the caller believes a dead sandbox is working; no data loss, but it misleads every downstream decision). **Docker agent-free-launch path** for the Active case; all backends for the others.
+- **Disposition:** FILED, not fixed — **reported by the audit, not independently verified by me.** A cluster of three faces of one root cause: nothing verifies the launched-agent → written-status linkage.
+- **Description (audit-reported):** (1) Docker brings up a neutral keepalive then launches `sandbox-setup.py` as a **detached** exec whose handle is discarded (`launch.go:311-317`); if it dies before `launch_monitor()`, `agent-status.json` stays `{}`, `parseStatusJSON` rejects it, and `DetectStatus` falls through to *"assume active"* (`status.go:249-251`) — permanently, since the keepalive never exits and the monitor never started. (2) A dead status-monitor while the last state was `idle` reports Idle forever — `idle` has no staleness check by design (`status.go:285-289`) and the monitor is an unsupervised `Popen` with no restart. (3) An agent binary that never launches leaves a dead tmux pane the monitor writes up as `done exit_code=0` (`status-monitor.py`), i.e. clean success. `runtime/runtimetest/conformance.go` exercises none of the `Launch`/`ProcessLauncher` bring-up path.
+- **Pointer:** `internal/orchestrator/launch/launch.go:247-328,1045-1087`; `internal/orchestrator/status/status.go:249-251,285-289`; `runtime/docker/resources/sandbox-setup.py`, `status-monitor.py`; `runtime/runtimetest/conformance.go` (coverage gap).
+
+### DF141 — `Engine.Restart` is Stop-then-Start with an unlocked gap, so `--isolation`/`--broker` overrides can persist a record that contradicts the running instance
+
+- **Discovered:** 2026-07-17 · **Workstream:** pre-release broken-sandbox audit
+- **Severity:** MEDIUM (durably wrong metadata: the record says one isolation mode, the instance is another), **race-triggered**
+- **Disposition:** FILED, not fixed — **reported by the audit, not independently verified by me.**
+- **Description (audit-reported):** `internal/orchestrator/engine_lifecycle.go:49-57` calls `lifecycle.Stop` then `lifecycle.Start`, each taking and releasing its own per-sandbox lock, so there is an unlocked window between them (violating the whole-op lock invariant at `store/lock_unix.go:50-54`). A concurrent `start` in the gap recreates the container in the old mode; Restart's Start half then runs `applyIsolationOverride` (`start.go:74-98`), which **persists** `isolation=vm` unconditionally, then `DetectStatus` sees Active and returns early without recreating (`start.go:369-372`). The record says `vm`; the instance is a container. Same persist-then-check-then-maybe-skip order silently drops `--broker`/`--vscode-tunnel`/`--resume` on the race. Distinct from DF113.
+- **Pointer:** `internal/orchestrator/engine_lifecycle.go:49-57`; `internal/orchestrator/lifecycle/start.go:74-98,343,369-372`; `store/lock_unix.go:50-54`.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
