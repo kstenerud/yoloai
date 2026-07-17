@@ -1101,6 +1101,53 @@ def wait_for_ready(cfg: dict[str, Any], socket: str | None = None) -> None:
         prev = curr
 
 
+# Closed-loop submit budget. The submit key is not always acted on: a TUI that
+# is still settling can take the pasted text into its input box and drop the
+# Enter that should send it, leaving the agent parked on a composed prompt it
+# never runs (DF13). Open-loop delivery reports success there, and the only
+# downstream signal is the caller's eventual timeout, so we confirm instead.
+_SUBMIT_VERIFY_ATTEMPTS = 3
+_SUBMIT_VERIFY_DELAY_SECONDS = 0.75
+
+
+def _send_submit(submit_sequence: str, socket: str | None = None) -> None:
+    """Send the agent's submit key sequence to the pane."""
+    for key in submit_sequence.split():
+        tmux("send-keys", "-t", "main", key, socket=socket)
+        time.sleep(0.2)
+
+
+def prompt_pending_in_input(
+    cfg: dict[str, Any], content: str, socket: str | None = None
+) -> bool:
+    """True when `content` still sits UNSENT in the agent's input box.
+
+    Distinguishing "still composed" from "sent" matters because the prompt text
+    is on screen either way — once submitted it simply moves up into the
+    transcript. The discriminator is ready_pattern: it marks the live input box,
+    so the LAST line carrying it is that box. If the prompt is still there, the
+    submit key never landed.
+
+    Returns False whenever the question can't be answered (no ready_pattern to
+    locate the box, an unreadable pane, an empty prompt). False means "don't
+    retry": a wrong retry re-sends a key, and for an agent we cannot even locate
+    an input box for, that is a guess we shouldn't act on.
+    """
+    ready_pattern = cfg.get("ready_pattern", "")
+    if not ready_pattern or ready_pattern == "null":
+        return False
+    first_line = content.strip().split("\n", 1)[0].strip()
+    if not first_line:
+        return False
+    pane = tmux_output("capture-pane", "-t", "main", "-p", socket=socket)
+    input_lines = [line for line in pane.split("\n") if ready_pattern in line]
+    if not input_lines:
+        return False
+    # Compare a prefix, not the whole line: the box wraps and decorates long
+    # prompts, so only the opening run of characters is reliably intact.
+    return first_line[:40] in input_lines[-1]
+
+
 def deliver_prompt(
     cfg: dict[str, Any],
     yoloai_dir: str,
@@ -1167,13 +1214,35 @@ def deliver_prompt(
             return False
 
         time.sleep(0.5)
-        for key in submit_sequence.split():
-            tmux("send-keys", "-t", "main", key, socket=socket)
-            time.sleep(0.2)
+        _send_submit(submit_sequence, socket=socket)
+
+        # Confirm the submit actually took, and re-send if it didn't. Bounded,
+        # and each retry is logged: a prompt that needs one is a real event, and
+        # silently recovering would hide the very race this guards (DF13).
+        confirmed = False
+        for attempt in range(_SUBMIT_VERIFY_ATTEMPTS + 1):
+            time.sleep(_SUBMIT_VERIFY_DELAY_SECONDS)
+            if not prompt_pending_in_input(cfg, content, socket=socket):
+                confirmed = True
+                break
+            if attempt < _SUBMIT_VERIFY_ATTEMPTS:
+                log_info("prompt.submit_retry",
+                         "prompt still composed in the input box; re-sending submit",
+                         attempt=attempt + 1)
+                _send_submit(submit_sequence, socket=socket)
     finally:
         os.unlink(tmpname)
 
-    log_info("sandbox.prompt_deliver", "prompt delivered", method="paste-buffer")
+    if not confirmed:
+        # The agent is parked on a composed prompt it will never run. Say so
+        # here rather than leaving the caller to infer it from a timeout.
+        log_error("prompt.submit_unconfirmed",
+                  "prompt still in the input box after every submit attempt; "
+                  "the agent has the text but was never told to run it",
+                  attempts=_SUBMIT_VERIFY_ATTEMPTS)
+
+    log_info("sandbox.prompt_deliver", "prompt delivered", method="paste-buffer",
+             submit_confirmed=confirmed)
     return has_prompt  # True only when a real user task was submitted
 
 
