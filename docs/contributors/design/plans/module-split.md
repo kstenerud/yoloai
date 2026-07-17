@@ -511,6 +511,13 @@ Each phase is independently mergeable and green under `make check`.
 - **Substrate store shape:** opaque-payload generic vs agent-owned sidecar file for
   `AgentType`/`Model` (affects the `environment.json` schema — would be another versioned
   migration, like the v1→v2 reshape).
+  **Not needed for the split, and not scheduled (noted 2026-07-17).** Phase A closed both import
+  edges with **no migration and no wire-format change**; the sidecar/opaque-payload options survive
+  only for the separate question of whether the substrate should stop *persisting* agent fields at
+  all. Recorded here because this bullet's "would be another versioned migration" was read off as a
+  planned migration, and made this plan a candidate for a breaking release it has no need of — the
+  quote was accurate, the inference was not. **Nothing in this plan requires a breaking or
+  schema-touching release**; the outstanding Phase D is depguard fences.
 - **How far to push the rename:** just `sandbox`→orchestrator (high value) vs the full table.
 - **Scope of the tangled refinements:** `overlay`, `interactive-session/tmux`, and
   `network-isolation` are the only entries needing real untangling (not just a name + a
