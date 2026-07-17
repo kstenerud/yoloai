@@ -26,7 +26,7 @@ func SaveSandboxState(sandboxDir string, state *SandboxState) error {
 	}
 
 	path := filepath.Join(sandboxDir, SandboxStateFile)
-	if err := fileutil.WriteFile(path, data, 0600); err != nil {
+	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", SandboxStateFile, err)
 	}
 

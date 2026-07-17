@@ -35,7 +35,7 @@ func Save(sandboxDir string, cfg *AgentConfig) error {
 	}
 
 	path := filepath.Join(sandboxDir, AgentConfigFile)
-	if err := fileutil.WriteFile(path, data, 0600); err != nil {
+	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", AgentConfigFile, err)
 	}
 

@@ -151,7 +151,7 @@ func ReadSchemaVersion(path string) (version int, exists bool, err error) {
 
 // WriteSchemaVersion writes version as a plain integer to the stamp at path.
 func WriteSchemaVersion(path string, version int) error {
-	if err := fileutil.WriteFile(path, []byte(strconv.Itoa(version)), 0600); err != nil {
+	if err := fileutil.AtomicWriteFile(path, []byte(strconv.Itoa(version)), 0600); err != nil {
 		return fmt.Errorf("write schema version: %w", err)
 	}
 	return nil
@@ -309,7 +309,7 @@ func backfillSandboxLaunchPrefix(sandboxDir string, prefixFor LaunchPrefixResolv
 	}
 	// runtime-config.json is bind-mounted into the container (read-only, no
 	// secrets); 0644 matches the create path's perm.
-	if err := fileutil.WriteFilePerm(rcPath, out, 0644); err != nil {
+	if err := fileutil.AtomicWriteFile(rcPath, out, 0644); err != nil {
 		return fmt.Errorf("write runtime-config.json: %w", err)
 	}
 	return nil

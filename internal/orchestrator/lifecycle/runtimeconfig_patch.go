@@ -45,7 +45,7 @@ func patchRuntimeConfig(sandboxDir string, mutate func(*runtimeconfig.ContainerC
 	if err != nil {
 		return fmt.Errorf("marshal runtime-config.json: %w", err)
 	}
-	if err := fileutil.WriteFile(configPath, updated, 0600); err != nil {
+	if err := fileutil.AtomicWriteFile(configPath, updated, 0600); err != nil {
 		return fmt.Errorf("write runtime-config.json: %w", err)
 	}
 	return nil
