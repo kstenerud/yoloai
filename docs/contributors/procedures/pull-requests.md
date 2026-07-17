@@ -37,6 +37,19 @@ docker` exit 1 — a hard break — across nine changed files, none of them
 `docs/BREAKING-CHANGES.md`. The entry only existed because the maintainer asked for it in
 review. Nothing in the repo told the contributor it was needed.
 
+**Half of it is gated now, on the PR.** `scripts/check_breaking_changes.py` (a `commits` job
+step, since it needs the base ref) compares the set of user-visible names at the base against
+HEAD and fails when one **disappears** — a removed or renamed config key or CLI flag — with no
+`BREAKING-CHANGES.md` entry in the same change. It is a set difference, so a name that merely
+moves between files is a non-event. Measured before landing: 0 firings across 51 real merges,
+and it blocks a synthetic `container_backend` or `--debug` rename.
+
+It sees **removals only**. A changed default or newly-rejected input is still rule 1 and still
+review-caught — a partial gate on the recurring case beats none on all of them. Note the other
+BREAKING-CHANGES check, in `release.yml`, is not this: it fires on a release tag and asserts
+`## Unreleased` is *empty*, which proves entries were drained and cannot see one that was never
+written. It passes most loudly in exactly the failure case, which is why this exists.
+
 **The other half: a break you chose to defer is a deprecation, and it gets registered.** If
 instead of breaking you kept the old form working — a migration, a legacy reader, an alias — you
 did not avoid the break, you scheduled it. Add it to

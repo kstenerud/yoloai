@@ -70,6 +70,17 @@ jobs:
             --base "origin/${{ github.base_ref }}" \
             --head "${{ github.event.pull_request.head.sha }}"
 
+      # Rule 1, at the end where the entry is owed. The release workflow's
+      # BREAKING-CHANGES check runs on a tag and asserts `## Unreleased` is EMPTY
+      # — it proves entries that exist got drained, and cannot see one that was
+      # never written, so it passes most loudly in the failure case. This is the
+      # other half, and it needs the same base ref the commit linter does.
+      - name: Require a BREAKING-CHANGES entry for a removed user-visible name
+        run: |
+          python3 scripts/check_breaking_changes.py \
+            --base "origin/${{ github.base_ref }}" \
+            --head "${{ github.event.pull_request.head.sha }}"
+
   integration:
     runs-on: ubuntu-latest
     needs: check

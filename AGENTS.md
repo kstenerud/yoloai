@@ -45,7 +45,9 @@ Full detail and the reasoning behind each rule:
 1. **A user-visible break needs a `docs/BREAKING-CHANGES.md` entry in the same PR** — under
    `## Unreleased`, never under a `## vX.Y.Z` heading (those are frozen once tagged). Renamed
    or removed flags and config keys, changed defaults, newly-rejected input. That file's
-   preamble has the format and the trap. *This is the most-missed rule here.*
+   preamble has the format and the trap. *This is the most-missed rule here.* A **removed or
+   renamed** config key or flag is now gated on the PR (`scripts/check_breaking_changes.py`);
+   a changed default or newly-rejected input is not, and stays yours to notice.
 2. **Invalidate a name, sweep every surface that names it.** Config keys, flags, and agent
    names are mirrored verbatim into shipped text that nothing typechecks — including
    `internal/cli/helpcmd/help/*.md`, which is `//go:embed`ed **shipped UI** despite living
