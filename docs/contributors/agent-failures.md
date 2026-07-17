@@ -32,13 +32,6 @@ into a simple one, and there is no scar to file. Those go in
 interaction stopped resembling a human one **in either direction**. Do not let the existence of this
 file imply the interesting moments are the failures; on the evidence so far they are not.
 
-**This file is only half the story, and the darker half.** A failure leaves wreckage to find; the
-other kind of bump leaves nothing — the owner says one offhand sentence, a complex plan collapses
-into a simple one, and there is no scar to file. Those go in
-[`design/research/uncanny-valley.md`](design/research/uncanny-valley.md), which collects moments the
-interaction stopped resembling a human one **in either direction**. Do not let the existence of this
-file imply the interesting moments are the failures; on the evidence so far they are not.
-
 ## Fields, and the one that matters
 
 - **Claimed / True** — the gap.
@@ -54,43 +47,153 @@ file imply the interesting moments are the failures; on the evidence so far they
 
 ## Patterns so far
 
-Thin, and stated with the sample size attached, because a pattern asserted from seven specimens
-is a hypothesis. Update as the corpus grows; **do not** let this section become a claim the
-specimens do not support (D121: don't count what nothing enforces — the same applies to a pattern).
+Thin, and every pattern **names the specimens it rests on**, because a pattern asserted from a
+corpus this young is a hypothesis and the entries are the only thing that makes it checkable.
+Update as the corpus grows; **do not** let this section become a claim the specimens do not support.
 
-**1. Execution catches my errors. Reading does not.** Every specimen below where the agent caught
-itself (A4, A5, A6) involved *running something* — a probe, a measurement, a comparison of two
-numbers. Every specimen that reached a durable artifact uncaught (A1, A2, A3) was a claim written
-from something *read*: grep output, a subagent's report, a comment, an error string. The defence is
-therefore not "read more carefully" but "execute something", which is what D119 already says — *"a
-finding parks its fix, never its verification"* — and which failed anyway (see "how this gets
-written", below).
+**Cite the entries, never a total.** This section carried a running tally ("a pattern asserted from
+seven specimens", "a corpus of seven") until 2026-07-17, and an agent adding an entry duly
+*incremented* it in two places and added a third — while editing the sentence that cites D121
+against exactly that. A count is a second copy of what the list below already says, it drifts on the
+next entry, and nothing enforces it. The IDs don't drift, and a reader who wants the sample size can
+see it.
+
+**1. Execution catches my errors. Reading does not — but A8 sharpens which reading.** Every
+specimen where the agent caught itself by *running something* (A4, A5, A6) — a probe, a measurement,
+a comparison of two numbers — held. Every specimen that reached a durable artifact uncaught (A1, A2,
+A3) was written from something read: grep output, a subagent's report, a comment, an error string.
+**A8 is the exception that names the axis.** It was caught by reading — but by opening the *primary
+source*, having been caused by reading *prose about* the primary source. So the split is not
+execute-versus-read; it is **the artifact versus an account of the artifact**. Opening the file is
+cheap and works. The defence D119 already states — *"a finding parks its fix, never its
+verification"* — is loaded every session and failed anyway (see "how this gets written", below).
 
 **2. The false belief always arrives second-hand, and second-hand is invisible from the inside.**
 Not one of A1–A3 was invented. Each was *inherited*: from a plan's audit, a subagent's summary, a
 code comment, an error message. Each source was written by someone reasoning about a different case
 than the one in front of me, and none of them announced that. This is Part 7's "No provenance on a
-fact", and it is the class with the highest hit rate in this corpus.
+fact", and with A8 it is the largest class here: A1, A2, A3, A8.
+
+**2b. A source does not have to be wrong to mislead; it only has to be silent.** A8's source was
+*accurate* and cited the exact line numbers. What it omitted — that the code runs at a migration
+boundary — was simply not its subject, and an omission carries no marker. So "check the source" is
+not sufficient guidance if the source is another document: a true sentence about a file is not the
+file, and the gap between them is invisible precisely because nothing is wrong.
 
 **3. I reason from the read site about a write site.** A1, A2 and A3 are all the same movement: I
 examined the code that *consumes* a value or state and asserted a fact about what *produces* it.
 "Who writes this?" is a grep, not a model — which is why it is mechanisable and why the failure is
 embarrassing rather than deep.
 
-**4. The catch rate of the mechanisms, on this corpus, is one — and it arrived within an hour of
-the file existing.** A1, A2 and A3 (the interpretive class) were each caught by the owner asking a
-plain question; no hook, test or gate fired on any of them. Then **A0** was caught by
-`check_citation_provenance.py`, on a live edit, unprompted — and it was a *false accusation* that
-was nonetheless worth complying with. Two things follow, and both should be re-checked as entries
-accumulate: the gates do fire, and so far they fire on **citation provenance**, not on the
-interpretive class that does the damage. If that split holds, it says the guardable surface and the
-dangerous surface are not yet the same surface.
+**4. Almost everything here was caught by the owner; A0 alone was caught by a mechanism — and it
+arrived within an hour of the file existing.** A1, A2, A3 and A8 (the interpretive class) were each
+caught by the owner — three by a plain question, one by an *instruction to proceed*; A9 by the owner
+watching an edit go past. No hook, test or gate fired on any of them. Then **A0** was caught by `check_citation_provenance.py`, on a live edit, unprompted — and it
+was a *false accusation* that was nonetheless worth complying with. Two things follow, and both
+should be re-checked as entries accumulate: the gates do fire, and so far they fire on **citation
+provenance**, not on the interpretive class that does the damage. If that split holds, it says the
+guardable surface and the dangerous surface are not yet the same surface.
+
+**4b. The surfaces may be closer than pattern 4 assumes — one unbuilt rule spans two specimens.**
+A1 and A8 would *both* be caught by the hook that already exists, if findings were required to cite
+source paths repo-relative rather than as bare basenames (`check_citation_provenance.py:48` calls
+the basename hole out by name). That is not a new mechanism; it is a format rule feeding one already
+built and already running. It is the first concrete candidate this corpus has produced for gating
+the interpretive class, and it came from two entries that look unrelated until filed side by side —
+which is the argument for the file.
+
+**5. Proximity is not enforcement, and it sits awkwardly with D56 (A9, one specimen — read it as a
+warning, not a result).** A9's rule was inside the sentence being edited, cited D121 by ID, in the
+file about this failure mode, and did not fire. D56 says to place a principle where it will stick —
+fused onto the mechanism it governs — and that is still the best available *placement* heuristic.
+A9 does not refute it; it bounds it. Placement decides whether a rule is **read**, and reading is
+not applying. Where the wrong state can simply be made unrepresentable — no count to update, an
+`InstancePrefix` that panics — that beats any placement, and the corpus has no specimen of a
+poka-yoke failing. Worth watching: if a second entry lands where a co-located rule was read and not
+applied, the honest conclusion is that prose placement is a *readability* strategy that has been
+doing duty as an enforcement strategy.
 
 ## Specimens
 
 Newest first. Every entry here is from a single session (2026-07-16/17) — the first sustained
 attempt to record them, so the corpus is deep on one session and empty before it. That skew is
 itself worth knowing when reading pattern 4.
+
+### A9 — the rule was in the sentence I was editing, and it did not fire (2026-07-17)
+
+- **Claimed:** nothing, explicitly. While adding A8 I updated this section's running tally of
+  specimens from "seven" to "nine" in two places, and wrote a third count ("four of nine") into
+  pattern 2.
+- **True:** the tally is a hand-maintained duplicate of the list directly below it, drifting on every
+  new entry — D121's "don't count what nothing enforces" and the same denormalization DF103 is filed
+  for. The pre-existing "seven" was already the defect; I did not evaluate it, I *incremented* it.
+- **Source of the false belief:** the number was already there. An existing field in a doc I was
+  editing read as a thing to keep current, and "keep it current" is a well-formed, virtuous-feeling
+  action. Nothing in the act of updating a number prompts the question of whether the number should
+  exist.
+- **Caught by:** the owner, watching the edits go past — *"You're counting things again. I've watched
+  you convert 'seven' to 'nine' in two places."* No gate; `make check` does not read prose.
+- **Cost:** would have been three drifting counts in the file whose subject is claims that drift.
+  Caught in the same session, before commit.
+- **Class:** Coherence pressure, in its cheapest form — matching the local shape of the text instead
+  of asking what the text is for. Note the neighbours: A2 propagated a comment's claim, A8 propagated
+  a citation's silence, and this propagated a number's existence. All three are *inheritance from the
+  artifact I was already looking at*, which is the corpus's dominant movement.
+- **The finding worth more than the specimen: proximity is not enforcement.** The violated rule was
+  not in some unread doc — it was **inside the sentence being edited**, naming D121 by ID, in a file
+  *about* this exact failure mode. It still did not fire. This is the strongest available evidence
+  for what the instruction corpus keeps assuming and should stop: that a rule near the work will be
+  applied at the work. Reading it and applying it are different operations, and only one of them was
+  happening. If a rule co-located with its own violation cannot fire, **no placement can** — the
+  lever is mechanical (make the wrong state unrepresentable: no number, no drift) or it is nothing.
+  Compare D126's poka-yoke, which did not ask anyone to remember not to write `"yoloai-"`; it made
+  `InstancePrefix` panic.
+- **Gated now?** No, and this one is plausibly gateable — a count in prose has a shape (a number-word
+  or digit near "specimens"/"entries"/"of nine"). But that is a linter for one file, which is the
+  wrong trade. The durable fix is the one applied: **remove the counts**, so there is nothing to
+  keep current. An absent field cannot drift.
+
+### A8 — the correction was the error; the page it corrected was right (2026-07-17)
+
+- **Claimed:** DF113's remedy is not schema-gated. A provenance field is "additive with a legacy
+  backfill — exactly what `ImageRef` already does for pre-existing records (`environment.go:184-188`)",
+  so it ships in any point release and `next-release.md`'s *"i.e. schema"* was wrong. Pitched to the
+  owner as a correction to file, and accepted — *"file the correction"*.
+- **True:** that backfill is inside **`func migrate(meta *Environment)`**, and the comment beside it
+  states the convention it is an instance of: backfill **at the migration boundary**, *"rather than
+  coercing it at read time, so the rest of the codebase can treat an empty BackendType as genuinely
+  broken metadata."* A field whose absence means "legacy, trust it" is exactly what this codebase
+  does *with* a migration. `BackendType` and `ImageRef` both took that route. The staging page was
+  right, and my correction to it would have been wrong.
+- **Source of the false belief:** DF126's prose, which cites the backfill **accurately** — *"with a
+  legacy backfill to `yoloai-base` (`environment.go:184-188`)"* — and says nothing about where it
+  runs, because that was not its subject. I read a true sentence written for another purpose and
+  supplied the missing half without registering that I had supplied anything.
+- **Caught by:** the owner saying *"file the correction"* — which sent me to open the file to cite the
+  precedent properly. Not scepticism; **agreement**. The instruction to act is what forced the read
+  that killed the claim.
+- **Cost:** none, by one tool call — but it was travelling. Its conclusion ("DF113 ships in 0.9.1")
+  would have dropped the item from the last release that can carry it cheaply, and it would have
+  landed as a *correction*, a genre that reads as having been checked.
+- **Class:** No provenance on a fact, with a wrinkle this corpus has not had: **the citation was
+  correct and the inference from it was not.** A1–A3 inherited claims that were wrong for my case.
+  Here the source was accurate, precise, and load-bearingly *incomplete* — and incompleteness has no
+  marker on it. That is Part 7's "Absence has no representation", applied to prose I was reading
+  rather than to state on disk. The tell would have been noticing that "I know where this line is"
+  and "I have seen this line" felt identical. They always do.
+- **A dangerous adjacent shape: agreement is not verification.** The owner approving a claim was, in
+  the moment, indistinguishable from the claim being checked — and it is the strongest such signal
+  available. The corpus says the owner's *question* is the most reliable detector here; the mirror is
+  that the owner's *assent* is not a detector at all, and it feels like one.
+- **Gated now?** **Not as written — but the fix is already named, and this is its second specimen.**
+  `check_citation_provenance.py` requires a repo-relative path that resolves (`(repo_root /
+  m.group(1)).is_file()`); **bare basenames are deliberately unmatched** (a known hole, stated at
+  `scripts/check_citation_provenance.py:48`). My citation would have been `` `environment.go:184-188` ``
+  — bare — so the hook stays silent. Written repo-relative it **would have fired**: `environment.go`
+  appears in no tool input this session before I opened it. So the gate's coverage here rests
+  entirely on citation *format*, which nothing enforces. **A1 identified exactly this** ("closing that
+  needs a finding-format rule requiring repo-relative paths"). Two independent specimens now turn on
+  one unbuilt rule, on a hook that already exists and would work — see DF129's neighbourhood.
 
 ### A0 — the gate fired on its own author, and was right anyway (2026-07-17)
 
@@ -256,16 +359,27 @@ rule that fires: *"a returned delegation is an event you can see, unlike the unc
 feel."* Every one of A1–A3 has that trigger, and it fired reliably — the owner's question is,
 empirically, the most dependable detector in this repo.
 
+**A8 adds a second trigger, and it is not a correction: opening the primary source and finding the
+claim you already made about it does not survive.** That is equally an event you can see, and it
+came from the owner *agreeing* — the instruction to file forced the read. Worth stating because the
+first trigger, taken alone, implies that assent is safe and only challenge is informative. It is the
+reverse: a question makes me look again, while agreement is the moment the claim stops being
+examined, by both of us at once. Approval is the least-checked state a claim can be in.
+
 **What does not work, on the evidence:** "record your failures" as a standing instruction. That is
 the noticing register, and DF132 is the finding that says it does not fire. D119 — *"a finding parks
 its fix, never its verification"* — is loaded every session, and DF128 (A3) was filed with an
 unverified claim by a session that could recite it.
 
-**Not gated, deliberately, for now.** A corpus of seven cannot justify a mechanism, and a gate on a
+**Not gated, deliberately, for now.** A corpus this small cannot justify a mechanism, and a gate on a
 file this young would be pinning a shape nobody has learned yet. The thing to gate, when the shape
 is known, is probably not the *writing* of an entry but the **format** — a "Caught by" field that
 cannot be omitted, so pattern 4 stays computable. Revisit at ~20 specimens, or when an entry appears
 whose class already has three siblings.
+
+**One thing is ready ahead of that, though** (pattern 4b): the repo-relative-citation rule for
+findings. It has two specimens (A1, A8), needs no new mechanism, and turns an existing hook's known
+hole into coverage. That is a lower bar than "gate this file" and should not wait for it.
 
 **When in doubt about whether something belongs: does it have a Caught-by that is not "the owner"?**
 If yes, it is evidence a mechanism worked and belongs here for that reason alone — the successes are
