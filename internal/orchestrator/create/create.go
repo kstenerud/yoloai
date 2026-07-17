@@ -452,10 +452,29 @@ func validateAndLoadConfig(d state.Deps, opts Options) (*agent.Definition, strin
 
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
 	if _, err := os.Stat(sandboxDir); err == nil && !opts.Replace {
-		if _, metaErr := store.LoadEnvironment(sandboxDir); metaErr != nil {
-			_ = os.RemoveAll(sandboxDir)
-		} else {
+		_, metaErr := store.LoadEnvironment(sandboxDir)
+		switch {
+		case metaErr == nil:
 			return nil, "", nil, nil, fmt.Errorf("sandbox %q already exists (use --replace to recreate): %w", opts.Name, ErrSandboxExists)
+		case errors.Is(metaErr, fs.ErrNotExist):
+			// environment.json is absent: an earlier create was interrupted
+			// before it wrote the record. create copies the work tree (Phase 2)
+			// before writing the record (Phase 3), and the agent only runs after
+			// create returns — so an interrupted create holds a pristine copy of
+			// the host with no agent work, and cleaning it to retry loses
+			// nothing. This is the ONLY state we auto-clean.
+			_ = os.RemoveAll(sandboxDir)
+		default:
+			// The record exists but will not load. A torn write is no longer
+			// possible (SaveEnvironment is atomic — D110), so this is a real
+			// sandbox we cannot read: one predating an upgrade and needing
+			// `system migrate`, one written by a newer binary, or a transient
+			// read error. It may hold the agent's unapplied work, so it must
+			// never be wiped — the old code did, on any load error at all.
+			return nil, "", nil, nil, fmt.Errorf(
+				"sandbox %q exists but its metadata cannot be read: %w — it was left untouched; "+
+					"run `yoloai system migrate` if it predates an upgrade, or pass --replace to discard and recreate it",
+				opts.Name, metaErr)
 		}
 	}
 

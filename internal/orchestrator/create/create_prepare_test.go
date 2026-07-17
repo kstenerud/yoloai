@@ -883,3 +883,51 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 	assert.Contains(t, st.NetworkAllow, "api.anthropic.com")
 	assert.Contains(t, st.NetworkAllow, "api.example.com")
 }
+
+// A sandbox whose environment.json exists but will not load must NOT be wiped.
+// It may be a real sandbox holding the agent's unapplied work — most commonly one
+// created by an older binary that now needs `yoloai system migrate`. Before this
+// guard, prepareSandboxState wiped the directory on ANY LoadEnvironment error, so
+// a plain `yoloai new <name>` after an upgrade silently destroyed the old
+// sandbox and its work. This is the regression pin for that data-loss path.
+func TestPrepareSandboxState_UnreadableMetadataRefusesAndPreserves(t *testing.T) {
+	tmpDir := t.TempDir()
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "old")
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	// version 1 is below the current schema, so LoadEnvironment returns
+	// ErrNeedsMigration — a real sandbox, not an interrupted creation.
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "environment.json"),
+		[]byte(`{"version":1,"name":"old"}`), 0600))
+	workMarker := filepath.Join(sandboxDir, "work", "proj", "agent-wrote-this.txt")
+	require.NoError(t, os.MkdirAll(filepath.Dir(workMarker), 0750))
+	require.NoError(t, os.WriteFile(workMarker, []byte("unapplied"), 0600))
+
+	d := state.Deps{Runtime: &fakeRuntime{}, Layout: layoutForTmpDir(tmpDir), Input: strings.NewReader("")}
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "old", Workdir: DirSpec{Path: tmpDir}, Agent: "test"})
+
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, ErrSandboxExists, "this is the unreadable-metadata refusal, not the ordinary exists error")
+	assert.Contains(t, err.Error(), "cannot be read")
+	assert.FileExists(t, workMarker, "a refused create must leave the sandbox and its unapplied work untouched")
+}
+
+// A directory that exists but holds NO environment.json is a genuinely
+// interrupted creation (create copies work before writing the record, and the
+// agent runs only after create returns, so nothing of value exists yet). That
+// one case is still auto-cleaned and allowed to proceed — the guard must not
+// have turned the incomplete-create retry into a refusal too.
+func TestPrepareSandboxState_AbsentMetadataIsNotRefused(t *testing.T) {
+	tmpDir := t.TempDir()
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", "half")
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750)) // dir present, no environment.json
+
+	d := state.Deps{Runtime: &fakeRuntime{}, Layout: layoutForTmpDir(tmpDir), Input: strings.NewReader("")}
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "half", Workdir: DirSpec{Path: tmpDir}, Agent: "test"})
+
+	// It may fail later on the fake runtime, but it must get PAST the metadata
+	// guard rather than refuse with the unreadable-metadata error.
+	if err != nil {
+		assert.NotContains(t, err.Error(), "cannot be read",
+			"an absent record is an interrupted creation, not an unreadable sandbox")
+	}
+}
