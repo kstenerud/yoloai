@@ -354,8 +354,7 @@ func resolveNewDirSpecs(rawWorkdirArg string, rawDirs []string) (workdirSpec yol
 			// ParseAuxDirArg returns *UsageError for the :copy and
 			// :overlay-retired rejection cases (already user-actionable); pass it through.
 			// Other parse errors get the "invalid directory" prefix.
-			var usage *yoerrors.UsageError
-			if errors.As(parseErr, &usage) {
+			if _, isUsage := errors.AsType[*yoerrors.UsageError](parseErr); isUsage {
 				return yoloai.DirSpec{}, nil, parseErr
 			}
 			return yoloai.DirSpec{}, nil, yoerrors.NewUsageError("invalid directory %q: %s", rawDir, parseErr)
@@ -446,8 +445,7 @@ func executeNewCreate(cmd *cobra.Command, ctx context.Context, c *yoloai.Client,
 // opt-in via --allow-dirty alone.
 func createSandboxWithDirtyRetry(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, opts yoloai.SandboxCreateOptions) (*yoloai.Sandbox, error) {
 	sb, err := c.CreateSandbox(ctx, opts)
-	var dirty *yoloai.DirtyWorkdirError
-	if errors.As(err, &dirty) {
+	if dirty, isDirty := errors.AsType[*yoloai.DirtyWorkdirError](err); isDirty {
 		printDirtyWarning(cmd, dirty)
 		allowDirty, _ := cmd.Flags().GetBool("allow-dirty")
 		if !allowDirty {
