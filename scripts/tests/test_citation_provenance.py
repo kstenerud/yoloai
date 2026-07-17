@@ -172,3 +172,53 @@ def test_a_missing_transcript_stays_quiet(tmp_path: Path) -> None:
 def test_an_edit_citing_nothing_stays_quiet(tmp_path: Path) -> None:
     t = _transcript(tmp_path, [])
     assert unread_citations(_edit(t, "A paragraph with no citations at all.")) == []
+
+
+# --- source citations in findings (D122 extension) ---------------------------
+
+_FINDINGS = "docs/contributors/design/findings-unresolved.md"
+_SRC = "runtime/tart/prune.go"
+
+
+def test_a_finding_citing_unopened_source_is_reported(tmp_path: Path) -> None:
+    """The claim this extension exists for: a finding asserts what a mechanism
+    does, citing a file the session only ever saw through grep output."""
+    t = _transcript(tmp_path, [("Grep", {"pattern": "InstancePrefix", "glob": "*.go"})])
+    payload = _edit(t, f"tart matches by prefix (`{_SRC}:31,36`).", file_path=_FINDINGS)
+    assert unread_citations(payload) == [_SRC]
+
+
+def test_opening_the_source_clears_the_finding(tmp_path: Path) -> None:
+    t = _transcript(tmp_path, [("Bash", {"command": f"sed -n '20,60p' {_SRC}"})])
+    payload = _edit(t, f"tart matches by prefix (`{_SRC}:31,36`).", file_path=_FINDINGS)
+    assert unread_citations(payload) == []
+
+
+def test_a_source_path_outside_a_finding_is_not_a_claim(tmp_path: Path) -> None:
+    """Scope. Source paths appear in commit messages, docs and code comments
+    constantly; gating those is the noise that gets a hook disabled (D122)."""
+    t = _transcript(tmp_path, [("Read", {"file_path": "/repo/unrelated.md"})])
+    for target in ("notes.md", "docs/contributors/design/findings-resolved.md", "AGENTS.md"):
+        payload = _edit(t, f"see `{_SRC}` for the sweep", file_path=target)
+        assert unread_citations(payload) == [], f"{target} must not be gated"
+
+
+def test_draining_a_finding_to_a_sink_is_not_a_new_claim(tmp_path: Path) -> None:
+    """A drain carries every pointer across verbatim. It is a move, not a claim,
+    and gating it would fire on each one."""
+    t = _transcript(tmp_path, [("Read", {"file_path": "/repo/unrelated.md"})])
+    block = f"- **Pointer:** `{_SRC}`; `store/paths.go`"
+    payload = _edit(t, block, file_path="docs/contributors/design/findings-resolved.md")
+    assert unread_citations(payload) == []
+
+
+def test_a_source_path_that_names_no_file_is_prose(tmp_path: Path) -> None:
+    t = _transcript(tmp_path, [("Read", {"file_path": "/repo/unrelated.md"})])
+    payload = _edit(t, "see `internal/nope/imaginary.go`", file_path=_FINDINGS)
+    assert unread_citations(payload) == []
+
+
+def test_carrying_an_existing_source_citation_is_not_a_new_claim(tmp_path: Path) -> None:
+    t = _transcript(tmp_path, [("Read", {"file_path": "/repo/unrelated.md"})])
+    payload = _edit(t, f"reworded, still `{_SRC}`", old_string=f"was `{_SRC}`", file_path=_FINDINGS)
+    assert unread_citations(payload) == []

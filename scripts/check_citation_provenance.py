@@ -40,10 +40,54 @@ from typing import Any
 # the two spellings compare equal.
 RESEARCH_CITATION = re.compile(r"(?:[\w./-]*/)?research/([\w.-]+\.md)")
 
+# A repo-relative source path cited in a finding — "runtime/tart/prune.go",
+# "internal/cli/gate.go:40". Anchored at a real top-level dir so prose like
+# "config.go" or "a .go file" is not a citation; the path must also resolve to a
+# real file (see cited_source_paths), for the same reason RESEARCH_ROOT exists.
+#
+# Bare basenames are deliberately NOT matched, and that is a known hole rather
+# than an oversight: a finding that says "seatbelt (`prune.go:80`)" names four
+# candidate files, and the session opened two of them, so the check could only
+# guess. Requiring the path is the fix, and it belongs to the finding format, not
+# here.
+#
+# Measured before shipping, by replaying this checker over a real session's
+# transcript against the four finding commits it produced — each replayed with the
+# transcript TRUNCATED to what the hook would have seen when the finding was
+# written, because replaying against the finished transcript scores every path as
+# read and reports a comfortable zero. Result: 2 blocks across ~24 citations, and
+# both were true positives — `lifecycle/restart.go:197` and `seatbelt.go:168,172`,
+# exact line numbers lifted out of grep output for files the session never opened.
+# Grep output is how DF115's wrong claim was made, so that is the class landing.
+SOURCE_CITATION = re.compile(
+    r"\b((?:internal|runtime|store|scripts|cmd|test)/[A-Za-z0-9_./-]+\.(?:go|py))"
+)
+
+# Where a source citation is a claim worth gating: the two files that MINT
+# findings. The history sinks (findings-resolved/deferred/abandoned) are exempt
+# on purpose — draining a finding carries its pointers across verbatim, which is
+# a move, not a new claim, and gating it would fire on every drain. That is the
+# noise that gets a hook disabled (D122).
+SOURCE_CITATION_SCOPE = (
+    "docs/contributors/design/findings-unresolved.md",
+    "docs/contributors/deprecations.md",
+)
+
 # Tools whose input means the session went and looked. Write/Edit are excluded
 # deliberately and not merely as an oversight guard: writing a path is not reading
 # it, and without this the Edit currently being checked would satisfy the check by
 # containing the very citation that triggered it.
+#
+# Known false-pass, measured not theorised (2026-07-17): naming a path in ANY
+# Bash input counts as looking, and a session names paths for reasons that are not
+# looking — a commit-message heredoc, a path as a string literal in a test, an
+# `echo`. The demonstration was this checker's own noise measurement: running
+# `echo "did I open seatbelt.go?"` put seatbelt.go in the blob and cleared the
+# very citation under investigation. Asking whether you read a file marks it read.
+# Left as-is because the alternative — parsing shell to tell a read from a mention
+# — is the under-match direction, and a false accusation is what gets a hook
+# disabled (D122). It does mean the check is weakest late in a long session, which
+# is where it is needed most. Tracked as DF129.
 READ_TOOLS = frozenset({"Read", "Grep", "Glob", "Bash", "Task", "Agent", "WebFetch"})
 
 WRITE_TOOLS = ("Write", "Edit")
@@ -67,6 +111,24 @@ def cited_research_docs(text: str, root: Path | None = None) -> set[str]:
     if root is None:
         return names
     return {name for name in names if (root / name).is_file()}
+
+
+def cited_source_paths(text: str, repo_root: Path, target: str | None) -> set[str]:
+    """Return the source paths cited in text, when text is a finding being minted.
+
+    Empty unless target is one of SOURCE_CITATION_SCOPE: a source path in a commit
+    message, a doc, or a code comment is not a finding's claim about a mechanism,
+    and gating those is how a hook earns its way into someone's disable list.
+
+    Only paths that resolve to a real file survive, for the same reason research
+    citations are resolved: you cannot fail to read a file that does not exist, so
+    a path that names nothing is prose, not a claim.
+    """
+    if target is None or not any(target.endswith(s) for s in SOURCE_CITATION_SCOPE):
+        return set()
+    return {
+        m.group(1) for m in SOURCE_CITATION.finditer(text) if (repo_root / m.group(1)).is_file()
+    }
 
 
 def read_tool_inputs(transcript_path: Path) -> str | None:
@@ -128,7 +190,8 @@ def unread_citations(payload: dict[str, Any]) -> list[str]:
         return []
 
     cwd = payload.get("cwd")
-    root = (Path(cwd) if isinstance(cwd, str) and cwd else Path.cwd()) / RESEARCH_ROOT
+    repo_root = Path(cwd) if isinstance(cwd, str) and cwd else Path.cwd()
+    root = repo_root / RESEARCH_ROOT
 
     # Only citations this edit introduces. A reflow that carries an existing
     # citation across, or a move between files, is not a new claim about a source.
@@ -138,6 +201,12 @@ def unread_citations(payload: dict[str, Any]) -> list[str]:
     target = tool_input.get("file_path")
     if isinstance(target, str):
         cited -= {Path(target).name}
+
+    # A finding's source paths are the same claim in the same shape: "the
+    # mechanism is X, see this file". Same new-claims-only and same resolution.
+    tgt = target if isinstance(target, str) else None
+    cited |= cited_source_paths(added, repo_root, tgt) - cited_source_paths(prior, repo_root, tgt)
+
     if not cited:
         return []
 
@@ -149,7 +218,10 @@ def unread_citations(payload: dict[str, Any]) -> list[str]:
         # No evidence either way. This hook may only ever complain about something
         # it can positively establish, so an unreadable transcript means silence.
         return []
-    return sorted(doc for doc in cited if doc not in blob)
+    # Match on the basename: a path reaches a tool input as a bare name, an
+    # absolute path, or a fragment of a shell command, and the basename catches
+    # all three. Identity for research docs, which are already basenames.
+    return sorted(c for c in cited if Path(c).name not in blob)
 
 
 def reason(unread: list[str]) -> str:
@@ -157,6 +229,9 @@ def reason(unread: list[str]) -> str:
     plural = "those files" if len(unread) > 1 else "that file"
     return (
         f"You just cited {docs}, but nothing in this session opened {plural}. "
+        f"Grep output is not an opening: reading a matched line tells you the line, "
+        f"not what the code around it does — which is exactly how a `TrimPrefix` "
+        f"normalising a known-set got written up as a prefix match (DF115).\n\n"
         f"Every agent error this hook was built from had that exact shape: a summary "
         f"was in context and the source was not, and the claim felt like knowledge "
         f"because a summary reads exactly like one.\n\n"
