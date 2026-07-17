@@ -99,8 +99,17 @@ func MigrateCLI() error {
 		}
 		return CreateFreshCLI()
 	case dirExists(filepath.Join(top, libraryNamespace)) || dirExists(CLIDir()):
-		// A namespaced layout that predates the stamp (an interim build):
-		// record the stamp without relocating anything.
+		// A namespaced layout with no CLI stamp: adopt it by stamping, relocating
+		// nothing — the layout is already the shape we want.
+		//
+		// This reads like leftovers from the interim builds between D60 and the
+		// stamp landing, and it is not: the condition is any TOP where one realm
+		// exists without the CLI stamp, which a shipped install reaches whenever
+		// the library realm is created WITHOUT the CLI — an embedder rooted at
+		// TOP/library, on a TOP the user later runs the CLI against. The startup
+		// gate calls that state InconsistentDataDir and refuses; this branch is
+		// what repairs it. Do not delete it as dead code (it was nearly retired
+		// on that reading, 2026-07-17).
 		return CreateFreshCLI()
 	case dirAbsentOrEmpty(top):
 		// Nothing on disk yet: initialize the CLI realm fresh.

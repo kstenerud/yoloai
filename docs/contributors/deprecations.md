@@ -111,9 +111,16 @@ not a clock; an unreleased entry says `(pending)`.
   moves a flat `TOP` into `TOP/cli` + `TOP/library` and carries `state.yaml`'s `setup_complete`
   forward; a second branch handles "a namespaced layout that predates the stamp (an interim
   build)".
-- **Retire by:** dropping both with the ladder floor. **The interim-build branch can likely go
-  sooner and separately** — it exists for unreleased builds, so no released version ever produced
-  that layout; if that is confirmed, it is already dead code rather than a deprecation.
+- **Retire by:** dropping `isFlatV0Install`/`relocateFlatToNamespaced` with the ladder floor —
+  they read a layout no release has produced since v0.3.0.
+- **NOT the second branch.** `MigrateCLI`'s *"a namespaced layout that predates the stamp (an
+  interim build)"* case reads like dead code and is not: its comment describes an interim build,
+  but its **condition** is any TOP where `library/` or `cli/` exists without the CLI stamp — which
+  includes a live shape, an integrator whose DataDir is `TOP/library` on a TOP the CLI later runs
+  against. **Verified by execution 2026-07-17:** a library-only TOP makes the gate refuse with
+  `inconsistent data directory`, and `system migrate` repairs it through exactly that branch. It
+  is a recovery path, not a deprecation, and does not belong in this register. (It was listed here
+  as "likely dead — confirm and delete" until the confirmation was actually run.)
 - **Pointer:** `internal/cli/cliutil/clischema.go`
 
 ### v1→v2 launch-prefix backfill
