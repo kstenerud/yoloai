@@ -8,6 +8,7 @@
   code is small, the *verification* needs a v6-routable network per backend, and a security boundary
   is the wrong thing to rush into a cut.
 - **Depends on:** —
+- **Rides:** **any** release — filtering v6 correctly takes away only egress to hosts that were never allowlisted, so nothing promised is withdrawn. (The two rejected shortcuts *would* have been breaking, which is not a reason to prefer them — see below.)
 
 ## The one-sentence version
 

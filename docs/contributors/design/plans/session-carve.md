@@ -10,6 +10,7 @@
   `substrate-move`. Per D99, incidental per-commit contract churn is fine; build straight to the
   final shape (each commit compiles + `make check` green).
 - **Depends on:** —
+- **Rides:** 1a-iv wants a **breaking** release (it flips `keepalive_only` and reshapes `runtime-config.json`) — but the scope test is not what gates it: it is fourth in the sequence below, and 1a-ii/1a-iii are unbuilt. Out of v0.9.0, 2026-07-17.
 
 ## What's already built (don't re-do)
 

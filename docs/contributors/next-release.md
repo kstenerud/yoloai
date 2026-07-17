@@ -26,31 +26,40 @@ and progress. A checkbox here would be a second copy of that state and would dri
 are none. **"What's left for this release?"** is answered by following the links and reading each
 record — never by trusting this page.
 
+**A line here is an ID and the record's own title. Nothing else — no reason, no scope note, no
+"just the small half".** Every entry below links to a record that owns *why* it is here, in a
+`- **Rides:**` field naming the kind of release its fix needs, and which half of it if only one
+qualifies. That field is the thing to read; this page is an index to it.
+
+**Why the rule is this blunt (2026-07-17).** Six candidates were assessed and *two* were decided
+wrongly — in opposite directions. One line asserted something its record contradicted, and was
+believed. Another asserted something true its record did not contain, and was overturned as
+unsupported. Both were reasons composed *here*, and that is the single property they share: a
+page-authored reason cannot be checked against anything, so being right is indistinguishable from
+being wrong. The two candidates settled quickly and correctly were the two whose records already
+held the deciding fact. Length was never the variable — **ownership was**. So the reason lives in
+the record, always, and this page is not permitted to explain itself.
+
 **Getting here.** When a release is on the table, take stock of what landed since the last tag and
 decide what is best slipped in before the cut. Anything discovered along the way gets its own
 finding or decision first, and lands here only if it should block the release.
 
 ## In scope
 
-- [DF126](design/findings-unresolved.md) — profile image tags carry no principal. Breaking, and
-  schema-touching via the persisted `ImageRef`. Latent, so it will never justify its own break: it
-  rides a breaking release or it does not happen.
-- [init-sentinel](design/plans/init-sentinel.md) P1 — resolves DF128 rather than rewording it.
-  Small; droppable if the cut is tight.
-- [DF113](design/findings-unresolved.md) — **the provenance stamp only, not the guard.** Writing the
-  stamp at `create` is inert and changes no behaviour; the guard that reads it has an unsettled
-  design (idempotency) and must not gate the cut. The stamp needs the migration's backfill, so it
-  rides now or costs a schema of its own later — and building it later leaves v0.9.0's own sandboxes
-  permanently unguessable too.
-- [DF53](design/findings-unresolved.md) — **make tart reject `-p`, nothing more.** Newly-rejected
-  input is a break (rule 1), so it is cheap only while something else already breaks. Actually
-  wiring softnet port-forwarding is a feature needing real macOS verification, and is not
-  release-gated — that half waits.
+- [DF126](design/findings-unresolved.md) — profile image tags carry no principal, so two principals
+  with a same-named profile collide on one image
+- [DF113](design/findings-unresolved.md) — `destroy` frees the sandbox name while leaving the
+  instance behind, so the next `start` adopts a VM it never provisioned
+- [DF53](design/findings-unresolved.md) — Tart silently ignores `-p` port mappings (port-forwarding
+  never wired into `tart run`)
+- [init-sentinel](design/plans/init-sentinel.md) — mark an in-progress TOP init, so a failed one is
+  a fact and not an inference
 
 ## Candidates — undecided
 
-*None.* Decided 2026-07-17: module-split, session-carve 1a-iv and DF39 are all out — each record
-carries the reason.
+*None.* Decided out 2026-07-17 — each record's `**Rides:**` field says why:
+[module-split](design/plans/module-split.md), [session-carve](design/plans/session-carve.md) 1a-iv,
+[DF39](design/findings-unresolved.md), [DF104](design/findings-unresolved.md).
 
 ## In flight — started, not finished
 
@@ -97,4 +106,7 @@ What "reset" means — restore exactly this, keeping everything above `## In sco
 - **Version field:** the next point release after the one just cut (`0.y.z+1`; post-beta
   `x.y.z+1`), with no escalation note. It escalates again on its own, when something breaking lands.
 - **In scope**, **Candidates**, **In flight**: emptied.
+- The line format does not reset, because it is not release state: an entry is an ID and the
+  record's own title, and the record's `**Rides:**` field carries the reason. See "This file
+  points".
 - **Taking stock**: emptied — its notes are scoped to one release cycle.

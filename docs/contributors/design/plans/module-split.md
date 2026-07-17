@@ -9,6 +9,7 @@
   deferred pending a concrete headless/non-PTY consumer; Phase D (depguard fences encoding the
   full DAG) remains. Will earn a D-number in `working-notes.md` when adopted.
 - **Depends on:** —
+- **Rides:** **any** release. Phase A closed the import edges with no migration and no wire-format change, and the remaining Phase D is depguard fences — see Open questions for why the store-shape reshape this was once staged for is neither needed nor scheduled. Out of v0.9.0, 2026-07-17.
 
 **Premise (from the coupling map, 2026-06-13):** yoloAI is already, structurally,
 a reusable *sandbox substrate* under an *agent-specific* shell. The substrate's

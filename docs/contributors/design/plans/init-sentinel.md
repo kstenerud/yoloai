@@ -6,6 +6,7 @@
 
 - **Status:** PLANNED — designed 2026-07-17 (owner's proposal), not started. Small, self-contained.
 - **Depends on:** —
+- **Rides:** **any** release — nothing here is breaking or schema-touching. In v0.9.0's scope on value, not necessity; droppable if the cut is tight.
 
 ## The one-sentence version
 

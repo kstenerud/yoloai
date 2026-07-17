@@ -40,8 +40,13 @@ own docs — read it *before* diagnosing any backend problem; add to it when you
 `next-release.md` stages whatever ships next: it carries the next release version (a fact — it
 escalates on its own when something breaking lands) and points at the work considered for the cut.
 It is permanent and drains at each release, like `## Unreleased`. **It never carries an item's
-status** — *"what's left for this release?"* is answered by following its links and reading each
-record, never by trusting the page.
+status, and never its own reason** — an entry there is an ID and the record's own title, nothing
+more. *"What's left for this release?"* and *"why is this in?"* are both answered by following its
+links, never by trusting the page. The scope reason lives in the record, in a `- **Rides:**` field
+naming the kind of release the fix needs (**any** / **breaking** / **a migration**) and which half
+qualifies when only one does. Add that field to anything you propose for a release. It exists
+because a reason composed on the staging page cannot be checked against anything, so a right one and
+a wrong one read identically — and both duly happened, in opposite directions, on the same day.
 
 `agent-failures.md` is its sibling for the component that writes the code. **The trigger is an
 owner correction**: when the owner contradicts a claim you made, or asks a question whose answer
