@@ -23,6 +23,30 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `yoloai new <name>` refuses when a sandbox of that name has unreadable metadata
+
+**Previous behavior:** `yoloai new <name>` (no `--replace`) treated *any* failure
+to read an existing sandbox's `environment.json` as an interrupted creation and
+silently `os.RemoveAll`'d the directory before recreating. That included a record
+that merely needed `yoloai system migrate` (created by an older binary), one
+written by a newer binary, and a transient read error — all of which are real,
+complete sandboxes. The agent's unapplied work was destroyed with no prompt.
+
+**New behavior:** only a genuinely absent `environment.json` (an interrupted
+creation, which by construction holds no agent work) is auto-cleaned. Any other
+read failure now errors, leaves the directory untouched, and names the remedy —
+`yoloai system migrate` if it predates an upgrade, or `--replace` to discard and
+recreate deliberately.
+
+**Impact:** a script that ran `yoloai new <name>` expecting it to clobber and
+recreate a name whose record is unreadable now exits with an error instead. In
+the normal case — a name that is free, or whose record reads cleanly — nothing
+changes.
+
+**Migration:** run `yoloai system migrate` for a sandbox that predates an
+upgrade, or pass `--replace` (with `--abandon-unapplied` if it holds work you
+mean to discard).
+
 ### `yoloai reset` refuses a sandbox with unapplied changes
 
 **Previous behavior:** `reset` re-copied the workdir from the host over the
