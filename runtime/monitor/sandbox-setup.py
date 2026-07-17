@@ -1154,7 +1154,13 @@ def deliver_prompt(
                       exit_code=r.returncode, stderr=r.stderr.strip())
             return False
 
-        r = tmux("paste-buffer", "-t", "main", socket=socket)
+        # -p brackets the paste (ESC[200~ … ESC[201~) when the agent has asked
+        # for bracketed paste mode. Without it tmux rewrites each LF to a CR
+        # (tmux(1), paste-buffer) and a TUI that infers paste boundaries from
+        # timing swallows those CRs, silently joining a multi-line prompt into a
+        # single line. tmux emits the brackets only for an app that requested the
+        # mode, so this stays inert for agents that did not.
+        r = tmux("paste-buffer", "-p", "-t", "main", socket=socket)
         if r.returncode != 0:
             log_error("prompt.paste_buffer_failed", "tmux paste-buffer failed",
                       exit_code=r.returncode, stderr=r.stderr.strip())
@@ -1332,7 +1338,9 @@ def run_lifecycle_background(
         tmpname = tmp.name
     try:
         tmux("load-buffer", tmpname, socket=socket)
-        tmux("paste-buffer", "-t", "main", socket=socket)
+        # -p for the same reason as deliver_prompt: keep the text's own line
+        # structure instead of letting tmux's LF→CR rewrite reach the agent.
+        tmux("paste-buffer", "-p", "-t", "main", socket=socket)
         time.sleep(0.3)
         submit_sequence = cfg.get("submit_sequence", "")
         for key in submit_sequence.split():
