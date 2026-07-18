@@ -23,6 +23,22 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### A sandbox's container/VM hostname is now the sandbox name
+
+**Previous behavior:** yoloAI set no hostname on the guest, so a container took the
+backend default — the short container id (e.g. `2112b2d4f72d`). Anything reading the
+in-guest hostname (a shell prompt, a status line, `docker inspect .Config.Hostname`)
+saw that opaque id.
+
+**New behavior:** the guest's hostname is the sandbox name, lightly sanitized to a
+valid DNS label (lowercased, `.`/`_` folded to `-`; `my-feature` is unchanged,
+`My_Box` becomes `my-box`). Applies to the Docker, Podman, and containerd backends;
+the tart/apple macOS VM backends still take the default for now (DF142), and Seatbelt
+shares the host's hostname by construction.
+
+**Impact:** informational only. A script that matched on the container-id hostname
+would need to match the sandbox name instead; nothing in yoloAI relies on the old value.
+
 ## v0.9.0
 
 ### `yoloai new <name>` refuses when a sandbox of that name has unreadable metadata

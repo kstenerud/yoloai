@@ -874,6 +874,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 
 	instanceCfg := runtime.InstanceConfig{
 		Name:         cname,
+		Hostname:     config.SanitizeHostname(st.Name),
 		ImageRef:     st.ImageRef,
 		WorkingDir:   WorkdirMountPath(st.Workdir),
 		Mounts:       mnts,
