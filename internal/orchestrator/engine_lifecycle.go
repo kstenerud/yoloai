@@ -67,12 +67,19 @@ func (e *Engine) Reset(ctx context.Context, opts ResetOptions) (*ResetResult, er
 
 // Destroy removes the sandbox and its container. The active-work guard is the
 // caller's policy (the library boundary turns it into a typed *ActiveWorkError);
-// this is the unconditional teardown.
+// this is the unconditional teardown. Tears down through the backend recorded
+// in the sandbox's own environment.json, not necessarily this Engine's backend
+// (DF138) — a --all/wildcard batch can span backends.
 func (e *Engine) Destroy(ctx context.Context, name string) (*DestroyResult, error) {
 	if err := e.ensure(ctx); err != nil {
 		return nil, err
 	}
-	return lifecycle.Destroy(ctx, e.deps(), name)
+	deps, cleanup, err := e.depsForSandbox(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	defer cleanup()
+	return lifecycle.Destroy(ctx, deps, name)
 }
 
 // Create provisions a new dormant sandbox from create.Options and returns its
@@ -92,7 +99,34 @@ func (e *Engine) Create(ctx context.Context, opts create.Options) (string, error
 // probe fails safe and reports the sandbox as needing confirmation.
 func (e *Engine) NeedsConfirmation(ctx context.Context, name string) (bool, string) {
 	e.TryEnsure(ctx)
-	return lifecycle.NeedsConfirmation(ctx, e.deps(), name)
+	deps, cleanup, err := e.depsForSandbox(ctx, name)
+	if err != nil {
+		return true, "backend for this sandbox is unavailable, so unapplied changes can't be verified (use --abandon-unapplied)"
+	}
+	defer cleanup()
+	return lifecycle.NeedsConfirmation(ctx, deps, name)
+}
+
+// depsForSandbox resolves the state.Deps to operate on the named sandbox through
+// the backend recorded in its environment.json, opening a per-sandbox runtime
+// when that backend differs from the Engine's own. A --all/wildcard destroy
+// batch (or a clone overwrite) can name sandboxes created on other backends;
+// tearing them down through the Engine's single runtime would no-op the
+// Stop/Remove and orphan the live instance while still deleting the record
+// (DF138). Falls back to the Engine's own deps when the metadata is unreadable
+// or names no backend, or already matches the Engine's backend. The returned
+// cleanup closes any per-sandbox runtime this opened (a no-op otherwise).
+func (e *Engine) depsForSandbox(ctx context.Context, name string) (state.Deps, func(), error) {
+	noop := func() {}
+	meta, err := store.LoadEnvironment(e.layout.SandboxDir(name))
+	if err != nil || meta.BackendType == "" || meta.BackendType == e.backend {
+		return e.deps(), noop, nil //nolint:nilerr // unreadable/legacy/matching metadata falls back to the Engine's own deps, not an error
+	}
+	rt, rtErr := runtime.New(ctx, meta.BackendType, e.layout)
+	if rtErr != nil {
+		return state.Deps{}, noop, fmt.Errorf("connect to %s backend for %q: %w", meta.BackendType, name, rtErr)
+	}
+	return state.Deps{Runtime: rt, Layout: e.layout, Input: e.input}, func() { _ = rt.Close() }, nil
 }
 
 // DestroyForOverwrite tears down a pre-existing destination sandbox so a clone
@@ -110,15 +144,11 @@ func (e *Engine) DestroyForOverwrite(ctx context.Context, dest string) error {
 		return nil
 	}
 
-	deps := e.deps()
-	if meta, err := store.LoadEnvironment(dstDir); err == nil && meta.BackendType != "" {
-		rt, rtErr := runtime.New(ctx, meta.BackendType, e.layout)
-		if rtErr != nil {
-			return fmt.Errorf("connect to %s backend to overwrite %q: %w", meta.BackendType, dest, rtErr)
-		}
-		defer rt.Close() //nolint:errcheck // best-effort close after teardown
-		deps = state.Deps{Runtime: rt, Layout: e.layout, Input: e.input}
+	deps, cleanup, err := e.depsForSandbox(ctx, dest)
+	if err != nil {
+		return fmt.Errorf("overwrite existing destination %q: %w", dest, err)
 	}
+	defer cleanup()
 
 	if _, err := lifecycle.Destroy(ctx, deps, dest); err != nil {
 		return fmt.Errorf("overwrite existing destination %q: %w", dest, err)
