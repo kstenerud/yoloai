@@ -226,6 +226,61 @@ func TestIntegration_ContainerLifecycle(t *testing.T) {
 	assert.ErrorIs(t, err, runtime.ErrNotFound)
 }
 
+// TestIntegration_DefaultRuntimeCreate covers the plain `--backend containerd`
+// path: default container isolation, where InstanceConfig.ContainerRuntime is ""
+// (the backend-default sentinel from runtime.IsolationContainerRuntime). That
+// path was dead on arrival — containerd rejects an empty Runtime.Name at Create
+// with "container.Runtime.Name must be set" — and nothing here caught it because
+// every other case forces a Kata runtime: TestIntegration_ContainerLifecycle
+// hardcodes it and the conformance sleeper rewrites "" → kata. This creates with
+// the empty default, asserts the container was stamped with the runc shim (the
+// resolver's job), and runs it to prove the runtime is functional.
+func TestIntegration_DefaultRuntimeCreate(t *testing.T) {
+	requireAvailable(t)
+
+	ctx := context.Background()
+	rt, err := New(ctx, testLayout(t))
+	require.NoError(t, err)
+	defer rt.Close() //nolint:errcheck // best-effort close
+
+	exists, err := rt.IsReady(ctx)
+	require.NoError(t, err)
+	if !exists {
+		t.Skip("yoloai-base image not found in containerd yoloai namespace; run 'yoloai system setup' first")
+	}
+
+	name := "yoloai-integration-runc"
+	cfg := runtime.InstanceConfig{
+		Name:       name,
+		ImageRef:   "yoloai-base",
+		WorkingDir: "/",
+		// ContainerRuntime deliberately left "" — the default container isolation,
+		// the case the regression broke.
+	}
+
+	_ = rt.Remove(ctx, name) // clear any leftover from a previous run
+	require.NoError(t, rt.Create(ctx, cfg), "Create must succeed for the default (empty) runtime")
+	defer func() {
+		_ = rt.Stop(ctx, name)
+		_ = rt.Remove(ctx, name)
+	}()
+
+	// The empty sentinel must have been resolved to the runc shim at the
+	// containerd boundary — inspect the container's stamped runtime directly.
+	nsCtx := rt.withNamespace(ctx)
+	c, err := rt.client.LoadContainer(nsCtx, name)
+	require.NoError(t, err)
+	info, err := c.Info(nsCtx)
+	require.NoError(t, err)
+	assert.Equal(t, defaultRuntime, info.Runtime.Name, "empty runtime must resolve to the runc shim")
+
+	// And it actually boots and runs under runc (no Kata required for this path).
+	require.NoError(t, rt.Start(ctx, name), "Start should succeed")
+	result, err := rt.Exec(ctx, name, []string{"echo", "hello"}, "")
+	require.NoError(t, err)
+	assert.Contains(t, result.Stdout, "hello")
+}
+
 // TestContainerdConformance runs the shared, backend-agnostic behavioral
 // conformance suite against a live containerd + Kata daemon, so containerd
 // verifies the same lifecycle / exec / mount contract as docker, podman, and
