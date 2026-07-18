@@ -4,9 +4,8 @@
 
 # Next release
 
-**Next release version: `v0.10.0`** — escalated from the point release by a breaking change in
-this cycle: `yoloai system prune` no longer reclaims non-yoloai containers/networks (DF137, see
-BREAKING-CHANGES.md). Escalation is a consequence of what landed, not a decision.
+**Next release version: `v0.9.1`** — the next point release after v0.9.0. Nothing breaking has
+landed on main since; the field escalates on its own to `v0.10.0` the moment something does.
 
 ## How this works
 

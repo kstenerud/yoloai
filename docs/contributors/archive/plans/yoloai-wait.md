@@ -15,7 +15,7 @@
 
 - **Status:** IMPLEMENTED
 - **Depends on:** —
-- **Rides:** **breaking** — `wait --for exit` previously always exited 0; it now exits with the agent's own code, a changed exit-status contract for an existing command.
+- **Rides:** **any** release — filed as a minor behavior change, not breaking (owner's call, 2026-07-18). `wait --for exit` did change from always-0 to the agent's own code, but it is a non-default mode whose new behavior is the intended one; no flag/config/promised-capability was withdrawn.
 
 Block until the agent in a named sandbox exits, then return the agent's exit code. Useful for CI/CD pipelines and scripting. Without `wait`, polling `yoloai list --json` is the only way to detect completion.
 
