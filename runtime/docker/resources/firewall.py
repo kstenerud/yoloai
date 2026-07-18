@@ -81,6 +81,45 @@ def resolve_domains(domains: Iterable[str], log_error: LogFn) -> set[tuple[str, 
     return allowed_ips
 
 
+def is_ipv4(addr: str) -> bool:
+    """Return True if addr is a valid IPv4 address literal."""
+    try:
+        socket.inet_pton(socket.AF_INET, addr)
+        return True
+    except OSError:
+        return False
+
+
+def parse_nameservers(lines: Iterable[str], log_error: LogFn) -> list[str]:
+    """Extract usable (IPv4) nameserver IPs from resolv.conf lines.
+
+    A non-IPv4 (IPv6) nameserver is skipped with a loud log rather than kept:
+    the firewall installs IPv4 rules only today, and feeding a v6 address to
+    `iptables -d` fails, aborting the whole install and taking the correct v4
+    rules down with it — so a single v6 nameserver used to disable isolation
+    entirely (DF134). A v6 nameserver is also unreachable from within v4-only
+    isolation, so dropping it loses nothing usable. Full dual-stack filtering
+    (keeping v6 nameservers and allowing them via ip6tables) is the
+    network-families design, not this fix. If a v6 nameserver was the ONLY one,
+    the empty result trips read_nameservers' loud no-nameservers warning, so a
+    DNS-blocked sandbox is still surfaced rather than silently broken.
+    """
+    nameservers: list[str] = []
+    for line in lines:
+        if line.startswith("nameserver "):
+            parts = line.split()
+            if len(parts) >= 2:
+                ns = parts[1]
+                if is_ipv4(ns):
+                    nameservers.append(ns)
+                else:
+                    log_error("network.nameserver_non_ipv4_skipped",
+                              "skipping non-IPv4 nameserver; the firewall filters "
+                              "IPv4 only today, so keeping it would abort the "
+                              "install (DF134)", nameserver=ns)
+    return nameservers
+
+
 def read_nameservers(log_error: LogFn) -> list[str]:
     """Read nameserver IPs from /etc/resolv.conf so DNS egress can be allowed.
 
@@ -91,11 +130,7 @@ def read_nameservers(log_error: LogFn) -> list[str]:
     nameservers: list[str] = []
     try:
         with open("/etc/resolv.conf") as f:
-            for line in f:
-                if line.startswith("nameserver "):
-                    parts = line.split()
-                    if len(parts) >= 2:
-                        nameservers.append(parts[1])
+            nameservers = parse_nameservers(f, log_error)
     except OSError as e:
         log_error("network.resolv_conf_unreadable",
                   "cannot read /etc/resolv.conf; DNS will be blocked", error=str(e))
