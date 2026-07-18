@@ -192,11 +192,16 @@ func (r *Runtime) ResolveGuestMountPath(containerPath string) string {
 
 // SetupWorkDirInVM returns shell commands to copy from VirtioFS staging
 // to local VM storage and create git baseline. Called during Create/Reset.
+//
+// The baseline commit sets user.email/user.name explicitly rather than relying
+// on git's identity auto-detection: the guest hostname (set from the sandbox
+// name, see DF142) resolves to no real domain, which git's auto-detect refuses
+// to commit under ("unable to auto-detect email address").
 func (r *Runtime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string {
 	return []string{
 		fmt.Sprintf("mkdir -p '%s'", filepath.Dir(vmLocalPath)),
 		fmt.Sprintf("rsync -a '%s/' '%s/'", virtiofsStagingPath, vmLocalPath),
-		fmt.Sprintf("cd '%s' && git init && git add -A && git commit --allow-empty -m 'baseline'", vmLocalPath),
+		fmt.Sprintf("cd '%s' && git init && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit --allow-empty -m 'baseline'", vmLocalPath),
 	}
 }
 

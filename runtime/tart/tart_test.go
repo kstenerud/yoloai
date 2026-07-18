@@ -462,7 +462,7 @@ func TestSetupWorkDirInVM(t *testing.T) {
 			vmLocalPath:         "/Users/admin/yoloai-work/encoded",
 			expectMkdir:         "mkdir -p '/Users/admin/yoloai-work'",
 			expectRsync:         "rsync -a '/Volumes/My Shared Files/yoloai/work/encoded/' '/Users/admin/yoloai-work/encoded/'",
-			expectGit:           "cd '/Users/admin/yoloai-work/encoded' && git init && git add -A && git commit --allow-empty -m 'baseline'",
+			expectGit:           "cd '/Users/admin/yoloai-work/encoded' && git init && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit --allow-empty -m 'baseline'",
 		},
 		{
 			name:                "path with special characters",
@@ -470,7 +470,7 @@ func TestSetupWorkDirInVM(t *testing.T) {
 			vmLocalPath:         "/Users/admin/yoloai-work/project-name",
 			expectMkdir:         "mkdir -p '/Users/admin/yoloai-work'",
 			expectRsync:         "rsync -a '/Volumes/My Shared Files/yoloai/work/project-name/' '/Users/admin/yoloai-work/project-name/'",
-			expectGit:           "cd '/Users/admin/yoloai-work/project-name' && git init && git add -A && git commit --allow-empty -m 'baseline'",
+			expectGit:           "cd '/Users/admin/yoloai-work/project-name' && git init && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit --allow-empty -m 'baseline'",
 		},
 		{
 			name:                "deeply nested path",
@@ -478,7 +478,7 @@ func TestSetupWorkDirInVM(t *testing.T) {
 			vmLocalPath:         "/Users/admin/yoloai-work/deep/nested/dir",
 			expectMkdir:         "mkdir -p '/Users/admin/yoloai-work/deep/nested'",
 			expectRsync:         "rsync -a '/Volumes/My Shared Files/yoloai/work/deep/nested/dir/' '/Users/admin/yoloai-work/deep/nested/dir/'",
-			expectGit:           "cd '/Users/admin/yoloai-work/deep/nested/dir' && git init && git add -A && git commit --allow-empty -m 'baseline'",
+			expectGit:           "cd '/Users/admin/yoloai-work/deep/nested/dir' && git init && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit --allow-empty -m 'baseline'",
 		},
 		{
 			name:                "encoded path with special chars",
@@ -486,7 +486,7 @@ func TestSetupWorkDirInVM(t *testing.T) {
 			vmLocalPath:         "/Users/admin/yoloai-work/%2FUsers%2Fkarl%2Fproject",
 			expectMkdir:         "mkdir -p '/Users/admin/yoloai-work'",
 			expectRsync:         "rsync -a '/Volumes/My Shared Files/yoloai/work/%2FUsers%2Fkarl%2Fproject/' '/Users/admin/yoloai-work/%2FUsers%2Fkarl%2Fproject/'",
-			expectGit:           "cd '/Users/admin/yoloai-work/%2FUsers%2Fkarl%2Fproject' && git init && git add -A && git commit --allow-empty -m 'baseline'",
+			expectGit:           "cd '/Users/admin/yoloai-work/%2FUsers%2Fkarl%2Fproject' && git init && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit --allow-empty -m 'baseline'",
 		},
 	}
 
