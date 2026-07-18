@@ -29,6 +29,27 @@ import (
 	"github.com/kstenerud/yoloai/yoerrors"
 )
 
+// defaultRuntime is containerd's standard runc shimv2 type. Unlike Docker —
+// whose API treats an empty runtime as "daemon default (runc)" — containerd
+// rejects an empty Runtime.Name at ContainerCreate ("container.Runtime.Name
+// must be set"), so the backend-default sentinel "" must be resolved to a
+// concrete type here. Its Kata siblings are the literals in
+// runtime.IsolationContainerRuntime; this keeps that convention.
+const defaultRuntime = "io.containerd.runc.v2"
+
+// resolveContainerdRuntime maps the backend-agnostic OCI runtime name to the
+// concrete containerd shimv2 type to hand ContainerCreate. runtime.InstanceConfig
+// carries "" for the default container isolation (the "backend default"
+// sentinel, see IsolationContainerRuntime); containerd has no implicit default,
+// so "" becomes defaultRuntime. A non-empty name (a Kata shim type) passes
+// through unchanged.
+func resolveContainerdRuntime(name string) string {
+	if name == "" {
+		return defaultRuntime
+	}
+	return name
+}
+
 // kataConfigPath returns the Kata Containers configuration file path for the
 // given shimv2 runtime type, or "" to use the shim's built-in default.
 func kataConfigPath(_ string) string {
@@ -243,7 +264,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 		client.WithSnapshotter(snapshotter),
 		client.WithNewSnapshot(cfg.Name, img),
 		client.WithNewSpec(specOpts...),
-		client.WithRuntime(cfg.ContainerRuntime, kataOpts),
+		client.WithRuntime(resolveContainerdRuntime(cfg.ContainerRuntime), kataOpts),
 	}
 	if len(cfg.Labels) > 0 {
 		ctrOpts = append(ctrOpts, client.WithContainerLabels(cfg.Labels))

@@ -352,3 +352,13 @@ func TestAttachCommand_ZeroTermSize_NoStty(t *testing.T) {
 	assert.NotContains(t, joined, "stty")
 	assert.Contains(t, joined, "tmux")
 }
+
+// TestResolveContainerdRuntime: the backend-default sentinel "" must become a
+// concrete shimv2 type, because containerd rejects an empty Runtime.Name at
+// ContainerCreate ("container.Runtime.Name must be set") — the failure a plain
+// `--backend containerd` create hit. Non-empty Kata types pass through.
+func TestResolveContainerdRuntime(t *testing.T) {
+	assert.Equal(t, defaultRuntime, resolveContainerdRuntime(""), "backend default resolves to runc shim")
+	assert.Equal(t, "io.containerd.kata.v2", resolveContainerdRuntime("io.containerd.kata.v2"), "explicit runtime passes through")
+	assert.Equal(t, "io.containerd.kata-fc.v2", resolveContainerdRuntime("io.containerd.kata-fc.v2"))
+}
