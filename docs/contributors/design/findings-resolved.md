@@ -7,6 +7,14 @@ History of codebase findings (issues discovered mid-work) that have been address
 are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
 active file stays a working set. Newest first.
 
+### DF143 — `destroy --all` counted an already-gone sandbox as a failure, so a concurrent teardown flipped the exit code (RESOLVED 2026-07-18)
+
+- **Resolved 2026-07-18** — `destroyOne` (`internal/cli/lifecycle/destroy.go`) now returns an `alreadyGone` flag: when its `c.Sandbox(name)` pre-flight yields `ErrSandboxNotFound`, the sandbox is already gone, which already satisfies destroy's goal, so it returns `(true, nil)` instead of the error. `executeDestroy` renders that as `"<name>: already gone"` (text) / `Action: "already-gone"` (JSON) and does **not** add it to the failure tally. This aligns the CLI with the library teardown, which has always treated a missing sandbox dir as a no-op (`launch.Teardown` returns `nil, nil`). Regression tests: `TestDestroyOne_AlreadyGoneIsBenign`, `TestExecuteDestroy_AlreadyGoneNotAFailure`.
+- **Discovered:** 2026-07-18 · **Workstream:** owner hit it destroying leftover smoke-test sandboxes while the smoke run was still live
+- **Severity:** LOW — cosmetic/exit-code only; the sandboxes were in fact destroyed (a subsequent `yoloai ls` was clean). But a non-zero exit on a fully-successful destroy is a real papercut for scripts and for anyone reading the "failed to destroy N sandbox(es)" line.
+- **Description:** `--all` snapshots the sandbox list once in `resolveDestroyAll`, then loops. A concurrent teardown (here: the still-running smoke harness tearing down its own `tag-transfer-containerd-vm-*` sandboxes) removes a sandbox dir in the TOCTOU window between the snapshot and its turn in the loop. `destroyOne`'s pre-flight `c.Sandbox(name)` then returns `ErrSandboxNotFound`, which `executeDestroy` counted as a failure. Explicitly-named args cannot hit this — `resolveDestroyArgs` existence-checks them up front — so a not-found in the loop always means "vanished after resolution", i.e. success.
+- **Pointer:** `internal/cli/lifecycle/destroy.go` (`destroyOne`, `executeDestroy`); `internal/orchestrator/launch/teardown.go:26-32` (the idempotent library teardown the CLI now matches); `store/paths.go` (`ErrSandboxNotFound`, `RequireSandboxDir`); `client.go` (`Client.Sandbox`).
+
 ### DF142 — per-sandbox hostname was wired for the Linux backends but not the tart/apple macOS VMs (RESOLVED 2026-07-18)
 
 - **Resolved 2026-07-18** — split by backend after establishing feasibility on a real Mac:

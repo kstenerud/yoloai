@@ -4,6 +4,7 @@ package lifecycle
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
@@ -220,9 +221,13 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 		var results []destroyResult
 		for _, name := range names {
 			slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name)
-			if err := destroyOne(cmd, ctx, c, name, abandonUnapplied); err != nil {
+			gone, err := destroyOne(cmd, ctx, c, name, abandonUnapplied)
+			switch {
+			case err != nil:
 				results = append(results, destroyResult{Name: name, Error: err.Error()})
-			} else {
+			case gone:
+				results = append(results, destroyResult{Name: name, Action: "already-gone"})
+			default:
 				slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name)
 				results = append(results, destroyResult{Name: name, Action: "destroyed"})
 			}
@@ -233,10 +238,14 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 	var errs []error
 	for _, name := range names {
 		slog.Info("destroying sandbox", "event", "sandbox.destroy", "sandbox", name)
-		if err := destroyOne(cmd, ctx, c, name, abandonUnapplied); err != nil {
+		gone, err := destroyOne(cmd, ctx, c, name, abandonUnapplied)
+		switch {
+		case err != nil:
 			fmt.Fprintf(os.Stderr, "Warning: destroy %s: %v\n", name, err)
 			errs = append(errs, err)
-		} else {
+		case gone:
+			fmt.Fprintf(cmd.OutOrStdout(), "%s: already gone\n", name) //nolint:errcheck // best-effort output
+		default:
 			slog.Info("sandbox destroyed", "event", "sandbox.destroy.complete", "sandbox", name)
 			fmt.Fprintf(cmd.OutOrStdout(), "Destroyed %s\n", name) //nolint:errcheck // best-effort output
 		}
@@ -249,17 +258,26 @@ func executeDestroy(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, n
 }
 
 // destroyOne destroys a single sandbox and renders any advisory notices
-// (e.g. a directory that couldn't be fully removed). Returns the destroy error,
-// if any. abandonUnapplied authorizes discarding unapplied work; when false the
-// library refuses a sandbox that still holds it (a backstop to checkActiveWork).
-func destroyOne(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, abandonUnapplied bool) error {
+// (e.g. a directory that couldn't be fully removed). abandonUnapplied authorizes
+// discarding unapplied work; when false the library refuses a sandbox that still
+// holds it (a backstop to checkActiveWork).
+//
+// alreadyGone reports that the sandbox no longer existed — its directory vanished
+// between name resolution and this point (a concurrent teardown, or a stale --all
+// snapshot). That already satisfies destroy's goal, so it is not an error: the
+// library teardown treats a missing sandbox dir as a no-op, and the CLI matches
+// that here rather than counting an already-gone sandbox as a failure (DF143).
+func destroyOne(cmd *cobra.Command, ctx context.Context, c *yoloai.Client, name string, abandonUnapplied bool) (alreadyGone bool, err error) {
 	sb, err := c.Sandbox(name)
 	if err != nil {
-		return err
+		if errors.Is(err, yoloai.ErrSandboxNotFound) {
+			return true, nil
+		}
+		return false, err
 	}
 	res, err := sb.Destroy(ctx, yoloai.SandboxDestroyOptions{AbandonUnappliedWork: abandonUnapplied})
 	if res != nil {
 		cliutil.RenderNotices(cmd, res.Notices)
 	}
-	return err
+	return false, err
 }

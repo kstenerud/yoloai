@@ -4,6 +4,8 @@
 package lifecycle
 
 import (
+	"bytes"
+	"context"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/cli/clitest"
@@ -47,6 +49,42 @@ func TestDestroyCmd_InvalidName(t *testing.T) {
 	cmd.SetArgs([]string{"INVALID_NAME!!"})
 	err := cmd.Execute()
 	assert.Error(t, err)
+}
+
+// A sandbox that vanished between name resolution and its turn in the destroy
+// loop (a concurrent teardown, or a stale --all snapshot) already satisfies
+// destroy's goal. It must be reported as already-gone, never counted as a
+// failure that flips the exit code (DF143).
+func TestDestroyOne_AlreadyGoneIsBenign(t *testing.T) {
+	_ = clitest.Home(t)
+
+	cmd := NewDestroyCmd()
+	cmd.SetContext(context.Background())
+	c, err := cliutil.Client(cmd)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck // backend-less close is a no-op
+
+	// "ghost" never existed on disk, so c.Sandbox inside destroyOne returns
+	// ErrSandboxNotFound — exactly what a mid-loop-vanished sandbox produces.
+	gone, err := destroyOne(cmd, cmd.Context(), c, "ghost", true)
+	require.NoError(t, err)
+	assert.True(t, gone, "an absent sandbox must report already-gone")
+}
+
+func TestExecuteDestroy_AlreadyGoneNotAFailure(t *testing.T) {
+	_ = clitest.Home(t)
+
+	cmd := NewDestroyCmd()
+	cmd.SetContext(context.Background())
+	var out bytes.Buffer
+	cmd.SetOut(&out)
+	c, err := cliutil.Client(cmd)
+	require.NoError(t, err)
+	defer c.Close() //nolint:errcheck // backend-less close is a no-op
+
+	err = executeDestroy(cmd, cmd.Context(), c, []string{"ghost"}, true)
+	require.NoError(t, err, "already-gone sandboxes must not fail the destroy")
+	assert.Contains(t, out.String(), "ghost: already gone")
 }
 
 func TestDestroyCmd_FlagsRegistered(t *testing.T) {
