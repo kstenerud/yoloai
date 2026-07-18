@@ -101,3 +101,24 @@ func TestInstancePrefix(t *testing.T) {
 			func() { InstancePrefix("") })
 	})
 }
+
+func TestSanitizeHostname(t *testing.T) {
+	// Every input here is a valid sandbox name (ParseSandboxName-conformant);
+	// the fold must yield a valid RFC 1123 label: lowercase, alphanumerics and
+	// single interior hyphens, no leading/trailing/doubled hyphen.
+	cases := map[string]string{
+		"my-feature": "my-feature", // already a label — unchanged
+		"My_Box":     "my-box",     // uppercase + underscore
+		"a.b-c_d":    "a-b-c-d",    // all three separators fold to hyphen
+		"Project123": "project123",
+		"a":          "a",
+	}
+	for in, want := range cases {
+		t.Run(in, func(t *testing.T) {
+			if _, err := ParseSandboxName(in); err != nil {
+				t.Fatalf("test input %q is not a valid sandbox name: %v", in, err)
+			}
+			assert.Equal(t, want, SanitizeHostname(in))
+		})
+	}
+}

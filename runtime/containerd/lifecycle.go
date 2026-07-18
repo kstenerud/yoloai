@@ -298,6 +298,10 @@ func buildContainerSpecOpts(img client.Image, netnsPath string, cfg runtime.Inst
 		}),
 	}
 
+	if cfg.Hostname != "" {
+		specOpts = append(specOpts, oci.WithHostname(cfg.Hostname))
+	}
+
 	if cfg.WorkingDir != "" {
 		specOpts = append(specOpts, oci.WithProcessCwd(cfg.WorkingDir))
 	}

@@ -516,6 +516,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 
 	containerConfig := &container.Config{
 		Image:        cfg.ImageRef,
+		Hostname:     cfg.Hostname,
 		WorkingDir:   cfg.WorkingDir,
 		ExposedPorts: exposedPorts,
 		Labels:       cfg.Labels,

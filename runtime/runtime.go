@@ -86,7 +86,18 @@ const (
 // orchestrator's runtimeconfig.ContainerConfig (the DF33 substrate/agent split).
 type InstanceConfig struct {
 	// Universal — all backends.
-	Name        string
+	Name string
+
+	// Hostname is the OS-level hostname to give the sandbox's guest, so tools
+	// running inside it — a shell prompt, a status line — show the sandbox name
+	// instead of an opaque container id. It is resolved once at the orchestrator
+	// edge from the sandbox name via config.SanitizeHostname, so it is always a
+	// valid RFC 1123 label or empty. Honored by backends whose guest has its own
+	// UTS namespace (Docker, Podman, containerd, and the VM backends); backends
+	// that share the host's namespace (Seatbelt) cannot set it per-sandbox and
+	// ignore it. "" means "leave the backend default".
+	Hostname string
+
 	WorkingDir  string
 	Mounts      []MountSpec
 	Ports       []PortMapping

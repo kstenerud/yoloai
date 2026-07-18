@@ -5,6 +5,7 @@ package config
 
 import (
 	"regexp"
+	"strings"
 
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -64,6 +65,18 @@ func ParseSandboxName(name string) (SandboxName, error) {
 		return "", yoerrors.NewUsageError("invalid sandbox name %q: must be alphanumeric segments joined by single '.', '_', or '-' (no leading, trailing, or repeated separators), e.g. \"my-box\" or \"feature_2\"", name)
 	}
 	return SandboxName(name), nil
+}
+
+// SanitizeHostname folds a sandbox name into a valid RFC 1123 DNS label for use
+// as a container/VM hostname: lowercased, with the sandbox grammar's '.' and '_'
+// separators rewritten to '-'. A name that passed ParseSandboxName is alphanumeric
+// runs joined by single separators, so the fold never produces a leading, trailing,
+// or doubled hyphen, and the length stays within MaxNameLength (56) < 63 — the
+// result is always a valid label. It mirrors invocation.SanitizeTunnelName, which
+// does the same for the stricter VS Code tunnel grammar. The caller is expected to
+// pass a validated sandbox name; garbage in, garbage out.
+func SanitizeHostname(name string) string {
+	return strings.NewReplacer("_", "-", ".", "-").Replace(strings.ToLower(name))
 }
 
 // PrincipalSegment is a parsed, validated principal identifier used to namespace

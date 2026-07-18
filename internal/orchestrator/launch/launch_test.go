@@ -273,6 +273,7 @@ func TestBuildInstanceConfig_BrokerOutcome(t *testing.T) {
 
 	cfg, err := buildInstanceConfig(desc, st, nil, nil, brokerOutcome{}, false)
 	require.NoError(t, err)
+	assert.Equal(t, "test", cfg.Hostname, "hostname is the sanitized sandbox name, not the instance id")
 	assert.Equal(t, "", cfg.NetworkMode, "no broker: keep the user's network mode")
 	assert.NotContains(t, cfg.ContainerEnv, "YOLOAI_BROKER_INJECTOR_ENDPOINT=", "no broker: no injector env")
 
