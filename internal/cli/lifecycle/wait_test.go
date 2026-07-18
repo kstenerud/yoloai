@@ -56,3 +56,25 @@ func TestWriteWaitResult_JSON(t *testing.T) {
 	assert.Contains(t, buf.String(), `"status": "`+string(yoloai.StatusDone)+`"`)
 	assert.Contains(t, buf.String(), "mybox")
 }
+
+func TestWaitExitCode(t *testing.T) {
+	tests := []struct {
+		name      string
+		status    yoloai.Status
+		agentExit *int
+		want      int
+	}{
+		{"done", yoloai.StatusDone, nil, 0},
+		{"idle", yoloai.StatusIdle, nil, 0},
+		{"stopped", yoloai.StatusStopped, nil, 0},
+		{"failed with exit code", yoloai.StatusFailed, new(3), 3},
+		{"failed with zero exit code still means failure", yoloai.StatusFailed, new(0), 1},
+		{"failed with no recorded exit code", yoloai.StatusFailed, nil, 1},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			assert.Equal(t, tc.want, waitExitCode(tc.status, tc.agentExit))
+		})
+	}
+}

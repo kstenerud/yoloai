@@ -155,6 +155,7 @@ func sandboxInfoFromStatus(si *orchestrator.Info) *SandboxInfo {
 		NetHealthDetail: si.NetHealthDetail,
 		Changes:         ChangeState(si.HasChanges),
 		DiskUsageBytes:  si.DiskUsageBytes,
+		ExitCode:        si.ExitCode,
 	}
 }
 

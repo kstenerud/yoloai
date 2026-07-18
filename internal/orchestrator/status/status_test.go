@@ -331,37 +331,45 @@ func TestParseStatusJSON(t *testing.T) {
 	old := time.Now().Add(-30 * time.Second).Unix()
 
 	tests := []struct {
-		name   string
-		data   []byte
-		status Status
-		ok     bool
+		name     string
+		data     []byte
+		status   Status
+		exitCode *int
+		ok       bool
 	}{
-		{"empty", []byte("{}"), "", false},
-		{"invalid json", []byte("{bad"), "", false},
-		{"active fresh", statusJSONBytes("active", nil, now), StatusActive, true},
-		{"idle fresh", statusJSONBytes("idle", nil, now), StatusIdle, true},
-		{"active stale", statusJSONBytes("active", nil, old), "", false},
-		{"idle stale", statusJSONBytes("idle", nil, old), StatusIdle, true},
-		{"done success", statusJSONBytes("done", new(0), now), StatusDone, true},
-		{"done failure", statusJSONBytes("done", new(1), now), StatusFailed, true},
-		{"done stale success", statusJSONBytes("done", new(0), old), StatusDone, true},
-		{"done stale failure", statusJSONBytes("done", new(1), old), StatusFailed, true},
-		{"done no exit code", statusJSONBytes("done", nil, now), StatusFailed, true},
-		{"unknown status", statusJSONBytes("unknown", nil, now), "", false},
-		{"zero timestamp", statusJSONBytes("active", nil, 0), "", false},
+		{"empty", []byte("{}"), "", nil, false},
+		{"invalid json", []byte("{bad"), "", nil, false},
+		{"active fresh", statusJSONBytes("active", nil, now), StatusActive, nil, true},
+		{"idle fresh", statusJSONBytes("idle", nil, now), StatusIdle, nil, true},
+		{"active stale", statusJSONBytes("active", nil, old), "", nil, false},
+		{"idle stale", statusJSONBytes("idle", nil, old), StatusIdle, nil, true},
+		{"done success", statusJSONBytes("done", new(0), now), StatusDone, new(0), true},
+		{"done failure", statusJSONBytes("done", new(1), now), StatusFailed, new(1), true},
+		{"done stale success", statusJSONBytes("done", new(0), old), StatusDone, new(0), true},
+		{"done stale failure", statusJSONBytes("done", new(1), old), StatusFailed, new(1), true},
+		{"done no exit code", statusJSONBytes("done", nil, now), StatusFailed, new(1), true},
+		{"done failure code 3", statusJSONBytes("done", new(3), now), StatusFailed, new(3), true},
+		{"unknown status", statusJSONBytes("unknown", nil, now), "", nil, false},
+		{"zero timestamp", statusJSONBytes("active", nil, 0), "", nil, false},
 		// W2 schema versioning: missing schema_version (=0) is tolerated;
 		// mismatched non-zero schema_version causes the reader to discard the
 		// status as unusable rather than misinterpret it.
-		{"schema_version match", []byte(`{"schema_version":1,"status":"active","timestamp":` + fmt.Sprint(now) + `}`), StatusActive, true},
-		{"schema_version mismatch", []byte(`{"schema_version":99,"status":"active","timestamp":` + fmt.Sprint(now) + `}`), "", false},
+		{"schema_version match", []byte(`{"schema_version":1,"status":"active","timestamp":` + fmt.Sprint(now) + `}`), StatusActive, nil, true},
+		{"schema_version mismatch", []byte(`{"schema_version":99,"status":"active","timestamp":` + fmt.Sprint(now) + `}`), "", nil, false},
 	}
 
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
-			status, ok := parseStatusJSON(tc.data)
+			status, exitCode, ok := parseStatusJSON(tc.data)
 			assert.Equal(t, tc.ok, ok)
 			if ok {
 				assert.Equal(t, tc.status, status)
+				if tc.exitCode == nil {
+					assert.Nil(t, exitCode)
+				} else {
+					require.NotNil(t, exitCode)
+					assert.Equal(t, *tc.exitCode, *exitCode)
+				}
 			}
 		})
 	}
