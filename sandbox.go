@@ -452,6 +452,10 @@ type SandboxInfo struct {
 	NetHealthDetail string      `json:"net_health_detail,omitempty"`
 	Changes         ChangeState `json:"has_changes"`
 	DiskUsageBytes  int64       `json:"disk_usage_bytes"`
+	// ExitCode is the agent's process exit code once the agent has exited:
+	// 0 when Status is Done, the agent's non-zero code when Failed; nil while
+	// the agent is still running/idle or the sandbox never ran an agent.
+	ExitCode *int `json:"exit_code,omitempty"`
 }
 
 // Status is a sandbox's lifecycle state. Re-exported (type alias) from

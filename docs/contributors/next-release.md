@@ -59,6 +59,7 @@ finding or decision first, and lands here only if it should block the release.
 
 - [DF138](design/findings-resolved.md) — `destroy --all` / wildcard resolves one backend for the whole batch, orphaning sandboxes on other backends
 - [DF137](design/findings-unresolved.md) — plain `yoloai system prune` reclaims non-yoloai content on a shared daemon (docker/podman half; apple deferred)
+- [yoloai wait](archive/plans/yoloai-wait.md) — `wait --for exit` propagates the agent's exit code, `--timeout` exits 124
 
 ## Candidates — undecided
 

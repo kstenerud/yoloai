@@ -23,6 +23,23 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `yoloai wait --for exit` now propagates the agent's exit code (was always 0)
+
+**Previous behavior:** `yoloai wait <name> --for exit` printed the final status and always exited
+`0`, even when the agent had failed. A script guarding on `yoloai wait x --for exit && …` could
+not tell success from failure.
+
+**New behavior:** `wait` exits with the agent's own process exit code — `0` when the agent
+finished cleanly (status `done`), the agent's non-zero code when it failed (status `failed`;
+`1` if the monitor recorded no numeric code). `--timeout` now exits `124` (matching `timeout(1)`)
+instead of printing a generic error. `wait --json` gains an `exit_code` field on the emitted
+`SandboxInfo`. (`--for idle` is unchanged for the common "agent reached the prompt" case — it
+still exits `0` — but if it observes a terminal `failed` state it now surfaces that code too.)
+
+**Impact:** scripts that treated `yoloai wait --for exit` as always-succeeding will now see a
+non-zero exit when the agent failed — which is the intended signal. This is a new, exported
+`exit_code` field and a changed process exit status, not a flag/config change.
+
 ### `yoloai system prune` no longer reclaims non-yoloai containers and networks
 
 **Previous behavior:** plain `yoloai system prune` (Docker/Podman) ran the backend's

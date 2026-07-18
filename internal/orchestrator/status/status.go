@@ -77,6 +77,9 @@ type Info struct {
 	// -1 when it could not be measured. Rendering to a human-readable string
 	// is the CLI's responsibility (see cliutil.FormatSize).
 	DiskUsageBytes int64 `json:"disk_usage_bytes"`
+	// ExitCode is the agent's process exit code when Status is Done (0) or
+	// Failed (non-zero); nil for every non-terminal or non-agent-exit state.
+	ExitCode *int `json:"exit_code,omitempty"`
 }
 
 // DirSize recursively calculates the total size of all files under path.
@@ -220,19 +223,27 @@ type statusJSON struct {
 // DetectStatus queries the runtime and agent-status.json to determine sandbox status.
 // sandboxDir is the host-side sandbox directory.
 func DetectStatus(ctx context.Context, rt runtime.Backend, containerName string, sandboxDir string) (Status, error) {
+	st, _, err := detectStatusWithExit(ctx, rt, containerName, sandboxDir)
+	return st, err
+}
+
+// detectStatusWithExit is DetectStatus plus the agent's numeric exit code when
+// the sandbox reached a terminal done/failed state (nil otherwise — a running,
+// idle, stopped, or removed sandbox has no agent exit code to report).
+func detectStatusWithExit(ctx context.Context, rt runtime.Backend, containerName string, sandboxDir string) (Status, *int, error) {
 	info, err := rt.Inspect(ctx, containerName)
 	if err != nil {
 		if errors.Is(err, runtime.ErrNotFound) {
-			return StatusRemoved, nil
+			return StatusRemoved, nil, nil
 		}
-		return "", fmt.Errorf("inspect container: %w", err)
+		return "", nil, fmt.Errorf("inspect container: %w", err)
 	}
 
 	if !info.Running {
 		if info.Suspended {
-			return StatusSuspended, nil
+			return StatusSuspended, nil, nil
 		}
-		return StatusStopped, nil
+		return StatusStopped, nil, nil
 	}
 
 	// Try agent-status.json (fast path — no exec)
@@ -240,23 +251,25 @@ func DetectStatus(ctx context.Context, rt runtime.Backend, containerName string,
 		statusPath := filepath.Join(sandboxDir, store.AgentStatusFile)
 		data, readErr := os.ReadFile(statusPath) //nolint:gosec // path is sandbox-controlled
 		if readErr == nil && len(data) > 0 {
-			if status, ok := parseStatusJSON(data); ok {
-				return status, nil
+			if status, exitCode, ok := parseStatusJSON(data); ok {
+				return status, exitCode, nil
 			}
 		}
 	}
 
 	// If status file is missing or stale, assume active (container is running)
 	slog.Debug("detecting sandbox status", "event", "sandbox.inspect.status", "container", containerName, "result", string(StatusActive))
-	return StatusActive, nil
+	return StatusActive, nil, nil
 }
 
-// parseStatusJSON parses the status.json content and returns the status.
-// Returns false if the content is invalid or stale (except for terminal "done" state).
-func parseStatusJSON(data []byte) (Status, bool) {
+// parseStatusJSON parses the status.json content and returns the status, plus
+// the agent's numeric exit code when the status is a terminal "done" state
+// (nil otherwise). Returns false if the content is invalid or stale (except
+// for terminal "done" state).
+func parseStatusJSON(data []byte) (Status, *int, bool) {
 	var s statusJSON
 	if err := json.Unmarshal(data, &s); err != nil {
-		return "", false
+		return "", nil, false
 	}
 
 	// schema_version=0 means the file was written before W2 (no version
@@ -267,26 +280,26 @@ func parseStatusJSON(data []byte) (Status, bool) {
 			"event", "sandbox.inspect.schema_mismatch",
 			"got", s.SchemaVersion,
 			"expected", agentStatusSchemaVersion)
-		return "", false
+		return "", nil, false
 	}
 
 	if s.Status == "" || s.Timestamp == 0 {
-		return "", false
+		return "", nil, false
 	}
 
 	switch s.Status {
 	case "active":
 		age := time.Since(time.Unix(s.Timestamp, 0))
 		if age > statusFileStaleness {
-			return "", false // stale — fall back to exec
+			return "", nil, false // stale — fall back to exec
 		}
-		return StatusActive, true
+		return StatusActive, nil, true
 
 	case "idle":
 		// Idle is a persistent state written once (by hook or monitor) and
 		// cleared only by new prompt delivery or agent exit. No staleness
 		// check — the status remains valid until explicitly changed.
-		return StatusIdle, true
+		return StatusIdle, nil, true
 
 	case "done":
 		// "done" is a terminal state — trust it even if stale
@@ -294,13 +307,14 @@ func parseStatusJSON(data []byte) (Status, bool) {
 		if s.ExitCode != nil {
 			exitCode = *s.ExitCode
 		}
+		code := exitCode
 		if exitCode == 0 {
-			return StatusDone, true
+			return StatusDone, &code, true
 		}
-		return StatusFailed, true
+		return StatusFailed, &code, true
 
 	default:
-		return "", false
+		return "", nil, false
 	}
 }
 
@@ -316,7 +330,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Backen
 		return nil, fmt.Errorf("load metadata: %w", err)
 	}
 
-	status, err := DetectStatus(ctx, rt, store.InstanceName(layout.Principal, name), sandboxDir)
+	status, exitCode, err := detectStatusWithExit(ctx, rt, store.InstanceName(layout.Principal, name), sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -340,6 +354,7 @@ func InspectSandbox(ctx context.Context, layout config.Layout, rt runtime.Backen
 		NetHealthDetail: netHealthDetail,
 		HasChanges:      detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
 		DiskUsageBytes:  diskUsageBytes,
+		ExitCode:        exitCode,
 	}, nil
 }
 
@@ -464,7 +479,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 	}
 
 	// Runtime available - perform full inspection
-	status, err := DetectStatus(ctx, rt, store.InstanceName(layout.Principal, name), sandboxDir)
+	status, exitCode, err := detectStatusWithExit(ctx, rt, store.InstanceName(layout.Principal, name), sandboxDir)
 	if err != nil {
 		return nil, err
 	}
@@ -481,6 +496,7 @@ func InspectSandboxWithBackend(ctx context.Context, layout config.Layout, rt run
 		NetHealthDetail: netHealthDetail,
 		HasChanges:      detectWorkdirChanges(ctx, git.NewSandbox(layout, rt, name), sandboxDir, meta),
 		DiskUsageBytes:  diskUsageBytes,
+		ExitCode:        exitCode,
 	}, nil
 }
 
