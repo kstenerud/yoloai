@@ -4,8 +4,9 @@
 
 # Next release
 
-**Next release version: `v0.9.1`** — the next point release after v0.9.0. Nothing breaking has
-landed on main since; the field escalates on its own to `v0.10.0` the moment something does.
+**Next release version: `v0.10.0`** — escalated from the point release by a breaking change in
+this cycle: `yoloai system prune` no longer reclaims non-yoloai containers/networks (DF137, see
+BREAKING-CHANGES.md). Escalation is a consequence of what landed, not a decision.
 
 ## How this works
 
@@ -57,6 +58,7 @@ finding or decision first, and lands here only if it should block the release.
 "This file points" above.*
 
 - [DF138](design/findings-resolved.md) — `destroy --all` / wildcard resolves one backend for the whole batch, orphaning sandboxes on other backends
+- [DF137](design/findings-unresolved.md) — plain `yoloai system prune` reclaims non-yoloai content on a shared daemon (docker/podman half; apple deferred)
 
 ## Candidates — undecided
 

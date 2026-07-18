@@ -12,6 +12,7 @@ import (
 	"github.com/docker/docker/api/types/container"
 	"github.com/docker/docker/api/types/image"
 	"github.com/docker/docker/api/types/volume"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/stretchr/testify/assert"
 )
 
@@ -43,7 +44,7 @@ func TestSplitCacheBytes_ImageBytesFuncOverride(t *testing.T) {
 	r.SetImageBytesFunc(func(types.DiskUsage) int64 { return 7 * gib })
 	du := types.DiskUsage{
 		LayersSize: 0, // would be the image total without the override
-		Containers: []*container.Summary{{SizeRw: 42, State: container.StateExited}},
+		Containers: []*container.Summary{yoloaiCtr(42, container.StateExited)},
 	}
 	cached, images := r.splitCacheBytes(du)
 	assert.Equal(t, int64(42), cached)
@@ -59,14 +60,25 @@ func yoloaiVol(size int64) *volume.Volume {
 	}
 }
 
+// yoloaiCtr returns a yoloai-labeled container of the given writable-layer size
+// and state — only such containers count toward the reclaimable cached tier,
+// since PruneCache's ContainersPrune is label-scoped (DF137).
+func yoloaiCtr(sizeRw int64, state container.ContainerState) *container.Summary {
+	return &container.Summary{
+		SizeRw: sizeRw,
+		State:  state,
+		Labels: map[string]string{runtime.LabelSandbox: "somebox"},
+	}
+}
+
 // Containers' writable layers, yoloai volumes, and build cache live outside the
 // image layer store — they're the no-rebuild "cached" tier, separate from images.
 func TestSplitCacheBytes_NonImageUsageIsCachedTier(t *testing.T) {
 	du := types.DiskUsage{
 		LayersSize: 5 * gib,
 		Containers: []*container.Summary{
-			{SizeRw: 100, State: container.StateExited},
-			{SizeRw: 200, State: container.StateDead},
+			yoloaiCtr(100, container.StateExited),
+			yoloaiCtr(200, container.StateDead),
 		},
 		Volumes:    []*volume.Volume{yoloaiVol(50)},
 		BuildCache: []*build.CacheRecord{{Size: 25}},
@@ -83,10 +95,27 @@ func TestSplitCacheBytes_NonImageUsageIsCachedTier(t *testing.T) {
 func TestSplitCacheBytes_ExcludesLiveContainers(t *testing.T) {
 	du := types.DiskUsage{
 		Containers: []*container.Summary{
-			{SizeRw: 1000, State: container.StateRunning},
-			{SizeRw: 2000, State: container.StatePaused},
-			{SizeRw: 3000, State: container.StateRestarting},
-			{SizeRw: 42, State: container.StateExited}, // only this one is reclaimable
+			yoloaiCtr(1000, container.StateRunning),
+			yoloaiCtr(2000, container.StatePaused),
+			yoloaiCtr(3000, container.StateRestarting),
+			yoloaiCtr(42, container.StateExited), // only this one is reclaimable
+		},
+	}
+	cached, _ := (&Runtime{}).splitCacheBytes(du)
+	assert.Equal(t, int64(42), cached)
+}
+
+// Regression: a foreign stopped container yoloai didn't create (no
+// com.yoloai.sandbox label) must NOT count as reclaimable. PruneCache's
+// ContainersPrune is label-scoped (DF137), so counting it would promise a
+// reclaim plain prune never delivers — and plain prune must not touch a shared
+// daemon's foreign containers at all.
+func TestSplitCacheBytes_ExcludesUnlabeledContainers(t *testing.T) {
+	du := types.DiskUsage{
+		Containers: []*container.Summary{
+			{SizeRw: 5000, State: container.StateExited},                                                                 // foreign — no yoloai label
+			{Labels: map[string]string{"com.docker.compose.project": "foley"}, SizeRw: 6000, State: container.StateDead}, // someone else's label
+			yoloaiCtr(42, container.StateExited),
 		},
 	}
 	cached, _ := (&Runtime{}).splitCacheBytes(du)

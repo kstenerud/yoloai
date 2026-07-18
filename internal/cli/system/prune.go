@@ -28,9 +28,11 @@ orphaned lock files. Broken sandbox dirs that still hold unreviewed work are
 never touched (reported with a fix command); broken dirs that can't be
 classified are quarantined to the trash dir, not deleted.
 
-Always reclaims each backend's no-rebuild cache (build cache, volumes,
-dangling images) — this never forces a rebuild, so 'new' still runs
-without rebuilding afterward.
+Reclaims each backend's no-rebuild cache — this never forces a rebuild, so
+'new' still runs without rebuilding afterward. yoloai's own stopped containers
+and volumes are removed by label, so a shared daemon's foreign content is left
+alone; the build cache and dangling images have no per-project attribution, so
+that reclaim is daemon-wide.
 
 --images additionally removes each backend's base/profile images, which
 forces yoloai-base to rebuild on the next sandbox creation. Use on a host
