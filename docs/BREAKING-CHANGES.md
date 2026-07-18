@@ -32,9 +32,11 @@ saw that opaque id.
 
 **New behavior:** the guest's hostname is the sandbox name, lightly sanitized to a
 valid DNS label (lowercased, `.`/`_` folded to `-`; `my-feature` is unchanged,
-`My_Box` becomes `my-box`). Applies to the Docker, Podman, and containerd backends;
-the tart/apple macOS VM backends still take the default for now (DF142), and Seatbelt
-shares the host's hostname by construction.
+`My_Box` becomes `my-box`). Applies to the Docker, Podman, containerd, and tart
+backends (tart sets all three macOS hostname facets in-guest via `scutil`). The
+apple `container` backend keeps its default, which is already the sandbox's full
+instance name rather than an opaque id (DF142); Seatbelt shares the host's hostname
+by construction.
 
 **Impact:** informational only. A script that matched on the container-id hostname
 would need to match the sandbox name instead; nothing in yoloAI relies on the old value.

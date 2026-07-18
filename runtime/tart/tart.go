@@ -423,7 +423,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Deliver setup script via shared directory and run it
 	slog.Debug("tart Start: calling runSetupScript", "name", name)
-	if err := r.runSetupScript(ctx, name, sandboxPath, cfg.Mounts); err != nil {
+	if err := r.runSetupScript(ctx, name, sandboxPath, cfg.Hostname, cfg.Mounts); err != nil {
 		return fmt.Errorf("run setup script: %w", err)
 	}
 

@@ -555,15 +555,6 @@ is worse than none because it also supplies the confidence.
 - **Description (audit-reported):** `internal/orchestrator/engine_lifecycle.go:49-57` calls `lifecycle.Stop` then `lifecycle.Start`, each taking and releasing its own per-sandbox lock, so there is an unlocked window between them (violating the whole-op lock invariant at `store/lock_unix.go:50-54`). A concurrent `start` in the gap recreates the container in the old mode; Restart's Start half then runs `applyIsolationOverride` (`start.go:74-98`), which **persists** `isolation=vm` unconditionally, then `DetectStatus` sees Active and returns early without recreating (`start.go:369-372`). The record says `vm`; the instance is a container. Same persist-then-check-then-maybe-skip order silently drops `--broker`/`--vscode-tunnel`/`--resume` on the race. Distinct from DF113.
 - **Pointer:** `internal/orchestrator/engine_lifecycle.go:49-57`; `internal/orchestrator/lifecycle/start.go:74-98,343,369-372`; `store/lock_unix.go:50-54`.
 
-### DF142 — per-sandbox hostname is wired for the Linux backends but not yet for the tart/apple macOS VMs
-
-- **Discovered:** 2026-07-18 · **Workstream:** sandbox-hostname
-- **Severity:** LOW (cosmetic — a tart/apple sandbox's in-guest hostname stays the backend default, so a status line inside it shows an opaque id instead of the sandbox name; no functional impact)
-- **Disposition:** PARKED — the Linux half (Docker, Podman, containerd) shipped on branch `sandbox-hostname` via the new `runtime.InstanceConfig.Hostname` field; the two macOS VM backends are deferred because they need a guest-side command that cannot be built or verified from a Linux host. Seatbelt is out of scope by construction: it runs agent processes directly on the macOS host under the host's UTS namespace, so a per-sandbox hostname would rename the Mac itself.
-- **Description:** `Hostname` is resolved once at the orchestrator edge (`buildInstanceConfig`, from `config.SanitizeHostname(st.Name)`) and consumed by the container backends. The VM backends need it applied in the guest instead: **tart** via a `sudo scutil --set HostName <name>` in the per-boot `runSetupScript` (`runtime/tart/mounts.go:41`, alongside the existing in-guest `tart exec` commands; the base-image build path is wrong because it is shared across sandboxes); **apple** via `container create --hostname <name>` **if that flag exists** (unconfirmed — verify against `container create --help` on a Mac) else a post-start `hostname`/`hostnamectl` guest exec. Both must lint under `make lint-darwin` and run on real VMs before merge.
-- **Pointer:** `runtime/runtime.go` (`InstanceConfig.Hostname`); `internal/orchestrator/launch/launch.go` (edge resolution); `runtime/tart/mounts.go:41`, `runtime/tart/build.go:629` (sudo precedent); `runtime/apple/apple.go:185` (Create arg build), `apple.go:300` (Exec).
-- **Rides:** any — additive, non-breaking; a point release is fine.
-
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

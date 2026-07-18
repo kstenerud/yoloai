@@ -38,11 +38,13 @@ func remapTargetPath(target string) string {
 
 // runSetupScript creates mount symlinks, writes the embedded setup script
 // to the shared directory, and executes it inside the VM.
-func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string, mounts []runtime.MountSpec) error {
+func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath, hostname string, mounts []runtime.MountSpec) error {
 	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
 
-	// P1: wire the mounts into the guest. Always — a bare runtime instance still
-	// needs its mounts reachable at the expected paths.
+	// P1: name the guest, then wire its mounts. Always — a bare runtime instance
+	// still needs its hostname set and its mounts reachable at the expected paths.
+	r.setVMHostname(ctx, vmName, hostname)
+
 	if err := r.createVMMountSymlinks(ctx, vmName, sandboxPath, vmSharedDir, mounts); err != nil {
 		return err
 	}
@@ -73,6 +75,40 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath string
 	}
 
 	return nil
+}
+
+// setVMHostname sets the guest's OS hostname to the sandbox name so tools
+// running inside the VM (a shell prompt, a status line) show it instead of the
+// base image's generic "Manageds-Virtual-Machine". macOS keeps three names, all
+// set here: HostName is what the `hostname` command and shells read,
+// LocalHostName is the Bonjour/.local name, and ComputerName the UI label.
+//
+// hostname is already a sanitized RFC 1123 label (config.SanitizeHostname), so it
+// is safe to single-quote and valid as a LocalHostName. "" (bare runtime use /
+// the conformance suite) is a no-op. Passwordless sudo is available in the admin
+// guest and used throughout mount setup. This is best-effort and cosmetic: a
+// failure is logged and swallowed rather than failing Start, so a guest that
+// somehow can't set it just keeps the default name.
+func (r *Runtime) setVMHostname(ctx context.Context, vmName, hostname string) {
+	if hostname == "" {
+		return
+	}
+	args := execArgs(vmName, "bash", "-c", hostnameSetCommand(hostname))
+	if _, err := r.runTart(ctx, args...); err != nil {
+		slog.Warn("tart setup: could not set VM hostname; keeping the guest default",
+			"vm", vmName, "hostname", hostname, "err", err)
+	}
+}
+
+// hostnameSetCommand builds the in-guest bash command that sets all three macOS
+// hostnames. Split out from setVMHostname so the command construction is unit-
+// testable without a booted VM. hostname is a sanitized DNS label, so it contains
+// no shell metacharacters and single-quoting is sufficient.
+func hostnameSetCommand(hostname string) string {
+	return fmt.Sprintf(
+		"sudo scutil --set HostName '%s' && sudo scutil --set LocalHostName '%s' && sudo scutil --set ComputerName '%s'",
+		hostname, hostname, hostname,
+	)
 }
 
 // createVMMountSymlinks creates symlinks in the VM from expected mount targets to VirtioFS paths.

@@ -38,6 +38,50 @@ func TestTart_Descriptor_AdvertisesVMCapabilities(t *testing.T) {
 		"tart has no docker-compatible container surface; VS Code Attach should be false")
 }
 
+// TestTart_Start_SetsGuestHostname verifies the DF142 tart half end to end: a
+// Create+Start with InstanceConfig.Hostname set lands that name as the guest's
+// OS hostname (runSetupScript -> setVMHostname -> sudo scutil). Without the fix
+// the guest keeps the base image's generic "Manageds-Virtual-Machine".
+//
+// Gated behind YOLOAI_TEST_TART_VM=1 like the conformance suite: it clones and
+// boots a multi-GB base VM. The VM is named "yoloai-test-*" and removed via
+// t.Cleanup.
+func TestTart_Start_SetsGuestHostname(t *testing.T) {
+	if os.Getenv("YOLOAI_TEST_TART_VM") != "1" {
+		t.Skip("set YOLOAI_TEST_TART_VM=1 to run the Tart hostname test (clones + boots a multi-GB base VM)")
+	}
+	ctx := context.Background()
+	home, err := os.UserHomeDir()
+	require.NoError(t, err)
+	layout := config.NewLayoutFor(filepath.Join(t.TempDir(), ".yoloai"), home).
+		WithPrincipal(config.CLIPrincipal).
+		WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars))
+	rt, err := New(ctx, layout)
+	require.NoError(t, err, "tart backend must be available on this platform")
+	ready, err := rt.IsReady(ctx)
+	require.NoError(t, err)
+	if !ready {
+		t.Skip("yoloai-base VM not present in ~/.tart; run 'yoloai system build --backend tart' first")
+	}
+
+	name := "yoloai-test-hostname"
+	wantHostname := "my-sandbox-hostname"
+	_ = rt.Remove(ctx, name) // evict any stale leftover from a failed run
+	t.Cleanup(func() { _ = rt.Remove(context.Background(), name) })
+
+	require.NoError(t, rt.Create(ctx, runtime.InstanceConfig{
+		Name:     name,
+		Hostname: wantHostname,
+		ImageRef: "yoloai-base",
+	}))
+	require.NoError(t, rt.Start(ctx, name))
+
+	res, err := rt.Exec(ctx, name, []string{"hostname"}, "")
+	require.NoError(t, err)
+	assert.Equal(t, wantHostname, res.Stdout,
+		"the guest hostname should be the sandbox name set via scutil, not the base image default")
+}
+
 func TestTart_InspectNotFound(t *testing.T) {
 	rt, ctx := tartSetup(t)
 	info, err := rt.Inspect(ctx, "does-not-exist-"+t.Name())
