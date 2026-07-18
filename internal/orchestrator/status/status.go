@@ -307,11 +307,10 @@ func parseStatusJSON(data []byte) (Status, *int, bool) {
 		if s.ExitCode != nil {
 			exitCode = *s.ExitCode
 		}
-		code := exitCode
 		if exitCode == 0 {
-			return StatusDone, &code, true
+			return StatusDone, &exitCode, true
 		}
-		return StatusFailed, &code, true
+		return StatusFailed, &exitCode, true
 
 	default:
 		return "", nil, false

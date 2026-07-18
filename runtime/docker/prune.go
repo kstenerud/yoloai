@@ -141,10 +141,12 @@ func (r *Runtime) removeImage(ctx context.Context, id, shortID string, output io
 //
 // Scoped to yoloai's own content: the stopped-container, volume, and network
 // reclaim are label-filtered (com.yoloai.sandbox / com.yoloai.managed) so a
-// shared daemon's foreign content is never removed (DF137). The one exception
-// is the BuildKit build cache, which carries no per-project attribution — its
-// reclaim is daemon-wide, and on a shared host that forces other projects to
-// rebuild (never data loss; the images themselves are kept unless includeImages).
+// shared daemon's foreign content is never removed (DF137). Two categories
+// cannot be scoped and stay daemon-wide, because neither carries per-project
+// attribution: the BuildKit build cache (always), and — only under
+// includeImages — the unused-image sweep (see ImagesPrune below). Both force a
+// rebuild/re-pull on a shared host but never lose data. Plain prune (the common
+// case) touches neither the images nor a foreign container/volume/network.
 //
 // Returns bytes reclaimed, measured as the drop in this backend's own
 // CacheUsage across the prune (before − after) rather than the SDK's
