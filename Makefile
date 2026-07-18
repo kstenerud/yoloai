@@ -234,6 +234,7 @@ ensure-python-venv:
 ## python-test: run pytest from the uv-managed venv (uv required; see D112)
 python-test: python-typecheck
 	$(PYTEST) runtime/monitor/tests/ -v
+	$(PYTEST) runtime/docker/resources/tests/ -v
 	$(PYTEST) scripts/tests/ -v
 
 ## python-typecheck: run mypy --strict from the uv-managed venv over EVERY tracked

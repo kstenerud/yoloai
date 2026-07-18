@@ -475,22 +475,6 @@ is worse than none because it also supplies the confidence.
 - **Evidence that the instruction form alone does not carry this.** D119 (*"a finding parks its fix, never its verification"*) is loaded every session, and [DF128](#df128--the-gate-tells-you-to-hand-inspect-a-half-initialized-first-run-that-system-migrate-repairs-deterministically) was filed with an unverified reachability claim by a session that could recite it. The rule was well-placed and well-worded; it still did not fire.
 - **Pointer:** `AGENTS.md` (rules 1, 7); `docs/contributors/principles/development-principles.md` (DEV §16 and its tell); `docs/contributors/principles/general-principles.md` (GEN §13; §7's D123 corollary — the template); `research/llm-shaped-repos.md` Part 7 (the taxonomy); D119; DF128.
 
-### DF134 — one IPv6 nameserver in `/etc/resolv.conf` aborts `--network-isolated` entirely
-
-- **Discovered:** 2026-07-17 · **Workstream:** costing proper IPv6 support for DF104 — found by reading `firewall.py` to size the work, then confirmed on real Docker
-- **Severity:** MEDIUM — a hard failure of a security feature. It fails **closed** (isolation aborts; the sandbox does not come up silently unisolated), which is the right direction and the only reason this is not higher.
-- **Disposition:** FILED, not fixed. Subsumed by the IPv6 workstream ([ipv6-network-isolation.md](plans/ipv6-network-isolation.md)) — a family-aware `read_nameservers`/`apply_firewall` removes it as a side effect. It earns its own entry because it bites *before* any v6 support exists, and because its remedy if seen in the wild (drop non-v4 nameservers, log it) is one line and need not wait for the workstream.
-- **Mechanism — verified on real Docker in `yoloai-base:latest`, 2026-07-17.** `read_nameservers` accepts any `nameserver <addr>` line **regardless of family**, and `apply_firewall` feeds each straight to `iptables -A OUTPUT -d <ns> -p udp --dport 53`. A v6 address there fails:
-
-  ```
-  iptables v1.8.11 (nf_tables): host/network `fd00::1' not found     → exit 2
-  ```
-
-  `run_strict` raises `NetworkIsolationError` on any non-zero exit, `apply_firewall` propagates it, and the caller aborts rather than proceed with unenforced isolation. So a single v6 nameserver takes down the whole isolation path — **including the v4 rules that would otherwise have been correct**. A v4 nameserver on the same command shape succeeds (exit 0), so the family is the whole difference.
-- **Reachability is the unverified half, and it is what keeps this latent.** The trigger needs a v6 nameserver to reach the *container's* `resolv.conf`. On the dev host it does not: Docker replaced the host file with `nameserver 8.8.8.8` / `8.8.4.4` (verified in the same run). Docker filters v6 nameservers when the container has no v6 connectivity, so the exposure lives on the paths that do — an `--ipv6` network, a CNI supplying v6 DNS on containerd, the apple guest's vmnet-supplied resolver. **None of those were tested.** Read the dev-host result as "not reachable the one way it was checked", never as "unreachable".
-- **It is DF104's class one step earlier.** DF104 is isolation silently *not covering* v6; this is isolation *refusing to start* because v6 exists. Same missing family-awareness, same file, same trigger: someone's network has IPv6.
-- **Pointer:** `runtime/docker/resources/firewall.py:84-106` (`read_nameservers`, family-blind), `:151-156` (the `-d <ns>` rules), `:44-62` (`run_strict`, raises on non-zero). Related: DF104.
-
 ### DF135 — containerd loads the CNI portmap plugin and never feeds it, so `-p` is silently dropped there too
 
 - **Discovered:** 2026-07-17 · **Workstream:** checking DF53's premise before building it — the finding names tart, so the question was whether tart is the only one
