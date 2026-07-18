@@ -1,20 +1,24 @@
 > **ABOUTME:** Sizes proper IPv6 support for `--network-isolated` — family-aware resolution and a
 > parallel v6 ruleset — and records why both cheap alternatives (disable v6, or deny v6 unfiltered)
-> are regressions rather than shortcuts. Closes DF104 and DF134.
+> are regressions rather than shortcuts. This is the **isolation slice** of the broader
+> [guest-network-families](guest-network-families.md) design. DF134 shipped separately (2026-07-18);
+> this closes DF104.
 
 # Plan: make `--network-isolated` mean both address families
 
-- **Status:** PLANNED — sized 2026-07-17, not started. Deferred out of v0.9.0 (owner's call): the
-  code is small, the *verification* needs a v6-routable network per backend, and a security boundary
-  is the wrong thing to rush into a cut.
-- **Depends on:** —
+- **Status:** PLANNED — sized 2026-07-17. This is layer 3 (filter what's present) of
+  [guest-network-families](guest-network-families.md): filtering v6 is only meaningful once the guest
+  is actually *provisioned* with v6 (layers 1–2 there), which today happens only on apple. The code is
+  small; the *verification* needs a v6-routable guest per backend, which this dev host cannot provide.
+  DF134's interim safety fix (skip non-v4 nameservers) already shipped — see findings-resolved.md.
+- **Depends on:** guest-network-families.md
 - **Rides:** **any** release — filtering v6 correctly takes away only egress to hosts that were never allowlisted, so nothing promised is withdrawn. (The two rejected shortcuts *would* have been breaking, which is not a reason to prefer them — see below.)
 
 ## The one-sentence version
 
 `--network-isolated` filters IPv4 only, on every backend that claims it, and says so nowhere
 ([DF104](../findings-unresolved.md)) — while the same family-blindness makes a single v6 nameserver
-abort the whole isolation path ([DF134](../findings-unresolved.md)). Resolve both families, install
+abort the whole isolation path ([DF134](../findings-resolved.md)). Resolve both families, install
 the same ruleset twice, and the claim becomes true.
 
 ## Why the two cheap routes are wrong, not just cheap
@@ -118,7 +122,7 @@ rather than aborting). It does not wait for this plan.
 ## References
 
 [DF104](../findings-unresolved.md) (the IPv4-only isolation, and its live capture);
-[DF134](../findings-unresolved.md) (a v6 nameserver aborts the run);
+[DF134](../findings-resolved.md) (a v6 nameserver aborts the run);
 `runtime/docker/resources/firewall.py` (`resolve_domains:63`, `read_nameservers:84`,
 `apply_firewall:109`, `run_strict:44`); `runtime/docker/resources/install-firewall.py` (the sidecar
 installer); `runtime/docker/docker.go:53`, `runtime/podman/podman.go:39`,
