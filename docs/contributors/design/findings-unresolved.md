@@ -523,14 +523,6 @@ is worse than none because it also supplies the confidence.
 - **Cheap partial mitigation (if wanted before the full fix):** scope `ContainersPrune`/`NetworksPrune` by `managedLabel` exactly as `VolumesPrune` already is; and move the "dedicated host" caveat onto plain `prune`'s help. The build-cache reclaim stays global (BuildKit cache is not per-project labelable) but forces only a rebuild, not data loss.
 - **Pointer:** `system.go:847` (unconditional call); `runtime/docker/prune.go:157-214`; `runtime/apple/prune.go:99-119`; `internal/cli/system/prune.go` (help text).
 
-### DF138 — `destroy --all` / wildcard resolves one backend for the whole batch, orphaning sandboxes on other backends
-
-- **Discovered:** 2026-07-17 · **Workstream:** pre-release deletion-verb audit
-- **Severity:** MEDIUM (orphans a real instance with the user's work still in it; the on-disk record is deleted, so no yoloai command tracks it until a later same-backend `prune` reaps it)
-- **Disposition:** FILED, not fixed — **reported by the audit, not independently verified by me.** The fix (per-sandbox backend from `environment.json`) is not trivial and touches destroy across backends; deferred.
-- **Description (audit-reported):** `internal/cli/lifecycle/destroy.go:74-86` resolves the backend once (config default / `SelectContainerBackend`) for a batch; per-sandbox `ResolveBackendForSandbox` is applied only to a single non-wildcard name. For a sandbox created under a *different* backend, `Stop`/`Remove` silently no-op (wrong backend), `HasActiveWork` reads work through the wrong backend's git path so its refusal is unreliable, and `forceRemoveAll(sandboxDir)` deletes the record anyway (`launch/teardown.go:62`). The real instance is left running, now untracked. The codebase already solved this exact hazard for clone (`engine_lifecycle.go:98-127` `DestroyForOverwrite` reads the destination's own `environment.json` backend); `Engine.Destroy` does not.
-- **Pointer:** `internal/cli/lifecycle/destroy.go:74-86`; `internal/orchestrator/launch/teardown.go:62`; `internal/orchestrator/engine_lifecycle.go:98-127` (the pattern it should follow). Related: DF113.
-
 ### DF139 — seatbelt `killByPID` sends SIGKILL to a process group from an unverified, possibly-reused PID
 
 - **Discovered:** 2026-07-17 · **Workstream:** pre-release deletion-verb audit

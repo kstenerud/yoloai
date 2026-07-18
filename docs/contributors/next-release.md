@@ -56,7 +56,7 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
-*Nothing yet.*
+- [DF138](design/findings-resolved.md) — `destroy --all` / wildcard resolves one backend for the whole batch, orphaning sandboxes on other backends
 
 ## Candidates — undecided
 
