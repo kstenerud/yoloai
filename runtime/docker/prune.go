@@ -18,11 +18,12 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
-// managedLabel marks Docker volumes created by yoloai. Volume reclaim
-// accounting (splitCacheBytes) and volume pruning (PruneCache) are scoped to
-// volumes carrying this label so yoloai never counts or deletes the user's
-// unrelated volumes — e.g. a project's database volume. yoloai creates no
-// volumes today; any future code that does MUST stamp them with this label.
+// managedLabel marks Docker volumes (and any future networks) created by
+// yoloai. Volume/network reclaim accounting (splitCacheBytes) and pruning
+// (PruneCache) are scoped to resources carrying this label so yoloai never
+// counts or deletes the user's unrelated ones — e.g. a project's database
+// volume. yoloai creates no volumes or networks today; any future code that
+// does MUST stamp them with this label.
 const managedLabel = "com.yoloai.managed"
 
 // Prune implements runtime.Backend.
@@ -138,9 +139,12 @@ func (r *Runtime) removeImage(ctx context.Context, id, shortID string, output io
 //   - true (`prune --images`): also `images prune -a`, removing unused base
 //     images and forcing a rebuild on next creation.
 //
-// Affects ALL backend content, not just yoloai's — appropriate for a host
-// dedicated to yoloai testing; on shared hosts users should run the backend's
-// own prune commands instead.
+// Scoped to yoloai's own content: the stopped-container, volume, and network
+// reclaim are label-filtered (com.yoloai.sandbox / com.yoloai.managed) so a
+// shared daemon's foreign content is never removed (DF137). The one exception
+// is the BuildKit build cache, which carries no per-project attribution — its
+// reclaim is daemon-wide, and on a shared host that forces other projects to
+// rebuild (never data loss; the images themselves are kept unless includeImages).
 //
 // Returns bytes reclaimed, measured as the drop in this backend's own
 // CacheUsage across the prune (before − after) rather than the SDK's
@@ -161,9 +165,12 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 
 	before := r.reclaimableBytes(ctx, includeImages)
 
-	// Containers first (stopped only). Removing stopped containers releases
-	// holds on otherwise-unreferenced images.
-	if _, err := r.client.ContainersPrune(ctx, filters.NewArgs()); err != nil {
+	// Containers first (stopped only), and only yoloai's own (label-scoped, like
+	// the volumes below). Removing stopped yoloai containers releases holds on
+	// otherwise-unreferenced yoloai images. Scoping by com.yoloai.sandbox leaves
+	// a foreign stopped container on a shared daemon untouched — plain prune is
+	// not a daemon-wide `docker container prune` (DF137).
+	if _, err := r.client.ContainersPrune(ctx, filters.NewArgs(filters.Arg("label", runtime.LabelSandbox))); err != nil {
 		fmt.Fprintf(output, "%s: containers prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
@@ -190,8 +197,11 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 		fmt.Fprintf(output, "%s: volumes prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
-	// Networks (only unused user-defined networks; defaults are preserved).
-	if _, err := r.client.NetworksPrune(ctx, filters.NewArgs()); err != nil {
+	// Networks: only yoloai's own (label-scoped, like the volumes above). yoloai
+	// creates no Docker networks today, so this reclaims nothing now; scoping by
+	// the managed label keeps it from removing a foreign unused network on a
+	// shared daemon (DF137) and stays correct if yoloai ever creates a labelled one.
+	if _, err := r.client.NetworksPrune(ctx, filters.NewArgs(filters.Arg("label", managedLabel))); err != nil {
 		fmt.Fprintf(output, "%s: networks prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
@@ -352,6 +362,12 @@ func (r *Runtime) splitCacheBytes(du types.DiskUsage) (cached, images int64) {
 	}
 	for _, ct := range du.Containers {
 		if ct == nil {
+			continue
+		}
+		// Only yoloai's own: PruneCache's ContainersPrune is label-scoped (DF137),
+		// so counting a foreign stopped container's writable layer would promise a
+		// reclaim plain prune no longer delivers.
+		if _, ok := ct.Labels[runtime.LabelSandbox]; !ok {
 			continue
 		}
 		// Only stopped containers are reclaimable: ContainersPrune (in PruneCache)

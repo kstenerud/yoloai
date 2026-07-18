@@ -23,6 +23,25 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `yoloai system prune` no longer reclaims non-yoloai containers and networks
+
+**Previous behavior:** plain `yoloai system prune` (Docker/Podman) ran the backend's
+container and network prune with empty filters — removing *every* stopped container and
+*every* unused network on the daemon, including ones yoloAI never created. On a host shared
+with other Docker/Podman work this reaped unrelated content.
+
+**New behavior:** the container and network reclaim is scoped to yoloAI's own resources by
+label (`com.yoloai.sandbox` for containers, `com.yoloai.managed` for networks), matching how
+volume reclaim already worked. A foreign stopped container or unused network is left
+untouched, and the reclaim/disk accounting (`doctor`, `disk`) counts only yoloAI's own
+footprint to match. The BuildKit build cache still has no per-project attribution, so its
+reclaim remains daemon-wide (forces a rebuild, never data loss); plain prune's `--help` now
+says so. The apple `container` backend is not yet scoped (tracked as DF137).
+
+**Impact:** `yoloai system prune` reclaims less on a shared daemon — by design. If you relied
+on it as a whole-daemon cleanup, run the backend's own `docker system prune` /
+`podman system prune` instead.
+
 ### A sandbox's container/VM hostname is now the sandbox name
 
 **Previous behavior:** yoloAI set no hostname on the guest, so a container took the

@@ -95,6 +95,12 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 
 	before, _ := r.systemDF(ctx)
 
+	// DF137: unlike the docker backend (whose ContainersPrune/NetworksPrune are
+	// now label-scoped), these `container ...` prunes are NOT yoloai-scoped —
+	// Apple's container CLI has no label filter — so on a shared macOS host this
+	// reaps foreign content. Deferred: needs a Mac to fix and verify. See the
+	// open DF137 in findings-unresolved.md.
+	//
 	// Stopped containers first, mirroring the docker backend's ordering.
 	if _, err := r.runContainer(ctx, "prune"); err != nil {
 		fmt.Fprintf(output, "apple: container prune failed: %v\n", err) //nolint:errcheck
