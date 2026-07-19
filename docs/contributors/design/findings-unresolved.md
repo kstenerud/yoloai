@@ -542,6 +542,36 @@ is worse than none because it also supplies the confidence.
 - **Structural note:** `wrapcheck` is not enabled (confirmed); `errorlint` flags unsafe type-*asserts* but not a dropped `%w`, so shapes (b)/(c) are not linted today. Per the one-consistent-convention rule, Phase 1 adds a single `sysexec` helper that renders `*exec.ExitError.Stderr` rather than sprinkling `errors.As` at each site; the `.Output()` sites (b) then reuse it.
 - **Pointer:** builds — `runtime/apple/apple.go:455`, `runtime/tart/build.go:444,351,371,363`; `.Output()` — `runtime/tart/runtime.go:66`, `runtime/podman/podman.go:286`, `internal/envsetup/keychain_darwin.go:26`, `runtime/tart/build.go:244`; dropped-`%w` — `internal/orchestrator/files.go:145`. Reference remedy: `internal/sysexec/tail.go`, `runtime/docker/build.go:178-187`.
 
+### DF146 — integration-tagged test files escape the linter entirely, so 32 issues sit unseen
+
+- **Discovered:** 2026-07-19 · **Workstream:** conformance speedup (integration harness work)
+- **Severity:** LOW (test-only lint debt, not a shipped defect), but it is a **gate blind spot** — the
+  class of thing that silently rots because nothing looks at it.
+- **Disposition:** FILED, not fixed — the fix is not a one-liner (see the tag-set tension below), and
+  it is the owner's call whether integration files come under the gate at all.
+- **Description:** `make check`, `make lint`, `make lint-cross`, and the CI `golangci-lint-action` all
+  run `golangci-lint run ./...` with **no build tags**, so every `//go:build integration` file is
+  never compiled by the linter and never checked. Running `golangci-lint run --build-tags integration
+  ./...` surfaces **32 issues** across the integration suite: `gosec` (13 — G104 unchecked
+  `rt.Close()`, G306/G301 test-file perms, G304 file-inclusion via a test-controlled path), `forbidigo`
+  (4 — `os.WriteFile` / `testutil.GetCuratedHostEnv` at test edges not in the `.golangci.yml`
+  allowlist), `gocritic` (6 — `exitAfterDefer` in `TestMain`s), `nolintlint` (7 — see below),
+  `errcheck` (1 — `os.RemoveAll`), `unused` (1 — `func testSandboxDir`). Several are genuine
+  (`testSandboxDir` is dead; the `os.RemoveAll` is unchecked); several are test-edge false positives
+  that want a scoped `//nolint` or an allowlist entry, not a code change.
+- **The tension that makes it non-trivial (why it is not "just add the tag to CI"):** the 7
+  `nolintlint` "directive unused" hits are `//nolint` comments that are *needed* under the untagged
+  lint but *unused* under the tagged lint (or vice versa) — the same file yields different nolint
+  requirements per build-tag set. So bringing integration files under the gate cannot be a blanket
+  flip; each `//nolint` must be reconciled so **both** the tagged and untagged runs pass, or the two
+  runs will fight. That reconciliation, plus the real fixes and the allowlist entries, is the actual
+  work.
+- **Pointer:** gate definition `Makefile` (`lint`, `lint-cross`), `.github/workflows/ci.yml` (the
+  `golangci-lint-action` step). Full issue list: `golangci-lint run --build-tags integration ./...`
+  (32 issues at time of filing). Concentrations: `runtime/{docker,podman,apple,tart,seatbelt}/
+  integration_*_test.go`, `internal/orchestrator/*integration*_test.go`, `runtime/runtimetest/
+  conformance_iface.go:400,407`.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
