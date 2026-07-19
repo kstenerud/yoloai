@@ -54,10 +54,10 @@ func TestE2E_Debug_WritesCLIJSONL(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "e2e-debug") })
 
 	// Run a command with --debug; cli.jsonl should get debug-level entries
-	runYoloai(t, "--debug", "sandbox", "e2e-debug", "info") //nolint:errcheck // return value not needed
+	runYoloai(t, "--debug", "sandbox", "e2e-debug", "info")
 
 	cliJSONL := filepath.Join(sandboxLogsDir(t, "e2e-debug"), "cli.jsonl")
-	data, err := os.ReadFile(cliJSONL) //nolint:gosec // test path
+	data, err := os.ReadFile(cliJSONL) //nolint:gosec // G304: path under the test's sandbox logs dir
 	require.NoError(t, err, "cli.jsonl should exist after --debug run")
 	assert.Contains(t, string(data), `"level":"debug"`, "cli.jsonl should contain debug entries")
 }
@@ -88,7 +88,7 @@ func TestE2E_BugreportFlag(t *testing.T) {
 	require.NoError(t, err)
 	require.Len(t, matches, 1, "expected exactly one bug report file")
 
-	content, err := os.ReadFile(matches[0]) //nolint:gosec // test path
+	content, err := os.ReadFile(matches[0])
 	require.NoError(t, err)
 	out := string(content)
 

@@ -407,10 +407,11 @@ linters:
       # lifecycle_test.go threads SUDO_UID so reset's git re-baseline is
       # sudo-safe. The rest of the list is the integration-tagged callers
       # (internal/cli, internal/orchestrator, and the docker/podman/tart
-      # runtime backends), analyzed only under --build-tags integration. Keep
+      # runtime backends, plus the e2e harness's curated agent/go-build envs
+      # in test/e2e/helpers_test.go), analyzed only under the tagged lint. Keep
       # this path-scoped to the specific test-edge files; do NOT exclude whole
       # dirs, even though the list has gotten long.
-      - path: "internal/orchestrator/create/fakeruntime_test\\.go|internal/orchestrator/lifecycle/lifecycle_test\\.go|internal/cli/integration_main_test\\.go|internal/orchestrator/integration_helpers_test\\.go|internal/orchestrator/integration_macos_test\\.go|runtime/tart/integration_test\\.go|runtime/docker/integration_main_test\\.go|runtime/docker/integration_test\\.go|runtime/docker/keepalive_integration_test\\.go|runtime/docker/launch_integration_test\\.go|runtime/docker/volume_integration_test\\.go|runtime/podman/integration_main_test\\.go|runtime/podman/integration_test\\.go"
+      - path: "internal/orchestrator/create/fakeruntime_test\\.go|internal/orchestrator/lifecycle/lifecycle_test\\.go|internal/cli/integration_main_test\\.go|internal/orchestrator/integration_helpers_test\\.go|internal/orchestrator/integration_macos_test\\.go|runtime/tart/integration_test\\.go|runtime/docker/integration_main_test\\.go|runtime/docker/integration_test\\.go|runtime/docker/keepalive_integration_test\\.go|runtime/docker/launch_integration_test\\.go|runtime/docker/volume_integration_test\\.go|runtime/podman/integration_main_test\\.go|runtime/podman/integration_test\\.go|test/e2e/helpers_test\\.go"
         linters:
           - forbidigo
         text: "testutil\\.GetCuratedHostEnv"

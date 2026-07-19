@@ -16,6 +16,35 @@ active file stays a working set. Newest first.
 - **Severity:** MEDIUM — a hard failure of a security feature (isolation aborted), failing closed. Latent on this dev host (Docker replaced the container `resolv.conf` with v4 nameservers; a v6 nameserver reaches the container only on an `--ipv6` network / v6-supplying CNI / apple vmnet resolver — none reproducible here), which is why it was never higher.
 - **Pointer:** `runtime/docker/resources/firewall.py` (`is_ipv4`, `parse_nameservers`, `read_nameservers`); `runtime/docker/resources/tests/test_firewall.py`; `Makefile` (`python-test`). Related: DF104 (open, folded into the network-families design).
 
+### DF146 — integration-tagged test files escaped the linter entirely, so 32 (really 86) issues sat unseen (RESOLVED 2026-07-19)
+
+- **Resolved 2026-07-19, in two acts.** *The issues:* bringing `--build-tags integration` up surfaced
+  not the filed 32 but **86** issues — golangci-lint's default output caps (`--max-same-issues`,
+  `--max-issues-per-linter`) had truncated the list, an undercount that was itself a symptom of the
+  blindness. All were reconciled so the tagged and untagged runs both pass, on darwin and
+  GOOS=linux, with caps disabled: six TestMains called `os.Exit` with defers pending (real bugs —
+  the deferred cleanup never ran; each restructured as a thin `TestMain` over a helper returning the
+  exit code), a dead helper deleted, an unchecked `os.RemoveAll` handled; the rest were stale nolint
+  directives removed, test-edge unchecked errors converted to the idiomatic `_ =` form, scoped
+  nolints with reasons on gosec test-fixture false positives, and `.golangci.yml` DF19-allowlist
+  entries for the integration-file `GetCuratedHostEnv` callers. The e2e tag hid six more of the same
+  classes (`test/e2e/`), fixed when the gate wiring landed. *The blind spot:* on the owner's
+  go-ahead, `make lint` and `make lint-cross` now run a **second golangci-lint pass with
+  `--build-tags 'integration e2e'`** (matching vet's tag set) and caps disabled, on the host GOOS
+  and each cross GOOS — CI runs `make check`, so the gate holds everywhere and the reconciliation
+  cannot silently rot.
+- **The tension that made it non-trivial:** the same file can need different `//nolint` directives
+  per build-tag set (`nolintlint` flags a directive unused under one set that the other requires),
+  so the flip could not be blanket — each directive was reconciled so **both** runs pass; where
+  `_ =` silences errcheck and gosec's G104 twin together, that form won over a two-linter nolint.
+- **Discovered:** 2026-07-19 · **Workstream:** conformance speedup (integration harness work)
+- **Severity:** LOW (test-only lint debt, not a shipped defect), but a **gate blind spot** — the
+  class of thing that silently rots because nothing looks at it.
+- **Pointer:** gate definition `Makefile` (`lint`, `lint-cross`); `.golangci.yml` (DF19 allowlist,
+  nolintlint settings); the sweep itself is commit-visible across
+  `runtime/*/integration_*_test.go`, `internal/{cli,orchestrator}/integration*_test.go`,
+  `runtime/runtimetest/conformance_iface.go`, `test/e2e/`.
+
 ### DF145 — subprocess and `.Output()` failures forwarded an opaque exit code, discarding the stderr the caller needs (RESOLVED 2026-07-19)
 
 - **Resolved 2026-07-19, in two phases.** Three shapes, one root cause — an error was wrapped or

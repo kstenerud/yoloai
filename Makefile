@@ -81,12 +81,18 @@ empty :=
 space := $(empty) $(empty)
 comma := ,
 
+## lint: two golangci-lint passes — untagged, then with the test build tags
+## (matching vet's tag set). Tagged files are invisible to the untagged run, and
+## the two tag sets have different nolint needs, so both must pass (DF146).
+## Output caps are disabled on the tagged pass because their truncation once hid
+## 54 of 86 issues behind a "32 issues" summary.
 lint:
 	@UNFMT=$$(gofmt -l .); \
 	if [ -n "$$UNFMT" ]; then \
 		echo "gofmt needed:"; echo "$$UNFMT"; exit 1; \
 	fi
 	GOTOOLCHAIN=$(shell PATH="$(PATH)" go env GOVERSION 2>/dev/null) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run ./...
+	GOTOOLCHAIN=$(shell PATH="$(PATH)" go env GOVERSION 2>/dev/null) go run github.com/golangci/golangci-lint/v2/cmd/golangci-lint@v2.11.3 run --build-tags 'integration e2e' --max-same-issues=0 --max-issues-per-linter=0 ./...
 
 ## lint-cross: run golangci-lint against each non-host GOOS in LINT_PLATFORMS, so
 ## lint rules (forbidigo, etc.) on //go:build <goos> files are ENFORCED regardless
@@ -106,6 +112,8 @@ lint-cross:
 		[ "$$goos" = "$$hostos" ] && continue; \
 		echo ">> golangci-lint $$goos/$$goarch"; \
 		GOOS="$$goos" GOARCH="$$goarch" "$$tmp/golangci-lint" run ./... || rc=1; \
+		echo ">> golangci-lint $$goos/$$goarch (build tags: integration e2e)"; \
+		GOOS="$$goos" GOARCH="$$goarch" "$$tmp/golangci-lint" run --build-tags 'integration e2e' --max-same-issues=0 --max-issues-per-linter=0 ./... || rc=1; \
 	done; \
 	rm -rf "$$tmp"; exit $$rc
 
