@@ -4,8 +4,8 @@
 
 # Next release
 
-**Next release version: `v0.9.1`** — the next point release after v0.9.0. Nothing breaking has
-landed on main since; the field escalates on its own to `v0.10.0` the moment something does.
+**Next release version: `v0.10.1`** — the next point release after v0.10.0. Nothing breaking has
+landed on main since; the field escalates on its own to `v0.11.0` the moment something does.
 
 ## How this works
 
@@ -56,14 +56,7 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
-- [DF138](design/findings-resolved.md) — `destroy --all` / wildcard resolves one backend for the whole batch, orphaning sandboxes on other backends
-- [DF137](design/findings-unresolved.md) — plain `yoloai system prune` reclaims non-yoloai content on a shared daemon (docker/podman half; apple deferred)
-- [yoloai wait](archive/plans/yoloai-wait.md) — `wait --for exit` propagates the agent's exit code, `--timeout` exits 124
-- [DF134](design/findings-resolved.md) — a v6 nameserver no longer aborts `--network-isolated` (v4-only firewall skips non-v4 nameservers)
-- [DF144](design/findings-resolved.md) — a failed image build now carries its cause on the error (visible under `--json`/to embedders), not just "exited with code 1"
-- `yoloai doctor` ownership audit — flags root-owned leftovers under the Docker config dir and the yoloai data dir (blocking prune/destroy/builds), with a `chown` remedy (follow-up to DF144)
-- [DF145](design/findings-resolved.md) — opaque subprocess/`.Output()` failures now surface their captured stderr instead of a bare exit code
-- [integration & smoke test speedup](archive/plans/integration-test-speedup.md) — amortize the conformance suite's per-subtest VM boots and add bounded parallelism to cut the ~1hr macOS integration+smoke run
+*Nothing yet.*
 
 ## Candidates — undecided
 

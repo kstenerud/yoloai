@@ -23,6 +23,8 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+## v0.10.0
+
 ### A sandbox's container/VM hostname is now the sandbox name
 
 **Previous behavior:** yoloAI set no hostname on the guest, so a container took the
