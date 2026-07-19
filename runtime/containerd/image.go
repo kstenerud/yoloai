@@ -29,6 +29,10 @@ import (
 
 const imageRef = "yoloai-base"
 
+// buildErrorTailLines is how many trailing lines of a failed build's output ride
+// on the returned error (DF144), so a --json/embedder caller sees the cause.
+const buildErrorTailLines = 20
+
 // dockerImageRef is the full ref Docker uses when storing yoloai-base in containerd.
 const dockerImageRef = "docker.io/library/yoloai-base:latest"
 
@@ -153,12 +157,17 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 	// store, which makes `system prune` churn forever (see
 	// backend-idiosyncrasies.md).
 	buildCmd := sysexec.CommandContext(ctx, r.layout.Env().EnvForDockerBuild(), dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-")
-	buildCmd.Stdout = output
-	buildCmd.Stderr = output
+	// Tee the stream into a tail buffer so a build failure's cause rides on the
+	// error, not only the (possibly discarded) stream — same value on both so
+	// os/exec keeps its single-pipe path (DF144).
+	tail := sysexec.NewTailBuffer(buildErrorTailLines)
+	w := io.MultiWriter(output, tail)
+	buildCmd.Stdout = w
+	buildCmd.Stderr = w
 	buildCmd.Stdin = buildCtx
 
 	if err := buildCmd.Run(); err != nil {
-		return "", fmt.Errorf("docker build: %w", err)
+		return "", fmt.Errorf("docker build: %w%s", err, tail.ErrorSuffix())
 	}
 	return dockerBin, nil
 }

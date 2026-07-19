@@ -26,6 +26,11 @@ import (
 // in a profile directory (for profile image staleness detection).
 const lastBuildFile = ".last-build-checksum"
 
+// buildErrorTailLines is how many trailing lines of a failed build's output are
+// carried on the returned error (DF144) — enough to include the failing
+// BuildKit step and its error, without dumping the whole log into one line.
+const buildErrorTailLines = 20
+
 // baseImageChecksumPath returns the path where the base image build checksum is
 // stored under the given layout's cache directory, keyed by backend.
 //
@@ -167,14 +172,19 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	args = append(args, "-t", "yoloai-base", "-")
 	cmd := sysexec.CommandContext(ctx, layout.Env().EnvForDockerBuild(), r.binaryName, args...)
 	cmd.Stdin = buildCtx
-	cmd.Stdout = output
-	cmd.Stderr = output
+	// Stream to output as before, but also tee into a tail buffer so a failure's
+	// actionable cause rides on the error itself, not only the (maybe discarded)
+	// stream — same value on both so os/exec keeps its single-pipe path (DF144).
+	tail := sysexec.NewTailBuffer(buildErrorTailLines)
+	w := io.MultiWriter(output, tail)
+	cmd.Stdout = w
+	cmd.Stderr = w
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-			return fmt.Errorf("%s build exited with code %d", r.binaryName, exitErr.ExitCode())
+			return fmt.Errorf("%s build exited with code %d%s", r.binaryName, exitErr.ExitCode(), tail.ErrorSuffix())
 		}
-		return fmt.Errorf("%s build: %w", r.binaryName, err)
+		return fmt.Errorf("%s build: %w%s", r.binaryName, err, tail.ErrorSuffix())
 	}
 
 	return nil
@@ -290,14 +300,16 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 
 	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForDockerBuild(), r.binaryName, args...)
 	cmd.Stdin = buildCtx
-	cmd.Stdout = output
-	cmd.Stderr = output
+	tail := sysexec.NewTailBuffer(buildErrorTailLines)
+	w := io.MultiWriter(output, tail)
+	cmd.Stdout = w
+	cmd.Stderr = w
 
 	if err := cmd.Run(); err != nil {
 		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
-			return fmt.Errorf("%s build exited with code %d", r.binaryName, exitErr.ExitCode())
+			return fmt.Errorf("%s build exited with code %d%s", r.binaryName, exitErr.ExitCode(), tail.ErrorSuffix())
 		}
-		return fmt.Errorf("%s build: %w", r.binaryName, err)
+		return fmt.Errorf("%s build: %w%s", r.binaryName, err, tail.ErrorSuffix())
 	}
 	return nil
 }

@@ -60,6 +60,7 @@ finding or decision first, and lands here only if it should block the release.
 - [DF137](design/findings-unresolved.md) — plain `yoloai system prune` reclaims non-yoloai content on a shared daemon (docker/podman half; apple deferred)
 - [yoloai wait](archive/plans/yoloai-wait.md) — `wait --for exit` propagates the agent's exit code, `--timeout` exits 124
 - [DF134](design/findings-resolved.md) — a v6 nameserver no longer aborts `--network-isolated` (v4-only firewall skips non-v4 nameservers)
+- [DF144](design/findings-resolved.md) — a failed image build now carries its cause on the error (visible under `--json`/to embedders), not just "exited with code 1"
 
 ## Candidates — undecided
 
