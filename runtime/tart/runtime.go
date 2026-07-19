@@ -63,7 +63,7 @@ func QueryAvailableRuntimes(ctx context.Context, env []string) ([]RuntimeVersion
 	cmd := sysexec.CommandContext(ctx, env, "xcrun", "simctl", "list", "runtimes", "--json")
 	output, err := cmd.Output()
 	if err != nil {
-		return nil, fmt.Errorf("query simctl runtimes: %w", err)
+		return nil, fmt.Errorf("query simctl runtimes: %w", sysexec.EnrichExitError(err))
 	}
 
 	var result simctlRuntimesOutput

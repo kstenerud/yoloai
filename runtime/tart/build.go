@@ -37,6 +37,12 @@ const (
 
 	// provisionedImageName is the local VM name for the provisioned base image.
 	provisionedImageName = "yoloai-base"
+
+	// buildErrorTailLines is how many trailing lines of a failed subprocess's
+	// output are folded into the returned error, so the actionable cause rides
+	// on the error itself rather than only on the (maybe discarded) stream
+	// (DF144/DF145).
+	buildErrorTailLines = 20
 )
 
 // macOSCodenames maps a macOS major version to the Cirrus Labs image codename.
@@ -241,7 +247,7 @@ func hostMatchedBaseImage(hostMajor func() (int, error)) string {
 func hostMacOSMajor(env []string) (int, error) {
 	out, err := sysexec.Command(env, "sw_vers", "-productVersion").Output()
 	if err != nil {
-		return 0, fmt.Errorf("sw_vers: %w", err)
+		return 0, fmt.Errorf("sw_vers: %w", sysexec.EnrichExitError(err))
 	}
 	major, _, _ := strings.Cut(strings.TrimSpace(string(out)), ".")
 	n, err := strconv.Atoi(major)
@@ -346,10 +352,14 @@ func (r *Runtime) verifyTools(ctx context.Context, vmName string, output io.Writ
 	)
 	args := execArgs(vmName, "zsh", "-lc", script)
 	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
-	cmd.Stdout = output
-	cmd.Stderr = output
+	// Tee into a tail buffer so the failure names the missing tool on the error
+	// itself, not only on the stream (DF145).
+	tail := sysexec.NewTailBuffer(buildErrorTailLines)
+	w := io.MultiWriter(output, tail)
+	cmd.Stdout = w
+	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("tool verification failed (a required tool of %v is missing from the login PATH): %w", requiredTools, err)
+		return fmt.Errorf("tool verification failed (a required tool of %v is missing from the login PATH): %w%s", requiredTools, err, tail.ErrorSuffix())
 	}
 	return nil
 }
@@ -360,15 +370,30 @@ func (r *Runtime) writeImprint(ctx context.Context, vmName, baseImage string) er
 	args := execArgs(vmName, "bash", "-c", "cat > ~/.yoloai-base-info")
 	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
 	cmd.Stdin = strings.NewReader(r.buildInfoContent(baseImage))
-	return cmd.Run()
+	// No stream target here — without a tail buffer the exec's stderr would be
+	// discarded entirely and a failure would read as a bare exit code (DF145).
+	tail := sysexec.NewTailBuffer(buildErrorTailLines)
+	cmd.Stdout = tail
+	cmd.Stderr = tail
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("write build imprint: %w%s", err, tail.ErrorSuffix())
+	}
+	return nil
 }
 
 // pullImage pulls a Tart VM image from a registry.
 func (r *Runtime) pullImage(ctx context.Context, imageRef string, output io.Writer) error {
 	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, "pull", imageRef)
-	cmd.Stdout = output
-	cmd.Stderr = output
-	return cmd.Run()
+	// Tee into a tail buffer so a pull failure (auth, network, disk) explains
+	// itself on the error, not only on the stream (DF145).
+	tail := sysexec.NewTailBuffer(buildErrorTailLines)
+	w := io.MultiWriter(output, tail)
+	cmd.Stdout = w
+	cmd.Stderr = w
+	if err := cmd.Run(); err != nil {
+		return fmt.Errorf("pull %s: %w%s", imageRef, err, tail.ErrorSuffix())
+	}
+	return nil
 }
 
 // bootForProvisioning boots a VM, runs provision commands, verifies the
@@ -438,11 +463,15 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 
 		args := execArgs(vmName, "bash", "-c", cmdStr)
 		provCmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, args...)
-		provCmd.Stdout = output
-		provCmd.Stderr = output
+		// Tee into a tail buffer so the step's actual failure (apt error,
+		// network fault) rides on the error, not only on the stream (DF145).
+		tail := sysexec.NewTailBuffer(buildErrorTailLines)
+		w := io.MultiWriter(output, tail)
+		provCmd.Stdout = w
+		provCmd.Stderr = w
 
 		if err := provCmd.Run(); err != nil {
-			return fmt.Errorf("provision step %d failed: %w", i+1, err)
+			return fmt.Errorf("provision step %d failed: %w%s", i+1, err, tail.ErrorSuffix())
 		}
 	}
 

@@ -34,6 +34,11 @@ const minMacOSMajor = 26
 // containerBin is the CLI we shell out to.
 const containerBin = "container"
 
+// buildErrorTailLines is how many trailing lines of a failed build's output are
+// folded into the returned error, so the actionable cause rides on the error
+// itself rather than only on the (maybe discarded) stream (DF144/DF145).
+const buildErrorTailLines = 20
+
 // installHint is the install URL; a const (not descriptor.InstallHint) so probe
 // can reference it without an initialization cycle through descriptor→probe.
 const installHint = "https://github.com/apple/container"
@@ -450,10 +455,18 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	logger.Debug("building yoloai-base via container build", "context", dir)
 
 	cmd := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, "build", "-t", baseImage, dir)
-	cmd.Stdout = output
-	cmd.Stderr = output
+	// Stream to output as before, but also tee into a tail buffer so a failure's
+	// actionable cause rides on the error itself, not only the (maybe discarded)
+	// stream — same value on both so os/exec keeps its single-pipe path (DF145).
+	tail := sysexec.NewTailBuffer(buildErrorTailLines)
+	w := io.MultiWriter(output, tail)
+	cmd.Stdout = w
+	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("container build: %w", err)
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			return fmt.Errorf("container build exited with code %d%s", exitErr.ExitCode(), tail.ErrorSuffix())
+		}
+		return fmt.Errorf("container build: %w%s", err, tail.ErrorSuffix())
 	}
 	dockerrt.RecordBuildChecksum(layout, "apple")
 	return nil

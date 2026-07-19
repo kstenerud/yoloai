@@ -23,7 +23,7 @@ var keychainEnv = []string{"PATH=/usr/bin:/bin:/usr/local/bin"}
 func readKeychainPassword(service string) ([]byte, error) {
 	out, err := sysexec.Command(keychainEnv, "security", "find-generic-password", "-s", service, "-w").Output()
 	if err != nil {
-		return nil, fmt.Errorf("keychain lookup for %q: %w", service, err)
+		return nil, fmt.Errorf("keychain lookup for %q: %w", service, sysexec.EnrichExitError(err))
 	}
 	return []byte(strings.TrimRight(string(out), "\n")), nil
 }
