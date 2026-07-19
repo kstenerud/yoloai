@@ -15,6 +15,23 @@ import (
 	"github.com/kstenerud/yoloai/store"
 )
 
+// copyTree previously returned fmt.Errorf("%s", combinedOutput) — just cp's own
+// stderr, which names the source it could not stat but never the destination,
+// and which collapses to the empty string (discarding the real error) when cp
+// fails to start. The fix frames the error with both paths and wraps the cause
+// with %w. Asserting the message names the DESTINATION distinguishes the fix
+// from the old behavior: cp's raw stderr for a missing source never mentions it
+// (DF145 regression).
+func TestCopyTree_FailureNamesBothPaths(t *testing.T) {
+	src := filepath.Join(t.TempDir(), "does-not-exist")
+	dst := filepath.Join(t.TempDir(), "dst")
+
+	err := copyTree(context.Background(), []string{"PATH=/usr/bin:/bin"}, src, dst)
+	require.Error(t, err)
+	assert.NotEmpty(t, err.Error(), "a copy failure must not surface as an empty message")
+	assert.Contains(t, err.Error(), dst, "copyTree's own framing must name the destination")
+}
+
 func TestValidateExchangePath_Valid(t *testing.T) {
 	assert.NoError(t, validateExchangePath("/a/b/files", "/a/b/files/foo.txt"))
 	assert.NoError(t, validateExchangePath("/a/b/files", "/a/b/files"))

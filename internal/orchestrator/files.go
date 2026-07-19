@@ -142,7 +142,13 @@ func WriteExchangeFile(layout config.Layout, name, rel string, data []byte) erro
 func copyTree(ctx context.Context, env []string, src, dst string) error {
 	cmd := sysexec.CommandContext(ctx, env, "cp", "-rp", src, dst)
 	if out, err := cmd.CombinedOutput(); err != nil {
-		return fmt.Errorf("%s", strings.TrimSpace(string(out)))
+		if msg := strings.TrimSpace(string(out)); msg != "" {
+			return fmt.Errorf("copy %s to %s: %w: %s", src, dst, err, msg)
+		}
+		// cp failed to start (e.g. binary missing): out is empty, so the real
+		// error is all we have — returning fmt.Errorf("%s", out) here would
+		// surface the empty string and discard err entirely (DF145).
+		return fmt.Errorf("copy %s to %s: %w", src, dst, err)
 	}
 	return nil
 }
