@@ -123,6 +123,40 @@ Newest first. Every entry here is from a single session (2026-07-16/17) — the 
 attempt to record them, so the corpus is deep on one session and empty before it. That skew is
 itself worth knowing when reading pattern 4.
 
+### A12 — I verified the parallel path on the one backend that could not exercise its bug (2026-07-19)
+
+- **Claimed:** that the parallelised conformance harness "works — verified on real docker (green,
+  3.0 s)", and committed it, wrote it into the plan, and handed it to the mac on that basis.
+- **True:** it panicked immediately on containerd (and would on tart/seatbelt): those backends isolate
+  via `IsolatedHome`, which calls `t.Setenv`, and Go **panics on `t.Setenv` inside a `t.Parallel()`
+  test**. The harness called `setup(t)` inside each parallel subtest. Docker and podman were the
+  *only* backends whose setup does not touch the environment — so docker was the single backend that
+  **could not reproduce the failure**, and it was the one I verified on.
+- **Source of the false belief:** I verified on the backend that was runnable unprivileged on the
+  Linux host (docker) and generalised "docker green" to "the parallel path is correct." The property
+  that breaks it — a setup that calls `t.Setenv` — is invisible from docker, because docker's setup
+  is the one that doesn't. The convenient instance and the risk-exercising instance were different
+  instances, and I only had the convenient one.
+- **Caught by:** **`releasetest` on a real `IsolatedHome` backend** (`TestContainerdConformance`) — a
+  *mechanism*, not the owner's question. Worth flagging loudly: the running corpus claim is that the
+  mechanism catch-rate for interpretive errors is ~0 and the owner's question catches everything. This
+  is a counter-example — the integration suite on a backend docker could not stand in for caught it
+  cold. The lesson is not "mechanisms don't work" but "the mechanism has to run the case the shortcut
+  skipped."
+- **Cost:** medium. It reached committed code, the plan's "verified" claim, and the mac handoff, and
+  broke `releasetest`. Caught before merge; the fix is call-setup-once.
+- **Class:** sibling of A11 — verifying the wrong thing. A11 checked a file's contents and not its
+  build tag; this checked one backend and not the property that differs across backends. Both are
+  *green on the reachable case, generalised to the unreachable one*. The tell both share: the check
+  ran, so `check_citation_provenance` and my own confidence were both satisfied, while the thing that
+  mattered was never in the run.
+- **Gated now?** Partially, and better than most. A fake-backend regression test now calls `t.Setenv`
+  in setup on the non-sharing (parallel) path, reproducing the exact panic on Linux — so *this*
+  regression is caught by the untagged... no: it is integration-tagged, but it runs without a real
+  daemon, so any run of the integration suite catches it. The general lesson — verify on the instance
+  that exercises the risk, not the one that is cheap to reach — is not mechanisable; it is the same
+  movement as pattern 3, one level out.
+
 ### A11 — I verified the file's contents and took its build tag on trust, in the same read (2026-07-19)
 
 - **Claimed:** in DF145's disposition, that the Phase-2 sites (`runtime/apple`, `runtime/tart`,
