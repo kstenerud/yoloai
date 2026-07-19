@@ -38,6 +38,15 @@ import (
 // see warmDockerBase in integration_helpers_test.go. A backend whose tests
 // don't run is then never touched.
 func TestMain(m *testing.M) {
+	os.Exit(runIntegrationMain(m))
+}
+
+// runIntegrationMain holds the real TestMain body in a function that RETURNS its
+// exit code, so every deferred cleanup — the injector's signal-notify stop, and
+// the temp-HOME removal — actually runs — os.Exit (called only by the thin
+// TestMain wrapper) skips defers, which previously leaked the bootstrap HOME
+// (and the injector case skipped stop() entirely) on every run.
+func runIntegrationMain(m *testing.M) int {
 	// The credential broker spawns its injector as `<this-binary> __inject` (it
 	// uses os.Executable()). In an integration test that binary IS this test
 	// binary, so it must dispatch __inject exactly as cmd/yoloai's main does —
@@ -47,20 +56,12 @@ func TestMain(m *testing.M) {
 		ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 		defer stop()
 		if err := broker.RunSidecar(ctx, os.Stdin, os.Stdout); err != nil {
-			fmt.Fprintln(os.Stderr, err) //nolint:errcheck // best-effort diagnostic
-			os.Exit(1)
+			fmt.Fprintln(os.Stderr, err)
+			return 1
 		}
-		os.Exit(0)
+		return 0
 	}
 
-	os.Exit(runIntegrationMain(m))
-}
-
-// runIntegrationMain holds the real TestMain body in a function that RETURNS its
-// exit code, so the deferred temp-HOME cleanup actually runs — os.Exit (called
-// only by the thin TestMain wrapper) skips defers, which previously leaked the
-// bootstrap HOME on every run. Returns the code to pass to os.Exit.
-func runIntegrationMain(m *testing.M) int {
 	// Reclaim bootstrap HOMEs leaked by a PRIOR run killed before its defer ran
 	// (SIGKILL/-timeout). The live run cleans its own HOME via the defer below.
 	testutil.SweepStaleTestHomes("yoloai-setup-")
@@ -70,8 +71,8 @@ func runIntegrationMain(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "failed to create temp home: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(tmpHome) //nolint:errcheck // best-effort cleanup
-	os.Setenv("HOME", tmpHome)  //nolint:errcheck // best-effort env set in test main
+	defer func() { _ = os.RemoveAll(tmpHome) }()
+	_ = os.Setenv("HOME", tmpHome)
 
 	return m.Run()
 }

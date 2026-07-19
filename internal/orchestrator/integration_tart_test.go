@@ -66,7 +66,7 @@ func tartIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) 
 		t.Skipf("Tart not available: %v", err)
 		return nil, nil
 	}
-	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _ = rt.Close() })
 
 	// Reap before provisioning, never after: an earlier run that died on a
 	// timeout skipped its t.Cleanup and left a VM standing under this exact
@@ -86,7 +86,7 @@ func tartIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) 
 	// ~29 GB VM in the developer's real ~/.tart. `make integration` builds the
 	// base first (tart-base-image), which is what makes "trust it" true. The seed
 	// cannot mask an absent base: needsBuild checks existence before the checksum.
-	if err := os.MkdirAll(layout.CacheDir(), 0750); err != nil { //nolint:forbidigo // test-edge dir create; fileutil's sudo chown is irrelevant here
+	if err := os.MkdirAll(layout.CacheDir(), 0750); err != nil {
 		t.Fatalf("create cache dir: %v", err)
 	}
 	rt.RecordBuildChecksum(layout.ProfileDir("base"))
@@ -118,7 +118,7 @@ func TestIntegrationTart_FullLifecycle(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, sandboxName) })
 
 	// Create only provisions; it does not boot the VM. This used to go straight
 	// to WaitForActive on a VM nothing had started, so it could only ever time
@@ -285,7 +285,7 @@ func TestIntegrationTart_MultipleAuxDirs(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, sandboxName) })
 
 	// Create provisions but does not boot; the aux mounts are only observable
 	// from inside a running VM.
@@ -337,7 +337,7 @@ func TestIntegrationTart_GitCorruption(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, sandboxName) })
 
 	// Create provisions but does not boot; the git operations below all run
 	// inside the VM.
@@ -416,7 +416,7 @@ func TestIntegrationTart_ResetRefreshesVMWorkDir(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, sandboxName) })
 
 	_, err = startSandbox(ctx, mgr, sandboxName, orchestrator.StartOptions{})
 	require.NoError(t, err)
@@ -480,7 +480,7 @@ func TestIntegrationTart_VMLocalStorageVerification(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, sandboxName) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, sandboxName) })
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(sandboxName))
 	require.NoError(t, err)

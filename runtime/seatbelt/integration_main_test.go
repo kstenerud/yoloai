@@ -22,8 +22,15 @@ import (
 // the Docker/Podman pattern); on macOS without sandbox-exec the tests skip
 // with a diagnostic line.
 func TestMain(m *testing.M) {
+	os.Exit(testMain(m))
+}
+
+// testMain holds the real TestMain body in a function that RETURNS its exit
+// code, so the deferred temp-dir cleanup actually runs — os.Exit (called only
+// by the thin TestMain wrapper) skips defers.
+func testMain(m *testing.M) int {
 	tmp, _ := os.MkdirTemp("", "seatbelt-probe-*")
-	defer os.RemoveAll(tmp) //nolint:errcheck // best-effort cleanup
+	defer func() { _ = os.RemoveAll(tmp) }()
 	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")).WithPrincipal(config.CLIPrincipal), tmp)
 	if err != nil {
 		// Seatbelt (sandbox-exec) is macOS-only. On any non-macOS host it is
@@ -32,10 +39,10 @@ func TestMain(m *testing.M) {
 		// Only on darwin is absence a failure, subject to the carve-out env.
 		if runtime.GOOS != "darwin" {
 			fmt.Fprintf(os.Stderr, "seatbelt backend not applicable on %s — skipping integration tests\n", runtime.GOOS)
-			os.Exit(0)
+			return 0
 		}
-		os.Exit(testutil.BackendAbsent("seatbelt", err.Error()))
+		return testutil.BackendAbsent("seatbelt", err.Error())
 	}
 	_ = rt
-	os.Exit(m.Run())
+	return m.Run()
 }

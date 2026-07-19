@@ -111,7 +111,7 @@ func warmDockerBase(ctx context.Context) error {
 		}
 		defer os.RemoveAll(home) //nolint:errcheck // best-effort cleanup
 		layout := config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal)
-		if err := os.MkdirAll(layout.CacheDir(), 0750); err != nil { //nolint:forbidigo // test-edge dir create
+		if err := os.MkdirAll(layout.CacheDir(), 0750); err != nil {
 			dockerWarmErr = fmt.Errorf("warm docker: cache dir: %w", err)
 			return
 		}
@@ -162,7 +162,7 @@ func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 
 	rt, err := dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "Docker must be running for integration tests")
-	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
@@ -202,7 +202,7 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 
 	rt, err := dockerrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "Docker must be running for integration tests")
-	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(&legacyDockerRuntime{Runtime: rt}, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
@@ -247,7 +247,7 @@ func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context
 
 	rt, err := podmanrt.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "podman must be available and provisioned when YOLOAI_TEST_BACKEND=podman")
-	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))

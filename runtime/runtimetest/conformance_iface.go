@@ -397,14 +397,14 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 			})
 			_, err := b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo hello > /mnt/test/output.txt"}, "")
 			require.NoError(t, err)
-			content, err := os.ReadFile(filepath.Join(hostDir, "output.txt"))
+			content, err := os.ReadFile(filepath.Join(hostDir, "output.txt")) //nolint:gosec // G304: test suite writes under t.TempDir(); no sudo chown concern
 			require.NoError(t, err)
 			assert.Contains(t, string(content), "hello")
 		})
 
 		t.Run("ReadOnly", func(t *testing.T) {
 			hostDir := t.TempDir()
-			require.NoError(t, os.WriteFile(filepath.Join(hostDir, "readonly.txt"), []byte("original"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(hostDir, "readonly.txt"), []byte("original"), 0o600)) //nolint:forbidigo // test suite writes under t.TempDir(); no sudo chown concern
 			name := boot(t, b, runtime.InstanceConfig{
 				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: true}},
 			})

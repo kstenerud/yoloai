@@ -50,7 +50,7 @@ func TestKeepaliveOnly_AgentFreeStartup(t *testing.T) {
 	}
 	rcBytes, err := json.Marshal(rc)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(rcPath, rcBytes, 0640))
+	require.NoError(t, os.WriteFile(rcPath, rcBytes, 0640)) //nolint:gosec // G306: test file, no secret content
 
 	cfg := runtime.InstanceConfig{
 		Name:       name,

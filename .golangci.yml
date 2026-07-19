@@ -402,13 +402,15 @@ linters:
         text: "\\.PassthroughEnv"
       # DF19 testutil.GetCuratedHostEnv allowlist — the licensed test-edge callers
       # of the one host-env read. golangci-lint does not analyze //go:build
-      # integration files by default, so the ban only fires on non-tagged files;
-      # these are the non-tagged callers default `make check` flags. The
-      # integration callers (docker/podman/sandbox *_test.go) are tagged and so
-      # are not analyzed by default — they need no entry here. Keep this
-      # path-scoped to the specific test-edge files; do NOT exclude whole dirs.
-      # lifecycle_test.go threads SUDO_UID so reset's git re-baseline is sudo-safe.
-      - path: "internal/orchestrator/create/fakeruntime_test\\.go|internal/orchestrator/lifecycle/lifecycle_test\\.go"
+      # integration files by default, so fakeruntime_test.go and
+      # lifecycle_test.go (non-tagged) are what default `make check` flags;
+      # lifecycle_test.go threads SUDO_UID so reset's git re-baseline is
+      # sudo-safe. The rest of the list is the integration-tagged callers
+      # (internal/cli, internal/orchestrator, and the docker/podman/tart
+      # runtime backends), analyzed only under --build-tags integration. Keep
+      # this path-scoped to the specific test-edge files; do NOT exclude whole
+      # dirs, even though the list has gotten long.
+      - path: "internal/orchestrator/create/fakeruntime_test\\.go|internal/orchestrator/lifecycle/lifecycle_test\\.go|internal/cli/integration_main_test\\.go|internal/orchestrator/integration_helpers_test\\.go|internal/orchestrator/integration_macos_test\\.go|runtime/tart/integration_test\\.go|runtime/docker/integration_main_test\\.go|runtime/docker/integration_test\\.go|runtime/docker/keepalive_integration_test\\.go|runtime/docker/launch_integration_test\\.go|runtime/docker/volume_integration_test\\.go|runtime/podman/integration_main_test\\.go|runtime/podman/integration_test\\.go"
         linters:
           - forbidigo
         text: "testutil\\.GetCuratedHostEnv"

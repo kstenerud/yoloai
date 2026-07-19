@@ -25,7 +25,7 @@ func TestDockerConformance(t *testing.T) {
 		ctx := context.Background()
 		rt, err := docker.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 		require.NoError(t, err, "Docker must be running for integration tests")
-		t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+		t.Cleanup(func() { _ = rt.Close() })
 		return rt, ctx
 	})
 }

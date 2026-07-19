@@ -108,7 +108,7 @@ func runCLI(t *testing.T, args ...string) (stdout, stderr string, err error) {
 // destroySandbox is a cleanup helper that destroys a sandbox, ignoring errors.
 func destroySandbox(t *testing.T, name string) {
 	t.Helper()
-	runCLI(t, "destroy", "--abandon-unapplied", name) //nolint:errcheck // best-effort cleanup
+	_, _, _ = runCLI(t, "destroy", "--abandon-unapplied", name)
 }
 
 // waitActive blocks until a just-created sandbox's container is active. Copy-mode
@@ -360,7 +360,7 @@ func TestCLI_BugreportCommand_Unsafe(t *testing.T) {
 	require.NoError(t, err)
 	reportDir := t.TempDir()
 	require.NoError(t, os.Chdir(reportDir))
-	t.Cleanup(func() { _ = os.Chdir(origDir) }) //nolint:gosec // G104: chdir in test cleanup
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	_, _, err = runCLI(t, "sandbox", "cli-br-unsafe", "bugreport", "unsafe")
 	require.NoError(t, err)
@@ -407,7 +407,7 @@ func TestCLI_BugreportCommand_Safe(t *testing.T) {
 	require.NoError(t, err)
 	reportDir := t.TempDir()
 	require.NoError(t, os.Chdir(reportDir))
-	t.Cleanup(func() { _ = os.Chdir(origDir) }) //nolint:gosec // G104: chdir in test cleanup
+	t.Cleanup(func() { _ = os.Chdir(origDir) })
 
 	_, _, err = runCLI(t, "sandbox", "cli-br-safe", "bugreport", "safe")
 	require.NoError(t, err)
@@ -442,7 +442,7 @@ func TestCLI_StartAfterDone(t *testing.T) {
 			// Dump diagnostic logs to help debug flaky failures.
 			sdir := cliutil.Layout().SandboxDir("cli-startdone")
 			for _, rel := range []string{"agent-status.json", "logs/monitor.jsonl", "logs/sandbox.jsonl"} {
-				if data, readErr := os.ReadFile(filepath.Join(sdir, rel)); readErr == nil {
+				if data, readErr := os.ReadFile(filepath.Join(sdir, rel)); readErr == nil { //nolint:gosec // G304: rel is a fixed list of diagnostic filenames, sdir is a test sandbox dir
 					t.Logf("=== %s ===\n%s", rel, data)
 				}
 			}

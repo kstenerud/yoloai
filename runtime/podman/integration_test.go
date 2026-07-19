@@ -27,7 +27,7 @@ func TestPodmanConformance(t *testing.T) {
 		ctx := context.Background()
 		rt, err := podman.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 		require.NoError(t, err, "Podman must be running with socket activated for integration tests")
-		t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+		t.Cleanup(func() { _ = rt.Close() })
 		return rt, ctx
 	})
 }
@@ -38,7 +38,7 @@ func TestPodman_Descriptor(t *testing.T) {
 	ctx := context.Background()
 	rt, err := podman.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "Podman must be running for integration tests")
-	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _ = rt.Close() })
 
 	assert.Equal(t, runtime.BackendPodman, rt.Descriptor().Type)
 }

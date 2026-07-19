@@ -77,7 +77,7 @@ func seatbeltMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context
 
 	rt, err := seatbelt.New(ctx, layout, home)
 	require.NoError(t, err, "seatbelt backend must be available on this platform")
-	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
@@ -104,7 +104,7 @@ func appleMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 
 	rt, err := apple.New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	require.NoError(t, err, "apple container backend must be available (macOS 26 + Apple Silicon)")
-	t.Cleanup(func() { rt.Close() }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
@@ -127,7 +127,7 @@ func runMaliciousFilterAssertion(ctx context.Context, t *testing.T, mgr *orchest
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, name) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, name) })
 
 	if startTimeout > 0 {
 		_, err = startSandbox(ctx, mgr, name, orchestrator.StartOptions{})

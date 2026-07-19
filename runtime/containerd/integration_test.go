@@ -64,13 +64,6 @@ func testLayout(t *testing.T) config.Layout {
 	return config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal)
 }
 
-// testSandboxDir creates a temporary directory that acts as a sandbox dir.
-func testSandboxDir(t *testing.T) string {
-	t.Helper()
-	dir := t.TempDir()
-	return dir
-}
-
 // TestIntegration_New verifies that New() connects to containerd successfully.
 func TestIntegration_New(t *testing.T) {
 	requireAvailable(t)
@@ -296,7 +289,7 @@ func TestContainerdConformance(t *testing.T) {
 		ctx := context.Background()
 		rt, err := New(ctx, testLayout(t))
 		require.NoError(t, err)
-		t.Cleanup(func() { _ = rt.Close() }) //nolint:errcheck // best-effort close
+		t.Cleanup(func() { _ = rt.Close() })
 
 		ready, err := rt.IsReady(ctx)
 		require.NoError(t, err)

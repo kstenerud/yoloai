@@ -108,7 +108,7 @@ func TestIntegration_Podman_DirectDeliveryOnMacOS(t *testing.T) {
 	}
 	mgr, ctx := podmanIntegrationSetup(t)
 
-	const realCred = "sk-test-REAL-should-be-delivered-direct"
+	const realCred = "sk-test-REAL-should-be-delivered-direct" //nolint:gosec // G101: inert test fixture, not a credential
 	def := agent.GetAgent("test")
 	require.NotNil(t, def, "the test agent must be registered")
 	origBroker := def.Broker
@@ -390,7 +390,7 @@ func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Cont
 		wantKey  string // expected x-api-key the mock sees ("" if none)
 		wantAuth string // expected Authorization the mock sees ("" if none)
 	}{
-		{
+		{ //nolint:gosec // G101: inert test fixture, not a credential
 			name:     "api-key",
 			envVar:   "TEST_BROKER_KEY",
 			header:   "x-api-key",
@@ -399,7 +399,7 @@ func runBrokerScenarios(t *testing.T, mgr *orchestrator.Engine, ctx context.Cont
 			wantKey:  "sk-test-REAL-broker-key-xyz",
 			wantAuth: "",
 		},
-		{
+		{ //nolint:gosec // G101: inert test fixture, not a credential
 			name:     "oauth-bearer",
 			envVar:   "TEST_BROKER_OAUTH",
 			header:   "Authorization",

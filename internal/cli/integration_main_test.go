@@ -99,7 +99,7 @@ func pinPodmanSocket() {
 	if sock == "" || sock == "<no value>" {
 		return
 	}
-	os.Setenv("CONTAINER_HOST", "unix://"+sock) //nolint:errcheck // best-effort env pin in test setup
+	_ = os.Setenv("CONTAINER_HOST", "unix://"+sock)
 }
 
 // integrationBackendKey maps the active integration backend type (from
@@ -140,8 +140,8 @@ func runCLIMain(m *testing.M) int {
 		fmt.Fprintf(os.Stderr, "failed to create temp home: %v\n", err)
 		return 1
 	}
-	defer os.RemoveAll(tmpHome)
-	os.Setenv("HOME", tmpHome) //nolint:errcheck // best-effort env set in test main
+	defer func() { _ = os.RemoveAll(tmpHome) }()
+	_ = os.Setenv("HOME", tmpHome)
 
 	if err := writeTestBackendConfig(tmpHome); err != nil {
 		fmt.Fprintf(os.Stderr, "failed to write test backend config: %v\n", err)

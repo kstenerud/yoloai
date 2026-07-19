@@ -152,7 +152,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "nostart") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "nostart") })
 
 	sandboxDir := mgr.Layout().SandboxDir("nostart")
 	assert.DirExists(t, sandboxDir)
@@ -187,7 +187,7 @@ func TestIntegration_CopyMode(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "copymode") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "copymode") })
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("copymode"))
 	require.NoError(t, err)
@@ -219,7 +219,7 @@ func TestIntegration_RWMode(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "rwmode") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "rwmode") })
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("rwmode"))
 	require.NoError(t, err)
@@ -242,7 +242,7 @@ func TestIntegration_AuxDirCopy_AcceptedByLibrary(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "auxcopy-accepted") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "auxcopy-accepted") })
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("auxcopy-accepted"))
 	require.NoError(t, err)
@@ -268,7 +268,7 @@ func TestIntegration_AuxDirRW(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "auxrw") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "auxrw") })
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("auxrw"))
 	require.NoError(t, err)
@@ -289,7 +289,7 @@ func TestIntegration_AuxDirRO(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "auxro") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "auxro") })
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("auxro"))
 	require.NoError(t, err)
@@ -309,7 +309,7 @@ func TestIntegration_Replace(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "replaceme") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "replaceme") })
 
 	// Replace with new sandbox. The prior sandbox is stopped, so copy-mode's
 	// in-confinement git (C1/DF66) cannot verify whether it holds unapplied work;
@@ -343,7 +343,7 @@ func TestIntegration_Reset(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "resettest") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "resettest") })
 
 	_, err = startSandbox(ctx, mgr, "resettest", orchestrator.StartOptions{})
 	require.NoError(t, err)
@@ -389,7 +389,7 @@ func TestIntegration_Exec(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "exectest") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "exectest") })
 
 	_, err = startSandbox(ctx, mgr, "exectest", orchestrator.StartOptions{})
 	require.NoError(t, err)
@@ -415,7 +415,7 @@ func TestIntegration_DiffClean(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "diffclean") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "diffclean") })
 
 	// Copy-mode diff runs git inside the sandbox (audit C1), so the box must be
 	// running — start it before diffing.
@@ -437,7 +437,7 @@ func TestIntegration_DiffWithChanges(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "diffchanges") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "diffchanges") })
 
 	startAndWaitActive(ctx, t, mgr, "diffchanges")
 
@@ -468,7 +468,7 @@ func TestIntegration_ApplyPatch(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "applypatch") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "applypatch") })
 
 	startAndWaitActive(ctx, t, mgr, "applypatch")
 
@@ -550,7 +550,7 @@ func assertMaliciousFilterNotRunOnHost(ctx context.Context, t *testing.T, mgr *o
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, name) }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, name) })
 	startAndWaitActive(ctx, t, mgr, name)
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir(name))
@@ -597,7 +597,7 @@ func TestIntegration_CopyModeLegitFilterDiffCorrect(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "legitfilter") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "legitfilter") })
 	startAndWaitActive(ctx, t, mgr, "legitfilter")
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("legitfilter"))
@@ -627,7 +627,7 @@ func TestIntegration_Prompt(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "prompttest") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "prompttest") })
 
 	sandboxDir := mgr.Layout().SandboxDir("prompttest")
 	meta, err := store.LoadEnvironment(sandboxDir)
@@ -653,7 +653,7 @@ func TestIntegration_ResourceLimits(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "reslimits") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "reslimits") })
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("reslimits"))
 	require.NoError(t, err)
@@ -674,7 +674,7 @@ func TestIntegration_PortForwarding(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "portfwd") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "portfwd") })
 
 	meta, err := store.LoadEnvironment(mgr.Layout().SandboxDir("portfwd"))
 	require.NoError(t, err)
@@ -695,8 +695,8 @@ func TestIntegration_MultiSandbox(t *testing.T) {
 		require.NoError(t, err)
 	}
 	t.Cleanup(func() {
-		destroySandbox(ctx, mgr, "multi-a") //nolint:errcheck // test cleanup
-		destroySandbox(ctx, mgr, "multi-b") //nolint:errcheck // test cleanup
+		_, _ = destroySandbox(ctx, mgr, "multi-a")
+		_, _ = destroySandbox(ctx, mgr, "multi-b")
 	})
 
 	// Both should exist
@@ -756,11 +756,11 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "netisolated") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "netisolated") })
 
 	// Verify runtime-config.json has network_isolated: true so the test
 	// can't pass vacuously (e.g., if the config field were never written).
-	rcData, err := os.ReadFile(filepath.Join(mgr.Layout().SandboxDir("netisolated"), store.RuntimeConfigFile)) //nolint:gosec // test path
+	rcData, err := os.ReadFile(filepath.Join(mgr.Layout().SandboxDir("netisolated"), store.RuntimeConfigFile))
 	require.NoError(t, err)
 	var rc map[string]any
 	require.NoError(t, json.Unmarshal(rcData, &rc))
@@ -813,7 +813,7 @@ func TestIntegration_NetworkIsolation_LivePatchViaSidecar(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "netlive") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "netlive") })
 
 	_, err = startSandbox(ctx, mgr, "netlive", orchestrator.StartOptions{})
 	require.NoError(t, err)
@@ -851,7 +851,7 @@ func TestIntegration_ReadOnlyMountVerified(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "romount") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "romount") })
 
 	_, err = startSandbox(ctx, mgr, "romount", orchestrator.StartOptions{})
 	require.NoError(t, err)
@@ -896,7 +896,7 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 	})
 	require.NoError(t, err)
 	_ = meta
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "credinject") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "credinject") })
 
 	// The per-sandbox env overlay is injected at launch (recreate), not persisted
 	// from create — the caller re-supplies it on each start.
@@ -966,7 +966,7 @@ func TestIntegration_AgentStubWorkflow(t *testing.T) {
 		Version: "test",
 	})
 	require.NoError(t, err)
-	t.Cleanup(func() { destroySandbox(ctx, mgr, "stubworkflow") }) //nolint:errcheck // test cleanup
+	t.Cleanup(func() { _, _ = destroySandbox(ctx, mgr, "stubworkflow") })
 
 	_, err = startSandbox(ctx, mgr, "stubworkflow", orchestrator.StartOptions{})
 	require.NoError(t, err)
@@ -1020,8 +1020,8 @@ func TestIntegration_Clone(t *testing.T) {
 	})
 	require.NoError(t, err)
 	t.Cleanup(func() {
-		destroySandbox(ctx, mgr, "clone-a") //nolint:errcheck // test cleanup
-		destroySandbox(ctx, mgr, "clone-b") //nolint:errcheck // test cleanup
+		_, _ = destroySandbox(ctx, mgr, "clone-a")
+		_, _ = destroySandbox(ctx, mgr, "clone-b")
 	})
 
 	// Start clone-a so its git baseline is committed in-confinement (C1/DF66);

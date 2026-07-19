@@ -23,11 +23,18 @@ import (
 // matrix can run this target everywhere and only execute where it makes
 // sense.
 func TestMain(m *testing.M) {
-	// TestMain runs before any t.TempDir; use a real temp dir for the
+	os.Exit(testMain(m))
+}
+
+// testMain holds the real TestMain body in a function that RETURNS its exit
+// code, so the deferred temp-dir cleanup actually runs — os.Exit (called only
+// by the thin TestMain wrapper) skips defers.
+func testMain(m *testing.M) int {
+	// testMain runs before any t.TempDir; use a real temp dir for the
 	// availability probe. Tart's New only checks tool presence so the
 	// path isn't actually used here.
 	tmp, _ := os.MkdirTemp("", "tart-probe-*")
-	defer os.RemoveAll(tmp) //nolint:errcheck // best-effort cleanup
+	defer func() { _ = os.RemoveAll(tmp) }()
 	rt, err := New(context.Background(), config.NewLayout(filepath.Join(tmp, ".yoloai")).WithPrincipal(config.CLIPrincipal))
 	if err != nil {
 		// Tart is macOS + Apple Silicon only. On any non-macOS host it is
@@ -36,10 +43,10 @@ func TestMain(m *testing.M) {
 		// Only on darwin is absence a failure, subject to the carve-out env.
 		if runtime.GOOS != "darwin" {
 			fmt.Fprintf(os.Stderr, "tart backend not applicable on %s — skipping integration tests\n", runtime.GOOS)
-			os.Exit(0)
+			return 0
 		}
-		os.Exit(testutil.BackendAbsent("tart", err.Error()))
+		return testutil.BackendAbsent("tart", err.Error())
 	}
 	_ = rt
-	os.Exit(m.Run())
+	return m.Run()
 }

@@ -19,23 +19,30 @@ import (
 // any integration tests run. Individual tests still call podmanSetup(t) to get
 // a per-test *Runtime with cleanup registered.
 func TestMain(m *testing.M) {
+	os.Exit(testMain(m))
+}
+
+// testMain holds the real TestMain body in a function that RETURNS its exit
+// code, so the deferred Runtime close actually runs — os.Exit (called only by
+// the thin TestMain wrapper) skips defers.
+func testMain(m *testing.M) int {
 	ctx := context.Background()
 
 	rt, err := New(ctx, config.Layout{}.WithEnv(testutil.GetCuratedHostEnv(testutil.IntegrationHostEnvVars)))
 	if err != nil {
-		os.Exit(testutil.BackendAbsent("podman", err.Error()))
+		return testutil.BackendAbsent("podman", err.Error())
 	}
-	defer rt.Close() //nolint:errcheck // best-effort close in test main
+	defer func() { _ = rt.Close() }()
 
 	exists, err := rt.IsReady(ctx)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "IsReady check failed: %v\n", err)
-		os.Exit(1)
+		return 1
 	}
 	if !exists {
 		fmt.Fprintf(os.Stderr, "yoloai-base image not found — run 'make build && ./yoloai system setup' first\n")
-		os.Exit(1)
+		return 1
 	}
 
-	os.Exit(m.Run())
+	return m.Run()
 }
