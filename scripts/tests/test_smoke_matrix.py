@@ -17,6 +17,7 @@ from smoke_test import (
     isolation_check_applies,
     should_run_under_filter,
     spec_needed_for_filters,
+    tag_transfer_applies,
     uncontrolled_backends,
     uncovered_backends,
     uncovered_reason,
@@ -33,6 +34,24 @@ def test_dind_applies_only_to_container_privileged() -> None:
     # dind needs nested-dockerd caps; only the container-privileged specs grant them
     # (docker on both hosts; podman on macOS, verified on a rootless Podman Machine).
     assert _labels(dind_applies) == {"docker-priv", "podman-priv"}
+
+
+def test_tag_transfer_trimmed_on_expensive_vm_backends_only() -> None:
+    # Lever 3 of the speedup plan: tart/apple keep stop_start as their one
+    # end-to-end scenario; tag_transfer's second per-backend boot runs only
+    # where a boot costs seconds. Everything else stays scheduled.
+    excluded = {s.label for s in ALL_SPECS if not tag_transfer_applies(s)}
+    assert excluded == {
+        s.label for s in ALL_SPECS
+        if s.check_backend in smoke_test.EXPENSIVE_VM_BACKENDS
+    }
+    assert {"tart", "apple"} <= {
+        s.check_backend for s in ALL_SPECS if not tag_transfer_applies(s)
+    }
+    # Kata (containerd-vm) is a VM but not an expensive one — never trimmed.
+    assert all(
+        tag_transfer_applies(s) for s in ALL_SPECS if s.check_backend == "containerd"
+    )
 
 
 def test_isolation_check_applies_to_capable_backends_only() -> None:

@@ -368,6 +368,16 @@ ISOLATION_HOST_NOTE: dict[str, str] = {
 # are not part of the primary create -> agent -> sentinel -> diff/apply path).
 QUICK_EXCLUDED_TESTS = {"clone", "tag_transfer"}
 
+# Backends whose per-sandbox boot is a full multi-GB VM clone (~2 min each).
+# The speedup plan's lever 3 trims redundant scenarios on these: they keep ONE
+# representative end-to-end scenario (stop_start, which also covers restart +
+# credential re-injection); tag_transfer needs a SECOND VM boot per backend and
+# its git-transfer plumbing is backend-agnostic, so it runs only where a boot
+# is seconds. isolation_check is NOT trimmed — guest network isolation is real
+# per-backend coverage nothing else proves. Every trim is logged at scheduling
+# so the reduced matrix never reads as full coverage.
+EXPENSIVE_VM_BACKENDS = {"tart", "apple"}
+
 
 def uncontrolled_backends() -> set[str]:
     """Backends the current (uncontrolled) runner genuinely cannot provision.
@@ -472,6 +482,15 @@ def isolation_check_applies(spec: BackendSpec) -> bool:
         spec.check_backend in {"docker", "podman", "containerd"}
         and not spec.isolation.endswith("-enhanced")
     )
+
+
+def tag_transfer_applies(spec: BackendSpec) -> bool:
+    """Speedup-plan lever 3: tag_transfer boots a SECOND sandbox (its own
+    git-host) per backend, and its git-transfer plumbing is backend-agnostic —
+    so on the expensive VM backends (a multi-GB clone + boot per sandbox) it is
+    trimmed in favor of their one representative end-to-end scenario
+    (stop_start). It still runs everywhere a boot costs seconds."""
+    return spec.check_backend not in EXPENSIVE_VM_BACKENDS
 
 
 def uncovered_backends(
@@ -3704,6 +3723,7 @@ def main() -> int:
         test_fn: Callable[[Test, BackendSpec], None],
         applies_to: Optional[Callable[[BackendSpec], bool]] = None,
         vm_serial: bool = False,
+        exclude_reason: str = "not applicable",
     ) -> None:
         """Run a test across the backend matrix, one slot per backend.
 
@@ -3725,7 +3745,7 @@ def main() -> int:
             excluded = [s for s in matrix if not applies_to(s)]
             if excluded:
                 labels = ", ".join(s.label for s in excluded)
-                print(f"  ({len(excluded)} not applicable, not scheduled: {labels})")
+                print(f"  ({len(excluded)} {exclude_reason}, not scheduled: {labels})")
         vm_cap = 1 if vm_serial else max(1, ctx.vm_concurrency)
         vm_sema = threading.Semaphore(vm_cap)
         workers = ctx.jobs if ctx.jobs > 0 else max(1, len(specs))
@@ -3760,9 +3780,16 @@ def main() -> int:
 
     # tag_transfer needs a second VM boot per backend (its own git-host sandbox),
     # so it's a heavier release-gate check excluded from the narrow --quick tier.
+    # On EXPENSIVE_VM_BACKENDS it is trimmed entirely (speedup plan lever 3):
+    # those keep stop_start as their end-to-end scenario, and tag_transfer's
+    # backend-agnostic git plumbing is proven on the cheap backends.
     print("\nBackend matrix (tag_transfer):")
     if "tag_transfer" not in QUICK_EXCLUDED_TESTS or not ctx.quick:
-        run_matrix_test("tag_transfer", test_tag_transfer)
+        run_matrix_test(
+            "tag_transfer", test_tag_transfer,
+            applies_to=tag_transfer_applies,
+            exclude_reason="trimmed on expensive VM backends (lever 3; stop_start covers them end to end)",
+        )
     else:
         print("  not in the --quick tier")
 
