@@ -1,6 +1,7 @@
 // ABOUTME: White-box tests for the Engine lifecycle/create verbs — the
 // ABOUTME: DestroyForOverwrite missing-destination no-op short-circuit, and
-// ABOUTME: depsForSandbox's non-opening (reuse/fallback) resolution branches.
+// ABOUTME: depsForSandbox's three resolution branches (reuse, fallback, and the
+// ABOUTME: cross-backend open that DF138 exists to fix).
 
 package orchestrator
 
@@ -10,14 +11,38 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
 )
+
+// crossBackendType is the registry name for a fake backend distinct from the
+// mockRuntime's "mock", so a sandbox recorded under it forces depsForSandbox
+// down its cross-backend-open branch. Registered process-wide (the registry
+// panics on a double Register), so registration is guarded by a sync.Once. The
+// factory returns a fresh *mockRuntime each call, which the test captures via
+// deps.Runtime to assert the opened runtime — not the Engine's own — is closed.
+const crossBackendType runtime.BackendType = "df138crossfake"
+
+var crossBackendOnce sync.Once
+
+func registerCrossBackendFake(t *testing.T) {
+	t.Helper()
+	crossBackendOnce.Do(func() {
+		runtime.Register(
+			func(context.Context, config.Layout) (runtime.Backend, error) {
+				return &mockRuntime{}, nil
+			},
+			runtime.BackendDescriptor{Type: crossBackendType},
+		)
+	})
+}
 
 // DestroyForOverwrite must short-circuit (and never touch the runtime) when the
 // destination doesn't exist — an Overwrite clone onto a fresh name is a plain
@@ -71,4 +96,39 @@ func TestEngine_DepsForSandbox_FallsBackWhenMetadataUnreadable(t *testing.T) {
 
 	cleanup()
 	require.Equal(t, 0, mock.closeCalls)
+}
+
+// depsForSandbox must open a SEPARATE runtime for the sandbox's own recorded
+// backend when it differs from the Engine's, and its cleanup must close that
+// opened runtime while leaving the Engine's own untouched. This is the exact
+// behavior DF138 exists to fix — a --all/wildcard batch tearing down a sandbox
+// created on another backend — so it gets a regression guard rather than relying
+// on the one-time real-hardware verification.
+func TestEngine_DepsForSandbox_OpensAndClosesForDifferentBackend(t *testing.T) {
+	registerCrossBackendFake(t)
+
+	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
+	mock := &mockRuntime{}
+	e := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+
+	name := "other-backend"
+	sandboxDir := layout.SandboxDir(name)
+	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
+	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
+		Name:        name,
+		BackendType: crossBackendType, // differs from e.backend ("mock")
+		CreatedAt:   time.Now(),
+	}))
+
+	deps, cleanup, err := e.depsForSandbox(context.Background(), name)
+	require.NoError(t, err)
+
+	opened, ok := deps.Runtime.(*mockRuntime)
+	require.True(t, ok, "a differing backend must yield a runtime opened via the registry")
+	require.NotSame(t, mock, opened, "the opened runtime must be the recorded backend's, not the Engine's own")
+	require.Equal(t, 0, opened.closeCalls, "the opened runtime must not be closed before cleanup")
+
+	cleanup()
+	require.Equal(t, 1, opened.closeCalls, "cleanup must close the runtime it opened")
+	require.Equal(t, 0, mock.closeCalls, "cleanup must not close the Engine's own runtime")
 }
