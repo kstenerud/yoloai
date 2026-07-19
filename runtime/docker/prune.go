@@ -211,6 +211,15 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	// forces a rebuild, so it's gated behind includeImages. Dangling images
 	// from prior builds are already removed by the core Prune; here we drop the
 	// reusable base/profile images too.
+	//
+	// Deliberately NOT label-scoped yet, so this stays daemon-wide (it can reap a
+	// foreign unused image on a shared host — the one prune category besides the
+	// build cache that isn't yoloai-scoped, DF137). The base image now carries
+	// com.yoloai.managed (inherited by profile images), so a future
+	// filters.Arg("label", managedLabel) here would scope it — but flipping now
+	// would strand pre-label images on existing installs (no label → never
+	// reclaimed by --images). The switch is registered with a settling period in
+	// docs/contributors/deprecations.md; until then, unscoped.
 	if includeImages {
 		if _, err := r.client.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "false"))); err != nil {
 			fmt.Fprintf(output, "%s: images prune failed: %v\n", r.binaryName, err) //nolint:errcheck

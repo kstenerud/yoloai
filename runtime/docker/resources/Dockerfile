@@ -272,4 +272,12 @@ COPY yoloai-resume /yoloai/bin/yoloai-resume
 RUN chmod +x /yoloai/bin/entrypoint.sh /yoloai/bin/entrypoint.py /yoloai/bin/install-firewall.py /yoloai/bin/diagnose-idle.sh /yoloai/bin/agent-run.sh /yoloai/bin/yoloai-resume \
     && echo 'export PATH="/yoloai/bin:$PATH"' > /etc/profile.d/yoloai-bin.sh
 
+# Marks this image (and every profile image built FROM it — LABELs are inherited)
+# as yoloai-authored, matching the com.yoloai.managed label already stamped on
+# yoloai-created volumes. Seeded now but NOT YET USED to scope image pruning:
+# `system prune --images` stays daemon-wide until the switch registered in
+# docs/contributors/deprecations.md comes due, so pre-label images on existing
+# installs still get reclaimed in the meantime.
+LABEL com.yoloai.managed="true"
+
 ENTRYPOINT ["/yoloai/bin/entrypoint.sh"]

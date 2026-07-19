@@ -183,6 +183,26 @@ not a clock; an unreleased entry says `(pending)`.
   Otherwise: the settling period.
 - **Pointer:** `runtime/tart/prune.go` (`legacyCLIVMName`, `testPrincipalVMRe`)
 
+### `system prune --images` reclaims all unused images, not just yoloai's
+
+- **Incurred:** 2026-07-19 · **Shipped:** v0.9.1 (pending) · **Due:** 2027-07-19 (user-facing, 12mo — owner's explicit call)
+- **What:** `PruneCache`'s `--images` sweep runs `ImagesPrune(dangling=false)` **unscoped**, so on a
+  shared daemon it reaps every unused image, not only yoloAI's — the one prune category besides the
+  BuildKit cache that DF137's label-scoping does not cover. The base image now carries
+  `com.yoloai.managed` (inherited by profile images built `FROM yoloai-base`), so the sweep *could*
+  be scoped like the container/volume/network reclaim already is — but it is deliberately left
+  unscoped for a settling period. Flipping immediately would strand images built **before** the
+  label existed: carrying no label, they would never again be reclaimed by `--images`.
+- **Why user-facing, 12mo (not internal, 6mo):** the stranded population is not just stale local
+  image stores (which rebuilds relabel over time) but **people who build their own images** — a
+  custom base or profile image not derived from `yoloai-base` must add the label itself to be
+  reclaimed once the sweep is scoped. They learn this from the docs (integrator/profile guidance)
+  and need time to adopt it, which is the "grow into it" the owner sized this at a year for.
+- **Retire by:** adding `filters.Arg("label", managedLabel)` to the `includeImages` `ImagesPrune`
+  call, so `--images` spares foreign images the way the container/volume/network reclaim already
+  does. Lands a `docs/BREAKING-CHANGES.md` entry (narrows what `--images` reclaims).
+- **Pointer:** `runtime/docker/prune.go` (the `includeImages` `ImagesPrune` call); `runtime/docker/resources/Dockerfile` (`LABEL com.yoloai.managed`); DF137.
+
 ## Not deprecations
 
 Recorded so they are not re-filed. Each looks like a compatibility shim and is not:

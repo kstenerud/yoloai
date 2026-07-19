@@ -18,11 +18,31 @@ See also: `../principles/general-principles.md §2` (boring tech — Debian + ap
 
 This standard covers the base image. Profile Dockerfiles are user-owned; yoloAI documents the `yoloai-base` contract in `docs/contributors/design/config.md` and trusts users to apt-install what they need on top.
 
+### Label custom images with `com.yoloai.managed`
+
+The base image carries `LABEL com.yoloai.managed="true"`, marking it yoloAI-authored so
+`yoloai system prune` can tell yoloAI's own build artifacts from unrelated images on a shared
+daemon. A profile Dockerfile that begins `FROM yoloai-base` **inherits this label automatically** —
+you need do nothing.
+
+If you build an image from an **unrelated base** — e.g. a devcontainer `build.dockerfile` that
+does not `FROM yoloai-base` — add the label yourself so yoloAI still recognises it as yours:
+
+```dockerfile
+LABEL com.yoloai.managed="true"
+```
+
+This is forward-looking today: `yoloai system prune --images` currently reclaims *every* unused
+image on the daemon. It is scheduled to become label-scoped after a settling period (registered in
+`../deprecations.md`), after which an **unlabeled** custom image will no longer be reclaimed by
+`--images` — so labeling it now is what keeps it reclaimable, and keeps an unrelated image of yours
+safe from a scoped sweep.
+
 ## Base image conventions
 
-### Base distro: `debian:bookworm-slim`
+### Base distro: `debian:trixie-slim`
 
-Debian bookworm-slim is the base. Reasons:
+Debian trixie-slim is the base. Reasons:
 
 - **Boring** (`../principles/general-principles.md §2`). Wide Debian familiarity in the developer community; apt is well-documented; package availability is broad.
 - **Slim variant** drops docs, locale data, and other bulk that the sandbox doesn't need.
