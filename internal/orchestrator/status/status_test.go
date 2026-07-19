@@ -137,6 +137,77 @@ func TestListSandboxes_IncludesBroken(t *testing.T) {
 	assert.Equal(t, int64(-1), brokenInfo.DiskUsageBytes)
 }
 
+// ListSandboxesMultiBackend groups sandboxes by their recorded backend and
+// inspects each group with a runtime opened for that backend. It is the read
+// sibling of the DF138 destroy fix (which routes teardown through each
+// sandbox's own backend) and had no unit test. This exercises all three fates:
+// a sandbox on an available backend is inspected, one on an unavailable backend
+// reports StatusUnavailable (with the backend named once, however many
+// sandboxes it holds), and one with unreadable metadata reports StatusBroken.
+func TestListSandboxesMultiBackend_GroupsAvailableUnavailableAndBroken(t *testing.T) {
+	tmpDir := t.TempDir()
+	sandboxesDir := filepath.Join(tmpDir, ".yoloai", "sandboxes")
+	require.NoError(t, os.MkdirAll(sandboxesDir, 0750))
+
+	saveOn := func(name string, backend runtime.BackendType) {
+		dir := filepath.Join(sandboxesDir, name)
+		require.NoError(t, os.MkdirAll(dir, 0750))
+		require.NoError(t, store.SaveEnvironment(dir, &store.Environment{
+			Name:        name,
+			Principal:   config.CLIPrincipal,
+			BackendType: backend,
+			Dirs:        []store.DirEnvironment{{HostPath: "/tmp/test", Mode: "copy"}},
+			CreatedAt:   time.Now(),
+		}))
+	}
+	saveOn("alpha", "backend-a")    // available
+	saveOn("gamma", "backend-gone") // unavailable
+	saveOn("delta", "backend-gone") // same unavailable backend — dedup
+	brokenDir := filepath.Join(sandboxesDir, "broken")
+	require.NoError(t, os.MkdirAll(brokenDir, 0750)) // no environment.json
+
+	requested := map[runtime.BackendType]int{}
+	newRT := func(_ context.Context, bt runtime.BackendType) (runtime.Backend, error) {
+		requested[bt]++
+		if bt == "backend-gone" {
+			return nil, fmt.Errorf("backend %s is not running", bt)
+		}
+		return &fakeRuntime{
+			inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+				return runtime.InstanceInfo{}, fmt.Errorf("not found: %w", runtime.ErrNotFound)
+			},
+		}, nil
+	}
+
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai")).WithPrincipal(config.CLIPrincipal)
+	result, unavailable, err := ListSandboxesMultiBackend(context.Background(), layout, newRT)
+	require.NoError(t, err)
+
+	byName := map[string]*Info{}
+	for _, info := range result {
+		byName[info.Environment.Name] = info
+	}
+	require.Len(t, result, 4)
+
+	// Available backend: opened and inspected → not broken, not unavailable.
+	require.NotNil(t, byName["alpha"])
+	assert.Equal(t, StatusRemoved, byName["alpha"].Status)
+
+	// Unavailable backend: both sandboxes reported unavailable, the backend
+	// opened once for the group and named exactly once.
+	require.NotNil(t, byName["gamma"])
+	require.NotNil(t, byName["delta"])
+	assert.Equal(t, StatusUnavailable, byName["gamma"].Status)
+	assert.Equal(t, StatusUnavailable, byName["delta"].Status)
+	assert.Equal(t, []string{"backend-gone"}, unavailable, "an unavailable backend must be named once, not per sandbox")
+	assert.Equal(t, 1, requested["backend-gone"], "a backend group opens its runtime once")
+
+	// Unreadable metadata: broken, and no runtime opened for the empty backend.
+	require.NotNil(t, byName["broken"])
+	assert.Equal(t, StatusBroken, byName["broken"].Status)
+	assert.Equal(t, 0, requested[""], "the broken group must not open a runtime")
+}
+
 // DetectStatus tests (exec fallback — empty sandboxDir)
 
 func TestDetectStatus_Running(t *testing.T) {
