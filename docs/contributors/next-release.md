@@ -62,6 +62,8 @@ finding or decision first, and lands here only if it should block the release.
 - [DF134](design/findings-resolved.md) — a v6 nameserver no longer aborts `--network-isolated` (v4-only firewall skips non-v4 nameservers)
 - [DF144](design/findings-resolved.md) — a failed image build now carries its cause on the error (visible under `--json`/to embedders), not just "exited with code 1"
 - `yoloai doctor` ownership audit — flags root-owned leftovers under the Docker config dir and the yoloai data dir (blocking prune/destroy/builds), with a `chown` remedy (follow-up to DF144)
+- [DF145](design/findings-unresolved.md) — opaque subprocess/`.Output()` failures now surface their captured stderr instead of a bare exit code (Linux half; apple/tart/keychain deferred to the mac queue)
+- [integration & smoke test speedup](design/plans/integration-test-speedup.md) — amortize the conformance suite's per-subtest VM boots and add bounded parallelism to cut the ~1hr macOS integration+smoke run
 
 ## Candidates — undecided
 
