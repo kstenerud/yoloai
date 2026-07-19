@@ -283,7 +283,7 @@ func defaultMachineSocketDiscovery(env map[string]string) (string, error) {
 	out, err := sysexec.Command(podmanEnv, "podman", "machine", "inspect",
 		"--format", "{{.ConnectionInfo.PodmanSocket.Path}}").Output()
 	if err != nil {
-		return "", err
+		return "", fmt.Errorf("podman machine inspect: %w", sysexec.EnrichExitError(err))
 	}
 	sock := strings.TrimSpace(string(out))
 	if sock == "" || sock == "<no value>" {
