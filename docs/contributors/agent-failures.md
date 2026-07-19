@@ -123,6 +123,40 @@ Newest first. Every entry here is from a single session (2026-07-16/17) — the 
 attempt to record them, so the corpus is deep on one session and empty before it. That skew is
 itself worth knowing when reading pattern 4.
 
+### A11 — I verified the file's contents and took its build tag on trust, in the same read (2026-07-19)
+
+- **Claimed:** in DF145's disposition, that the Phase-2 sites (`runtime/apple`, `runtime/tart`,
+  `keychain_darwin.go`) are *"`//go:build darwin` and cannot be built off a Mac"* — that being the
+  stated reason the whole error-fix workstream splits into a Linux phase and a Mac phase.
+- **True:** `runtime/apple` and `runtime/tart` carry **no** build tag; `go build ./runtime/apple/`
+  and `./runtime/tart/` both exit 0 on this Linux host. They gate at *runtime* — `tart.go:213`'s
+  `New()` returns a `PlatformError` when `isMacOS()` is false — not at compile time. Only
+  `keychain_darwin.go`, a `_darwin.go` suffix file, is genuinely un-compilable off darwin. The real
+  reason to defer is *verification* (needs the tart CLI / Apple Silicon / `security` tool), which the
+  claim conflated with *compilation*.
+- **Source of the false belief:** the opaque-error audit subagent's summary, which called them
+  "darwin-tagged files". I had *opened* apple.go and tart/build.go minutes earlier — the citation
+  hook forced it — and verified the error-handling claims line by line. But I checked the file's
+  *contents* and never ran `head -1` on it, so the *build-tag* claim rode along unchecked inside a
+  file I had genuinely read.
+- **Caught by:** the owner's question — *"Shouldn't tart be limited to macos only?"* It was not a
+  correction of the build-tag claim; it was a worry about a different thing (why tart compiles on
+  Linux at all) that forced the `head -1` / `go build` check, which then exposed the DF145 wording.
+  The owner's question again, catching a thing it wasn't even aimed at.
+- **Cost:** medium. It reached a filed, committed finding and was the stated rationale for the
+  Linux/Mac phase split; corrected the same session before any Phase-2 work rested on it. Had it
+  stood, a later reader would have believed the apple/tart edits *needed* a Mac to compile, narrowing
+  where the work could be done for no real reason.
+- **Class:** No provenance on a fact — but a sharper sibling of A10's: I *did* open the source, so
+  `check_citation_provenance` passed cleanly. Verifying one property of a file (its contents) lent
+  unearned confidence to a different, unchecked property of the same file (its build constraint).
+  Candidate row: *reading a file for claim X does not verify claim Y about it* — the hook proves the
+  open, not the check, and the two feel identical from the inside.
+- **Gated now?** No. The provenance hook saw the reads and was satisfied — that is precisely its
+  blind spot: it checks that the file was opened, not that the asserted property was the one looked
+  at. The cheap mechanisable rule: a platform/build-tag claim is a one-line check (`head -1`, or
+  `go build ./pkg/` on the dev OS), cheaper than the sentence that makes the claim.
+
 ### A10 — three corrections, each more fluent, all circling a struct I never opened (2026-07-17)
 
 - **Claimed:** that DF113's fix is schema-gated and must ride v0.9.0. Three times, in three
