@@ -11,6 +11,7 @@ import (
 
 	"github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 
 	"github.com/spf13/cobra"
 )
@@ -99,16 +100,27 @@ type netLivenessJSON struct {
 	VMs []vmNetHealthJSON `json:"vms"`
 }
 
+// ownershipConcernJSON is one directory holding files not owned by the invoking
+// user (root-owned sudo/backend leftovers that block prune/destroy/builds).
+type ownershipConcernJSON struct {
+	Label       string   `json:"label"`
+	Root        string   `json:"root"`
+	ExpectedUID int      `json:"expected_uid"`
+	Count       int      `json:"count"`
+	Sample      []string `json:"sample,omitempty"`
+}
+
 // doctorReportJSON is the single --json document: backend capability reports
 // plus the read-only repair advisory sections.
 type doctorReportJSON struct {
-	Backends         []backendReportJSON  `json:"backends"`
-	ReclaimableNow   []reclaimItemJSON    `json:"reclaimable_now"`
-	ReclaimableSpace []cacheUsageJSON     `json:"reclaimable_space"`
-	UnreviewedWork   []unreviewedWorkJSON `json:"unreviewed_work"`
-	Trash            trashJSON            `json:"trash"`
-	VMCensus         *vmCensusJSON        `json:"vm_census,omitempty"`
-	NetLiveness      *netLivenessJSON     `json:"net_liveness,omitempty"`
+	Backends         []backendReportJSON    `json:"backends"`
+	Ownership        []ownershipConcernJSON `json:"ownership"`
+	ReclaimableNow   []reclaimItemJSON      `json:"reclaimable_now"`
+	ReclaimableSpace []cacheUsageJSON       `json:"reclaimable_space"`
+	UnreviewedWork   []unreviewedWorkJSON   `json:"unreviewed_work"`
+	Trash            trashJSON              `json:"trash"`
+	VMCensus         *vmCensusJSON          `json:"vm_census,omitempty"`
+	NetLiveness      *netLivenessJSON       `json:"net_liveness,omitempty"`
 }
 
 // NewCmd builds the top-level `yoloai doctor` command.
@@ -125,6 +137,8 @@ Capability status per backend and isolation mode:
   Not available    — hardware or OS mismatch (not actionable)
 
 Plus a read-only repair advisory (nothing is deleted by doctor):
+  Ownership problems     — root-owned leftovers (from a 'sudo yoloai' run or a
+                           backend) that block prune, destroy, and image builds
   Reclaimable now        — orphaned resources, lock files, temp dirs, never-init dirs
   Reclaimable cached data — build caches reclaimable by 'prune' (no rebuild)
   Reclaimable images     — base images reclaimable only by 'prune --images' (forces rebuild)
@@ -171,16 +185,18 @@ func runDoctor(cmd *cobra.Command, backendFilter, isolationFilter string, isJSON
 	disk := cacheUsage(ctx, sys)
 	census := sys.VMCensus(ctx)
 	netLiveness := sys.NetLiveness(ctx)
+	ownership := ownershipConcerns(ctx, sys)
 
 	if isJSON {
 		// JSON mode reports failures in the document rather than via exit code,
 		// matching the prior `system doctor --json` behavior.
-		return cliutil.WriteJSON(out, buildDoctorJSON(reports, prune, disk, census, netLiveness))
+		return cliutil.WriteJSON(out, buildDoctorJSON(reports, ownership, prune, disk, census, netLiveness))
 	}
 
 	formatDoctor(out, reports)
 	renderVMCensus(out, census)
 	renderNetLiveness(out, netLiveness)
+	renderOwnership(out, ownership)
 	renderReclaimableNow(out, prune)
 	renderReclaimableSpace(out, disk)
 	renderUnreviewedWork(out, prune)
@@ -430,9 +446,10 @@ func netHealthLabel(vm yoloai.VMNetHealth) string {
 }
 
 // buildDoctorJSON assembles the single --json document.
-func buildDoctorJSON(reports []yoloai.BackendReport, prune *yoloai.PruneResult, disk *yoloai.DiskUsage, census *yoloai.VMCensus, netLiveness *yoloai.NetLivenessReport) doctorReportJSON {
+func buildDoctorJSON(reports []yoloai.BackendReport, ownership []yoloai.OwnershipConcern, prune *yoloai.PruneResult, disk *yoloai.DiskUsage, census *yoloai.VMCensus, netLiveness *yoloai.NetLivenessReport) doctorReportJSON {
 	return doctorReportJSON{
 		Backends:         convertDoctorReportsToJSON(reports),
+		Ownership:        ownershipJSONList(ownership),
 		ReclaimableNow:   reclaimItemsJSON(prune),
 		ReclaimableSpace: cacheUsageJSONList(disk),
 		UnreviewedWork:   unreviewedWorkJSONList(prune),
@@ -440,6 +457,75 @@ func buildDoctorJSON(reports []yoloai.BackendReport, prune *yoloai.PruneResult, 
 		VMCensus:         vmCensusJSONOf(census),
 		NetLiveness:      netLivenessJSONOf(netLiveness),
 	}
+}
+
+// ownershipConcerns gathers the ownership audit from both sides of the D60/D61
+// boundary: the library verb covers what needs its env resolution (the Docker
+// config dir a build uses), and the CLI adds the TOP data dir — which the
+// library must not name — via the shared fileutil primitive. Best-effort: a
+// scan error just omits that concern, matching the other advisory probes.
+func ownershipConcerns(ctx context.Context, sys *yoloai.System) []yoloai.OwnershipConcern {
+	// Best-effort like the other advisory probes: a scan error just yields
+	// whatever concerns were gathered (possibly none) and never fails doctor.
+	concerns, _ := sys.OwnershipAudit(ctx)
+	// TOP is the CLI's concept (TopDir = the whole $HOME/.yoloai tree, covering
+	// both the library and cli namespaces); the library is forbidden to name it.
+	layout := cliutil.Layout()
+	if scan, err := fileutil.ScanWrongOwner(ctx, cliutil.TopDir(), layout.HostUID, yoloai.OwnershipMaxSample); err == nil && scan.Count > 0 {
+		concerns = append(concerns, yoloai.OwnershipConcern{
+			Label:       "yoloai data dir",
+			Root:        cliutil.TopDir(),
+			ExpectedUID: layout.HostUID,
+			ExpectedGID: layout.HostGID,
+			Count:       scan.Count,
+			Sample:      scan.Sample,
+		})
+	}
+	return concerns
+}
+
+// renderOwnership lists directories holding files the invoking user does not
+// own — root-owned leftovers (a sudo run, backend VM/overlay state) that block
+// prune, destroy, and image builds until chowned back. Placed among the host
+// "something's wrong" sections, before the reclaimable-cruft advisory.
+func renderOwnership(w io.Writer, concerns []yoloai.OwnershipConcern) {
+	if len(concerns) == 0 {
+		return
+	}
+	fmt.Fprintln(w)                                                                                      //nolint:errcheck
+	fmt.Fprintln(w, "Ownership problems (files not owned by you — block prune, destroy, image builds):") //nolint:errcheck
+	for _, c := range concerns {
+		fmt.Fprintf(w, "  %s (%s): %d entr%s not owned by uid %d\n", c.Label, c.Root, c.Count, plural(c.Count, "y", "ies"), c.ExpectedUID) //nolint:errcheck
+		for _, p := range c.Sample {
+			fmt.Fprintf(w, "    %s\n", p) //nolint:errcheck
+		}
+		if c.Count > len(c.Sample) {
+			fmt.Fprintf(w, "    ... and %d more\n", c.Count-len(c.Sample)) //nolint:errcheck
+		}
+		fmt.Fprintf(w, "  Fix with: sudo chown -R %d:%d %s\n", c.ExpectedUID, c.ExpectedGID, c.Root) //nolint:errcheck
+	}
+}
+
+// plural picks the singular or plural suffix for n.
+func plural(n int, singular, pluralForm string) string {
+	if n == 1 {
+		return singular
+	}
+	return pluralForm
+}
+
+func ownershipJSONList(concerns []yoloai.OwnershipConcern) []ownershipConcernJSON {
+	out := make([]ownershipConcernJSON, 0, len(concerns))
+	for _, c := range concerns {
+		out = append(out, ownershipConcernJSON{
+			Label:       c.Label,
+			Root:        c.Root,
+			ExpectedUID: c.ExpectedUID,
+			Count:       c.Count,
+			Sample:      c.Sample,
+		})
+	}
+	return out
 }
 
 func vmCensusJSONOf(census *yoloai.VMCensus) *vmCensusJSON {

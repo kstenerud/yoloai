@@ -13,6 +13,43 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func TestRenderOwnership_ShowsPathsAndChownRemedy(t *testing.T) {
+	var buf bytes.Buffer
+	renderOwnership(&buf, []yoloai.OwnershipConcern{{
+		Label:       "Docker config",
+		Root:        "/home/u/.docker",
+		ExpectedUID: 1000,
+		ExpectedGID: 1000,
+		Count:       3,
+		Sample:      []string{"/home/u/.docker/buildx/x", "/home/u/.docker/y"},
+	}})
+	out := buf.String()
+	assert.Contains(t, out, "Docker config (/home/u/.docker): 3 entries not owned by uid 1000")
+	assert.Contains(t, out, "/home/u/.docker/buildx/x")
+	assert.Contains(t, out, "... and 1 more") // Count 3 > 2 sampled
+	assert.Contains(t, out, "sudo chown -R 1000:1000 /home/u/.docker")
+}
+
+func TestRenderOwnership_SingularAndEmpty(t *testing.T) {
+	var buf bytes.Buffer
+	renderOwnership(&buf, nil)
+	assert.Empty(t, buf.String(), "no concerns → no section")
+
+	renderOwnership(&buf, []yoloai.OwnershipConcern{{Label: "x", Root: "/r", ExpectedUID: 5, Count: 1, Sample: []string{"/r/a"}}})
+	assert.Contains(t, buf.String(), "1 entry not owned", "singular for a single entry")
+}
+
+func TestOwnershipJSONList_Projects(t *testing.T) {
+	got := ownershipJSONList([]yoloai.OwnershipConcern{{
+		Label: "yoloai data dir", Root: "/r", ExpectedUID: 7, ExpectedGID: 7, Count: 2, Sample: []string{"/r/a"},
+	}})
+	require.Len(t, got, 1)
+	assert.Equal(t, "yoloai data dir", got[0].Label)
+	assert.Equal(t, 7, got[0].ExpectedUID)
+	assert.Equal(t, 2, got[0].Count)
+	assert.Equal(t, []string{"/r/a"}, got[0].Sample)
+}
+
 func samplePrune() *yoloai.PruneResult {
 	return &yoloai.PruneResult{
 		RemovedItems: []yoloai.PruneItem{
@@ -111,7 +148,7 @@ func TestRenderTrash(t *testing.T) {
 }
 
 func TestBuildDoctorJSON(t *testing.T) {
-	rep := buildDoctorJSON(nil, samplePrune(), &yoloai.DiskUsage{
+	rep := buildDoctorJSON(nil, nil, samplePrune(), &yoloai.DiskUsage{
 		PerBackend: []yoloai.BackendDiskUsage{{Type: "docker", CachedBytes: 2048, ImageBytes: 4096}},
 	}, nil, nil)
 	assert.Len(t, rep.ReclaimableNow, 3)
@@ -125,7 +162,7 @@ func TestBuildDoctorJSON(t *testing.T) {
 }
 
 func TestBuildDoctorJSON_NilProbesYieldEmptySlices(t *testing.T) {
-	rep := buildDoctorJSON(nil, nil, nil, nil, nil)
+	rep := buildDoctorJSON(nil, nil, nil, nil, nil, nil)
 	// Non-nil empty slices so the JSON document carries [] rather than null.
 	assert.NotNil(t, rep.ReclaimableNow)
 	assert.NotNil(t, rep.ReclaimableSpace)
@@ -202,7 +239,7 @@ func TestDoctorExitError_NoWedgeIsNil(t *testing.T) {
 }
 
 func TestBuildDoctorJSON_IncludesNetLiveness(t *testing.T) {
-	rep := buildDoctorJSON(nil, nil, nil, nil, sampleNetLiveness())
+	rep := buildDoctorJSON(nil, nil, nil, nil, nil, sampleNetLiveness())
 	require.NotNil(t, rep.NetLiveness)
 	require.Len(t, rep.NetLiveness.VMs, 2)
 	assert.Equal(t, "wedged", rep.NetLiveness.VMs[0].State)

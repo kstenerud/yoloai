@@ -61,6 +61,7 @@ finding or decision first, and lands here only if it should block the release.
 - [yoloai wait](archive/plans/yoloai-wait.md) — `wait --for exit` propagates the agent's exit code, `--timeout` exits 124
 - [DF134](design/findings-resolved.md) — a v6 nameserver no longer aborts `--network-isolated` (v4-only firewall skips non-v4 nameservers)
 - [DF144](design/findings-resolved.md) — a failed image build now carries its cause on the error (visible under `--json`/to embedders), not just "exited with code 1"
+- `yoloai doctor` ownership audit — flags root-owned leftovers under the Docker config dir and the yoloai data dir (blocking prune/destroy/builds), with a `chown` remedy (follow-up to DF144)
 
 ## Candidates — undecided
 
