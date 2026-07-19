@@ -218,6 +218,21 @@ func TestConformanceHarness_SharesOneInstanceAcrossReadSubtests(t *testing.T) {
 		"exactly one instance is booted under the shared ReadOnly subtree")
 }
 
+// TestConformanceHarness_SetupUsingSetenvSurvivesParallel guards the regression
+// the mac hit on containerd: real backends isolate via IsolatedHome, which calls
+// t.Setenv, and Go panics on t.Setenv inside a t.Parallel() test. The harness
+// must therefore call setup exactly once on the non-parallel parent, not per
+// subtest. A non-sharing (parallel) backend whose setup uses t.Setenv reproduces
+// the exact condition; if setup were called per-subtest this test would panic.
+func TestConformanceHarness_SetupUsingSetenvSurvivesParallel(t *testing.T) {
+	ctx := context.Background()
+	f := newFakeConfBackend(false) // non-sharing → the parallel path
+	RunInterfaceConformance(t, func(t *testing.T) InterfaceBackend {
+		t.Setenv("YOLOAI_FAKE_HOME", "/tmp/fake") // as IsolatedHome does
+		return f.fixture(ctx)
+	})
+}
+
 func countContaining(names []string, sub string) int {
 	n := 0
 	for _, s := range names {

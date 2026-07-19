@@ -117,8 +117,10 @@ func occupantNames(c runtime.VMCensus) string {
 	return strings.Join(names, ", ")
 }
 
-// InterfaceSetupFunc connects to a backend and returns a fresh per-test fixture
-// with cleanup already registered (e.g. rt.Close via t.Cleanup).
+// InterfaceSetupFunc connects to a backend and returns the fixture with cleanup
+// already registered (e.g. rt.Close via t.Cleanup). It is called once per suite
+// on the non-parallel parent t — not per subtest — so a setup that uses t.Setenv
+// (IsolatedHome) is compatible with the parallel subtests that reuse the fixture.
 type InterfaceSetupFunc func(t *testing.T) InterfaceBackend
 
 // conformanceInstanceName flattens the subtest name into a legal instance name.
@@ -135,9 +137,9 @@ func conformanceInstanceName(t *testing.T) string {
 // InterfaceBackend skip fields.
 //
 // Subtests fall into three classes. No-instance property checks and mutating
-// lifecycle subtests each open their own fixture (setup) and, for a mutating
-// subtest, their own instance — preserving per-subtest isolation. The read-only
-// exec subtests are the amortisation target: a SharesReadOnlyInstance backend
+// lifecycle subtests share the suite's one fixture but each mutating subtest
+// boots its own uniquely-named instance — preserving per-instance isolation.
+// The read-only exec subtests are the amortisation target: a SharesReadOnlyInstance backend
 // runs them serially against ONE shared instance (the big win on VM backends,
 // where a boot is a multi-GB clone), while a container backend boots one per
 // subtest and runs them in parallel. The instanceGate bounds concurrent boots
@@ -154,10 +156,13 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 		return name
 	}
 
-	// One shared fixture reads the backend's sharing/concurrency policy and, for a
-	// VM backend, its live free-slot census; it also hosts the shared read-only
-	// instance. Isolated subtests still open their own fixture via setup(t), so a
-	// parallel run keeps each subtest's runtime independent.
+	// setup is called exactly once, here on the non-parallel parent, and every
+	// subtest reuses this fixture. It cannot be called per-subtest: backends
+	// isolate via IsolatedHome, which calls t.Setenv, and Go forbids t.Setenv in a
+	// t.Parallel() test (the env is process-global — a per-subtest Setenv under
+	// parallelism never isolated anything, it just races). Sharing one fixture is
+	// safe because each subtest still boots its OWN uniquely-named instance; only
+	// the backend's Runtime (a concurrency-safe client/connection) is shared.
 	probe := setup(t)
 	gate := newInstanceGate(t, probe)
 	shares := probe.SharesReadOnlyInstance
@@ -192,7 +197,7 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 	// would silently reintroduce the RCE (confine-host-side-git.md). A confining
 	// backend must also implement GitExecer, which git.NewSandbox dispatches through.
 	t.Run("BackendConfinesWorkCopyGit", func(t *testing.T) {
-		b := setup(t)
+		b := probe
 		assert.True(t, runtime.GitRunsInConfinement(b.Runtime),
 			"every backend must confine work-copy git (SandboxSide filesystem or GitExecInConfinement); the unconfined fallback was removed in DF119")
 		_, isGitExecer := b.Runtime.(runtime.GitExecer)
@@ -203,7 +208,7 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 	// so baseline creation is deferred to the sandbox (WorkDirSetup). The
 	// property-based dispatch in ExecuteVMWorkDirSetup assumes this invariant.
 	t.Run("SandboxSideImplementsLocalityOps", func(t *testing.T) {
-		b := setup(t)
+		b := probe
 		if b.Runtime.Descriptor().Capabilities.FilesystemLocality != runtime.LocalitySandboxSide {
 			t.Skip("HostSide backend: no in-sandbox locality operations required")
 		}
@@ -213,14 +218,14 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 
 	t.Run("InspectNotFound", func(t *testing.T) {
 		parallelize(t)
-		b := setup(t)
+		b := probe
 		_, err := b.Runtime.Inspect(b.Ctx, "yoloai-nonexistent-instance-xyz")
 		assert.ErrorIs(t, err, runtime.ErrNotFound)
 	})
 
 	t.Run("IsReady", func(t *testing.T) {
 		parallelize(t)
-		b := setup(t)
+		b := probe
 		ready, err := b.Runtime.IsReady(b.Ctx)
 		require.NoError(t, err)
 		assert.True(t, ready)
@@ -231,7 +236,7 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 	mutating := func(name string, body func(t *testing.T, b InterfaceBackend)) {
 		t.Run(name, func(t *testing.T) {
 			parallelize(t)
-			body(t, setup(t))
+			body(t, probe)
 		})
 	}
 
@@ -370,13 +375,13 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 		for _, c := range readOnly {
 			t.Run(c.name, func(t *testing.T) {
 				t.Parallel()
-				b := setup(t)
+				b := probe
 				c.run(t, b, boot(t, b, runtime.InstanceConfig{}))
 			})
 		}
 		t.Run("Stdio", func(t *testing.T) {
 			t.Parallel()
-			b := setup(t)
+			b := probe
 			runStdio(t, b, func(t *testing.T) string { return boot(t, b, runtime.InstanceConfig{}) })
 		})
 	}
@@ -385,7 +390,7 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 
 	t.Run("Mounts", func(t *testing.T) {
 		parallelize(t)
-		b := setup(t)
+		b := probe
 		if b.SkipMounts != "" {
 			t.Skip(b.SkipMounts)
 		}
