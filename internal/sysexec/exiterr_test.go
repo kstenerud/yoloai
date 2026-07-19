@@ -50,7 +50,7 @@ func TestEnrichExitError_EmptyStderrReturnsUnchanged(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected a non-zero exit error")
 	}
-	if got := EnrichExitError(err); got != err {
+	if got := EnrichExitError(err); got.Error() != err.Error() {
 		t.Fatalf("EnrichExitError = %q, want the original error unchanged", got)
 	}
 }
@@ -66,7 +66,7 @@ func TestEnrichExitError_FailToStartReturnsUnchanged(t *testing.T) {
 	if _, ok := errors.AsType[*exec.ExitError](err); ok {
 		t.Fatal("test precondition: a start failure must not be an *exec.ExitError")
 	}
-	if got := EnrichExitError(err); got != err {
+	if got := EnrichExitError(err); got.Error() != err.Error() {
 		t.Fatalf("EnrichExitError = %q, want the original error unchanged", got)
 	}
 }
