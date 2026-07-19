@@ -4,11 +4,22 @@
 
 # Integration & smoke test speedup
 
-- **Status:** PLANNED — designed 2026-07-19 against the real harness (`conformance_iface.go`);
-  levers 1–2 are the load-bearing changes, 3–5 are follow-ons. Not yet built.
+- **Status:** IN-PROGRESS — designed 2026-07-19 against the real harness (`conformance_iface.go`).
+  **Levers 1–2 built and verified on Linux:** the parallel path is green on real docker (3.0 s, was
+  6.2 s serial) and the shared-instance path is pinned by a fake-backend boot-count test
+  (`conformance_share_test.go`). **Mac-check phase pending** (tart/apple/seatbelt) plus levers 3–5.
 - **Depends on:** —
 - **Rides:** **any** release — test-only; no shipped behavior changes. (It is release-*blocking* by
   owner direction, not by the release-kind rule.)
+
+**Concurrency model, as built (a refinement of levers 1–2).** A shared read-only instance that held
+a gate token for its whole life would starve the mutating subtests at a single free slot (tart with
+one foreign VM). So the first implementation couples the two levers by backend class:
+**`SharesReadOnlyInstance` backends run serially** — the shared instance is scoped to a `ReadOnly`
+subtest so its slot frees before the mutating boots — while **container backends parallelise**. The
+free-slot census still guards every VM run (fail-loud at zero free). Parallelising exec *against* the
+shared instance (lever 2 on VM backends) stays deferred to the Mac's verification that the backend
+supports concurrent exec — the one open question below.
 
 The macOS integration run (`make integration` + the tart/apple/seatbelt suites) plus the smoke
 matrix is approaching **an hour**. Nearly all of it is real VM/container boots, and the single
