@@ -1,8 +1,8 @@
 //go:build integration
 
-// ABOUTME: Tart backend integration tests. Cheap tests run on every Apple
-// ABOUTME: Silicon machine with tart installed; full VM-lifecycle tests are
-// ABOUTME: opt-in via YOLOAI_TEST_TART_VM=1 because they clone a multi-GB base.
+// ABOUTME: Tart backend integration tests: the full VM-lifecycle tests, opt-in
+// ABOUTME: via YOLOAI_TEST_TART_VM=1 because each clones a multi-GB base VM.
+// ABOUTME: The VM-free basics live untagged in backend_basics_test.go.
 
 package tart
 
@@ -20,23 +20,6 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/runtimetest"
 )
-
-func TestTart_New_ReturnsRuntime(t *testing.T) {
-	rt, _ := tartSetup(t)
-	require.NotNil(t, rt)
-	assert.NotEmpty(t, rt.tartBin, "should have located tart CLI")
-	assert.NotEmpty(t, rt.layout.SandboxesDir(), "should have set sandbox base dir")
-}
-
-func TestTart_Descriptor_AdvertisesVMCapabilities(t *testing.T) {
-	rt, _ := tartSetup(t)
-	desc := rt.Descriptor()
-	assert.Equal(t, "tart", string(desc.Type))
-	assert.False(t, desc.Capabilities.HostFilesystem,
-		"tart runs the agent inside a VM, not on the host filesystem")
-	assert.False(t, desc.Capabilities.ContainerAttach,
-		"tart has no docker-compatible container surface; VS Code Attach should be false")
-}
 
 // TestTart_Start_SetsGuestHostname verifies the DF142 tart half end to end: a
 // Create+Start with InstanceConfig.Hostname set lands that name as the guest's
@@ -80,27 +63,6 @@ func TestTart_Start_SetsGuestHostname(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, wantHostname, res.Stdout,
 		"the guest hostname should be the sandbox name set via scutil, not the base image default")
-}
-
-func TestTart_InspectNotFound(t *testing.T) {
-	rt, ctx := tartSetup(t)
-	info, err := rt.Inspect(ctx, "does-not-exist-"+t.Name())
-	// Contract: Inspect on a nonexistent VM should either return an error
-	// or an InstanceInfo with Running=false. Either is acceptable; the
-	// caller checks Running, not whether the inspect succeeded.
-	if err == nil {
-		assert.False(t, info.Running,
-			"a nonexistent VM cannot be running")
-	}
-}
-
-func TestTart_RemoveIdempotent_NonexistentVM(t *testing.T) {
-	rt, ctx := tartSetup(t)
-	// Remove on a never-created VM should not error. Tart's "delete" is
-	// idempotent enough that the runtime should not surface a failure
-	// when the target wasn't there to begin with.
-	err := rt.Remove(ctx, "never-existed-"+t.Name())
-	assert.NoError(t, err, "Remove on nonexistent VM should be idempotent")
 }
 
 // TestTartConformance runs the shared backend-agnostic conformance suite against
@@ -147,6 +109,9 @@ func TestTartConformance(t *testing.T) {
 		return runtimetest.InterfaceBackend{
 			Runtime: rt,
 			Ctx:     ctx,
+			// A tart boot is a multi-GB clone (~90-118s); amortize the read-only
+			// subtests onto one shared instance (speedup plan, lever 1).
+			SharesReadOnlyInstance: true,
 			// Conformance mounts at /mnt/test — a container-centric path. On the
 			// macOS guest the root volume is read-only (the SIP-sealed system
 			// volume), so /mnt does not exist and cannot be created even as root:

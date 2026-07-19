@@ -57,7 +57,7 @@ func ensureSleepImage(rt *Runtime, ctx context.Context) error {
 		}
 		defer os.RemoveAll(dir) //nolint:errcheck // best-effort cleanup
 		dockerfile := "FROM alpine:3.22\nENTRYPOINT [\"sleep\", \"3600\"]\n"
-		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil {
+		if err := os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte(dockerfile), 0o644); err != nil { //nolint:gosec // G306: test file, no secret content
 			sleepImageErr = err
 			return
 		}
@@ -87,6 +87,9 @@ func TestAppleConformance(t *testing.T) {
 		return runtimetest.InterfaceBackend{
 			Runtime: rt,
 			Ctx:     ctx,
+			// Each apple container is its own lightweight VM; share one across the
+			// read-only subtests to skip its per-subtest boots (speedup plan, lever 1).
+			SharesReadOnlyInstance: true,
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 				if cfg.ImageRef == "" {
 					cfg.ImageRef = itestImage
@@ -107,13 +110,13 @@ func TestApple_Lifecycle(t *testing.T) {
 	buildSleepImage(t, rt, ctx)
 
 	host := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(host, "from-host.txt"), []byte("hi-from-host"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(host, "from-host.txt"), []byte("hi-from-host"), 0o644)) //nolint:gosec // G306: test file, no secret content
 
 	// A single-FILE mount — yoloai injects seed/credential files this way
 	// (e.g. ~/.claude.json). `--mount type=virtiofs` rejects a file source, so
 	// Create must use -v; this guards that regression.
 	seedFile := filepath.Join(t.TempDir(), "seed.json")
-	require.NoError(t, os.WriteFile(seedFile, []byte("seed-data"), 0o644))
+	require.NoError(t, os.WriteFile(seedFile, []byte("seed-data"), 0o644)) //nolint:gosec // G306: test file, no secret content
 
 	const name = "yoloai-apple-itest"
 	cfg := runtime.InstanceConfig{
@@ -143,7 +146,7 @@ func TestApple_Lifecycle(t *testing.T) {
 	// :rw mount, guest → host (live propagation).
 	_, err = rt.Exec(ctx, name, []string{"sh", "-c", "echo from-guest > /mnt/work/g.txt"}, "")
 	require.NoError(t, err)
-	data, rerr := os.ReadFile(filepath.Join(host, "g.txt"))
+	data, rerr := os.ReadFile(filepath.Join(host, "g.txt")) //nolint:gosec // G304: path under t.TempDir()
 	require.NoError(t, rerr)
 	assert.Equal(t, "from-guest", strings.TrimSpace(string(data)))
 
@@ -182,7 +185,7 @@ func TestApple_SetupBuildsBase(t *testing.T) {
 	// A real CacheDir so the staleness marker persists (production has one;
 	// os.WriteFile won't mkdir).
 	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
-	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0o755))
+	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0o755)) //nolint:gosec // G301: test dir under t.TempDir(), no sudo chown concern
 
 	var buf bytes.Buffer
 	require.NoError(t, rt.Setup(ctx, layout, "", &buf, slog.Default(), false),
