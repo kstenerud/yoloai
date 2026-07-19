@@ -183,25 +183,25 @@ not a clock; an unreleased entry says `(pending)`.
   Otherwise: the settling period.
 - **Pointer:** `runtime/tart/prune.go` (`legacyCLIVMName`, `testPrincipalVMRe`)
 
-### `system prune --images` reclaims all unused images, not just yoloai's
+### `--images` name-heuristic bridge for pre-label yoloai images
 
-- **Incurred:** 2026-07-19 · **Shipped:** v0.9.1 (pending) · **Due:** 2027-07-19 (user-facing, 12mo — owner's explicit call)
-- **What:** `PruneCache`'s `--images` sweep runs `ImagesPrune(dangling=false)` **unscoped**, so on a
-  shared daemon it reaps every unused image, not only yoloAI's — the one prune category besides the
-  BuildKit cache that DF137's label-scoping does not cover. The base image now carries
-  `com.yoloai.managed` (inherited by profile images built `FROM yoloai-base`), so the sweep *could*
-  be scoped like the container/volume/network reclaim already is — but it is deliberately left
-  unscoped for a settling period. Flipping immediately would strand images built **before** the
-  label existed: carrying no label, they would never again be reclaimed by `--images`.
-- **Why user-facing, 12mo (not internal, 6mo):** the stranded population is not just stale local
-  image stores (which rebuilds relabel over time) but **people who build their own images** — a
-  custom base or profile image not derived from `yoloai-base` must add the label itself to be
-  reclaimed once the sweep is scoped. They learn this from the docs (integrator/profile guidance)
-  and need time to adopt it, which is the "grow into it" the owner sized this at a year for.
-- **Retire by:** adding `filters.Arg("label", managedLabel)` to the `includeImages` `ImagesPrune`
-  call, so `--images` spares foreign images the way the container/volume/network reclaim already
-  does. Lands a `docs/BREAKING-CHANGES.md` entry (narrows what `--images` reclaims).
-- **Pointer:** `runtime/docker/prune.go` (the `includeImages` `ImagesPrune` call); `runtime/docker/resources/Dockerfile` (`LABEL com.yoloai.managed`); DF137.
+- **Incurred:** 2026-07-19 · **Shipped:** v0.9.1 (pending) · **Due:** 2027-01-19 (heuristic backstop, 6mo)
+- **What:** the `--images` sweep is now scoped to yoloAI's own images (this **supersedes** the
+  former entry here that kept it deliberately unscoped for a 12-month settling period — the owner
+  ruled the immediate scoping a **bugfix**, not a break: reaping foreign images was the DF137-class
+  defect, and whole-daemon image pruning was never a promised capability). `pruneManagedImages`
+  (`runtime/docker/prune.go`) reclaims unused images matching `com.yoloai.managed` (stamped by the
+  base Dockerfile, inherited by `FROM yoloai-base` builds) **∪** `yoloaiImageName` — an anchored,
+  bare-local `yoloai-` name. That name predicate is the deprecation: it exists only so images built
+  *before* the label existed keep being reclaimed. Every name-only match is logged
+  ("matched by name only (pre-label…)"), so the population's decay is observable; if it does not
+  decay, the labeling machinery has a bug to find before this retires.
+- **Retire by:** deleting `yoloaiImageName` and the `nameOnly` logging; the label becomes the sole
+  marker. A custom image not derived from `yoloai-base` must carry the label to be swept —
+  the owner accepted that bespoke unlabeled images are the creator's to clean, so the old entry's
+  12-month adoption rationale no longer applies.
+- **Pointer:** `runtime/docker/prune.go` (`pruneManagedImages`, `yoloaiImageName`);
+  `runtime/docker/resources/Dockerfile` (`LABEL com.yoloai.managed`); DF137.
 
 ## Not deprecations
 

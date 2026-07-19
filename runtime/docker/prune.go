@@ -105,10 +105,7 @@ func (r *Runtime) pruneDanglingImages(ctx context.Context, dryRun bool, output i
 
 	var items []runtime.PruneItem
 	for _, img := range danglingImages {
-		shortID := strings.TrimPrefix(img.ID, "sha256:")
-		if len(shortID) > 12 {
-			shortID = shortID[:12]
-		}
+		shortID := shortImageID(img.ID)
 		if !dryRun && !r.removeImage(ctx, img.ID, shortID, output) {
 			continue
 		}
@@ -126,6 +123,134 @@ func (r *Runtime) removeImage(ctx context.Context, id, shortID string, output io
 	}
 	fmt.Fprintf(output, "Warning: failed to remove image %s: %v\n", shortID, err) //nolint:errcheck // best-effort output
 	return false
+}
+
+// pruneManagedImages is the scoped `--images` sweep: it removes unused images
+// that are yoloai's — carrying managedLabel (stamped by the base Dockerfile
+// and inherited by `FROM yoloai-base` profile builds) or, as a deprecated
+// bridge, bearing a bare-local `yoloai-` name (the population built before
+// the label existed; registered with a sunset in
+// docs/contributors/deprecations.md). A foreign unused image on a shared
+// daemon is spared. "Unused" means referenced by no container at all,
+// foreign containers included — a foreign container legitimately pins any
+// image, ours or not.
+//
+// The docker API's ImagesPrune cannot express this predicate (it filters on
+// labels but not names), so the sweep lists and removes individually — the
+// same shape as pruneDanglingImages. Slightly more round-trips than a
+// server-side prune; accepted for the isolation, and the name half retires
+// with the bridge.
+func (r *Runtime) pruneManagedImages(ctx context.Context, output io.Writer) {
+	imgs, err := r.client.ImageList(ctx, image.ListOptions{})
+	if err != nil {
+		fmt.Fprintf(output, "%s: images prune: list images failed: %v\n", r.binaryName, err) //nolint:errcheck
+		return
+	}
+	// Without the full container list we cannot know what is in use, and
+	// guessing risks removing a pinned image — so remove nothing.
+	containers, err := r.client.ContainerList(ctx, container.ListOptions{All: true})
+	if err != nil {
+		fmt.Fprintf(output, "%s: images prune: list containers failed: %v\n", r.binaryName, err) //nolint:errcheck
+		return
+	}
+	inUse := make(map[string]bool, len(containers))
+	for _, c := range containers {
+		inUse[c.ImageID] = true
+	}
+	for _, cand := range managedImageCandidates(imgs, inUse) {
+		if cand.nameOnly {
+			// The discrepancy signal for the bridge's settling period: this
+			// image predates the label. The population should decay to zero as
+			// rebuilds re-stamp; if it doesn't, the labeling machinery has a
+			// bug to find before the bridge retires.
+			fmt.Fprintf(output, "%s: image %s matched by name only (pre-label; rebuilt images carry %s)\n", //nolint:errcheck
+				r.binaryName, cand.display, managedLabel)
+		}
+		for _, ref := range cand.removeRefs {
+			_ = r.removeImage(ctx, ref, cand.display, output)
+		}
+	}
+}
+
+// managedImageCandidate is one unused yoloai image the scoped sweep will
+// remove. nameOnly marks a match via the deprecated name bridge rather than
+// the label — the signal logged during the bridge's settling period.
+// removeRefs is what to hand ImageRemove: the image ID for a labeled image
+// (whole-image removal — the label marks it yoloai-derived even under a
+// foreign tag), but only the matching yoloai tags for a bridge match, so a
+// foreign image someone re-tagged with a yoloai- name loses that tag while
+// its own tags — and the image under them — survive.
+type managedImageCandidate struct {
+	id         string
+	display    string
+	nameOnly   bool
+	removeRefs []string
+}
+
+// managedImageCandidates selects the unused yoloai images from a full image
+// list: not referenced by any container, and carrying managedLabel or (bridge)
+// a bare-local yoloai- name. Pure so the selection is testable without a
+// daemon.
+func managedImageCandidates(imgs []image.Summary, inUse map[string]bool) []managedImageCandidate {
+	var out []managedImageCandidate
+	for _, img := range imgs {
+		if inUse[img.ID] {
+			continue
+		}
+		_, labeled := img.Labels[managedLabel]
+		var named []string
+		for _, t := range img.RepoTags {
+			if yoloaiImageName(t) {
+				named = append(named, t)
+			}
+		}
+		if !labeled && len(named) == 0 {
+			continue
+		}
+		display := ""
+		removeRefs := []string{img.ID}
+		switch {
+		case len(named) > 0:
+			display = named[0]
+			if !labeled {
+				removeRefs = named
+			}
+		case len(img.RepoTags) > 0:
+			display = img.RepoTags[0]
+		default:
+			display = shortImageID(img.ID)
+		}
+		out = append(out, managedImageCandidate{id: img.ID, display: display, nameOnly: !labeled, removeRefs: removeRefs})
+	}
+	return out
+}
+
+// yoloaiImageName reports whether ref is a bare-local yoloai image name:
+// `yoloai-<something>[:tag]` with no registry or repository path component, so
+// a registry-qualified foreign image like ghcr.io/x/yoloai-base never
+// matches. Every image yoloai has ever built is named this way — yoloai-base
+// (config.BaseImage) and the InstancePrefix-derived profile tags, including
+// the pre-D126 legacy yoloai-<profile> shape.
+//
+// Deprecated bridge: this predicate exists only so images built before
+// managedLabel was stamped keep being reclaimed by --images. It retires on
+// the schedule in docs/contributors/deprecations.md; the label is the
+// authoritative marker.
+func yoloaiImageName(ref string) bool {
+	if strings.Contains(ref, "/") {
+		return false
+	}
+	repo, _, _ := strings.Cut(ref, ":")
+	return strings.HasPrefix(repo, "yoloai-")
+}
+
+// shortImageID renders a sha256 image ID in the familiar 12-char short form.
+func shortImageID(id string) string {
+	short := strings.TrimPrefix(id, "sha256:")
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	return short
 }
 
 // PruneCache implements runtime.CachePruner. The depth is set by includeImages:
@@ -207,23 +332,14 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 		fmt.Fprintf(output, "%s: networks prune failed: %v\n", r.binaryName, err) //nolint:errcheck
 	}
 
-	// Images last, and only when asked: -a (also non-dangling). This is what
-	// forces a rebuild, so it's gated behind includeImages. Dangling images
-	// from prior builds are already removed by the core Prune; here we drop the
-	// reusable base/profile images too.
-	//
-	// Deliberately NOT label-scoped yet, so this stays daemon-wide (it can reap a
-	// foreign unused image on a shared host — the one prune category besides the
-	// build cache that isn't yoloai-scoped, DF137). The base image now carries
-	// com.yoloai.managed (inherited by profile images), so a future
-	// filters.Arg("label", managedLabel) here would scope it — but flipping now
-	// would strand pre-label images on existing installs (no label → never
-	// reclaimed by --images). The switch is registered with a settling period in
-	// docs/contributors/deprecations.md; until then, unscoped.
+	// Images last, and only when asked. This is what forces a rebuild, so it's
+	// gated behind includeImages. Dangling images from prior builds are already
+	// removed by the core Prune; here we drop the reusable base/profile images
+	// too — but only yoloai's own (label ∪ the deprecated name bridge), never a
+	// foreign unused image on a shared daemon. That reaping was the DF137-class
+	// defect the earlier unscoped ImagesPrune(dangling=false) carried.
 	if includeImages {
-		if _, err := r.client.ImagesPrune(ctx, filters.NewArgs(filters.Arg("dangling", "false"))); err != nil {
-			fmt.Fprintf(output, "%s: images prune failed: %v\n", r.binaryName, err) //nolint:errcheck
-		}
+		r.pruneManagedImages(ctx, output)
 	}
 
 	reclaimed := int64(0)
@@ -264,7 +380,11 @@ func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, outp
 	what := "unused volumes, build cache"
 	estimate := cached
 	if includeImages {
-		what = "unused images, volumes, build cache"
+		// The byte figure still counts every unused image's layers (the docker
+		// disk-usage API cannot attribute shared layers per image), but the
+		// sweep itself only removes yoloai's own — so on a shared daemon this
+		// "~" estimate is an upper bound.
+		what = "unused yoloai images, volumes, build cache"
 		estimate += images
 	}
 	// This runs as the CLI's internal scan phase on every prune — not only under
@@ -304,6 +424,16 @@ func imageReclaimBlockers(du types.DiskUsage) []imageReclaimBlocker {
 		switch c.State {
 		case container.StateExited, container.StateDead:
 			continue
+		}
+		// Only a container pinning a yoloai image blocks the scoped sweep; a
+		// foreign container pinning its own image is no longer our concern.
+		// Recognize ours by the pinned image's name or the container's own
+		// sandbox label (which covers a sandbox running an untagged/re-tagged
+		// image whose name check would miss).
+		if !yoloaiImageName(c.Image) {
+			if _, ok := c.Labels[runtime.LabelSandbox]; !ok {
+				continue
+			}
 		}
 		name := ""
 		if len(c.Names) > 0 {

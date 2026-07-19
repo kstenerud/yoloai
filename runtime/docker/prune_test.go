@@ -156,15 +156,16 @@ func TestSplitCacheBytes_IgnoresUnknownVolumeSize(t *testing.T) {
 // PruneCache removes stopped containers (exited/dead) before ImagesPrune, so
 // those don't block image reclaim. Every other state pins the image.
 func TestImageReclaimBlockers_FlagsNonRemovableStates(t *testing.T) {
+	sandboxLabels := map[string]string{runtime.LabelSandbox: "x"}
 	du := types.DiskUsage{
 		Containers: []*container.Summary{
 			{Names: []string{"/run-1"}, State: container.StateRunning, Image: "yoloai-base"},
 			{Names: []string{"/paused-1"}, State: container.StatePaused, Image: "yoloai-base"},
-			{Names: []string{"/created-1"}, State: container.StateCreated, Image: "other"},
-			{Names: []string{"/restarting-1"}, State: container.StateRestarting, Image: "other"},
-			{Names: []string{"/removing-1"}, State: container.StateRemoving, Image: "other"},
-			{Names: []string{"/exited-1"}, State: container.StateExited, Image: "other"},
-			{Names: []string{"/dead-1"}, State: container.StateDead, Image: "other"},
+			{Names: []string{"/created-1"}, State: container.StateCreated, Image: "other", Labels: sandboxLabels},
+			{Names: []string{"/restarting-1"}, State: container.StateRestarting, Image: "other", Labels: sandboxLabels},
+			{Names: []string{"/removing-1"}, State: container.StateRemoving, Image: "other", Labels: sandboxLabels},
+			{Names: []string{"/exited-1"}, State: container.StateExited, Image: "other", Labels: sandboxLabels},
+			{Names: []string{"/dead-1"}, State: container.StateDead, Image: "other", Labels: sandboxLabels},
 		},
 	}
 	got := imageReclaimBlockers(du)
@@ -174,6 +175,33 @@ func TestImageReclaimBlockers_FlagsNonRemovableStates(t *testing.T) {
 		names = append(names, b.Name)
 	}
 	assert.ElementsMatch(t, []string{"run-1", "paused-1", "created-1", "restarting-1", "removing-1"}, names)
+}
+
+// The sweep is scoped to yoloai's images, so a foreign container pinning its
+// own image is not a blocker — warning about it would tell the user to stop a
+// container whose image the sweep would never touch anyway.
+func TestImageReclaimBlockers_SkipsForeignContainers(t *testing.T) {
+	du := types.DiskUsage{
+		Containers: []*container.Summary{
+			{Names: []string{"/postgres"}, State: container.StateRunning, Image: "postgres:16"},
+			{Names: []string{"/registry-yoloai"}, State: container.StateRunning, Image: "ghcr.io/x/yoloai-base"},
+		},
+	}
+	assert.Nil(t, imageReclaimBlockers(du))
+}
+
+// A sandbox running an untagged or re-tagged image would slip the name check;
+// the container's own sandbox label still marks it as a blocker.
+func TestImageReclaimBlockers_SandboxLabelBlocksRegardlessOfImageName(t *testing.T) {
+	du := types.DiskUsage{
+		Containers: []*container.Summary{
+			{Names: []string{"/sb"}, State: container.StateRunning, Image: "sha256:abc",
+				Labels: map[string]string{runtime.LabelSandbox: "x"}},
+		},
+	}
+	got := imageReclaimBlockers(du)
+	assert.Len(t, got, 1)
+	assert.Equal(t, "sb", got[0].Name)
 }
 
 // Container names from the docker API carry a leading "/" that must be trimmed
@@ -200,4 +228,71 @@ func TestImageReclaimBlockers_EmptyWhenAllStopped(t *testing.T) {
 		},
 	}
 	assert.Nil(t, imageReclaimBlockers(du))
+}
+
+// The name bridge must match every name yoloai has ever produced (yoloai-base,
+// principal-scoped and pre-D126 legacy profile tags) and nothing
+// registry-qualified or merely yoloai-ish.
+func TestYoloaiImageName(t *testing.T) {
+	matches := []string{
+		"yoloai-base", "yoloai-base:latest",
+		"yoloai-cli-go-dev", "yoloai-cli-go-dev:latest",
+		"yoloai-go-dev", // pre-D126 legacy profile tag
+	}
+	for _, ref := range matches {
+		assert.True(t, yoloaiImageName(ref), "should match %q", ref)
+	}
+	nonMatches := []string{
+		"yoloai",                  // no dash: not a name we ever emit
+		"myyoloai-base",           // prefix must anchor at the start
+		"ghcr.io/x/yoloai-base",   // registry-qualified is foreign
+		"someuser/yoloai-base",    // repository-qualified is foreign
+		"alpine:3.22", "postgres", // plainly foreign
+		"", "<none>:<none>", // dangling placeholder
+	}
+	for _, ref := range nonMatches {
+		assert.False(t, yoloaiImageName(ref), "should not match %q", ref)
+	}
+}
+
+// Selection contract for the scoped --images sweep: an unused image is a
+// candidate iff it carries the managed label OR (deprecated bridge) a
+// bare-local yoloai- name; anything in use, and every foreign image, is
+// spared. nameOnly marks bridge matches for the settling-period log line.
+func TestManagedImageCandidates(t *testing.T) {
+	managed := map[string]string{managedLabel: "true"}
+	imgs := []image.Summary{
+		{ID: "sha256:aaa", RepoTags: []string{"yoloai-base:latest"}, Labels: managed},
+		{ID: "sha256:bbb", RepoTags: []string{"yoloai-cli-go:latest"}},               // pre-label: bridge match
+		{ID: "sha256:ccc", RepoTags: []string{"my-agent:latest"}, Labels: managed},   // derived, renamed: label match
+		{ID: "sha256:ddd", RepoTags: []string{"alpine:3.22"}},                        // foreign: spared
+		{ID: "sha256:eee", RepoTags: []string{"yoloai-base:old"}, Labels: managed},   // in use: spared
+		{ID: "sha256:fff", Labels: managed},                                          // labeled dangling: reclaimed
+		{ID: "sha256:ggg", RepoTags: []string{"alpine:edge", "yoloai-retag:latest"}}, // foreign re-tagged with our name
+	}
+	inUse := map[string]bool{"sha256:eee": true}
+
+	got := managedImageCandidates(imgs, inUse)
+
+	byID := map[string]managedImageCandidate{}
+	for _, c := range got {
+		byID[c.id] = c
+	}
+	assert.Len(t, got, 5)
+	assert.Contains(t, byID, "sha256:aaa")
+	assert.False(t, byID["sha256:aaa"].nameOnly, "labeled image is not a bridge match")
+	assert.Equal(t, "yoloai-base:latest", byID["sha256:aaa"].display)
+	assert.Equal(t, []string{"sha256:aaa"}, byID["sha256:aaa"].removeRefs,
+		"a labeled image is removed whole, by ID")
+	assert.True(t, byID["sha256:bbb"].nameOnly, "unlabeled yoloai-named image rides the bridge")
+	assert.Equal(t, []string{"yoloai-cli-go:latest"}, byID["sha256:bbb"].removeRefs,
+		"a bridge match is removed by its yoloai tags, not by ID")
+	assert.False(t, byID["sha256:ccc"].nameOnly)
+	assert.Equal(t, "my-agent:latest", byID["sha256:ccc"].display,
+		"a renamed derived image displays its own tag")
+	assert.NotContains(t, byID, "sha256:ddd", "foreign unused image must be spared")
+	assert.NotContains(t, byID, "sha256:eee", "in-use image must be spared")
+	assert.Equal(t, "fff", byID["sha256:fff"].display, "untagged image displays its short ID")
+	assert.Equal(t, []string{"yoloai-retag:latest"}, byID["sha256:ggg"].removeRefs,
+		"only the yoloai tag is removed from a re-tagged foreign image; its own tag and the image survive")
 }

@@ -35,9 +35,11 @@ alone; the build cache and dangling images have no per-project attribution, so
 that reclaim is daemon-wide.
 
 --images additionally removes each backend's base/profile images, which
-forces yoloai-base to rebuild on the next sandbox creation. Use on a host
-dedicated to yoloai; on shared machines, prefer the backend's own prune
-(e.g., 'docker system prune').
+forces yoloai-base to rebuild on the next sandbox creation. On docker and
+podman only yoloai's own images are removed (matched by the com.yoloai.managed
+label, or a yoloai- name for images from builds that predate the label);
+foreign images on a shared daemon are left alone. The apple backend cannot
+filter images yet, so its --images remains daemon-wide.
 
 --stale-bases removes superseded base images a backend left behind — e.g. an
 old-macOS Tart base orphaned when the host OS (and the resolved base codename)
