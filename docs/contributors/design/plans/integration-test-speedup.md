@@ -47,9 +47,14 @@ Ranked by wall-clock return. Levers 1–2 are the core; 3–5 are follow-ons.
 
 ### 1. Amortize the read-only subtests onto one shared running instance (the big VM win)
 
-Most conformance subtests never mutate their instance — they exec a command against a running
-sleeper and read the result. Booting a separate instance for each is the waste. Split the suite's
-subtests into two classes, by whether they change instance state:
+**Sharing is a per-backend opt-in, worth its isolation cost only where a boot is expensive.** The VM
+backends (tart, apple) share; docker/podman/containerd/seatbelt boot in ~1–2 s and skip sharing
+entirely, running every subtest isolated and parallel (lever 2). This confines the isolation risk to
+the two backends that actually benefit.
+
+For a sharing backend, most conformance subtests never mutate their instance — they exec a command
+against a running sleeper and read the result. Booting a separate instance for each is the waste.
+Split the suite's subtests into two classes, by whether they change instance state:
 
 - **Read-only (shareable)** — exec against a running instance, assert output/exit, no state change:
   `ExecSimple`, `ExecNonZeroExit`, `InteractiveExecZeroExit`, `InteractiveExecNonZeroExit`,
@@ -85,18 +90,50 @@ own their instance) can run concurrently:
 
 - **Container backends (docker/podman/containerd/seatbelt):** `t.Parallel()` on the independent
   subtests. Boots are cheap but numerous; parallelism roughly halves these suites at near-zero risk.
-- **tart:** has a **hard 2-VM cap** (established fact — the tart/host limit smoke already enforces via
-  `YOLOAI_SMOKE_VM_CONCURRENCY=2`). Gate tart concurrency behind a **semaphore of 2**, never raw
-  `t.Parallel()`. Even 2-wide, applied to the mutating subtests that still boot, it compounds with
-  lever 1.
-- **apple (and any other VM backend):** **no hard concurrency restriction** — bounded only by host
-  resources, not a fixed cap. Apple can parallelize more freely than tart; pick a resource-sane cap
-  if needed, but it is *not* held to tart's 2. (Smoke's uniform `vm_concurrency=2` is a conservative
-  default across VM backends; the actual hard limit is tart's alone.)
+- **apple (and any other VM backend):** **no hard concurrency restriction** — start **unbounded**
+  (a soft cap invented before a symptom is just a slower test for no reason) and add one only if
+  contention actually appears. Apple's `container` VMs do not count against tart's macOS limit.
+- **tart: a *dynamic* semaphore sized to the free VM slots, not a static 2.** macOS enforces a hard
+  2-VM limit (Virtualization.framework), and the host may already be running a VM this test cannot
+  shut down. So the cap is computed at suite start from a live census: **free = `Limit − occupied`**.
+  One foreign VM present → free = 1 → the tart suite runs serially (slow, but it runs — the required
+  behavior). free = 0 → **fail loudly with the census** (which VM holds the slot) rather than hang.
+
+  This reuses machinery that already exists: `runtime/tart/census.go`'s
+  `Runtime.VMCensus(ctx) → runtime.VMCensus{Limit, Slots}` (optional interface
+  `runtime.VMCensusReporter`), where each `VMSlot` carries an `Owned` flag distinguishing yoloai's
+  own `yoloai-test-*` VMs from a foreign sandbox. The smoke harness already consumes the same data
+  via `doctor --json` (`parse_vm_census` → `plan_tart_slots`, whose `zero_free_blocks` /
+  `clamps_to_free` cases are the Python counterpart of this exact logic). The conformance harness
+  calls `VMCensus` on the tart runtime directly.
+
+  Note the graceful degradation: when slots are scarce, **lever 1 matters more, not less** — the
+  read-only subtests collapse to one shared boot that fits in a single slot, and the mutating
+  subtests serialize through the semaphore. The design's worst case is "slow but correct."
 
 Parallelism and lever 1 interact: concurrent execs against the *one* shared read-only instance are
 fine for backends that support concurrent exec (docker/tart do), but this is the risk surface — hence
 the per-backend opt-out above.
+
+### Mechanism: how a backend declares its policy
+
+Both levers are per-backend-type policy, so the two knobs live on the `InterfaceBackend` test
+fixture (alongside the existing `SkipMounts` / `SkipStdio` / `NewSleeper`), never on the shipped
+`runtime.BackendDescriptor` — a test-tuning concurrency cap does not belong on a production type:
+
+- **`SharesReadOnlyInstance bool`** — VM backends (tart, apple) set it; container backends leave it
+  false and run every subtest isolated-and-parallel. The read-only/mutating classification stays
+  *internal to the suite* (two explicit subtest groups, not a per-subtest boolean the backend sees);
+  a sharing backend consults it, a non-sharing backend never does.
+- **`MaxConcurrentInstances int`** (0 = unbounded) — the *static* soft cap: apple and containers pass
+  0. tart is the exception: rather than a static number, a backend implementing
+  `runtime.VMCensusReporter` has its cap computed *dynamically* from the live census (free =
+  `Limit − occupied`) at suite start, so the one hard constraint in the system reads its value from
+  the machine that enforces it instead of a hard-coded literal that can drift.
+
+tart's 2-VM limit is arguably also a production fact (the orchestrator launching sandboxes hits the
+same wall — which is why `VMCensus` exists for `doctor`), but enforcing it outside tests is a
+separate concern; this plan only *reads* the census, it does not move the limit onto the descriptor.
 
 ### 3. Trim redundant slow-backend coverage across tiers
 
@@ -139,8 +176,14 @@ problem.
   share when in doubt.
 - **Concurrent-exec races** against the shared instance on a backend that serializes exec. Guard with
   the per-backend opt-out.
-- **VM host exhaustion** under parallelism — for **tart**, bounded by its hard 2-VM semaphore
-  (matching smoke); other VM backends have no fixed cap and are bounded by host resources.
+- **VM host exhaustion** under parallelism — for **tart**, bounded by the dynamic free-slot semaphore
+  from `VMCensus` (never exceeds `Limit`); other VM backends have no fixed cap and are bounded by host
+  resources.
+- **A foreign tart VM the run cannot control** (the owner's case: a sandbox that won't shut down). The
+  free-slot census handles it — one foreign VM → the suite runs serially rather than trying to boot a
+  third VM and failing mid-run; zero free → it fails at the *start* with the census naming the
+  occupant, not deep in a subtest. The foreign VM is never counted as ours (`VMSlot.Owned`) so prune/
+  cleanup never touches it.
 - **Reduced smoke matrix hiding a real gap** — mitigated by `log()`-ing every dropped scenario.
 
 ## Phasing (Linux implement + verify → Mac check)
@@ -167,7 +210,10 @@ redundant smoke boots.
 
 - Does tart support concurrent `Exec` against one running VM reliably enough to parallelize the shared
   read-only subtests, or should VM backends share-but-serialize (lever 1 without lever 2's parallelism
-  on the shared instance)? Settle on the Mac.
-- Is the shared-instance split best expressed as two explicit subtest groups in
-  `RunInterfaceConformance`, or as a per-subtest `shareable bool` the suite dispatches on? The former
-  is more legible; the latter keeps each subtest self-describing. Decide during the Linux build.
+  on the shared instance)? **Settle on the Mac** (the owner does not know offhand; the Mac-check phase
+  verifies it). If concurrent exec is unreliable, tart keeps lever 1 and drops parallelism *on the
+  shared instance* only — the free-slot semaphore for the mutating boots is unaffected.
+
+**Resolved during design:** the shared-instance split is two explicit subtest groups (not a
+per-subtest boolean); sharing is a per-backend opt-in (VM backends only); apple starts unbounded; and
+tart's cap is the dynamic free-slot census, not a static 2. See levers 1–2.
