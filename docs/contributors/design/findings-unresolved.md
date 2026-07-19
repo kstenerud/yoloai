@@ -533,22 +533,24 @@ is worse than none because it also supplies the confidence.
 - **Description (audit-reported):** `internal/orchestrator/engine_lifecycle.go:49-57` calls `lifecycle.Stop` then `lifecycle.Start`, each taking and releasing its own per-sandbox lock, so there is an unlocked window between them (violating the whole-op lock invariant at `store/lock_unix.go:50-54`). A concurrent `start` in the gap recreates the container in the old mode; Restart's Start half then runs `applyIsolationOverride` (`start.go:74-98`), which **persists** `isolation=vm` unconditionally, then `DetectStatus` sees Active and returns early without recreating (`start.go:369-372`). The record says `vm`; the instance is a container. Same persist-then-check-then-maybe-skip order silently drops `--broker`/`--vscode-tunnel`/`--resume` on the race. Distinct from DF113.
 - **Pointer:** `internal/orchestrator/engine_lifecycle.go:49-57`; `internal/orchestrator/lifecycle/start.go:74-98,343,369-372`; `store/lock_unix.go:50-54`.
 
-### DF145 — subprocess and `.Output()` failures forward an opaque exit code, discarding the stderr the caller needs
-
-- **Discovered:** 2026-07-19 · **Workstream:** post-DF144 opaque-error audit
-- **Severity:** MEDIUM (no data loss, but a build/daemon failure surfaces only `exit status N`, so the operator cannot tell a missing package from a network fault from a permission error without re-running by hand). Cross-backend; the highest-impact sites are macOS-only.
-- **Disposition:** the class DF144 fixed (docker/containerd/podman image builds → `TailBuffer`) has siblings the fix did not reach. **Linux/cross-platform half being ADDRESSED on branch `opaque-error-diagnostics`** (Phase 1: a shared `sysexec` stderr-surfacing helper + `internal/orchestrator/files.go` + `runtime/podman/podman.go`); **runtime-macOS half deferred to the mac queue** (Phase 2: `runtime/apple`, `runtime/tart`, `internal/envsetup/keychain_darwin.go` — these need macOS at runtime to *verify*: tart's CLI + Apple Silicon, apple's `container` CLI, the `security` tool. `runtime/apple` and `runtime/tart` are **not** build-tagged — they compile on Linux (their `New()` fails at runtime via `isMacOS()`), so the edits themselves are Linux-buildable; only `keychain_darwin.go`, a `_darwin.go` suffix file, cannot be compiled off darwin. It is verification, not compilation, that forces the deferral). The finding stays open until the mac half lands.
-- **Description:** three shapes, one root cause — an error is wrapped or returned without the diagnostic already in hand. (a) *Streaming builds drop their tail* — `runtime/apple/apple.go:455` (`container build`, the exact DF144 case on the apple backend) and `runtime/tart/build.go:444,351,371,363` stream stdout/stderr to a writer but return only the exit error; remedy is DF144's `TailBuffer`. (b) *`.Output()` wraps discard the captured `ExitError.Stderr`* — `runtime/tart/runtime.go:66`, `runtime/podman/podman.go:286`, `internal/envsetup/keychain_darwin.go:26`, `runtime/tart/build.go:244`; Go already populated `(*exec.ExitError).Stderr` and the `%w` renders only `exit status N`. (c) *A dropped `%w` yields an empty message* — `internal/orchestrator/files.go:145` returns `fmt.Errorf("%s", cpOutput)`, which is the **empty string** when `cp` fails to *start* (the real `err` is discarded). The codebase is mostly healthy: `git.go`, `runtime/exec.go`, and `apple.go:379` already capture stderr into a typed error — the fix is to reuse that idiom, not invent one.
-- **Structural note:** `wrapcheck` is not enabled (confirmed); `errorlint` flags unsafe type-*asserts* but not a dropped `%w`, so shapes (b)/(c) are not linted today. Per the one-consistent-convention rule, Phase 1 adds a single `sysexec` helper that renders `*exec.ExitError.Stderr` rather than sprinkling `errors.As` at each site; the `.Output()` sites (b) then reuse it.
-- **Pointer:** builds — `runtime/apple/apple.go:455`, `runtime/tart/build.go:444,351,371,363`; `.Output()` — `runtime/tart/runtime.go:66`, `runtime/podman/podman.go:286`, `internal/envsetup/keychain_darwin.go:26`, `runtime/tart/build.go:244`; dropped-`%w` — `internal/orchestrator/files.go:145`. Reference remedy: `internal/sysexec/tail.go`, `runtime/docker/build.go:178-187`.
-
 ### DF146 — integration-tagged test files escape the linter entirely, so 32 issues sit unseen
 
 - **Discovered:** 2026-07-19 · **Workstream:** conformance speedup (integration harness work)
 - **Severity:** LOW (test-only lint debt, not a shipped defect), but it is a **gate blind spot** — the
   class of thing that silently rots because nothing looks at it.
-- **Disposition:** FILED, not fixed — the fix is not a one-liner (see the tag-set tension below), and
-  it is the owner's call whether integration files come under the gate at all.
+- **Disposition:** issues FIXED on branch `opaque-error-diagnostics` (2026-07-19); the **blind spot
+  itself remains open** pending the owner's call on wiring `--build-tags integration` into the gate.
+  The cleanup found the filed count was itself a symptom of the blindness: golangci-lint's default
+  output caps (`--max-same-issues`, `--max-issues-per-linter`) had truncated the list — the true
+  backlog was **86 issues**, not 32 (the extra 54: G104 twins of `//nolint:errcheck`-suppressed
+  lines, and more unallowlisted `GetCuratedHostEnv` callers). All 86 are now reconciled so that
+  `golangci-lint run ./...` **and** `... --build-tags integration ./...` both pass, on darwin and
+  GOOS=linux, with output caps disabled. The 6 `exitAfterDefer` TestMains were real bugs (deferred
+  cleanup never ran); the rest were stale directives, scoped `//nolint`s with reasons, and
+  `.golangci.yml` allowlist entries. **Proposal for the owner:** add the tagged run to `make lint` /
+  CI (a second `golangci-lint run --build-tags integration ./...` invocation, with caps disabled)
+  so this cannot rot again; without it the reconciliation decays with the next integration-file
+  edit. Until that decision, this finding stays open as the record that nothing gates the tag.
 - **Description:** `make check`, `make lint`, `make lint-cross`, and the CI `golangci-lint-action` all
   run `golangci-lint run ./...` with **no build tags**, so every `//go:build integration` file is
   never compiled by the linter and never checked. Running `golangci-lint run --build-tags integration
@@ -571,6 +573,28 @@ is worse than none because it also supplies the confidence.
   (32 issues at time of filing). Concentrations: `runtime/{docker,podman,apple,tart,seatbelt}/
   integration_*_test.go`, `internal/orchestrator/*integration*_test.go`, `runtime/runtimetest/
   conformance_iface.go:400,407`.
+
+### DF147 — the conformance harness's parallel path panics on a fixture that uses `t.Setenv`, and apple's is one
+
+- **Discovered:** 2026-07-19 · **Workstream:** integration-test speedup, Mac-check phase
+- **Severity:** LOW (latent — no in-tree combination currently triggers it), but it is exactly the
+  class of macOS-only breakage the Linux phase cannot see.
+- **Disposition:** FILED, worked around by design rather than fixed. With
+  `SharesReadOnlyInstance: true` (apple's intended, now-set policy) the suite runs serially and the
+  panic cannot fire; the incompatibility itself remains.
+- **Description:** `RunInterfaceConformance` calls `t.Parallel()` on every subtest of a non-sharing
+  backend, and calls `setup(t)` *inside* those parallel subtests. A fixture whose setup uses
+  `testutil.IsolatedHome` (which calls `t.Setenv`) then panics: Go forbids `t.Setenv` in a parallel
+  test (`testing: test using t.Setenv ... can not use t.Parallel`). `appleSetup` is such a fixture,
+  so apple with `SharesReadOnlyInstance: false` panics the whole suite — verified on hardware
+  2026-07-19 (the Linux phase verified only docker/podman/containerd fixtures, none of which call
+  `IsolatedHome` per-subtest; tart's closure captures its runtime once at parent scope). Any future
+  fixture that isolates env per-subtest will hit the same wall the moment it opts out of sharing.
+- **Remedy sketch:** either make the harness detect the combination and fail with a named error
+  (cheap), or make per-subtest fixtures isolate HOME without `t.Setenv` (a Layout-only isolation,
+  since the env leak the helper guards against is process-global anyway).
+- **Pointer:** `runtime/runtimetest/conformance_iface.go` (`parallelize`, the non-sharing branch);
+  `runtime/apple/integration_test.go` (`appleSetup`); `internal/testutil/home.go:33`.
 
 ## Policy origin
 

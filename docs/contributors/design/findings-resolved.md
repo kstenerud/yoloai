@@ -16,6 +16,37 @@ active file stays a working set. Newest first.
 - **Severity:** MEDIUM — a hard failure of a security feature (isolation aborted), failing closed. Latent on this dev host (Docker replaced the container `resolv.conf` with v4 nameservers; a v6 nameserver reaches the container only on an `--ipv6` network / v6-supplying CNI / apple vmnet resolver — none reproducible here), which is why it was never higher.
 - **Pointer:** `runtime/docker/resources/firewall.py` (`is_ipv4`, `parse_nameservers`, `read_nameservers`); `runtime/docker/resources/tests/test_firewall.py`; `Makefile` (`python-test`). Related: DF104 (open, folded into the network-families design).
 
+### DF145 — subprocess and `.Output()` failures forwarded an opaque exit code, discarding the stderr the caller needs (RESOLVED 2026-07-19)
+
+- **Resolved 2026-07-19, in two phases.** Three shapes, one root cause — an error was wrapped or
+  returned without the diagnostic already in hand. **Phase 1 (Linux/cross-platform):** new
+  `sysexec.EnrichExitError` folds the stderr Go already captured into `(*exec.ExitError)` on any
+  `.Output()` failure into the error message (wrapping with `%w` so `errors.As/Is` still match);
+  applied at `runtime/podman/podman.go:286`, and `internal/orchestrator/files.go:145`'s dropped-`%w`
+  (which could render as the *empty string* when `cp` failed to start) now wraps the real error.
+  **Phase 2 (macOS, verified on Apple Silicon hardware):** the streaming build/VM sites got the
+  DF144 `TailBuffer` remedy — `runtime/apple/apple.go` (`container build`, the exact DF144 case) and
+  `runtime/tart/build.go` (provision steps, tool verification, `tart pull`, and the imprint write,
+  which previously discarded its exec's output entirely) — and the remaining `.Output()` sites
+  (`runtime/tart/runtime.go` simctl query, `runtime/tart/build.go` `sw_vers`,
+  `internal/envsetup/keychain_darwin.go` `security`) route through `sysexec.EnrichExitError`.
+  Hardware probes confirmed the mechanism inputs (`tart pull` and `security` both emit their
+  diagnostics on stderr with a bare exit status otherwise); unit tests with fake failing binaries
+  pin every remedied shape (`runtime/tart/build_test.go`, `runtime/apple/build_test.go`,
+  `internal/envsetup/keychain_darwin_test.go`, plus the Phase-1 `sysexec` tests).
+- **Rides:** **any** release — additive error enrichment; no flag, config, default, or
+  accepted-input change.
+- **Discovered:** 2026-07-19 · **Workstream:** post-DF144 opaque-error audit
+- **Severity:** MEDIUM (no data loss, but a build/daemon failure surfaced only `exit status N`, so
+  the operator could not tell a missing package from a network fault from a permission error
+  without re-running by hand). Cross-backend; the highest-impact sites were macOS-only.
+- **Pointer:** `internal/sysexec/exiterr.go` (`EnrichExitError`), `internal/sysexec/tail.go`
+  (`TailBuffer`, from DF144); builds — `runtime/apple/apple.go` (`buildBaseImage`),
+  `runtime/tart/build.go` (`bootForProvisioning`, `verifyTools`, `pullImage`, `writeImprint`);
+  `.Output()` — `runtime/tart/runtime.go` (`QueryAvailableRuntimes`), `runtime/tart/build.go`
+  (`hostMacOSMajor`), `internal/envsetup/keychain_darwin.go`, `runtime/podman/podman.go`;
+  dropped-`%w` — `internal/orchestrator/files.go`.
+
 ### DF144 — a failed image build returned "exited with code 1" with the cause dropped, invisible to `--json`/embedders (RESOLVED 2026-07-19)
 
 - **Resolved 2026-07-19** — the three image-build exec sites (`runtime/docker/build.go` base + profile, `runtime/containerd/image.go`) streamed the build subprocess's combined stdout+stderr to an `output` writer but, on failure, returned a generic `"%s build exited with code %d"` — the actionable cause (a permission error, a missing apt package, a network failure) reached the user only via the live stream. Interactively that stream is the terminal, so a human saw the real error buried under yoloai's opaque line; under `--json` the stream is `io.Discard` and library embedders pass their own writer, so the cause was **lost entirely**. New `sysexec.TailBuffer` (an `io.Writer` keeping the last N lines, mutex-guarded, memory-bounded) is tee'd into each build via `io.MultiWriter(output, tail)` — the same value on both `cmd.Stdout`/`cmd.Stderr` so os/exec keeps its single-pipe path — and its `ErrorSuffix()` is appended to the returned error. **Verified on the exact reported scenario:** a root-owned `~/.docker/buildx/activity/default` made `yoloai system build --json` fail; the error now reads `docker build exited with code 1\nlast output:\n  ERROR: open …/.docker/buildx/… permission denied` instead of the bare code. Unit tests cover the buffer (retention, unterminated final line, CR-stripping, memory bound, suffix formatting) and the end-to-end wiring through a real failing subprocess.

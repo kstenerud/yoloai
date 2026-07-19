@@ -4,10 +4,11 @@
 
 # Integration & smoke test speedup
 
-- **Status:** IN-PROGRESS — designed 2026-07-19 against the real harness (`conformance_iface.go`).
-  **Levers 1–2 built and verified on Linux:** the parallel path is green on real docker (3.0 s, was
-  6.2 s serial) and the shared-instance path is pinned by a fake-backend boot-count test
-  (`conformance_share_test.go`). **Mac-check phase pending** (tart/apple/seatbelt) plus levers 3–5.
+- **Status:** IMPLEMENTED — designed 2026-07-19 against the real harness (`conformance_iface.go`);
+  levers 1–2 built and verified on Linux (docker parallel: 3.0 s, was 6.2 s serial; sharing pinned
+  by `conformance_share_test.go`); **Mac-check phase completed 2026-07-19 on Apple Silicon
+  hardware** — measurements, the concurrent-exec verdict, and the levers 3–5 outcomes are in
+  "Mac-check results" below.
 - **Depends on:** —
 - **Rides:** **any** release — test-only; no shipped behavior changes. (It is release-*blocking* by
   owner direction, not by the release-kind rule.)
@@ -217,13 +218,58 @@ Levers 1+2 target the ~15–20 min tart conformance suite and its apple twin: re
 min off the macOS run** with isolation preserved, before lever 3 trims several more minutes of
 redundant smoke boots.
 
+## Mac-check results (2026-07-19, M-series host, 2 free VM slots)
+
+Both VM backends now set `SharesReadOnlyInstance: true`. Wall-clock for the tart conformance
+suite, same host, same base image, back to back:
+
+| Configuration | Wall-clock | Boots |
+| --- | --- | --- |
+| Lever off (per-subtest boots, 2-wide parallel via the census gate) | **3 m 55 s** | 10 |
+| Lever on (shared read-only instance, suite serial) | **2 m 33 s** | 6 |
+
+Boots on this host cost ~25–45 s (clone + boot), well under the design's 90–118 s estimate, and
+the census-gated parallelism already landed from Linux — so the honest "before" is the 3 m 55 s
+parallel run, not the old ~15–20 min serial harness. Sharing still wins by ~35 % *against* that
+parallel baseline: the read-only group costs one 29 s boot instead of five.
+
+**apple:** the lever-off configuration does not run at all on hardware — `appleSetup` isolates HOME
+via `t.Setenv`, which panics under the non-sharing path's `t.Parallel()` (filed as DF147; invisible
+to the Linux phase because apple only runs on macOS). With sharing on, the suite is green in
+**30.6 s**. seatbelt's fixture captures its runtime at parent scope and is unaffected.
+
+**Concurrent-exec question — settled: tart Exec against one running VM is concurrency-safe.** A
+hardware probe ran 8 goroutines × 5 rounds of `Exec` (40 total) against a single running clone;
+zero failures, every output exact. **The shared read-only subtests stay serial anyway:** measured
+post-boot they cost 0.02–0.10 s each, so parallelising them would recover well under one second.
+The verdict matters only if the harness ever wants to overlap the shared instance with the
+mutating boots; that refinement stays unbuilt (its ceiling on this host is ~30 s).
+
+**Lever 3 — done.** `tag_transfer` is trimmed from the expensive VM backends
+(`EXPENSIVE_VM_BACKENDS = {tart, apple}` in `scripts/smoke_test.py`): it boots a second sandbox
+per backend and its git-transfer plumbing is backend-agnostic, so it runs only where a boot costs
+seconds; tart/apple keep `stop_start` as their end-to-end scenario. `isolation_check` is *not*
+trimmed (guest network isolation is per-backend coverage nothing else proves); `clone` already ran
+only on the default docker backend. The trim is logged at scheduling ("trimmed on expensive VM
+backends…") and pinned by `test_tag_transfer_trimmed_on_expensive_vm_backends_only`.
+
+**Lever 4 — investigated on hardware, declined.** The suite measured **6 m 46 s** all-green on
+this host (FullLifecycle 114 s, GitCorruption 104 s, ResetRefreshesVMWorkDir 99 s, MultipleAuxDirs
+48 s, VMLocalStorageVerification 41 s), confirming the ~7–8 min estimate. But in all three booting
+tests the boots are themselves the behavior under test (Start, restart-recreate-from-staging,
+reset-recreate); a shared booted VM would erase the lifecycle transitions being pinned. The only
+mergeable piece (VMLocalStorageVerification's assertions into FullLifecycle's first started state)
+saves one ~41 s boot at real failure-legibility cost — declined.
+
+**Lever 5 — done.** The VM-free tart/seatbelt basics moved untagged
+(`runtime/{tart,seatbelt}/backend_basics_test.go`), with the platform guard in the shared setup
+helpers (`setup_test.go`): skip off macOS (structurally impossible), and on macOS an absent
+backend fails per D112 via `testutil.RequireBackend` (carve-out honored). They now run in every
+macOS `make check`.
+
 ## Open questions
 
-- Does tart support concurrent `Exec` against one running VM reliably enough to parallelize the shared
-  read-only subtests, or should VM backends share-but-serialize (lever 1 without lever 2's parallelism
-  on the shared instance)? **Settle on the Mac** (the owner does not know offhand; the Mac-check phase
-  verifies it). If concurrent exec is unreliable, tart keeps lever 1 and drops parallelism *on the
-  shared instance* only — the free-slot semaphore for the mutating boots is unaffected.
+None — the concurrent-exec question was the last one, settled above.
 
 **Resolved during design:** the shared-instance split is two explicit subtest groups (not a
 per-subtest boolean); sharing is a per-backend opt-in (VM backends only); apple starts unbounded; and
