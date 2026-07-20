@@ -38,7 +38,7 @@ const (
 	SandboxStateFile = "sandbox-state.json"
 
 	// RuntimeConfigFile stores entrypoint/infrastructure config.
-	RuntimeConfigFile = "runtime-config.json"
+	RuntimeConfigFile = config.RuntimeConfigFileName
 
 	// AgentStatusFile stores live agent liveness status.
 	AgentStatusFile = "agent-status.json"
@@ -167,7 +167,7 @@ func HomeSeedPath(sandboxDir string) string {
 
 // RuntimeConfigFilePath returns the path to runtime-config.json within a sandbox.
 func RuntimeConfigFilePath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, RuntimeConfigFile)
+	return config.RuntimeConfigPath(sandboxDir)
 }
 
 // AgentStatusFilePath returns the path to agent-status.json within a sandbox.

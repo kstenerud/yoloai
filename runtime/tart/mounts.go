@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/monitor"
@@ -55,7 +56,7 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath, hostn
 	// — the VM is left booted, mounted, and exec-able with no monitor. This keeps
 	// tart's Start a clean P1 like every other backend's, with P2 gated on the
 	// sandbox handshake (the config file) rather than fused into Start.
-	if _, err := os.Stat(filepath.Join(sandboxPath, "runtime-config.json")); os.IsNotExist(err) {
+	if _, err := os.Stat(config.RuntimeConfigPath(sandboxPath)); os.IsNotExist(err) {
 		return nil
 	}
 

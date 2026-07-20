@@ -147,7 +147,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 	}
 
 	// Read existing runtime-config.json
-	configData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	configData, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
 	}

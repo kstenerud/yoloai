@@ -930,7 +930,7 @@ const dockerHomeDir = "/home/yoloai"
 
 // patchConfigWorkingDir reads runtime-config.json, remaps working_dir for macOS, and writes it back.
 func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if os.IsNotExist(err) {
 		return nil // no sandbox config → bare runtime instance, nothing to patch
@@ -1161,7 +1161,7 @@ func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.Mount
 	}
 
 	// Read existing runtime-config.json
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if os.IsNotExist(err) {
 		// No sandbox config → no monitor to consume the mount_map (a bare runtime

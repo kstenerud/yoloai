@@ -546,7 +546,7 @@ func runNetnsSidecarWithRetry(ctx context.Context, runner runtime.NetnsSidecarRu
 // runtime-config.json — the composed agent-floor + user allowlist written at
 // create time and kept current by network allow/deny.
 func loadAllowedDomains(sandboxDir string) ([]string, error) {
-	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
+	configPath := store.RuntimeConfigFilePath(sandboxDir)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return nil, fmt.Errorf("read runtime-config.json: %w", err)
@@ -944,7 +944,7 @@ func startLegacy(ctx context.Context, rt runtime.Backend, st *state.State, cname
 // the keepalive_only field, and writes it back atomically. Called before
 // rt.Create so the entrypoint reads the updated config on first boot.
 func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
-	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
+	configPath := store.RuntimeConfigFilePath(sandboxDir)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)

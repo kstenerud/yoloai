@@ -213,7 +213,7 @@ func buildSystemMounts(st *state.State) []runtime.MountSpec {
 	mounts = append(mounts,
 		// Runtime config file
 		runtime.MountSpec{
-			HostPath:      filepath.Join(st.SandboxDir, store.RuntimeConfigFile),
+			HostPath:      store.RuntimeConfigFilePath(st.SandboxDir),
 			ContainerPath: "/yoloai/" + store.RuntimeConfigFile,
 			ReadOnly:      true,
 		},

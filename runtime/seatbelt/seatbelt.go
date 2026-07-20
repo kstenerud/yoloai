@@ -321,7 +321,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	// keep-alive under the SBPL profile instead: a running, exec-able instance
 	// (Exec runs fresh sandbox-exec'd commands; the profile enforces the mount
 	// grants) with no monitor. Mirrors tart's P1/P2 split.
-	_, cfgStatErr := os.Stat(filepath.Join(sandboxPath, "runtime-config.json"))
+	_, cfgStatErr := os.Stat(config.RuntimeConfigPath(sandboxPath))
 	bareInstance := os.IsNotExist(cfgStatErr)
 	sandboxArgs := []string{"-f", profilePath}
 	if bareInstance {
@@ -824,7 +824,7 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	// caller-supplied workDir because it comes from environment.json mount_path,
 	// which stores the Docker-oriented target path (the original host path),
 	// not the seatbelt copy path.
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
 	if data, err := os.ReadFile(cfgPath); err == nil { //nolint:gosec // G304: path within sandbox dir
 		var raw map[string]any
 		if err := json.Unmarshal(data, &raw); err == nil {
@@ -866,7 +866,7 @@ func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.Mou
 		return nil // not a copy-mode sandbox
 	}
 
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if os.IsNotExist(err) {
 		return nil // no sandbox config → bare runtime instance, nothing to patch

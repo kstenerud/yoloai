@@ -284,8 +284,8 @@ func backfillSandboxLaunchPrefix(sandboxDir string, prefixFor LaunchPrefixResolv
 		return nil // no environment.json: can't classify; leave untouched
 	}
 
-	rcPath := filepath.Join(sandboxDir, "runtime-config.json")
-	rcData, err := os.ReadFile(rcPath) //nolint:gosec // G304: trusted sandbox subpath
+	rcPath := filepath.Join(sandboxDir, "runtime-config.json") // flat: pre-tier sealed-ladder migration (v1->v2)
+	rcData, err := os.ReadFile(rcPath)                         //nolint:gosec // G304: trusted sandbox subpath
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil // no runtime-config.json: nothing to wrap

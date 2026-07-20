@@ -791,7 +791,7 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 	if err := fileutil.WriteFilePerm(filepath.Join(sandboxDir, store.AgentStatusFile), []byte("{}\n"), perms.File); err != nil {
 		return fmt.Errorf("write %s: %w", store.AgentStatusFile, err)
 	}
-	if err := fileutil.WriteFilePerm(filepath.Join(sandboxDir, store.RuntimeConfigFile), configData, configPerm); err != nil {
+	if err := fileutil.WriteFilePerm(store.RuntimeConfigFilePath(sandboxDir), configData, configPerm); err != nil {
 		return fmt.Errorf("write %s: %w", store.RuntimeConfigFile, err)
 	}
 	if err := envsetup.WriteContextFiles(sandboxDir, meta, envspec.BuildEnvSpec(agentDef)); err != nil {
