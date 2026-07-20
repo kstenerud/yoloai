@@ -207,6 +207,25 @@ func WriteBuildContextDir(dir string) error {
 	if err != nil {
 		return err
 	}
+	return writeTarToDir(tarReader, dir)
+}
+
+// WriteProfileBuildContextDir materializes a profile's build context (its
+// Dockerfile and sibling files, excluding the internal checksum marker and
+// config.yaml — same filtering as createProfileBuildContext) into dir.
+// Backends whose build command needs a *directory* context rather than a
+// stdin tar — e.g. Apple `container build <dir>` — use this instead of the
+// tar-based profile build context.
+func WriteProfileBuildContextDir(sourceDir string, dir string) error {
+	tarReader, err := createProfileBuildContext(sourceDir)
+	if err != nil {
+		return err
+	}
+	return writeTarToDir(tarReader, dir)
+}
+
+// writeTarToDir unpacks a tar stream into dir, one file per entry.
+func writeTarToDir(tarReader io.Reader, dir string) error {
 	tr := tar.NewReader(tarReader)
 	for {
 		hdr, err := tr.Next()
@@ -318,6 +337,19 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 // (re)built. Checks: no checksum file, profile Dockerfile changed, or
 // parent profile was rebuilt more recently.
 func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bool {
+	return ProfileImageNeedsBuild(profileDir, parentDir)
+}
+
+// RecordProfileBuildChecksum writes the current Dockerfile checksum to disk
+// for staleness detection.
+func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
+	RecordProfileBuildChecksum(profileDir)
+}
+
+// ProfileImageNeedsBuild is the free-function form of Runtime's method of the
+// same name — usable directly by other backends (e.g. apple) that share this
+// profile Dockerfile checksum scheme without needing a docker.Runtime.
+func ProfileImageNeedsBuild(profileDir string, parentDir string) bool {
 	current := profileBuildChecksum(profileDir)
 	if current == "" {
 		return true
@@ -345,9 +377,9 @@ func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bo
 	return parentInfo.ModTime().After(myInfo.ModTime())
 }
 
-// RecordProfileBuildChecksum writes the current Dockerfile checksum to disk
-// for staleness detection.
-func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
+// RecordProfileBuildChecksum is the free-function form of Runtime's method of
+// the same name — see ProfileImageNeedsBuild.
+func RecordProfileBuildChecksum(profileDir string) {
 	if sum := profileBuildChecksum(profileDir); sum != "" {
 		_ = fileutil.WriteFile(filepath.Join(profileDir, lastBuildFile), []byte(sum), 0600)
 	}

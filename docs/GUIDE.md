@@ -895,6 +895,7 @@ Isolation modes are silently ignored on non-container backends (tart, seatbelt).
 - **Network isolation works** the same as on Linux — the in-VM Linux kernel enforces the `--network-isolated` allowlist.
 - **No suspend/resume and no VS Code "Attach to Running Container".** `container` has no checkpoint or docker-compat API; `exec`-based attach (`yoloai attach`) works normally.
 - **Memory is not released back to the host** until the VM stops (virtio-balloon) — minor for ephemeral sandboxes.
+- **Profile Dockerfiles are built via Apple's own builder** (`container build`, same as `docker build`/`podman build`) — a profile's `yoloai-<profile>` image is built and cached automatically, no manual step needed. One gap versus Docker/Podman: no `--secret` build-secret support, so an auto-detected secret (e.g. `~/.npmrc`) is reported and dropped rather than passed into the build.
 
 **`container-privileged` — Docker-in-Docker and Compose:**
 
