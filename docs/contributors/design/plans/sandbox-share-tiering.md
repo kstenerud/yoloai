@@ -4,10 +4,66 @@
 
 # Sandbox directory share tiering (host-only / read-only / read-write)
 
-- **Status:** PLANNED — design draft from the DF136 solution-audit conversation (2026-07-20); not
-  yet a locked decision, not implemented. The interim (§ Interim) is shippable independently; the
-  full tiering is the target end state. Empirical facts below are marked confirmed-on-hardware.
+- **Status:** IN-PROGRESS — design confirmed with the owner 2026-07-20; being built on branch
+  `sandbox-share-tiering`. The concrete design is in § Confirmed design below; the earlier prose
+  stands as the reasoning that led there. Empirical facts are marked confirmed-on-hardware.
 - **Depends on:** —
+
+## Confirmed design (2026-07-20)
+
+The owner chose the fully principled fix over the cheap interim: make the tier a **physical
+directory**, so classification is "which directory does this file live in", not a list that can
+drift. The sandbox-dir root holds **only three subdirectories** — there is no un-tiered place to put
+a new file, and `store/paths.go` becomes the sole path-builder, every helper rooted in a tier.
+
+```
+<sandboxDir>/
+  host/   — never shared to any guest
+  ro/     — guest read-only
+  rw/     — guest read-write
+```
+
+**File → tier** (from the host+guest surface maps):
+
+| Tier | Contents |
+| --- | --- |
+| `host/` | `environment.json`, `sandbox-state.json`, `agent.json`, `netpolicy.json`, `backend/` (SBPL profile, pids, VM/CNI state), `network-diag.txt` |
+| `ro/` | `runtime-config.json`, `bin/` (guest-exec'd scripts), `prompt.txt`/`resume-prompt.txt`, `machine-id`, `home-seed/`, `secrets/` (ephemeral, guest-read) |
+| `rw/` | `logs/` (+ the `.secrets-consumed`/`.substrate-ready` markers), `agent-runtime/`, `agent-status.json`, `files/`, `cache/`, `home/`, `work/`, `tmux/`, `setup.log`, `vscode-cli/`, the create-done marker |
+
+**The guest sees one flat root; its scripts are unchanged.** The in-sandbox scripts build every path
+as `os.path.join(yoloai_dir, "logs", …)` from a single root, so each backend assembles that flat
+root as a *view* over the tiers. Not touching the guest scripts is itself drift-elimination (they are
+the same bytes on every backend; ~20 fragile path-joins stay untouched).
+
+**Per-backend realization:**
+- **docker/podman/containerd/apple** — already bind per-file at the right RO/RW and never mount the
+  root; just repoint each MountSpec HostPath to its tier location. `host/` stays invisible for free.
+- **tart** — two VirtioFS shares (`ro`, `rw`) replace the one whole-root share; the existing symlink
+  tree assembles the flat guest view; `host/` gets no `--dir`, so it is unreachable.
+- **seatbelt** — grant read+write on `rw/`, read on `ro/` and the view dir, nothing on `host/`;
+  `yoloai_dir` becomes the view dir. **Confirmed on macOS Tahoe (2026-07-20):** writing through a
+  view symlink is enforced at the *target's* tier — a write via the view to `rw/` lands, a write via
+  the view to `ro/` is blocked, and a write to ungranted `host/` (the DF136 attack) is blocked.
+
+**Two judgment calls (owner-approved):**
+- `tmux/` → `rw` wholesale: it holds a runtime-created socket (needs write); `tmux.conf` rides along
+  writable — low-risk, the agent's own multiplexer running as the agent, no privilege boundary.
+- the seatbelt process-log moves from `backend/` to `rw/logs/`, so `backend/` is cleanly host-only.
+
+**Migration:** existing sandboxes are flat → schema bump **v5→v6** with a `TierLayout` migrator
+following the v3→v4 overlay-flatten precedent (scratch on the same filesystem, atomic promotion,
+stamp written **last** per D110). Register the migration in [deprecations.md](../../deprecations.md).
+
+**Sequencing (reviewable commits on the branch):**
+1. Prep-refactor: funnel the ~16 ad-hoc `runtime-config.json` joiners through
+   `store.RuntimeConfigFilePath` (no behavior change) so the later move is one-place.
+2. `store/paths.go`: the tier roots + every helper rooted in its tier; the four single-joiner
+   metadata files (`environment/sandbox-state/agent/netpolicy`) into `host/`.
+3. `create.go` dir creation + the backend wiring (`mounts.Build`, tart two-share + view, seatbelt
+   per-tier grants + view).
+4. The v6 `TierLayout` migrator.
+5. Tests on real docker/tart/seatbelt; the DF136/DF148 reproductions flip to "rejected".
 
 ## Problem
 
