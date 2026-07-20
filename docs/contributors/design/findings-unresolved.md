@@ -571,6 +571,44 @@ is worse than none because it also supplies the confidence.
 - **Pointer:** `runtime/runtimetest/conformance_iface.go` (`parallelize`, the non-sharing branch);
   `runtime/apple/integration_test.go` (`appleSetup`); `internal/testutil/home.go:33`.
 
+### DF148 — `runtime-config.json` is guest-writable on tart/seatbelt and the host reads it back post-launch
+
+- **Discovered:** 2026-07-20 · **Workstream:** DF136 solution audit (sandbox-metadata host surface)
+- **Severity:** LOW (security, latent — needs a compromised agent; **same class as DF136** — a host
+  action driven by a guest-writable file — but the concretely-reachable consequences on the two
+  affected backends are low-impact, see the bound below). **tart + seatbelt only.**
+- **Disposition:** PARKED — deferred to [sandbox-share-tiering.md](plans/sandbox-share-tiering.md),
+  which closes it by parking `runtime-config.json` in the read-only tier. Sibling of DF136; not a
+  release blocker. Filed rather than fixed to avoid scope-creeping the DF136 audit (D119).
+- **Verified (by me):** `runtime-config.json` sits at the sandbox-dir root, inside the *same* coarse
+  guest-writable share as `environment.json` (the DF136 root cause), so a confined agent can rewrite
+  it. Docker mounts it **read-only** as a single-file bind (`internal/orchestrator/mounts/mounts.go:215-219`);
+  tart and seatbelt expose it read-write — the same tart/seatbelt-vs-Docker asymmetry as DF136. The
+  host reads it back **after the guest is up** in three places: `Engine.sandboxIsolation`
+  (`internal/orchestrator/engine_network.go:84`) parses the `isolation` field to choose the
+  firewall-patch strategy (`UsesSidecarFirewall`, `engine_network.go:62`); seatbelt
+  `buildExecCommand` (`runtime/seatbelt/seatbelt.go:827-831`) reads `working_dir` on **every Exec**
+  to set the host command's cwd; and restart pulls `TmuxConf` from it (`internal/orchestrator/lifecycle/restart.go:163`).
+- **The bound that makes it LOW (verified):** restart is **defensively written** — it re-derives the
+  security-critical fields (`workdir`, network policy via `netpolicycfg.Load`, `Isolation`, `Setup`)
+  from the trusted `Environment` record and the separate netpolicy file, **not** from
+  `runtime-config.json` (`restart.go:180-208`). So the dangerous schema fields (`AllowedDomains`,
+  `SetupCommands`, `AgentCommand`) are **not** re-read from the guest-writable file on the host.
+  Further, the highest-impact residual consumer — `sandboxIsolation` → sidecar-firewall selection —
+  is a network-isolation mechanism whose macOS applicability is itself deferred
+  (see [tamper-resistant-network-isolation.md](plans/tamper-resistant-network-isolation.md) Scope),
+  i.e. it matters mainly on backends where this file is *already read-only*. On tart/seatbelt the
+  concretely-reachable residual is `working_dir`→host cwd (still inside the profile confinement) and
+  `TmuxConf` (tmux config injection) — both low.
+- **The check that would settle worst-case severity:** trace whether **any** high-impact consumer of
+  `runtime-config.json` (isolation-mode selection, or any field feeding a host privilege/network
+  decision) actually runs on tart or seatbelt *after* the guest could have tampered. If none does,
+  LOW is right; if `sandboxIsolation`'s strategy pick can weaken a tart/seatbelt sandbox's own
+  egress, this rises to MEDIUM. Not run — deferred with the finding.
+- **Pointer:** `internal/orchestrator/mounts/mounts.go:215-219` (Docker ro bind); `runtime/tart/tart.go:708`
+  + `runtime/seatbelt/profile.go:193-199` (the rw share/grant); `internal/orchestrator/engine_network.go:62,84`;
+  `runtime/seatbelt/seatbelt.go:827-831`; `internal/orchestrator/lifecycle/restart.go:163,180-208`. Related: DF136.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
