@@ -98,8 +98,9 @@ var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.UsernsProvider = (*Runtime)(nil)
 var _ runtime.IsolationCapabilityProvider = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
-var _ runtime.CachePruner = (*Runtime)(nil)       // inherited from embedded docker.Runtime
-var _ runtime.DiskUsageReporter = (*Runtime)(nil) // inherited; image bytes via podmanImageBytes (LayersSize=0 workaround)
+var _ runtime.CachePruner = (*Runtime)(nil)         // inherited from embedded docker.Runtime
+var _ runtime.DiskUsageReporter = (*Runtime)(nil)   // inherited; image bytes via podmanImageBytes (LayersSize=0 workaround)
+var _ runtime.ProfileImageBuilder = (*Runtime)(nil) // inherited from embedded docker.Runtime
 
 // New creates a Podman Runtime by discovering the Podman socket and
 // connecting via the Docker SDK.

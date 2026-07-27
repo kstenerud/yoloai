@@ -145,6 +145,7 @@ var _ runtime.CachePruner = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
 var _ runtime.RecreateAdvisor = (*Runtime)(nil)
+var _ runtime.ProfileImageBuilder = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable. layout
 // carries the threaded environment snapshot; the daemon socket and TLS settings

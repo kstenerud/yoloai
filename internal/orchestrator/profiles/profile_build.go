@@ -16,18 +16,11 @@ import (
 )
 
 // ProfileImageBuilder is optionally implemented by backends that support
-// building custom images from profile Dockerfiles.
-//
-// buildEnv is the host-environment snapshot the build subprocess draws from
-// (the caller's Layout, never the live process env — §12). The backend
-// allowlists the keys its build CLI actually needs (HostEnv.EnvForDockerBuild);
-// it does not inherit os.Environ. A multi-principal embedder thus controls
-// exactly which env each principal's profile build sees.
-type ProfileImageBuilder interface {
-	BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error
-	ProfileImageNeedsBuild(profileDir string, parentDir string) bool
-	RecordProfileBuildChecksum(profileDir string)
-}
+// building custom images from profile Dockerfiles. The interface is defined in
+// `runtime` alongside every other optional backend capability, so that backends
+// can compile-time assert it; this alias keeps the name available to the
+// orchestrator tier that consumes it.
+type ProfileImageBuilder = runtime.ProfileImageBuilder
 
 // EnsureProfileImage ensures that the Docker image for a profile and its
 // entire inheritance chain are built and up to date. Non-Docker backends
@@ -42,7 +35,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 		return nil
 	}
 
-	builder, ok := rt.(ProfileImageBuilder)
+	builder, ok := runtime.ProfileImageBuilderOf(rt)
 	if !ok {
 		return nil
 	}

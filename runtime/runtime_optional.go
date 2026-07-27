@@ -8,6 +8,7 @@ import (
 	"context"
 	"errors"
 	"io"
+	"log/slog"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime/caps"
@@ -445,6 +446,48 @@ func LauncherOf(rt Backend) (ProcessLauncher, bool) {
 // to fail with a clear error pointing at the backend.
 type StdioExecer interface {
 	StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error
+}
+
+// ProfileImageBuilder is an optional interface for backends that can build a
+// custom image from a profile's Dockerfile. Image-based backends (docker,
+// podman) implement it; backends with no OCI image concept (tart, seatbelt) do
+// not, and profile Dockerfiles are ignored there.
+//
+// buildEnv is the host-environment snapshot the build subprocess draws from
+// (the caller's Layout, never the live process env — §12). The backend
+// allowlists the keys its build CLI actually needs (`HostEnv.EnvForDockerBuild`
+// and its per-backend analogues); it does not inherit os.Environ, and it does
+// not substitute an exec env captured at construction. A multi-principal
+// embedder thus controls exactly which env each principal's profile build sees.
+//
+// Two invariants an implementation must carry, both learned from defects:
+//
+//   - **Staleness markers are keyed by backend** (DF150). A "have I built this
+//     already?" marker written by one backend must not satisfy another: the
+//     image stores are separate, so a shared marker makes the second backend
+//     skip a build whose image it does not have, and the run fails at pull.
+//     `baseImageChecksumPath(layout, backendKey)` is the worked example.
+//   - **A build failure carries the build tool's own diagnostic** on the error,
+//     not only on the output stream (DF144/DF145). See `standards/go.md` →
+//     Subprocess errors.
+//
+// This interface lives here, with every other optional backend capability, so
+// that a backend can assert it at compile time (`var _ runtime.ProfileImageBuilder
+// = (*Runtime)(nil)`) and so that the catalogue of what a backend may implement
+// is one file rather than a search. It previously lived in
+// `internal/orchestrator/profiles`, where no backend in the public runtime tree
+// could name it — which is how a backend came to be missing it unnoticed.
+type ProfileImageBuilder interface {
+	BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error
+	ProfileImageNeedsBuild(profileDir string, parentDir string) bool
+	RecordProfileBuildChecksum(profileDir string)
+}
+
+// ProfileImageBuilderOf returns rt as a ProfileImageBuilder if the backend
+// builds profile images; ok is false for backends with no image concept.
+func ProfileImageBuilderOf(rt Backend) (ProfileImageBuilder, bool) {
+	b, ok := rt.(ProfileImageBuilder)
+	return b, ok
 }
 
 // CachePruner is an optional interface for backends that maintain an
