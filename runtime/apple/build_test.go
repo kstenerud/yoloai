@@ -74,7 +74,7 @@ func TestBuildProfileImage_ErrorWrapsExitStatus(t *testing.T) {
 	sourceDir := newFakeProfileDir(t)
 
 	var output strings.Builder
-	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-r-dev", nil, r.layout, &output, slog.New(slog.DiscardHandler))
+	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-cli-dev", nil, r.layout, &output, slog.New(slog.DiscardHandler))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "container build exited with code 1",
 		"the error names the operation and exit code")
@@ -87,7 +87,7 @@ func TestBuildProfileImage_WarnsOnDroppedSecrets(t *testing.T) {
 	sourceDir := newFakeProfileDir(t)
 
 	var output strings.Builder
-	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-r-dev", []string{"npmrc"}, r.layout, &output, slog.New(slog.DiscardHandler))
+	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-cli-dev", []string{"npmrc"}, r.layout, &output, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	assert.Contains(t, output.String(), "not supported on the apple backend",
 		"an auto-detected build secret must be reported, not silently dropped")
@@ -99,7 +99,7 @@ func TestBuildProfileImage_NoWarningWithoutSecrets(t *testing.T) {
 	sourceDir := newFakeProfileDir(t)
 
 	var output strings.Builder
-	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-r-dev", nil, r.layout, &output, slog.New(slog.DiscardHandler))
+	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-cli-dev", nil, r.layout, &output, slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	assert.Empty(t, output.String(), "no secrets means no warning noise")
 }
