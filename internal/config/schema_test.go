@@ -228,6 +228,10 @@ func writeSandbox(t *testing.T, layout Layout, name, backend, prefix string) str
 	t.Helper()
 	dir := filepath.Join(layout.SandboxesDir(), name)
 	require.NoError(t, os.MkdirAll(dir, 0750))
+	// Flat, deliberately: the v1->v2 backfill reads both of these at the
+	// pre-tier layout the sandboxes it migrates were written with. Routing
+	// either through a path builder would desync the fixture from the reader
+	// the moment that builder moves into a tier.
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "environment.json"),
 		fmt.Appendf(nil, `{"backend":%q}`, backend), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "runtime-config.json"),

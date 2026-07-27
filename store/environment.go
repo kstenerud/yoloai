@@ -260,6 +260,10 @@ func SaveEnvironment(dir string, meta *Environment) error {
 		return fmt.Errorf("marshal %s: %w", EnvironmentFile, err)
 	}
 
+	if err := config.EnsureHostTier(dir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
+	}
+
 	path := EnvironmentFilePath(dir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", EnvironmentFile, err)

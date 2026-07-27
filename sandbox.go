@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator"
@@ -574,10 +573,11 @@ func (s *Sandbox) RuntimeConfigPath() string {
 }
 
 // EnvironmentPath returns the host path of the sandbox's environment.json
-// (<state>/environment.json), the captured creation-time metadata. Pure path
-// computation; the file need not exist.
+// (<state>/host/environment.json), the captured creation-time metadata. It
+// lives in the host-only tier, which is never shared into the sandbox. Pure
+// path computation; the file need not exist.
 func (s *Sandbox) EnvironmentPath() string {
-	return filepath.Join(s.engine.Layout().SandboxDir(s.name), store.EnvironmentFile)
+	return store.EnvironmentFilePath(s.engine.Layout().SandboxDir(s.name))
 }
 
 // LogPaths holds the host paths of a sandbox's diagnostic JSONL streams and the

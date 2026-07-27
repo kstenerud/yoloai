@@ -160,6 +160,12 @@ func LegacyCLIInstanceName(name string) string {
 // never as a filepath.Join at a call site, which is what the tiering is
 // removing (each path's tier must have exactly one place to change).
 
+// HostTierPath returns the host-only tier directory within a sandbox. Nothing
+// under it is ever shared into a guest on any backend.
+func HostTierPath(sandboxDir string) string {
+	return config.HostTierDir(sandboxDir)
+}
+
 // BackendPath returns the backend-specific directory within a sandbox.
 func BackendPath(sandboxDir string) string {
 	return config.BackendPath(sandboxDir)

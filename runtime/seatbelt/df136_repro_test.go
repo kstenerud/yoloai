@@ -88,7 +88,7 @@ func TestDF136_ConfinedAgentRedirectsApplyTarget(t *testing.T) {
 	tamperedSrc := filepath.Join(root, "tampered.json")
 	stageTamperedEnvironment(t, tamperedSrc, victimDir)
 
-	envPath := filepath.Join(sandboxDir, store.EnvironmentFile)
+	envPath := store.EnvironmentFilePath(sandboxDir)
 	out, err := sysexec.Command(sandboxExecEnv, sbExec,
 		"-f", profilePath, "/bin/cp", tamperedSrc, envPath).CombinedOutput()
 	require.NoErrorf(t, err, "confined write should succeed (DF136); output: %s", out)
@@ -142,9 +142,9 @@ func stageTamperedEnvironment(t *testing.T, path, victimHostPath string) {
 	// the confined process just copies pre-formed content.
 	tmpDir := t.TempDir()
 	writeEnvironment(t, tmpDir, victimHostPath)
-	data, err := os.ReadFile(filepath.Join(tmpDir, store.EnvironmentFile)) //nolint:gosec // test path in temp dir
+	data, err := os.ReadFile(store.EnvironmentFilePath(tmpDir))
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(path, data, 0o600)) //nolint:gosec // test path in temp dir
+	require.NoError(t, os.WriteFile(path, data, 0o600)) //nolint:gosec // G703: path is this test's own staging file under t.TempDir
 
 }
 

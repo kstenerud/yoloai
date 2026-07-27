@@ -6,7 +6,6 @@ package store
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -78,7 +77,7 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 	err := SaveEnvironment(dir, meta)
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec // test file in temp dir
+	data, err := os.ReadFile(EnvironmentFilePath(dir))
 	require.NoError(t, err)
 
 	var raw map[string]json.RawMessage
@@ -131,7 +130,8 @@ func TestLoadEnvironment_BalksBelowCurrentVersion(t *testing.T) {
 		"model": "opus",
 		"dirs": [{"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}]
 	}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(v2JSON), 0600))
+	require.NoError(t, config.EnsureHostTier(dir))
+	require.NoError(t, os.WriteFile(EnvironmentFilePath(dir), []byte(v2JSON), 0600))
 
 	_, err := LoadEnvironment(dir)
 	require.ErrorIs(t, err, ErrNeedsMigration)
@@ -216,7 +216,8 @@ func TestMeta_FutureVersionReturnsError(t *testing.T) {
 
 	futureJSON := `{"version": 9999, "name": "future",
 		"dirs": [{"host_path": "/tmp", "mount_path": "/tmp", "mode": "copy"}]}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(futureJSON), 0600))
+	require.NoError(t, config.EnsureHostTier(dir))
+	require.NoError(t, os.WriteFile(EnvironmentFilePath(dir), []byte(futureJSON), 0600))
 
 	_, err := LoadEnvironment(dir)
 	require.Error(t, err)
@@ -240,7 +241,7 @@ func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 	err := SaveEnvironment(dir, meta)
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec
+	data, err := os.ReadFile(EnvironmentFilePath(dir))
 	require.NoError(t, err)
 
 	var raw map[string]json.RawMessage
@@ -301,7 +302,7 @@ func TestMeta_MigrateV1ToV2(t *testing.T) {
 	// Re-save and verify no legacy keys, current version stamped.
 	dir := t.TempDir()
 	require.NoError(t, SaveEnvironment(dir, loaded))
-	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec // test file in temp dir
+	data, err := os.ReadFile(EnvironmentFilePath(dir))
 	require.NoError(t, err)
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &raw))

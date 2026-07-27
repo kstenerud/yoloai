@@ -562,6 +562,7 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 func createSandboxDirs(sandboxDir string, perms store.IsolationPerms) error {
 	for _, dir := range []string{
 		sandboxDir,
+		store.HostTierPath(sandboxDir),
 		store.HomeSeedPath(sandboxDir),
 		store.BinPath(sandboxDir),
 		store.TmuxPath(sandboxDir),

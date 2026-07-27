@@ -13,6 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
@@ -111,7 +112,7 @@ func mkSandboxDir(t *testing.T, c *System, name string) string {
 // writeEnv writes environment.json content into a sandbox dir.
 func writeEnv(t *testing.T, dir, content string) {
 	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "environment.json"), []byte(content), 0o600))
+	testutil.WriteSandboxRecord(t, filepath.Join(dir, "host", "environment.json"), []byte(content))
 }
 
 // TestLiveInjectorPIDs_ProtectsOnlyLiveSandboxes guards the keep-set that scopes

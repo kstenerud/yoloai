@@ -10,6 +10,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// WriteSandboxRecord writes raw bytes to a per-sandbox record at path,
+// creating its parent directory first.
+//
+// Tests that simulate pre-existing sandbox state — a corrupt record, an
+// old-schema one, a torn migration — write these files directly rather than
+// through the store writers, so nothing has created the record's access tier
+// for them. Take the path from a path helper (e.g. store.EnvironmentFilePath)
+// rather than joining a literal, so a record that later moves between tiers
+// carries its fixtures with it.
+func WriteSandboxRecord(t *testing.T, path string, data []byte) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0750))
+	require.NoError(t, os.WriteFile(path, data, 0600))
+}
+
 // GoProject creates a temp directory containing a minimal Go project (main.go)
 // with a git repository initialized and an initial commit. Returns the project dir.
 func GoProject(t *testing.T) string {

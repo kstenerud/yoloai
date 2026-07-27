@@ -34,6 +34,10 @@ func Save(sandboxDir string, cfg *AgentConfig) error {
 		return fmt.Errorf("marshal %s: %w", AgentConfigFile, err)
 	}
 
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
+	}
+
 	path := config.AgentConfigPath(sandboxDir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", AgentConfigFile, err)

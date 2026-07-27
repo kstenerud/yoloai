@@ -5,9 +5,9 @@ package store
 
 import (
 	"os"
-	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -33,7 +33,8 @@ func TestSandboxState_MissingFile(t *testing.T) {
 
 func TestSandboxState_InvalidJSON(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, SandboxStateFile), []byte("{invalid"), 0600))
+	require.NoError(t, os.MkdirAll(config.HostTierDir(dir), 0750))
+	require.NoError(t, os.WriteFile(SandboxStateFilePath(dir), []byte("{invalid"), 0600))
 
 	_, err := LoadSandboxState(dir)
 	assert.Error(t, err)

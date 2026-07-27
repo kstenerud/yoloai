@@ -2,7 +2,12 @@
 // ABOUTME: runtime backends — the single source of per-sandbox subpath truth.
 package config
 
-import "path/filepath"
+import (
+	"os"
+	"path/filepath"
+
+	"github.com/kstenerud/yoloai/internal/fileutil"
+)
 
 // Sandbox access tiers. A sandbox directory contains exactly these three
 // subdirectories and nothing else at its root; every per-sandbox file lives
@@ -78,26 +83,40 @@ const (
 	CreateDoneMarkerName = "lifecycle-on-create-done"
 )
 
-// Host-tier paths. Guest-invisible sandbox bookkeeping.
+// EnsureHostTier creates the host-only tier directory inside an existing
+// sandbox directory, so a writer of host-tier state does not depend on whoever
+// built the sandbox having created it. It deliberately refuses to create the
+// sandbox dir itself: a writer that conjured one would turn "no such sandbox"
+// into a silently created empty one, which is how a typo becomes a new sandbox.
+func EnsureHostTier(sandboxDir string) error {
+	if _, err := os.Stat(sandboxDir); err != nil {
+		return err
+	}
+	return fileutil.MkdirAll(HostTierDir(sandboxDir), 0o750)
+}
+
+// Host-tier paths. Guest-invisible sandbox bookkeeping: these resolve inside
+// host/, which is never shared into any sandbox on any backend. That placement
+// is what closes DF136 — the agent cannot forge a record it cannot reach.
 
 // EnvironmentPath returns the path to environment.json within a sandbox.
 func EnvironmentPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, EnvironmentFileName)
+	return filepath.Join(HostTierDir(sandboxDir), EnvironmentFileName)
 }
 
 // SandboxStatePath returns the path to sandbox-state.json within a sandbox.
 func SandboxStatePath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, SandboxStateFileName)
+	return filepath.Join(HostTierDir(sandboxDir), SandboxStateFileName)
 }
 
 // AgentConfigPath returns the path to agent.json within a sandbox.
 func AgentConfigPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, AgentConfigFileName)
+	return filepath.Join(HostTierDir(sandboxDir), AgentConfigFileName)
 }
 
 // NetpolicyPath returns the path to netpolicy.json within a sandbox.
 func NetpolicyPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, NetpolicyFileName)
+	return filepath.Join(HostTierDir(sandboxDir), NetpolicyFileName)
 }
 
 // NetworkDiagPath returns the path to network-diag.txt within a sandbox.

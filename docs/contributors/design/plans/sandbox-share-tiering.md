@@ -83,8 +83,13 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    `internal/config/sandbox_layout.go`, not `store/paths.go`, because the runtime backends,
    `internal/broker` and `internal/netpolicycfg` cannot import `store` — and `internal/cli` is
    forbidden from importing it by depguard. `store/paths.go` re-exports them for its own callers.
-2. `store/paths.go`: the tier roots + every helper rooted in its tier; the four single-joiner
-   metadata files (`environment/sandbox-state/agent/netpolicy`) into `host/`.
+2. The tier roots + every helper rooted in its tier; the four single-joiner metadata files
+   (`environment/sandbox-state/agent/netpolicy`) into `host/`. **Landed 2026-07-27 for the four
+   host-tier files only** — `ro/` and `rw/` are still flat, because moving those changes what the
+   backends mount and that is step 3's job. Note the resulting window: from this commit until the
+   step-4 migrator lands, **an existing sandbox reads as missing**, since its records are still at
+   the flat paths. `config.EnsureHostTier` makes each host-tier writer create its own tier, so
+   nothing depends on the creator having made it.
 3. `create.go` dir creation + the backend wiring (`mounts.Build`, tart two-share + view, seatbelt
    per-tier grants + view).
 4. The v6 `TierLayout` migrator.

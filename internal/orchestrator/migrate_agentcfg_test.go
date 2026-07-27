@@ -5,7 +5,6 @@ package orchestrator
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -14,6 +13,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/store"
 )
 
@@ -23,13 +23,13 @@ func writeRawEnv(t *testing.T, layout config.Layout, name, rawJSON string) strin
 	t.Helper()
 	sandboxDir := layout.SandboxDir(name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.EnvironmentFile), []byte(rawJSON), 0o600))
+	testutil.WriteSandboxRecord(t, store.EnvironmentFilePath(sandboxDir), []byte(rawJSON))
 	return sandboxDir
 }
 
 func rawEnvKeys(t *testing.T, sandboxDir string) map[string]json.RawMessage {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.EnvironmentFile)) //nolint:gosec // G304: test file in a temp dir
+	data, err := os.ReadFile(store.EnvironmentFilePath(sandboxDir))
 	require.NoError(t, err)
 	var m map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &m))
@@ -95,11 +95,11 @@ func TestMigrateAgentConfigs_Idempotent(t *testing.T) {
 	}`)
 
 	require.NoError(t, MigrateAgentConfigs(layout))
-	firstEnv, err := os.ReadFile(filepath.Join(sandboxDir, store.EnvironmentFile)) //nolint:gosec // G304: test file in a temp dir
+	firstEnv, err := os.ReadFile(store.EnvironmentFilePath(sandboxDir))
 	require.NoError(t, err)
 
 	require.NoError(t, MigrateAgentConfigs(layout))
-	secondEnv, err := os.ReadFile(filepath.Join(sandboxDir, store.EnvironmentFile)) //nolint:gosec // G304: test file in a temp dir
+	secondEnv, err := os.ReadFile(store.EnvironmentFilePath(sandboxDir))
 	require.NoError(t, err)
 
 	assert.Equal(t, string(firstEnv), string(secondEnv), "a second migration must not rewrite a v3 record")

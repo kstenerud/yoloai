@@ -14,6 +14,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/migrate"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
@@ -273,8 +274,8 @@ func TestPrincipalRename_Apply_UnreadableRecordAbortsAndDoesNotStamp(t *testing.
 	// got silently skipped, stamping the realm to v5 over an unconverted sandbox.
 	tornDir := layout.SandboxDir("torn")
 	require.NoError(t, os.MkdirAll(tornDir, 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(tornDir, store.EnvironmentFile),
-		[]byte(`{"version":99,"name":"torn","backend":"docker"}`), 0o600))
+	testutil.WriteSandboxRecord(t, store.EnvironmentFilePath(tornDir),
+		[]byte(`{"version":99,"name":"torn","backend":"docker"}`))
 
 	rt := &fakeBackend{keepAlive: runtime.KeepAliveHostKeepAlive}
 	_, err := newPrincipalRenameWith(layout, rt).Apply(context.Background(), migrate.Decision{})

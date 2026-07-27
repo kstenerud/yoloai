@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
@@ -22,6 +23,10 @@ func SaveSandboxState(sandboxDir string, state *SandboxState) error {
 	data, err := json.MarshalIndent(state, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", SandboxStateFile, err)
+	}
+
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
 	}
 
 	path := SandboxStateFilePath(sandboxDir)

@@ -225,10 +225,7 @@ func TestProfiles_ReferencingSandboxes_SkipsCorruptMeta(t *testing.T) {
 	// dropped; the scan keeps walking.
 	corruptDir := filepath.Join(c.layout.SandboxesDir(), "boxBroken")
 	require.NoError(t, os.MkdirAll(corruptDir, 0750))
-	require.NoError(t, os.WriteFile(
-		filepath.Join(corruptDir, "environment.json"),
-		[]byte("not json"), 0600,
-	))
+	testutil.WriteSandboxRecord(t, filepath.Join(corruptDir, "host", "environment.json"), []byte("not json"))
 
 	refs, err := c.Profiles().ReferencingSandboxes(context.Background(), "demo")
 	require.NoError(t, err)
@@ -289,7 +286,7 @@ func writeFakeSandboxMeta(t *testing.T, layout config.Layout, sandboxName, profi
 	meta := map[string]any{"profile": profile}
 	data, err := json.Marshal(meta)
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "environment.json"), data, 0600))
+	testutil.WriteSandboxRecord(t, filepath.Join(dir, "host", "environment.json"), data)
 }
 
 // Verify the assertion helpers + sandbox package import are wired up

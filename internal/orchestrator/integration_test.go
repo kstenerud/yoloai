@@ -172,7 +172,7 @@ func TestIntegration_CreateNoStart(t *testing.T) {
 
 	// Verify standard subdirs
 	assert.DirExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir))
-	assert.FileExists(t, filepath.Join(sandboxDir, store.EnvironmentFile))
+	assert.FileExists(t, store.EnvironmentFilePath(sandboxDir))
 	assert.FileExists(t, filepath.Join(sandboxDir, store.RuntimeConfigFile))
 }
 

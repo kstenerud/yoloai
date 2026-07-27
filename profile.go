@@ -216,7 +216,7 @@ func (a *ProfileAdmin) ReferencingSandboxes(_ context.Context, profileName strin
 		if !e.IsDir() {
 			continue
 		}
-		metaPath := filepath.Join(sandboxesDir, e.Name(), store.EnvironmentFile)
+		metaPath := store.EnvironmentFilePath(filepath.Join(sandboxesDir, e.Name()))
 		data, readErr := os.ReadFile(metaPath) //nolint:gosec // G304: path derived from sandboxes dir
 		if readErr != nil {
 			continue

@@ -5,7 +5,9 @@
 # Next release
 
 **Next release version: `v0.11.0`** — escalated from `v0.10.1`: the sandbox image moved from
-Node.js 20 to Node.js 22 LTS, which is user-visible (see `BREAKING-CHANGES.md`, Unreleased).
+Node.js 20 to Node.js 22 LTS, and the sandbox-dir tiering moved host-only metadata into a `host/`
+subdirectory, changing the on-disk layout. Both are user-visible (see `BREAKING-CHANGES.md`,
+Unreleased).
 
 ## How this works
 

@@ -49,7 +49,7 @@ func writeTestFile(t *testing.T, dir, name, content string) {
 // destroy unapplied work. It must fail loud instead.
 func TestCheckUnappliedWork_CorruptEnvironmentIsError(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.EnvironmentFile), []byte("{not valid json"), 0o600))
+	testutil.WriteSandboxRecord(t, store.EnvironmentFilePath(dir), []byte("{not valid json"))
 
 	err := checkUnappliedWork(context.Background(), git.NewSandbox(config.NewLayout(dir), nil, "box"), "box", dir)
 	require.Error(t, err)
@@ -896,8 +896,8 @@ func TestPrepareSandboxState_UnreadableMetadataRefusesAndPreserves(t *testing.T)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 	// version 1 is below the current schema, so LoadEnvironment returns
 	// ErrNeedsMigration — a real sandbox, not an interrupted creation.
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "environment.json"),
-		[]byte(`{"version":1,"name":"old"}`), 0600))
+	testutil.WriteSandboxRecord(t, store.EnvironmentFilePath(sandboxDir),
+		[]byte(`{"version":1,"name":"old"}`))
 	workMarker := filepath.Join(sandboxDir, "work", "proj", "agent-wrote-this.txt")
 	require.NoError(t, os.MkdirAll(filepath.Dir(workMarker), 0750))
 	require.NoError(t, os.WriteFile(workMarker, []byte("unapplied"), 0600))

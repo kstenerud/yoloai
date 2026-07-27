@@ -36,6 +36,10 @@ func Save(sandboxDir string, np *Netpolicy) error {
 		return fmt.Errorf("marshal %s: %w", NetpolicyFile, err)
 	}
 
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
+	}
+
 	path := config.NetpolicyPath(sandboxDir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", NetpolicyFile, err)

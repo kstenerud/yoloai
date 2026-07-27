@@ -105,7 +105,7 @@ func TestSandbox_ExchangePaths(t *testing.T) {
 	assert.Equal(t, filepath.Join(state, "files"), sb.Files().Path())
 	assert.Equal(t, filepath.Join(state, "cache"), sb.CacheDir())
 	assert.Equal(t, filepath.Join(state, "runtime-config.json"), sb.RuntimeConfigPath())
-	assert.Equal(t, filepath.Join(state, "environment.json"), sb.EnvironmentPath())
+	assert.Equal(t, filepath.Join(state, "host", "environment.json"), sb.EnvironmentPath())
 }
 
 func TestSandbox_LogPaths(t *testing.T) {
