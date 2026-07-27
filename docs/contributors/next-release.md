@@ -56,7 +56,8 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
-*Nothing yet.*
+- [DF149](design/findings-resolved.md) — `reset` stranded `files/`, `cache/` and `agent-runtime/` at
+  deleted inodes, silently breaking the agent's artifact channel
 
 ## Candidates — undecided
 

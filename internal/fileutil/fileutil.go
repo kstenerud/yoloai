@@ -186,6 +186,29 @@ func WriteFilePerm(path string, data []byte, perm fs.FileMode) error {
 	return os.Chmod(path, perm)
 }
 
+// ClearDirContents empties a directory without replacing it, creating it (with
+// perm) if absent. Use this for any directory that is bind-mounted into a
+// running sandbox: RemoveAll+MkdirAll yields a *new* inode while the guest's
+// bind mount still resolves to the old, unlinked one, so everything the agent
+// writes afterwards lands in an orphaned directory. The kernel marks the mount
+// `//deleted` and the guest sees a directory it can list and enter but not
+// write to — an ENOENT on create that reads as an agent bug (DF149).
+func ClearDirContents(dir string, perm fs.FileMode) error {
+	if err := MkdirAllPerm(dir, perm); err != nil {
+		return err
+	}
+	entries, err := os.ReadDir(dir)
+	if err != nil {
+		return fmt.Errorf("read dir %s: %w", dir, err)
+	}
+	for _, entry := range entries {
+		if err := os.RemoveAll(filepath.Join(dir, entry.Name())); err != nil {
+			return fmt.Errorf("remove %s: %w", entry.Name(), err)
+		}
+	}
+	return nil
+}
+
 // CopyDirFiles copies every non-directory file directly under srcDir into
 // destDir (non-recursive; subdirectories are skipped), writing each with perm.
 // Every failure — an unreadable srcDir, a failed file read, or a failed write —
