@@ -76,11 +76,10 @@ func TestBuildProfileImage_ErrorWrapsExitStatus(t *testing.T) {
 	var output strings.Builder
 	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-r-dev", nil, r.layout, &output, slog.New(slog.DiscardHandler))
 	require.Error(t, err)
-	assert.Contains(t, err.Error(), "container build:",
-		"the error names the failed operation")
-	assert.Contains(t, output.String(), cause,
-		"the build tool's own diagnostic still reaches the caller's output stream, even though "+
-			"(unlike buildBaseImage) BuildProfileImage does not also fold it onto the error itself")
+	assert.Contains(t, err.Error(), "container build exited with code 1",
+		"the error names the operation and exit code")
+	assert.Contains(t, err.Error(), cause,
+		"the build tool's own diagnostic rides on the error, not only the stream (DF144/DF145)")
 }
 
 func TestBuildProfileImage_WarnsOnDroppedSecrets(t *testing.T) {

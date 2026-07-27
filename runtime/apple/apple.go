@@ -502,10 +502,18 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 	logger.Debug("building profile image via container build", "tag", tag, "sourceDir", sourceDir, "context", dir)
 
 	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForAppleContainer(), r.containerBin, "build", "-t", tag, dir)
-	cmd.Stdout = output
-	cmd.Stderr = output
+	// Stream to output as before, but also tee into a tail buffer so a failure's
+	// actionable cause rides on the error itself, not only the (maybe discarded)
+	// stream — same value on both so os/exec keeps its single-pipe path (DF145).
+	tail := sysexec.NewTailBuffer(buildErrorTailLines)
+	w := io.MultiWriter(output, tail)
+	cmd.Stdout = w
+	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("container build: %w", err)
+		if exitErr, ok := errors.AsType[*exec.ExitError](err); ok {
+			return fmt.Errorf("container build exited with code %d%s", exitErr.ExitCode(), tail.ErrorSuffix())
+		}
+		return fmt.Errorf("container build: %w%s", err, tail.ErrorSuffix())
 	}
 	return nil
 }
