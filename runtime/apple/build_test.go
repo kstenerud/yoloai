@@ -82,6 +82,31 @@ func TestBuildProfileImage_ErrorWrapsExitStatus(t *testing.T) {
 		"the build tool's own diagnostic rides on the error, not only the stream (DF144/DF145)")
 }
 
+// TestBuildProfileImage_PassesTagAndAbsoluteContext pins the argv this fix
+// depends on (D128): `-t <tag>` must be passed, and the build context must be
+// an absolute directory containing the profile's Dockerfile. A relative
+// context (AC1) silently transfers nothing and every COPY fails — a defect
+// no assertion on the wrapped error alone would catch.
+func TestBuildProfileImage_PassesTagAndAbsoluteContext(t *testing.T) {
+	const tag = "yoloai-cli-dev"
+	script := "#!/bin/sh\n" +
+		"[ \"$1\" = build ] || { echo \"bad subcommand: $1\" >&2; exit 2; }\n" +
+		"[ \"$2\" = -t ] || { echo \"bad flag: $2\" >&2; exit 3; }\n" +
+		"[ \"$3\" = " + tag + " ] || { echo \"bad tag: $3\" >&2; exit 4; }\n" +
+		"case \"$4\" in\n" +
+		"  /*) ;;\n" +
+		"  *) echo \"context not absolute: $4\" >&2; exit 5 ;;\n" +
+		"esac\n" +
+		"test -f \"$4/Dockerfile\" || { echo \"Dockerfile missing from context\" >&2; exit 6; }\n" +
+		"exit 0\n"
+	r := newFakeContainerRuntime(t, script)
+	sourceDir := newFakeProfileDir(t)
+
+	var output strings.Builder
+	err := r.BuildProfileImage(context.Background(), sourceDir, tag, nil, r.layout, &output, slog.New(slog.DiscardHandler))
+	require.NoError(t, err, output.String())
+}
+
 func TestBuildProfileImage_WarnsOnDroppedSecrets(t *testing.T) {
 	r := newFakeContainerRuntime(t, "#!/bin/sh\nexit 0\n")
 	sourceDir := newFakeProfileDir(t)
