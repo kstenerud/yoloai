@@ -176,12 +176,12 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 **Backend handling:**
 - `os` — optional. Selects the guest OS for the sandbox. Valid values: `linux` (default), `mac`. `linux` is the default and requires no special hardware. `mac` requires a macOS host; the backend depends on `isolation`: `container` uses Seatbelt, `vm` uses Tart. Fails loudly on non-macOS hosts or if the required backend is not installed. CLI `--os` overrides.
 - `container_backend` — optional preference. Only meaningful for `--isolation container` or `container-enhanced`; ignored for `vm`, `vm-enhanced`, and `--os mac`.
-- `Dockerfile` — optional. Used with Docker, Podman, and Apple `container` backends to build a `yoloai-<profile>` image (`container build`, mirroring `docker build`/`podman build`). Must use `FROM yoloai-base`. Ignored with Tart and Seatbelt backends (no OCI image concept). When absent, image-based backends use `yoloai-base`. The Apple backend has no `--secret` build-secret support (unlike Docker/Podman's BuildKit invocation): any auto-detected secrets (e.g. `~/.npmrc`) are reported and dropped rather than passed through.
+- `Dockerfile` — optional. Used with Docker, Podman, and Apple `container` backends to build a `yoloai-<principal>-<profile>` image (`container build`, mirroring `docker build`/`podman build`). Must use `FROM yoloai-base`. Ignored with Tart and Seatbelt backends (no OCI image concept). When absent, image-based backends use `yoloai-base`. The Apple backend has no `--secret` build-secret support (unlike Docker/Podman's BuildKit invocation): any auto-detected secrets (e.g. `~/.npmrc`) are reported and dropped rather than passed through.
 - `tart.image` — optional. Used only with the Tart backend. Ignored with other backends.
 
 **Sandbox metadata:** When a profile is used, `environment.json` records the profile name and the resolved image ref. Lifecycle commands use the stored image ref — profile changes only take effect on new sandboxes.
 
-**Profile image building:** The sandbox manager calls `Runtime.EnsureImage()` for the base image, then uses container-backend build logic for profile images when Docker or Podman is active and the profile has a Dockerfile. Tart and Seatbelt skip profile image building.
+**Profile image building:** The sandbox manager calls `Runtime.EnsureImage()` for the base image, then uses container-backend build logic for profile images when Docker, Podman, or Apple `container` is active and the profile has a Dockerfile. Tart and Seatbelt skip profile image building.
 
 **Profile image staleness:** A profile image is considered stale when: (a) it doesn't exist, (b) the profile's Dockerfile has changed since last build (checksum-tracked), or (c) `yoloai-base` has been rebuilt since the profile image was last built. Stale images are automatically rebuilt during `yoloai new --profile`.
 
