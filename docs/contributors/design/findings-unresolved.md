@@ -631,6 +631,41 @@ is worse than none because it also supplies the confidence.
   + `runtime/seatbelt/profile.go:193-199` (the rw share/grant); `internal/orchestrator/engine_network.go:62,84`;
   `runtime/seatbelt/seatbelt.go:827-831`; `internal/orchestrator/lifecycle/restart.go:163,180-208`. Related: DF136.
 
+### DF153 — containerd is image-based but does not implement `ProfileImageBuilder`, so profile Dockerfiles are silently skipped there too
+
+- **Discovered:** 2026-07-27 · **Workstream:** PR #44 review (first external contribution)
+- **Severity:** MEDIUM (silent skip — a profile with a Dockerfile builds nothing and every sandbox
+  on that profile runs `yoloai-base` unmodified, with no error). Same class as the pre-fix apple
+  defect this PR closes, and the same class DF150/DF152 cover for the backends that do implement
+  the interface.
+- **Disposition:** FILED, not fixed — explicitly out of scope for this PR per the owner's review.
+- **Description:** `runtime.ProfileImageBuilder` (`runtime/runtime_optional.go`) is implemented by
+  docker, podman (via embedding), and now apple. containerd has its own OCI image store — the same
+  shape of backend docker/podman/apple are — but declares no
+  `var _ runtime.ProfileImageBuilder = (*Runtime)(nil)` and has no `BuildProfileImage`/
+  `ProfileImageNeedsBuild`/`RecordProfileBuildChecksum` methods at all. `ProfileImageBuilderOf`
+  (`runtime_optional.go`) falls through its `ok` branch for containerd exactly as it did for apple
+  before this PR, so a profile's Dockerfile is silently ignored rather than built.
+- **Root cause, and why the interface being back in `runtime_optional.go` matters:**
+  `ProfileImageBuilder` used to live in `internal/orchestrator/profiles`, where no backend in the
+  public runtime tree could compile-time assert it — that's how apple came to be missing it
+  unnoticed, and it's why containerd is missing it unnoticed now. Every other optional capability
+  lives in `runtime/runtime_optional.go` with the `var _ runtime.CachePruner = (*Runtime)(nil)`
+  idiom (`runtime/podman/podman.go:101`); moving `ProfileImageBuilder` there (done in this PR's
+  rebase, DF151) doesn't retrofit a missing assertion into containerd — that stays a per-backend
+  choice — but it does mean the next audit of "which backends assert which optional interfaces"
+  will actually surface the gap instead of it hiding behind a package nothing sweeps.
+- **Remedy sketch:** implement `BuildProfileImage`/`ProfileImageNeedsBuild`/
+  `RecordProfileBuildChecksum` on `runtime/containerd.Runtime`, keyed by backend `"containerd"`
+  through the shared `docker.ProfileImageNeedsBuild`/`docker.RecordProfileBuildChecksum` scheme
+  (DF150), and add the compile-time assertion. containerd's `CreateBuildContext`/build-context
+  materialization needs the same absolute-directory care apple's fix pinned (AC1) if containerd's
+  build command takes a directory context rather than a stdin tar.
+- **Pointer:** `runtime/runtime_optional.go` (`ProfileImageBuilder`, `ProfileImageBuilderOf`);
+  `runtime/containerd/containerd.go:106-111` (missing assertion); `runtime/docker/build.go`
+  (`ProfileImageNeedsBuild`, `RecordProfileBuildChecksum`, the shared scheme to reuse); `runtime/apple/apple.go`
+  (the sibling fix this PR made for apple). Related: DF150, DF151, DF152.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
