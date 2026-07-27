@@ -34,6 +34,21 @@ A file moves here **whole**, when its work is complete or abandoned, and stops c
 archived doc turns out to matter again, the answer is a new live document that supersedes it, not
 an edit here. This README is the exception — it is the index, so it stays current.
 
+**One edit is carved out: the `> **ARCHIVED …**` banner every file here carries** (D128). It is
+the single exception to "not swept", and it is the exception because it is the *inverse* of one:
+the reason sweeps stop at this boundary is that conforming a frozen doc implies someone vouched
+for it, and this banner says the opposite in the file's own first four lines. It is stamped once,
+on arrival, and never revised — a `git mv` into `archive/` adds it, and nothing else here changes
+again.
+
+Why it exists rather than living only in this README: **an agent that greps arrives mid-file and
+never passes through an index.** PR #44 is the worked example — an outside contributor's agent
+found [`plans/apple-container-backend.md`](plans/apple-container-backend.md), read its
+implementation table as a specification, and shipped a pre-D126 image name, a stale path to the
+plan's own pre-archive location, and reasoning copied from a design that had since moved. Every
+word of the warning above was already written and correct. None of it was on the path the agent
+took. See [DF151](../design/findings-unresolved.md).
+
 ## Layout
 
 | Subdir | What's here |

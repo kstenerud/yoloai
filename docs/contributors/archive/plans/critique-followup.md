@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 # Critique Follow-up — Decisions
 
 Decisions made during the 2026-05-27 triage of `docs/contributors/design/unresolved-critiques.md`. Each

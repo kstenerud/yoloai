@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 > **ABOUTME:** Plan to promote per-agent turn-completion detection (native callbacks like Codex
 > `notify`, Gemini `AfterAgent`) to a first-class strategy, gating the public-layering branch's
 > merge to main until every shipped agent uses its native callback instead of the heuristic

@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 > **ABOUTME:** Add `yoloai wait` to block until a named sandbox's agent exits and return its
 > exit code, so CI/CD scripting doesn't have to poll `yoloai list --json`.
 

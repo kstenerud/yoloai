@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 # F1 + F3 — Public creation surface (design for owner review)
 
 Combined design for the two creation findings. **Proposal — no code.** Approve

@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 # Layer 1 — Complete the public Go surface (consolidated)
 
 **Plan only — no code yet.** Consolidates and extends the prior F1/F2/F3 work

@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 > **ABOUTME:** Cut the macOS integration+smoke wall-clock (approaching an hour) by amortizing the
 > conformance suite's per-subtest VM boots and introducing bounded parallelism, without weakening
 > the per-test isolation that makes a failure legible.

@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 # VM Isolation (`--isolation vm`) End-to-End Debug Plan
 
 **Goal:** `yoloai new x . -a --replace --isolation vm` reliably creates a Kata Containers VM,

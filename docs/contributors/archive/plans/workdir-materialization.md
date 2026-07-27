@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 > **ABOUTME:** One owner for "produce or refresh a work copy and its baseline", so create and
 > the three reset paths stop re-deriving the (mode × backend-locality) matrix independently —
 > which is the single root behind the DF116/117/118/120/121 cluster.

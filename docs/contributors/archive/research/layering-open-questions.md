@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 <!-- ABOUTME: Pre-rearchitecture research report: open questions that affect the layering -->
 <!-- ABOUTME: refactor + prior architectural models to reuse. Written 2026-05-23. -->
 

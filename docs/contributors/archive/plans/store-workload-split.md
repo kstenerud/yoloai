@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 > **ABOUTME:** Plan (Q104, settled as D102) to split agent/model, inside-process config, out of
 > the sandbox's substrate record (`store.Environment`) into its own orchestration-owned
 > `agent.json`, so the record promoted to the public store package stays substrate-only.

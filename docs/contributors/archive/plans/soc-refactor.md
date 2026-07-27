@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 # Separation-of-Concerns Refactor Plan
 
 > **Status:** This plan is the detailed design for **W12** of [`architecture-remediation.md`](architecture-remediation.md). The four issues below are folded into W12's scope; this document remains as the detailed step-by-step. Don't start the work here independently — run it as W12 of the broader plan.

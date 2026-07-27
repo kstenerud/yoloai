@@ -1,3 +1,8 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 # Architecture Remediation Plan
 
 Concrete plan to address findings from [`../architecture-audit-2026-05.md`](../architecture-audit-2026-05.md). Third revision after two critique rounds (v1 committed `868a5b0`; v2 committed `1e9c558`).
