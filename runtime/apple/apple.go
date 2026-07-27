@@ -28,7 +28,7 @@ import (
 // minMacOSMajor is the lowest macOS major version we allow. Apple `container`
 // technically runs on macOS 15 with limitations (no container-to-container net,
 // no `container network`, IP conflicts), so we gate strictly on 26 (Tahoe) as a
-// safe over-gate. See docs/contributors/design/plans/apple-container-backend.md (AC14).
+// safe over-gate. See docs/contributors/archive/plans/apple-container-backend.md (AC14).
 const minMacOSMajor = 26
 
 // containerBin is the CLI we shell out to.
@@ -131,6 +131,7 @@ type Runtime struct {
 var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
 var _ runtime.GitExecer = (*Runtime)(nil)
+var _ runtime.ProfileImageBuilder = (*Runtime)(nil)
 
 // New constructs the apple Runtime after verifying platform, the CLI, and the
 // macOS version gate. The apiserver is not started here — Setup does that on
@@ -473,7 +474,7 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 }
 
 // BuildProfileImage builds a profile's Dockerfile via `container build`,
-// following the shape planned in docs/contributors/design/plans/apple-container-backend.md
+// following the shape planned in docs/contributors/archive/plans/apple-container-backend.md
 // ("reuses the existing Dockerfile/profile images unchanged"). Like
 // buildBaseImage, the context is materialized into an absolute temp dir —
 // `container build .` silently drops a relative context (AC1) — reusing the
