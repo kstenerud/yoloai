@@ -501,7 +501,7 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 	}
 	logger.Debug("building profile image via container build", "tag", tag, "sourceDir", sourceDir, "context", dir)
 
-	cmd := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, "build", "-t", tag, dir)
+	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForAppleContainer(), r.containerBin, "build", "-t", tag, dir)
 	cmd.Stdout = output
 	cmd.Stderr = output
 	if err := cmd.Run(); err != nil {
