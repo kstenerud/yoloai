@@ -196,6 +196,27 @@ if err != nil {
 // happy path continues here, unindented
 ```
 
+### Subprocess errors carry the tool's own diagnostic
+
+**When you shell out, the failure message must include what the tool said** (DF144/DF145). An
+`*exec.ExitError` stringifies to `exit status 1` and nothing else, so `fmt.Errorf("container
+build: %w", err)` — correct by every rule above — produces `build profile image
+yoloai-cli-dev: container build: exit status 1`, which names the operation and withholds the
+cause. The tool printed the reason; the error threw it away.
+
+This bites hardest exactly where it matters least to notice: a caller that streams the
+subprocess output to the user's terminal looks fine in manual testing, and yields nothing
+diagnosable the moment the output goes somewhere nobody reads — a log, a CI capture, a
+`--json` run, a wrapped library call. **A path that discards the stream is the normal case, not
+the edge case.**
+
+The mechanism is `sysexec.NewTailBuffer`: tee `Stdout`/`Stderr` into it alongside the real
+writer, and fold the tail onto the error when the command fails. `runtime/apple/apple.go`
+(`buildBaseImage`) and `runtime/docker/build.go` (`BuildProfileImage`) are the reference
+implementations; `sysexec.EnrichExitError` is the helper for the plain case. Copy one of them
+rather than inventing a third shape — this convention has been re-broken by every new backend
+path that did not.
+
 ### CLI Error Handling
 
 Domain packages return typed errors (e.g., `ConfigError`, `SandboxNotFoundError`) and sentinel errors. The root Cobra command handler inspects errors with `errors.As` / `errors.Is` and maps them to exit codes:

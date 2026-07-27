@@ -40,7 +40,9 @@ mounted at a container path**, implemented per backend as whatever gives shared 
 So the plumbing change is: extend `MountSpec` with a `VolumeName` (or a `Kind: bind|volume` + a
 `Source`), thread it through `state.State` → `mounts.Build`, and give `ConvertMounts` a
 `TypeVolume` branch for docker/podman while the other backends resolve the name to a managed host
-dir. The naming is `yoloai-<profile>-<name>` (per-profile to avoid cross-profile collision), and
+dir. The naming is `yoloai-<principal>-<profile>-<name>` — per-profile to avoid cross-profile
+collision, and principal-scoped because every yoloai-created name is (D126; `config.InstancePrefix`
+panics on an empty principal, so there is no unscoped form to fall back to) — and
 every created volume/dir is stamped `com.yoloai.managed` — **required**, because DF137 just made
 `VolumesPrune` reclaim only managed-labelled volumes, and these would be the first managed volumes
 yoloai ever creates.
@@ -56,7 +58,8 @@ cache_volumes:
   cargo: /usr/local/cargo/registry
 ```
 
-The key is the cache name (→ `yoloai-<profile>-npm`), the value the in-container mount point. Merge
+The key is the cache name (→ `yoloai-cli-<profile>-npm` under the CLI principal), the value the
+in-container mount point. Merge
 additively across a profile `extends:` chain, like `Mounts` already does. Open: map vs list form,
 and whether a bare name implies a conventional path.
 

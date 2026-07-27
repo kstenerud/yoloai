@@ -37,6 +37,12 @@ Two you will want by name: `architecture/where-to-change.md` maps a change onto 
 that make it. `backend-idiosyncrasies.md` catalogues backend behaviour that contradicts its
 own docs — read it *before* diagnosing any backend problem; add to it when you find more.
 
+**Nothing under `docs/contributors/archive/` is a specification.** It is frozen and unmaintained,
+and it usually describes code that has since moved; each file says so in its own opening lines.
+Search will put you there — plans read like specs, and an archived plan reads exactly like a live
+one. Use it for *"did we consider X?"*, never to build from. The live answer is in the tiers above,
+and if the only thing that answers your question is archived, that is a gap to file, not a source.
+
 `next-release.md` stages whatever ships next: it carries the next release version (a fact — it
 escalates on its own when something breaking lands) and points at the work considered for the cut.
 It is permanent and drains at each release, like `## Unreleased`. **It never carries an item's
@@ -63,7 +69,9 @@ exists to fix.
 ## Preparing a PR
 
 Full detail and the reasoning behind each rule:
-**`docs/contributors/procedures/pull-requests.md`**. Ordered by how likely you are to trip.
+**`docs/contributors/procedures/pull-requests.md`**. Ordered by how likely you are to trip — but
+the numbers are cited from other documents, so a new rule appends rather than inserts. Rule 10 is
+the newest and belongs about third.
 
 1. **A user-visible break needs a `docs/BREAKING-CHANGES.md` entry in the same PR** — under
    `## Unreleased`, never under a `## vX.Y.Z` heading (those are frozen once tagged). Renamed
@@ -92,7 +100,13 @@ Full detail and the reasoning behind each rule:
    the next free number. Don't grep for the highest — every duplicate ID this repo has had came
    from a grep that missed a sink.
 7. **File the defects you don't fix** in `design/findings-unresolved.md`. Fixing in scope is
-   fine *if you record it*; silently working around it never is.
+   fine *if you record it*; silently working around it never is. **And its converse: when a fix
+   establishes a convention, the convention graduates out of the finding** — into `standards/`,
+   `architecture/`, or the interface's own docstring, with the finding citing it rather than
+   holding it. A resolved finding is archaeology: `*-resolved.md` is append-only history that
+   nothing sweeps and no router points at, so a rule living only there is a rule the next
+   contributor cannot find. Both conventions PR #44 broke were sitting in `findings-resolved.md`
+   and nowhere else (DF151).
 8. **An idea worth building is a plan file** in `design/plans/` — not a bullet in a README, which
    is where a backlog goes to be invisible. Each carries a metadata list under its title:
    `- **Status:**` (`UNSPECIFIED` no design yet / `PLANNED` designed / `IN-PROGRESS` partly built /
@@ -105,6 +119,14 @@ Full detail and the reasoning behind each rule:
    old form, on the day it lands. Same for any compatibility reader, alias, or shim. The entry
    costs three lines and is the only thing that will ever make retiring it possible — the
    register's own audit found 16 such mechanisms, of which **0** recorded a date.
+10. **A behavior change carries a test that fails when the change is reverted** (D128). Not
+   "the package has tests" — a test that pins *this* behavior. When the behavior is an argv
+   handed to a subprocess, which is most of what the backends do, that means **asserting the
+   argv**: the flags that must be there, and which of them must be absolute. The fake-binary
+   fixture is the established shape and it is cheap (`runtime/apple/build_test.go`). Two traps
+   worth naming, because the first outside PR hit both: a test that asserts only *that* an error
+   was wrapped tests the wrapping, not the fix; and a test whose comment explains why the code
+   does the wrong thing has pinned the defect as intended behavior.
 
 ## The quality gate
 

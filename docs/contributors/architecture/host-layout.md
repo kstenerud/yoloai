@@ -78,3 +78,24 @@ library/
 └── cache/                   # Global cache directory (e.g., overlay detection, base image checksum)
 ```
 
+
+## Build-staleness markers are keyed by backend
+
+Several paths above cache a "have I already built this?" checksum next to the thing it
+describes — the global `cache/` base-image marker, and a `.last-build-checksum` in each profile
+directory. **These markers must be keyed by the backend that wrote them**, because the artifact
+they vouch for is not shared: docker, podman, containerd and apple each keep their own image
+store, so a marker written by one backend answers a question about an image another backend does
+not have.
+
+The base-image path already does this — `baseImageChecksumPath(layout, backendKey)` plus a
+`yoloai.base.checksum` image label, reasoned inline at `runtime/docker/build.go` ("can hold
+separate images across local providers"). **The profile path does not**: `.last-build-checksum` is
+unqualified. The failure is not hypothetical and not rare, because `apple` is the default on macOS
+when installed and users alternate constantly: build a profile under Docker Desktop, run the same
+profile under `--backend apple`, the checksum matches, apple skips the build it never did, and the
+run fails when `container run` tries to pull a local-only tag. It fails in both directions.
+
+The invariant generalizes past checksums: **any host-side marker that stands in for a
+backend-managed artifact is keyed by backend, or it is a lie for every other backend.** Filed as
+[DF150](../design/findings-unresolved.md); the profile marker is the open half.
