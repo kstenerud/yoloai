@@ -465,8 +465,13 @@ type StdioExecer interface {
 //   - **Staleness markers are keyed by backend** (DF150). A "have I built this
 //     already?" marker written by one backend must not satisfy another: the
 //     image stores are separate, so a shared marker makes the second backend
-//     skip a build whose image it does not have, and the run fails at pull.
-//     `baseImageChecksumPath(layout, backendKey)` is the worked example.
+//     skip a build whose image it does not have, and the run fails at pull. Use
+//     the shared scheme — `docker.ProfileImageNeedsBuild(profileDir, parentDir,
+//     backendKey)` and `docker.RecordProfileBuildChecksum(profileDir,
+//     backendKey)` — rather than a private marker, passing the key that names
+//     your image store. A backend name is only a proxy for a store, and where
+//     it is a poor one (docker, which may address several local daemons) the
+//     staleness belongs on the image instead; see DF152.
 //   - **A build failure carries the build tool's own diagnostic** on the error,
 //     not only on the output stream (DF144/DF145). See `standards/go.md` →
 //     Subprocess errors.

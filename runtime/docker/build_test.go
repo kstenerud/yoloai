@@ -80,8 +80,11 @@ func TestCreateProfileBuildContext(t *testing.T) {
 	dir := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "setup.sh"), []byte("apt install -y go"), 0600))
-	// Internal files should be excluded
-	require.NoError(t, os.WriteFile(filepath.Join(dir, lastBuildFile), []byte("abc"), 0600))
+	// Internal files should be excluded — every backend's keyed marker, and the
+	// pre-DF150 unkeyed one an older install may have left behind.
+	require.NoError(t, os.WriteFile(profileChecksumPath(dir, "docker"), []byte("abc"), 0600))
+	require.NoError(t, os.WriteFile(profileChecksumPath(dir, "podman"), []byte("def"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, lastBuildPrefix), []byte("legacy"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte("agent: claude"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "profile.yaml"), []byte("extends: base"), 0600))
 
@@ -104,8 +107,45 @@ func TestCreateProfileBuildContext(t *testing.T) {
 	assert.Contains(t, found, "Dockerfile")
 	assert.Contains(t, found, "setup.sh")
 	assert.Contains(t, found, "profile.yaml") // profile.yaml is NOT excluded (only config.yaml is)
-	assert.NotContains(t, found, lastBuildFile)
+	assert.NotContains(t, found, filepath.Base(profileChecksumPath(dir, "docker")))
+	assert.NotContains(t, found, filepath.Base(profileChecksumPath(dir, "podman")))
+	assert.NotContains(t, found, lastBuildPrefix)
 	assert.NotContains(t, found, "config.yaml")
+}
+
+// TestProfileImageNeedsBuild_MarkerIsPerBackend pins DF150: the profile
+// directory is shared across backends but their image stores are not, so a
+// build recorded by one backend must not tell another that its own image is
+// fresh. Before the fix this reproduced end-to-end — build a profile under
+// docker, run it under podman, and podman skipped the build then failed
+// trying to pull a tag that only ever existed in docker's store.
+func TestProfileImageNeedsBuild_MarkerIsPerBackend(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base"), 0600))
+	parent := t.TempDir()
+
+	require.True(t, ProfileImageNeedsBuild(dir, parent, "docker"), "nothing built yet")
+	RecordProfileBuildChecksum(dir, "docker")
+
+	assert.False(t, ProfileImageNeedsBuild(dir, parent, "docker"),
+		"docker built it and recorded under its own key, so docker is up to date")
+	assert.True(t, ProfileImageNeedsBuild(dir, parent, "podman"),
+		"podman has a separate image store and never built this profile, so docker's "+
+			"marker must not satisfy it (DF150)")
+}
+
+// TestProfileImageNeedsBuild_LegacyUnkeyedMarkerForcesRebuild covers the
+// upgrade path: a profile dir written before DF150 carries an unkeyed marker,
+// which names no store and so vouches for nothing. The safe reading is "stale"
+// — one extra rebuild per profile per backend, after which the keyed marker
+// takes over.
+func TestProfileImageNeedsBuild_LegacyUnkeyedMarkerForcesRebuild(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, lastBuildPrefix), []byte(profileBuildChecksum(dir)), 0600))
+
+	assert.True(t, ProfileImageNeedsBuild(dir, t.TempDir(), "docker"),
+		"an unkeyed marker names no store, so it cannot vouch for one")
 }
 
 func TestNeedsBuild_NoChecksum(t *testing.T) {

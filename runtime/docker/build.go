@@ -15,6 +15,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -22,9 +23,34 @@ import (
 	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
-// lastBuildFile is the filename used to record the last successful build checksum
-// in a profile directory (for profile image staleness detection).
-const lastBuildFile = ".last-build-checksum"
+// lastBuildPrefix is the filename prefix used to record the last successful
+// profile build checksum in a profile directory (profile image staleness
+// detection). The full name is suffixed with the backend key — see
+// profileChecksumPath. The bare prefix is also what the build-context filter
+// matches on, so a marker left by any backend (including the pre-DF150
+// unkeyed one) stays out of the build context.
+const lastBuildPrefix = ".last-build-checksum"
+
+// profileChecksumPath returns the profile build-checksum marker for backendKey.
+//
+// Keyed for the same reason baseImageChecksumPath is (DF56, DF150): the profile
+// directory is shared across backends but the image stores are not, so one
+// unkeyed marker let whichever backend built first answer "already built" for
+// every other backend — which then skipped a build whose image it did not have
+// and failed at `run` trying to pull a local-only tag. It reproduced between
+// docker and podman on one Linux host, in both directions.
+//
+// The same caveat as the base-image marker applies and is NOT yet addressed
+// here: a host-side marker keyed by backend name is exact only where one
+// backend name means one store. The docker backend can be pointed at any of
+// several local daemons (OrbStack, Docker Desktop, Colima), and this marker
+// cannot tell them apart — the base image solves that by stamping the checksum
+// onto the image itself (baseChecksumLabel) so staleness travels with the
+// image. The profile path cannot do that yet: ProfileImageNeedsBuild takes
+// neither a context nor a tag, so it cannot inspect an image. See DF152.
+func profileChecksumPath(profileDir string, backendKey string) string {
+	return filepath.Join(profileDir, lastBuildPrefix+"-"+backendKey)
+}
 
 // buildErrorTailLines is how many trailing lines of a failed build's output are
 // carried on the returned error (DF144) — enough to include the failing
@@ -318,12 +344,32 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 // (re)built. Checks: no checksum file, profile Dockerfile changed, or
 // parent profile was rebuilt more recently.
 func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bool {
+	return ProfileImageNeedsBuild(profileDir, parentDir, r.binaryName)
+}
+
+// RecordProfileBuildChecksum writes the current Dockerfile checksum to disk
+// for staleness detection.
+func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
+	RecordProfileBuildChecksum(profileDir, r.binaryName)
+}
+
+// ProfileImageNeedsBuild reports whether backendKey's profile image is stale:
+// no marker for that backend, the profile Dockerfile changed, or the parent
+// profile was rebuilt more recently.
+//
+// This is the scheme itself rather than a method, because it has more than one
+// consumer: the docker Runtime (which passes its own binaryName, so podman gets
+// "podman" through the embedding and keeps a separate marker) and any other
+// image-based backend that keeps its own store. backendKey names that store —
+// "docker", "podman", "containerd", "apple" — exactly as it does for the base
+// image in NeedsBuild.
+func ProfileImageNeedsBuild(profileDir string, parentDir string, backendKey string) bool {
 	current := profileBuildChecksum(profileDir)
 	if current == "" {
 		return true
 	}
 
-	lastPath := filepath.Join(profileDir, lastBuildFile)
+	lastPath := profileChecksumPath(profileDir, backendKey)
 	last, err := os.ReadFile(lastPath) //nolint:gosec // G304: profileDir is from profile resolution
 	if err != nil {
 		return true
@@ -332,8 +378,9 @@ func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bo
 		return true
 	}
 
-	// Check if parent was rebuilt after us
-	parentLastPath := filepath.Join(parentDir, lastBuildFile)
+	// Check if parent was rebuilt after us — in THIS backend's store, so the
+	// parent marker is read under the same key.
+	parentLastPath := profileChecksumPath(parentDir, backendKey)
 	parentInfo, parentErr := os.Stat(parentLastPath)
 	if parentErr != nil {
 		return false // can't check parent, assume ok
@@ -345,11 +392,11 @@ func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bo
 	return parentInfo.ModTime().After(myInfo.ModTime())
 }
 
-// RecordProfileBuildChecksum writes the current Dockerfile checksum to disk
-// for staleness detection.
-func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
+// RecordProfileBuildChecksum records the profile's Dockerfile checksum for
+// backendKey's store after a successful build. See ProfileImageNeedsBuild.
+func RecordProfileBuildChecksum(profileDir string, backendKey string) {
 	if sum := profileBuildChecksum(profileDir); sum != "" {
-		_ = fileutil.WriteFile(filepath.Join(profileDir, lastBuildFile), []byte(sum), 0600)
+		_ = fileutil.WriteFile(profileChecksumPath(profileDir, backendKey), []byte(sum), 0600)
 	}
 }
 
@@ -380,9 +427,11 @@ func createProfileBuildContext(sourceDir string) (io.Reader, error) {
 		if e.IsDir() {
 			continue
 		}
-		// Skip internal files
+		// Skip internal files. Prefix-matched so every backend's keyed marker
+		// is excluded, along with the pre-DF150 unkeyed one that may still be
+		// sitting in a profile dir from an older install.
 		name := e.Name()
-		if name == lastBuildFile || name == "config.yaml" {
+		if strings.HasPrefix(name, lastBuildPrefix) || name == "config.yaml" {
 			continue
 		}
 

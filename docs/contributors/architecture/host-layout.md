@@ -88,14 +88,21 @@ they vouch for is not shared: docker, podman, containerd and apple each keep the
 store, so a marker written by one backend answers a question about an image another backend does
 not have.
 
-The base-image path already does this — `baseImageChecksumPath(layout, backendKey)` plus a
-`yoloai.base.checksum` image label, reasoned inline at `runtime/docker/build.go` ("can hold
-separate images across local providers"). **The profile path does not**: `.last-build-checksum` is
-unqualified. The failure is not hypothetical and not rare, because `apple` is the default on macOS
-when installed and users alternate constantly: build a profile under Docker Desktop, run the same
-profile under `--backend apple`, the checksum matches, apple skips the build it never did, and the
-run fails when `container run` tries to pull a local-only tag. It fails in both directions.
+Both do this today: `baseImageChecksumPath(layout, backendKey)` for the base image (DF56) and
+`profileChecksumPath(profileDir, backendKey)` for profile images (DF150). The profile marker was
+unqualified until 2026-07-27, and the failure was neither hypothetical nor rare — build a profile
+under docker, run it under `--backend podman`, and podman skipped a build whose image it did not
+have, then failed pulling a local-only tag. It failed in both directions, on any host with two
+container backends.
 
 The invariant generalizes past checksums: **any host-side marker that stands in for a
-backend-managed artifact is keyed by backend, or it is a lie for every other backend.** Filed as
-[DF150](../design/findings-unresolved.md); the profile marker is the open half.
+backend-managed artifact is keyed by backend, or it is a lie for every other backend.**
+
+**And the key is a backend *name*, which is a proxy for a store rather than the store itself.**
+Where one name means one store — apple, containerd — the proxy is exact. The docker backend can
+be pointed at OrbStack, Docker Desktop or Colima, so it is not: `"docker"` names three possible
+stores. The base image handles this by not relying on a host-side marker at all, stamping the
+checksum onto the image (`baseChecksumLabel`) so staleness travels with the image into whatever
+store holds it. **When the artifact can carry its own staleness, that beats any host-side
+marker** — the marker is what you use when it cannot. The profile path cannot yet, and that gap is
+[DF152](../design/findings-unresolved.md).
