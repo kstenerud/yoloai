@@ -227,12 +227,11 @@ func resetAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, meta *stor
 // clearAgentState wipes and recreates the agent-runtime directory and resets
 // the AgentFilesInitialized flag.
 func clearAgentState(sandboxDir string, perms store.IsolationPerms) error {
+	// Bind-mounted into a live sandbox on the --clear-state path, so empty it
+	// in place rather than replacing it (DF149).
 	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
-	if err := os.RemoveAll(agentStateDir); err != nil {
-		return fmt.Errorf("remove %s: %w", store.AgentRuntimeDir, err)
-	}
-	if err := fileutil.MkdirAllPerm(agentStateDir, perms.Dir); err != nil {
-		return fmt.Errorf("recreate %s: %w", store.AgentRuntimeDir, err)
+	if err := fileutil.ClearDirContents(agentStateDir, perms.Dir); err != nil {
+		return fmt.Errorf("clear %s: %w", store.AgentRuntimeDir, err)
 	}
 	// Reset agent_files flag so files get re-seeded on next start
 	sbState, stateErr := store.LoadSandboxState(sandboxDir)
@@ -243,10 +242,13 @@ func clearAgentState(sandboxDir string, perms store.IsolationPerms) error {
 	return nil
 }
 
-// reinitLogs removes and recreates the sandbox log files with appropriate permissions.
+// reinitLogs clears the sandbox log files and recreates them with appropriate
+// permissions. logs/ is bind-mounted, but the only caller runs after the
+// container has been removed and before the recreate, so a replaced inode would
+// not strand a live mount today; it is emptied in place anyway so the safety
+// does not rest on that caller-side fact (DF149).
 func reinitLogs(sandboxDir string, perms store.IsolationPerms) {
-	_ = os.RemoveAll(filepath.Join(sandboxDir, store.LogsDir))
-	_ = fileutil.MkdirAllPerm(filepath.Join(sandboxDir, store.LogsDir), perms.Dir)
+	_ = fileutil.ClearDirContents(filepath.Join(sandboxDir, store.LogsDir), perms.Dir)
 	for _, logFile := range []string{store.SandboxJSONLFile, store.MonitorJSONLFile, store.HooksJSONLFile} {
 		_ = fileutil.WriteFilePerm(filepath.Join(sandboxDir, logFile), nil, perms.File)
 	}
@@ -411,22 +413,16 @@ func clearCacheAndFiles(d state.Deps, opts ResetOptions) error {
 	sandboxDir := d.Layout.SandboxDir(opts.Name)
 	perms := store.Perms()
 
+	// Both dirs are bind-mounted into a sandbox that is still running here, so
+	// they must be emptied in place — see fileutil.ClearDirContents (DF149).
 	if !opts.KeepCache {
-		cacheDir := store.CacheDir(sandboxDir)
-		if err := os.RemoveAll(cacheDir); err != nil {
-			return fmt.Errorf("remove cache: %w", err)
-		}
-		if err := fileutil.MkdirAllPerm(cacheDir, perms.Dir); err != nil {
-			return fmt.Errorf("recreate cache: %w", err)
+		if err := fileutil.ClearDirContents(store.CacheDir(sandboxDir), perms.Dir); err != nil {
+			return fmt.Errorf("clear cache: %w", err)
 		}
 	}
 	if !opts.KeepFiles {
-		filesDir := store.FilesDir(sandboxDir)
-		if err := os.RemoveAll(filesDir); err != nil {
-			return fmt.Errorf("remove files: %w", err)
-		}
-		if err := fileutil.MkdirAllPerm(filesDir, perms.Dir); err != nil {
-			return fmt.Errorf("recreate files: %w", err)
+		if err := fileutil.ClearDirContents(store.FilesDir(sandboxDir), perms.Dir); err != nil {
+			return fmt.Errorf("clear files: %w", err)
 		}
 	}
 	return nil
