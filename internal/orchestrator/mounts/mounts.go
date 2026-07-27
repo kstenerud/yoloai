@@ -88,7 +88,7 @@ func buildAgentMounts(st *state.State) []runtime.MountSpec {
 	// Agent runtime directory (agent's own managed state)
 	if st.Agent.StateDir != "" {
 		mounts = append(mounts, runtime.MountSpec{
-			HostPath:      filepath.Join(st.SandboxDir, store.AgentRuntimeDir),
+			HostPath:      store.AgentRuntimePath(st.SandboxDir),
 			ContainerPath: st.Agent.StateDir,
 		})
 	}
@@ -112,7 +112,7 @@ func buildVscodeMounts(st *state.State) []runtime.MountSpec {
 	// multiple sandboxes run tunnels concurrently. Token is seeded from the global
 	// dir (~/.yoloai/vscode-cli/) on first use so re-authentication is only needed
 	// once across all sandboxes.
-	vscodeSandboxCLIDir := filepath.Join(st.SandboxDir, "vscode-cli")
+	vscodeSandboxCLIDir := store.VSCodeCLIPath(st.SandboxDir)
 	_ = fileutil.MkdirAll(vscodeSandboxCLIDir, 0750)
 
 	// Seed token from global dir if this sandbox hasn't authenticated yet.
@@ -131,7 +131,7 @@ func buildVscodeMounts(st *state.State) []runtime.MountSpec {
 
 	// Stable machine-id — VS Code CLI ties its token to /etc/machine-id; a
 	// fresh random ID on each container restart causes re-authentication.
-	machineIDPath := filepath.Join(st.SandboxDir, store.MachineIDFile)
+	machineIDPath := store.MachineIDPath(st.SandboxDir)
 	if err := ensureMachineID(machineIDPath); err == nil {
 		mounts = append(mounts, runtime.MountSpec{
 			HostPath:      machineIDPath,
@@ -159,7 +159,7 @@ func buildHomeSeedMounts(st *state.State) []runtime.MountSpec {
 			if mountedDirs[topDir] {
 				continue
 			}
-			src := filepath.Join(st.SandboxDir, "home-seed", topDir)
+			src := filepath.Join(store.HomeSeedPath(st.SandboxDir), topDir)
 			if _, err := os.Stat(src); err != nil {
 				continue
 			}
@@ -169,7 +169,7 @@ func buildHomeSeedMounts(st *state.State) []runtime.MountSpec {
 			})
 			mountedDirs[topDir] = true
 		} else {
-			src := filepath.Join(st.SandboxDir, "home-seed", sf.TargetPath)
+			src := filepath.Join(store.HomeSeedPath(st.SandboxDir), sf.TargetPath)
 			if _, err := os.Stat(src); err != nil {
 				continue // skip if not seeded
 			}
@@ -187,19 +187,19 @@ func buildSystemMounts(st *state.State) []runtime.MountSpec {
 	mounts := []runtime.MountSpec{
 		// Structured log directory
 		{
-			HostPath:      filepath.Join(st.SandboxDir, store.LogsDir),
+			HostPath:      store.LogsPath(st.SandboxDir),
 			ContainerPath: "/yoloai/" + store.LogsDir,
 		},
 		// Agent status file (for in-container status monitor)
 		{
-			HostPath:      filepath.Join(st.SandboxDir, store.AgentStatusFile),
+			HostPath:      store.AgentStatusFilePath(st.SandboxDir),
 			ContainerPath: "/yoloai/" + store.AgentStatusFile,
 		},
 	}
 
 	// Prompt file
 	if st.HasPrompt {
-		promptSource := filepath.Join(st.SandboxDir, "prompt.txt")
+		promptSource := store.PromptFilePath(st.SandboxDir)
 		if st.PromptSourcePath != "" {
 			promptSource = st.PromptSourcePath
 		}
@@ -219,12 +219,12 @@ func buildSystemMounts(st *state.State) []runtime.MountSpec {
 		},
 		// File exchange directory
 		runtime.MountSpec{
-			HostPath:      filepath.Join(st.SandboxDir, "files"),
+			HostPath:      store.FilesDir(st.SandboxDir),
 			ContainerPath: "/yoloai/files",
 		},
 		// Cache directory
 		runtime.MountSpec{
-			HostPath:      filepath.Join(st.SandboxDir, "cache"),
+			HostPath:      store.CacheDir(st.SandboxDir),
 			ContainerPath: "/yoloai/cache",
 		},
 	)

@@ -12,13 +12,13 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/containerd/containerd/v2/client"
 	"github.com/containerd/containerd/v2/pkg/cio"
 	specs "github.com/opencontainers/runtime-spec/specs-go"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 )
@@ -94,7 +94,7 @@ func captureNetworkDiagnostics(ctx context.Context, r *Runtime, name string, tas
 	appendHostCmd(ctx, r.execEnv, &buf, "ls -la /run/cni/networks/yoloai/ (IPAM leases)",
 		"ls", "-la", "/run/cni/networks/yoloai/")
 
-	outPath := filepath.Join(sandboxDir, "network-diag.txt")
+	outPath := config.NetworkDiagPath(sandboxDir)
 	if err := fileutil.WriteFile(outPath, buf.Bytes(), 0o644); err != nil {
 		slog.Warn("failed to write network-diag.txt",
 			"event", "sandbox.network.diag.write_error",

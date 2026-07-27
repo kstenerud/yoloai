@@ -14,7 +14,9 @@
 The owner chose the fully principled fix over the cheap interim: make the tier a **physical
 directory**, so classification is "which directory does this file live in", not a list that can
 drift. The sandbox-dir root holds **only three subdirectories** — there is no un-tiered place to put
-a new file, and `store/paths.go` becomes the sole path-builder, every helper rooted in a tier.
+a new file, and one module becomes the sole path-builder, every helper rooted in a tier. That module
+is `internal/config/sandbox_layout.go` rather than `store/paths.go` (see sequencing step 1 for why);
+`store/paths.go` re-exports it.
 
 ```
 <sandboxDir>/
@@ -46,6 +48,25 @@ the same bytes on every backend; ~20 fragile path-joins stay untouched).
   view symlink is enforced at the *target's* tier — a write via the view to `rw/` lands, a write via
   the view to `ro/` is blocked, and a write to ungranted `host/` (the DF136 attack) is blocked.
 
+**Six files the table above missed** (found 2026-07-27 by funnelling every ad-hoc path joiner
+through `internal/config/sandbox_layout.go` — the table was written from the host+guest *access*
+maps, which never enumerated these). Each is classified from what the code already says about it,
+but none has been reviewed against the design:
+
+| File | Tier | Evidence |
+| --- | --- | --- |
+| `injector.json` (pid/addr record) | `host/` | host-side injector bookkeeping; guest never reads it |
+| `injector.log` | `host/` | written by the host-side injector process |
+| `injector-token` | `host/` | `internal/broker` states it is "never bind-mounted", which is what stops a co-resident container learning another sandbox's token |
+| `context.md` | `ro/` | seeded by the host, read by the agent |
+| `log.txt` (containerd) | `rw/` | `runtime/containerd/logs.go` calls it a "bind-mounted file" the guest writes |
+| `lifecycle-on-create-done` | `rw/` | the create-done marker the table already lists under `rw` |
+
+The lesson generalizes: a classification table built by enumerating *accesses* misses any file
+whose access nobody happened to describe. The path-builder funnel enumerates by *construction*
+instead, so it cannot miss one — which is the argument for keeping the funnel as the gate rather
+than the table.
+
 **Two judgment calls (owner-approved):**
 - `tmux/` → `rw` wholesale: it holds a runtime-created socket (needs write); `tmux.conf` rides along
   writable — low-risk, the agent's own multiplexer running as the agent, no privilege boundary.
@@ -56,8 +77,12 @@ following the v3→v4 overlay-flatten precedent (scratch on the same filesystem,
 stamp written **last** per D110). Register the migration in [deprecations.md](../../deprecations.md).
 
 **Sequencing (reviewable commits on the branch):**
-1. Prep-refactor: funnel the ~16 ad-hoc `runtime-config.json` joiners through
-   `store.RuntimeConfigFilePath` (no behavior change) so the later move is one-place.
+1. Prep-refactor: funnel every ad-hoc per-sandbox path joiner through one builder (no behavior
+   change) so the later move is one-place. Done in two passes: `runtime-config.json` first, then
+   (2026-07-27) the remaining ~55 across 25 files. The builders live in
+   `internal/config/sandbox_layout.go`, not `store/paths.go`, because the runtime backends,
+   `internal/broker` and `internal/netpolicycfg` cannot import `store` — and `internal/cli` is
+   forbidden from importing it by depguard. `store/paths.go` re-exports them for its own callers.
 2. `store/paths.go`: the tier roots + every helper rooted in its tier; the four single-joiner
    metadata files (`environment/sandbox-state/agent/netpolicy`) into `host/`.
 3. `create.go` dir creation + the backend wiring (`mounts.Build`, tart two-share + view, seatbelt

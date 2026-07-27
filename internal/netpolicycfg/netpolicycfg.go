@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // NetpolicyFile is the filename for the per-sandbox network-policy record.
-const NetpolicyFile = "netpolicy.json"
+const NetpolicyFile = config.NetpolicyFileName
 
 const schemaVersion = 1
 
@@ -36,7 +36,7 @@ func Save(sandboxDir string, np *Netpolicy) error {
 		return fmt.Errorf("marshal %s: %w", NetpolicyFile, err)
 	}
 
-	path := filepath.Join(sandboxDir, NetpolicyFile)
+	path := config.NetpolicyPath(sandboxDir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", NetpolicyFile, err)
 	}
@@ -48,7 +48,7 @@ func Save(sandboxDir string, np *Netpolicy) error {
 // zero-value Netpolicy if the file does not exist (a sandbox with default,
 // non-isolated networking writes no record — omitempty drops empty fields).
 func Load(sandboxDir string) (*Netpolicy, error) {
-	path := filepath.Join(sandboxDir, NetpolicyFile)
+	path := config.NetpolicyPath(sandboxDir)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir
 	if err != nil {

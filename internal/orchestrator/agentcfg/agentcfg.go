@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // AgentConfigFile is the filename for the per-sandbox inside-process config.
-const AgentConfigFile = "agent.json"
+const AgentConfigFile = config.AgentConfigFileName
 
 const schemaVersion = 1
 
@@ -34,7 +34,7 @@ func Save(sandboxDir string, cfg *AgentConfig) error {
 		return fmt.Errorf("marshal %s: %w", AgentConfigFile, err)
 	}
 
-	path := filepath.Join(sandboxDir, AgentConfigFile)
+	path := config.AgentConfigPath(sandboxDir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", AgentConfigFile, err)
 	}
@@ -45,7 +45,7 @@ func Save(sandboxDir string, cfg *AgentConfig) error {
 // Load reads agent.json from the given sandbox directory.
 // Returns a zero-value AgentConfig if the file does not exist.
 func Load(sandboxDir string) (*AgentConfig, error) {
-	path := filepath.Join(sandboxDir, AgentConfigFile)
+	path := config.AgentConfigPath(sandboxDir)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir
 	if err != nil {

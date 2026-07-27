@@ -61,7 +61,7 @@ func MigrateAgentConfigs(layout config.Layout) error {
 // steps 2 and 3, the values are already in their sibling files, the record is
 // still < v3, and a re-run repeats the (idempotent) steps to completion.
 func migrateAgentConfigRecord(sandboxDir string) error {
-	path := filepath.Join(sandboxDir, store.EnvironmentFile)
+	path := store.EnvironmentFilePath(sandboxDir)
 	data, err := os.ReadFile(path) //nolint:gosec // G304: trusted sandbox subpath
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

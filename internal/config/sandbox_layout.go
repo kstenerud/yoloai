@@ -36,12 +36,196 @@ func ReadWriteTierDir(sandboxDir string) string {
 	return filepath.Join(sandboxDir, ReadWriteTierName)
 }
 
-// RuntimeConfigFileName is the sandbox's Go<->guest runtime config file.
-const RuntimeConfigFileName = "runtime-config.json"
+// Per-sandbox entry names. Every file and directory inside a sandbox dir is
+// named exactly once, here. The path builders below are the only supported way
+// to turn a sandboxDir into a subpath: an ad-hoc filepath.Join at a call site
+// re-derives the layout, and the tier a path belongs to then has no single
+// place to change. store/paths.go re-exports these for its own callers; the
+// builders live here rather than there because the runtime backends and
+// internal/broker cannot import store.
+const (
+	EnvironmentFileName  = "environment.json"
+	SandboxStateFileName = "sandbox-state.json"
+	AgentConfigFileName  = "agent.json"
+	NetpolicyFileName    = "netpolicy.json"
+	NetworkDiagFileName  = "network-diag.txt"
+	// The injector's record, log and placeholder token are host-side only —
+	// the token comment in internal/broker is explicit that it is never
+	// bind-mounted, which is what keeps a co-resident container from learning
+	// another sandbox's token.
+	InjectorRecordFileName = "injector.json"
+	InjectorLogFileName    = "injector.log"
+	InjectorTokenFileName  = "injector-token"
 
-// RuntimeConfigPath returns the path to runtime-config.json within a sandbox
-// directory. Centralized here (not in store) so the runtime backends — which
-// do not import store — resolve the same path as the orchestrator.
+	RuntimeConfigFileName = "runtime-config.json"
+	PromptFileName        = "prompt.txt"
+	ResumePromptFileName  = "resume-prompt.txt"
+	MachineIDFileName     = "machine-id"
+	HomeSeedDirName       = "home-seed"
+
+	AgentStatusFileName = "agent-status.json"
+	LogsDirName         = "logs"
+	FilesDirName        = "files"
+	CacheDirName        = "cache"
+	WorkDirName         = "work"
+	VSCodeCLIDirName    = "vscode-cli"
+	ContextFileName     = "context.md"
+	// ContainerLogFileName is the guest-written container log the containerd
+	// backend bind-mounts and tails.
+	ContainerLogFileName = "log.txt"
+	// CreateDoneMarkerName records that on-create setup commands completed, so
+	// a restart does not re-run them.
+	CreateDoneMarkerName = "lifecycle-on-create-done"
+)
+
+// Host-tier paths. Guest-invisible sandbox bookkeeping.
+
+// EnvironmentPath returns the path to environment.json within a sandbox.
+func EnvironmentPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, EnvironmentFileName)
+}
+
+// SandboxStatePath returns the path to sandbox-state.json within a sandbox.
+func SandboxStatePath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, SandboxStateFileName)
+}
+
+// AgentConfigPath returns the path to agent.json within a sandbox.
+func AgentConfigPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, AgentConfigFileName)
+}
+
+// NetpolicyPath returns the path to netpolicy.json within a sandbox.
+func NetpolicyPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, NetpolicyFileName)
+}
+
+// NetworkDiagPath returns the path to network-diag.txt within a sandbox.
+func NetworkDiagPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, NetworkDiagFileName)
+}
+
+// BackendPath returns the backend-specific state directory within a sandbox
+// (SBPL profile, pids, VM/CNI state).
+func BackendPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, BackendDirName)
+}
+
+// InjectorRecordPath returns the path to the injector's pid/addr record.
+func InjectorRecordPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, InjectorRecordFileName)
+}
+
+// InjectorLogPath returns the path to the injector's host-side log.
+func InjectorLogPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, InjectorLogFileName)
+}
+
+// InjectorTokenPath returns the path to the sandbox's injector placeholder
+// token.
+func InjectorTokenPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, InjectorTokenFileName)
+}
+
+// Read-only-tier paths. The guest reads these; only the host writes them.
+
+// RuntimeConfigPath returns the path to runtime-config.json within a sandbox.
 func RuntimeConfigPath(sandboxDir string) string {
 	return filepath.Join(sandboxDir, RuntimeConfigFileName)
+}
+
+// BinPath returns the guest-exec'd script directory within a sandbox.
+func BinPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, BinDirName)
+}
+
+// PromptPath returns the path to prompt.txt within a sandbox.
+func PromptPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, PromptFileName)
+}
+
+// ResumePromptPath returns the path to resume-prompt.txt within a sandbox.
+func ResumePromptPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, ResumePromptFileName)
+}
+
+// MachineIDPath returns the path to the sandbox's stable machine-id file.
+func MachineIDPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, MachineIDFileName)
+}
+
+// HomeSeedPath returns the home-seed directory within a sandbox.
+func HomeSeedPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, HomeSeedDirName)
+}
+
+// Read-write-tier paths. The guest reads and writes these.
+
+// LogsPath returns the logs/ directory within a sandbox.
+func LogsPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, LogsDirName)
+}
+
+// LogFilePath returns the path to a named file under a sandbox's logs/ dir.
+// Callers pass a bare file name; the logs-relative constants in store are
+// spelled "logs/x.jsonl" for the guest's benefit and resolve to the same place.
+func LogFilePath(sandboxDir, name string) string {
+	return filepath.Join(sandboxDir, LogsDirName, name)
+}
+
+// AgentStatusPath returns the path to agent-status.json within a sandbox.
+func AgentStatusPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, AgentStatusFileName)
+}
+
+// AgentRuntimePath returns the agent-managed state directory within a sandbox.
+func AgentRuntimePath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, AgentRuntimeDirName)
+}
+
+// AgentRuntimeFilePath returns the path to a relative entry inside a sandbox's
+// agent-runtime directory.
+func AgentRuntimeFilePath(sandboxDir, relPath string) string {
+	return filepath.Join(sandboxDir, AgentRuntimeDirName, relPath)
+}
+
+// FilesPath returns the host<->guest file exchange directory within a sandbox.
+func FilesPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, FilesDirName)
+}
+
+// CachePath returns the cache directory within a sandbox.
+func CachePath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, CacheDirName)
+}
+
+// WorkBasePath returns the base directory holding a sandbox's per-mount work
+// copies. Individual work copies are addressed via store.WorkDir.
+func WorkBasePath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, WorkDirName)
+}
+
+// TmuxPath returns the tmux config/socket directory within a sandbox.
+func TmuxPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, TmuxDirName)
+}
+
+// VSCodeCLIPath returns the VS Code CLI state directory within a sandbox.
+func VSCodeCLIPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, VSCodeCLIDirName)
+}
+
+// ContainerLogPath returns the path to the guest-written container log.
+func ContainerLogPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, ContainerLogFileName)
+}
+
+// ContextPath returns the path to context.md within a sandbox.
+func ContextPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, ContextFileName)
+}
+
+// CreateDoneMarkerPath returns the path to the on-create-completed marker.
+func CreateDoneMarkerPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, CreateDoneMarkerName)
 }

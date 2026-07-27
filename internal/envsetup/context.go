@@ -6,7 +6,6 @@ package envsetup
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -61,8 +60,8 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 	filesPath := rtDir + "/files/"
 	cachePath := rtDir + "/cache/"
 	if meta.HostFilesystem {
-		filesPath = filepath.Join(sandboxDir, "files") + "/"
-		cachePath = filepath.Join(sandboxDir, "cache") + "/"
+		filesPath = store.FilesDir(sandboxDir) + "/"
+		cachePath = store.CacheDir(sandboxDir) + "/"
 	}
 	fmt.Fprintf(&b, "The **shared files directory** is at `%s`.\n", filesPath)
 	fmt.Fprintf(&b, "Files shared via `yoloai files put` appear here, and anything you write here can be retrieved by the user with `yoloai files get`.\n")
@@ -167,14 +166,14 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, spec EnvSpec)
 	content := GenerateContext(sandboxDir, meta)
 
 	// Write context.md at sandbox root (reference copy)
-	contextPath := filepath.Join(sandboxDir, "context.md")
+	contextPath := store.ContextFilePath(sandboxDir)
 	if err := fileutil.WriteFile(contextPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("write context.md: %w", err)
 	}
 
 	// Write full context inline into the agent's native instruction file.
 	if spec.ContextFile != "" && spec.HasStateDir {
-		refPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, spec.ContextFile)
+		refPath := store.AgentRuntimeFilePath(sandboxDir, spec.ContextFile)
 
 		// Append, don't clobber (D92): the seed/agent_files stage runs BEFORE this
 		// in the create flow, so the user's own context file (e.g. a seeded

@@ -510,7 +510,7 @@ func (o *OverlayFlatten) overlaySandboxNames() ([]string, error) {
 			continue
 		}
 		sandboxDir := filepath.Join(o.sandboxesRoot, e.Name())
-		if _, err := os.Stat(filepath.Join(sandboxDir, store.EnvironmentFile)); errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Stat(store.EnvironmentFilePath(sandboxDir)); errors.Is(err, fs.ErrNotExist) {
 			continue // not a sandbox dir at all — nothing here claims to be one
 		}
 		env, err := store.LoadEnvironment(sandboxDir)

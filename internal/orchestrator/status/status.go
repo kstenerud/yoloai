@@ -128,7 +128,7 @@ const (
 // payload that carries data.
 // g is a host-scoped git runner derived from the caller's layout (DEV §12).
 func ProbeWorkData(ctx context.Context, g *git.Git, sandboxDir string) (WorkDataState, string) {
-	entries, err := os.ReadDir(filepath.Join(sandboxDir, "work"))
+	entries, err := os.ReadDir(store.WorkBasePath(sandboxDir))
 	if err != nil {
 		return WorkDataNone, ""
 	}
@@ -138,7 +138,7 @@ func ProbeWorkData(ctx context.Context, g *git.Git, sandboxDir string) (WorkData
 		if !entry.IsDir() {
 			continue
 		}
-		workEntry := filepath.Join(sandboxDir, "work", entry.Name())
+		workEntry := filepath.Join(store.WorkBasePath(sandboxDir), entry.Name())
 
 		// Copy mode: the work dir is the git repo itself.
 		if _, statErr := os.Stat(filepath.Join(workEntry, ".git")); statErr == nil {
@@ -248,7 +248,7 @@ func detectStatusWithExit(ctx context.Context, rt runtime.Backend, containerName
 
 	// Try agent-status.json (fast path — no exec)
 	if sandboxDir != "" {
-		statusPath := filepath.Join(sandboxDir, store.AgentStatusFile)
+		statusPath := store.AgentStatusFilePath(sandboxDir)
 		data, readErr := os.ReadFile(statusPath) //nolint:gosec // path is sandbox-controlled
 		if readErr == nil && len(data) > 0 {
 			if status, exitCode, ok := parseStatusJSON(data); ok {

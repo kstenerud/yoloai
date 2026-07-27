@@ -9,7 +9,6 @@ import (
 	"fmt"
 	"maps"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/agent"
@@ -224,7 +223,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 	}
 
 	if resume {
-		sbState2.PromptSourcePath = filepath.Join(sandboxDir, "resume-prompt.txt")
+		sbState2.PromptSourcePath = store.ResumePromptFilePath(sandboxDir)
 	}
 
 	if err := launch.LaunchContainer(ctx, d, sbState2); err != nil {
@@ -285,7 +284,7 @@ func requireAgent(d state.Deps, name string) (*agent.Definition, *agentcfg.Agent
 // readResumeText reads a sandbox's original prompt.txt and prepends the resume
 // preamble, producing the text re-sent to the agent on a resume restart.
 func readResumeText(sandboxDir string) (string, error) {
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // path is sandbox-controlled
+	data, err := os.ReadFile(store.PromptFilePath(sandboxDir))
 	if err != nil {
 		return "", fmt.Errorf("read prompt.txt: %w", err)
 	}
@@ -430,7 +429,7 @@ rm -f %s`, tmuxShellPrefix(socket), buildReadyWaitScript(cfg), tmpFile, tmpFile,
 // container relaunches the agent interactively and re-delivers the prompt.
 func prepareRelaunchFiles(d state.Deps, name string, meta *store.Environment, promptText string) error {
 	sandboxDir := d.Layout.SandboxDir(name)
-	if err := fileutil.WriteFile(filepath.Join(sandboxDir, "resume-prompt.txt"), []byte(promptText), 0600); err != nil {
+	if err := fileutil.WriteFile(store.ResumePromptFilePath(sandboxDir), []byte(promptText), 0600); err != nil {
 		return fmt.Errorf("write resume-prompt.txt: %w", err)
 	}
 	agentDef, acfg, err := requireAgent(d, name)
@@ -455,5 +454,5 @@ func prepareResumeFiles(d state.Deps, name string, meta *store.Environment) erro
 
 // cleanupResumeFiles removes the temporary resume-prompt.txt file.
 func cleanupResumeFiles(d state.Deps, name string) {
-	_ = os.Remove(filepath.Join(d.Layout.SandboxDir(name), "resume-prompt.txt"))
+	_ = os.Remove(store.ResumePromptFilePath(d.Layout.SandboxDir(name)))
 }

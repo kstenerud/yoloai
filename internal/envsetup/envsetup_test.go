@@ -36,7 +36,7 @@ func agentSpec(agentDef *agent.Definition) EnvSpec {
 	var patches []SettingsPatch
 	if !agentDef.SeedsAllAgents && agentDef.StateDir != "" && agentDef.ApplySettings != nil {
 		patches = []SettingsPatch{{
-			RelDir:  store.AgentRuntimeDir,
+			Dir:     store.AgentRuntimePath,
 			DirPerm: store.Perms().Dir,
 			Apply:   agentDef.ApplySettings,
 		}}

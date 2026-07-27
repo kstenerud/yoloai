@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -261,7 +260,7 @@ func SaveEnvironment(dir string, meta *Environment) error {
 		return fmt.Errorf("marshal %s: %w", EnvironmentFile, err)
 	}
 
-	path := filepath.Join(dir, EnvironmentFile)
+	path := EnvironmentFilePath(dir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", EnvironmentFile, err)
 	}
@@ -298,7 +297,7 @@ func ContainerUser(meta *Environment, hostUID int) string {
 // otherwise the dropped agent/model keys would vanish silently before the
 // migration could relocate them.
 func LoadEnvironment(dir string) (*Environment, error) {
-	path := filepath.Join(dir, EnvironmentFile)
+	path := EnvironmentFilePath(dir)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir, not user input
 	if err != nil {

@@ -3,6 +3,7 @@
 package envspec_test
 
 import (
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -12,6 +13,10 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	"github.com/kstenerud/yoloai/store"
 )
+
+// sbDir is an arbitrary sandbox root: these tests assert where a patch resolves
+// relative to it, not that any real directory exists.
+const sbDir = "/sandboxes/demo"
 
 func TestBuildEnvSpec_NormalAgent(t *testing.T) {
 	def := agent.GetAgent("claude")
@@ -37,7 +42,7 @@ func TestBuildEnvSpec_NormalAgent(t *testing.T) {
 	assert.True(t, found, "credentials SeedFile should be present")
 
 	require.Len(t, spec.SettingsPatches, 1)
-	assert.Equal(t, store.AgentRuntimeDir, spec.SettingsPatches[0].RelDir)
+	assert.Equal(t, store.AgentRuntimePath(sbDir), spec.SettingsPatches[0].Dir(sbDir))
 	assert.NotNil(t, spec.SettingsPatches[0].Apply)
 }
 
@@ -61,7 +66,8 @@ func TestBuildEnvSpec_ShellAgent(t *testing.T) {
 
 	// Each patch should be under home-seed/
 	for _, p := range spec.SettingsPatches {
-		assert.Contains(t, p.RelDir, "home-seed/", "shell agent patches must target home-seed subdirs")
+		assert.Equal(t, store.HomeSeedPath(sbDir), filepath.Dir(p.Dir(sbDir)),
+			"shell agent patches must target home-seed subdirs")
 		assert.NotNil(t, p.Apply)
 	}
 }

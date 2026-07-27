@@ -6,7 +6,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
@@ -25,7 +24,7 @@ func SaveSandboxState(sandboxDir string, state *SandboxState) error {
 		return fmt.Errorf("marshal %s: %w", SandboxStateFile, err)
 	}
 
-	path := filepath.Join(sandboxDir, SandboxStateFile)
+	path := SandboxStateFilePath(sandboxDir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", SandboxStateFile, err)
 	}
@@ -36,7 +35,7 @@ func SaveSandboxState(sandboxDir string, state *SandboxState) error {
 // LoadSandboxState reads sandbox-state.json from the given sandbox directory.
 // Returns a zero-value SandboxState if the file does not exist.
 func LoadSandboxState(sandboxDir string) (*SandboxState, error) {
-	path := filepath.Join(sandboxDir, SandboxStateFile)
+	path := SandboxStateFilePath(sandboxDir)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir
 	if err != nil {

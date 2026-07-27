@@ -99,7 +99,7 @@ func cniConfDir(layout config.Layout) string {
 
 // cniStatePath returns the path to the CNI state file for a sandbox.
 func cniStatePath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, config.BackendDirName, cniStateFileName)
+	return filepath.Join(config.BackendPath(sandboxDir), cniStateFileName)
 }
 
 // ensureCNIConflist writes the yoloai CNI conflist if it does not already exist
@@ -343,7 +343,7 @@ func runCNIAdd(ctx context.Context, env []string, layout config.Layout, netnsPat
 		IP:        stateIP,
 	}
 
-	stateDir := filepath.Join(sandboxDir, config.BackendDirName)
+	stateDir := config.BackendPath(sandboxDir)
 	if err := fileutil.MkdirAll(stateDir, 0o750); err != nil {
 		return fmt.Errorf("create backend dir: %w", err)
 	}

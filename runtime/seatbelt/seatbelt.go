@@ -606,7 +606,7 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // `yoloai system migrate`, so a frozen host-absolute socket path goes stale —
 // freeze only target-internal paths, recompute host paths from the live layout.
 func (r *Runtime) TmuxSocket(sandboxDir string) string {
-	return filepath.Join(sandboxDir, tmuxDir, tmuxSocketName)
+	return filepath.Join(config.TmuxPath(sandboxDir), tmuxSocketName)
 }
 
 // AttachCommand returns the command to attach to the tmux session for seatbelt.

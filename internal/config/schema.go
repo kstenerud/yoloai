@@ -319,6 +319,9 @@ func backfillSandboxLaunchPrefix(sandboxDir string, prefixFor LaunchPrefixResolv
 // environment.json. The bool reports whether the file exists; a missing file
 // returns ("", false, nil) so the caller can skip an unclassifiable directory.
 func readSandboxBackend(sandboxDir string) (backend string, exists bool, err error) {
+	// flat: pre-tier sealed-ladder migration (v1->v2), like its rcPath sibling.
+	// Do NOT route this through EnvironmentPath — it must keep reading the
+	// layout that existed when these sandboxes were written.
 	data, err := os.ReadFile(filepath.Join(sandboxDir, "environment.json")) //nolint:gosec // G304: trusted sandbox subpath
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
