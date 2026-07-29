@@ -505,6 +505,38 @@ itself worth knowing when reading pattern 4.
   to have been reorganised. D121's "don't state a count nothing enforces" would also have stopped
   this at the doc, independently of the method being wrong.
 
+### A14 — reimplemented an approach the backend-idiosyncrasies entry had explicitly rejected (2026-07-29)
+
+- **Claimed:** DF152's cheap fix is to key the profile build marker by daemon endpoint, recommended
+  over the label-based scheme as "cheap, independent, no interface change". Built, tested, committed.
+- **True:** the base-image path had already faced this exact choice and gone the other way, and
+  `backend-idiosyncrasies.md` records it — *"Stop tracking docker base-image freshness with a
+  host-side marker at all"* — including a rejected patch that keyed the marker by daemon identity.
+  My key is better than the rejected one (`DaemonHost()` is client-side and never empty; `docker
+  info .ID` is daemon-reported and empty on podman), so it is not the same flaw. It is the same
+  *shape*: partition a host-side marker by store, on the sibling of the path that abandoned exactly
+  that. The commit closes a real bug and is the wrong end state.
+- **Source of the false belief:** reading `runtime/docker/build.go` and `docker.go` — the code — and
+  reasoning from the mechanisms found there. The comments in those files explain what the base path
+  *does*; the idiosyncrasy entry explains what it *rejected and why*, which is the half that decides
+  a design question. Code shows the surviving branch, never the pruned one.
+- **Caught by:** the owner, reframing the question rather than correcting a fact — "this feels more
+  about bringing mechanisms into harmony". Checking that frame meant looking for prior art on the
+  mechanism, which is what surfaced the entry. Nothing in the code would have said it.
+- **Cost:** one committed fix that is now marked interim, and a recommendation to defer the correct
+  approach. Also produced two by-catches: the entry's apple justification is wrong ("a Tart VM
+  image, not OCI" describes tart; apple is OCI), and that misattribution was load-bearing — it read
+  as a hard obstacle to harmonising.
+- **Class:** the Part 7 *primary-source* row, with a twist worth naming — **the primary source for a
+  design decision is not the code, it is the record of the decision.** A1/A8's lesson was to read
+  the source; this one is that "the source" for *why not X* is never the file where X is absent.
+- **Gated now?** No. `AGENTS.md` already says to read `backend-idiosyncrasies.md` **before**
+  diagnosing any backend problem, and I did not — so the instruction exists and was not reached,
+  which is GEN §17's failure mode rather than a missing rule. The narrow, transferable habit:
+  **before implementing a mechanism on one path, grep the idiosyncrasies file and the sibling path's
+  history for the same mechanism** — divergence between siblings is this repo's most repeated defect
+  (four instances in one release; see DF152).
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of
