@@ -631,6 +631,52 @@ is worse than none because it also supplies the confidence.
   + `runtime/seatbelt/profile.go:193-199` (the rw share/grant); `internal/orchestrator/engine_network.go:62,84`;
   `runtime/seatbelt/seatbelt.go:827-831`; `internal/orchestrator/lifecycle/restart.go:163,180-208`. Related: DF136.
 
+### DF153 — containerd is image-based but does not implement `ProfileImageBuilder`, so profile Dockerfiles are silently skipped there too
+
+- **Discovered:** 2026-07-27 · **Workstream:** PR #44 review (first external contribution)
+- **Severity:** MEDIUM (silent skip — a profile with a Dockerfile builds nothing and every sandbox
+  on that profile runs `yoloai-base` unmodified, with no error). Same class as the pre-fix apple
+  defect this PR closes, and the same class DF150/DF152 cover for the backends that do implement
+  the interface.
+- **Disposition:** PARKED — explicitly out of scope for the PR that found it, per the owner's review.
+- **Description:** `runtime.ProfileImageBuilder` (`runtime/runtime_optional.go`) is implemented by
+  docker, podman (via embedding), and now apple. containerd has its own OCI image store — the same
+  shape of backend docker/podman/apple are — but declares no
+  `var _ runtime.ProfileImageBuilder = (*Runtime)(nil)` and has no `BuildProfileImage`/
+  `ProfileImageNeedsBuild`/`RecordProfileBuildChecksum` methods at all. `ProfileImageBuilderOf`
+  (`runtime_optional.go`) falls through its `ok` branch for containerd exactly as it did for apple
+  before this PR, so a profile's Dockerfile is silently ignored rather than built.
+- **Root cause, and why the interface being back in `runtime_optional.go` matters:**
+  `ProfileImageBuilder` used to live in `internal/orchestrator/profiles`, where no backend in the
+  public runtime tree could compile-time assert it — that's how apple came to be missing it
+  unnoticed, and it's why containerd is missing it unnoticed now. Every other optional capability
+  lives in `runtime/runtime_optional.go` with the `var _ runtime.CachePruner = (*Runtime)(nil)`
+  idiom (`runtime/podman/podman.go:101`); moving `ProfileImageBuilder` there (done in this PR's
+  rebase, DF151) doesn't retrofit a missing assertion into containerd — that stays a per-backend
+  choice — but it does mean the next audit of "which backends assert which optional interfaces"
+  will actually surface the gap instead of it hiding behind a package nothing sweeps.
+- **Remedy sketch:** implement `BuildProfileImage`/`ProfileImageNeedsBuild`/
+  `RecordProfileBuildChecksum` on `runtime/containerd.Runtime`, keyed by backend `"containerd"`
+  through the shared `docker.ProfileImageNeedsBuild`/`docker.RecordProfileBuildChecksum` scheme
+  (DF150), and add the compile-time assertion. containerd's `CreateBuildContext`/build-context
+  materialization needs the same absolute-directory care apple's fix pinned (AC1) if containerd's
+  build command takes a directory context rather than a stdin tar.
+- **Pointer:** `runtime/runtime_optional.go` (`ProfileImageBuilder`, `ProfileImageBuilderOf`);
+  `runtime/containerd/containerd.go:106-111` (missing assertion); `runtime/docker/build.go`
+  (`ProfileImageNeedsBuild`, `RecordProfileBuildChecksum`, the shared scheme to reuse); `runtime/apple/apple.go`
+  (the sibling fix this PR made for apple). Related: DF150, DF151, DF152.
+
+### DF154 — profile-image staleness never checks that the image exists, so a marker outliving its image skips the build
+
+- **Discovered:** 2026-07-29 · **Workstream:** PR #44 follow-up
+- **Severity:** MEDIUM (silent skip then a confusing failure — `run` attempts to pull a local-only tag — with no path back except deleting the marker by hand or passing `--force`)
+- **Disposition:** PARKED
+- **Description:** `EnsureProfileImage` (`internal/orchestrator/profiles/profile_build.go`) gates the build solely on `force || builder.ProfileImageNeedsBuild(profileDir, prevDir)`, and `ProfileImageNeedsBuild` reads only the checksum marker on disk. **No code anywhere asks the backend whether the image is present.** So the marker is not evidence that the image exists; it is evidence that a build once ran. Delete the image by hand, prune it, or write the marker from a backend that turned out to address a different store, and yoloAI reads "fresh", skips the build, and fails later at `run` with a pull of a tag no local store has.
+- **This is the root the other two findings sit on.** DF150 (marker not keyed by backend) and DF152 (backend name is a poor proxy for a store on docker) are both about the marker *lying about which store it describes*. An existence check makes that class self-healing rather than fatal: a wrong-store marker would cost one unnecessary rebuild instead of a failed run. Worth weighing that against fixing each proxy problem separately — this is the cheaper invariant, and it is the one the design doc has claimed for a long time. `config.md`'s staleness paragraph listed "it doesn't exist" as condition (a) until 2026-07-29; it was never implemented, and the doc has been corrected rather than the code.
+- **Why not just fix it here:** the check needs a backend round-trip (an image inspect/exists call) on a path that is currently pure file I/O, so it wants either a new optional method on `ProfileImageBuilder` or a widening of `ProfileImageNeedsBuild`'s signature — the same interface change DF152 needs, and best done once, together.
+- **Cost note:** an existence probe runs on every `yoloai new --profile`, so it should be cheap and non-fatal on error (a probe that fails should fall back to the marker, never block the launch).
+- **Pointer:** `internal/orchestrator/profiles/profile_build.go` (`EnsureProfileImage`, the gate); `runtime/docker/build.go` (`ProfileImageNeedsBuild` — marker-only); `runtime/runtime_optional.go` (`ProfileImageBuilder`). Related: DF150 (resolved), DF152, DF153.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
