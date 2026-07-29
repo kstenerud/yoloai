@@ -474,6 +474,37 @@ itself worth knowing when reading pattern 4.
 - **Gated now?** No. Worth considering a rule: never `git add -A` on a branch you intend to delete;
   stage paths explicitly.
 
+### A13 — a "24 of 103" measurement counted file renames and renumberings as filings (2026-07-29)
+
+- **Claimed:** 24 of 103 resolved findings were "born resolved" — filed straight into
+  `findings-resolved.md` rather than drained from the active queue. Written into two live docs
+  ("about a quarter of the entries below arrived this way") and a commit message, as the evidence
+  that the direct path is normal practice.
+- **True:** unknown, and lower. The method was `git log -S "### DF<n> — " -- findings-resolved.md`,
+  which reports every commit where that string's count in that path changed — so it cannot
+  distinguish *an entry being created there* from *the file being renamed* or *an entry being
+  renumbered into existence*. DF1 and DF9 came from `docs: reverse queue-file naming to topic-first`
+  (a rename). DF23 came from `docs(findings): renumber duplicate DF19/DF20 to DF23/DF24`. Both were
+  counted as deliberate filings.
+- **Source of the false belief:** an exhaustive, scripted measurement over the whole corpus. It felt
+  like the opposite of a guess — 103 entries, no sampling, a real tool — and the flaw was in what
+  the tool's output *means*, one level below where the rigour was being applied.
+- **Caught by:** the owner, offering an unrelated hypothesis about *why* items land there ("put
+  together in the same commit at the end"). Testing that hypothesis meant opening the commits, which
+  is the first time anything looked at what the commits actually were. The count would have stood
+  otherwise; nothing about it looked shaky.
+- **Cost:** two live docs and a commit message carried the figure for one commit. Corrected in the
+  next.
+- **Class:** the Part 7 *primary-source* row, one turn removed — the primary source was consulted
+  and answered a question adjacent to the one asked. A5 and A6 are the same shape: a real
+  measurement, run correctly, whose result did not mean what it was read to mean. `-S` answers "did
+  this string's count change here", never "was this entry authored here".
+- **Gated now?** No, and probably not gateable. The transferable rule is narrower and cheap:
+  **`git log -S` over a path measures churn, not authorship** — when the question is "where did this
+  entry come from", read the commits, and expect renames and renumberings in any corpus old enough
+  to have been reorganised. D121's "don't state a count nothing enforces" would also have stopped
+  this at the doc, independently of the method being wrong.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of

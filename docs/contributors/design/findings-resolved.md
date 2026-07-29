@@ -9,8 +9,9 @@ both fine:
 - **Drained** from [`findings-unresolved.md`](findings-unresolved.md) when a parked finding is
   fixed, so the active file stays a working set.
 - **Filed straight here** when a finding is found *and* fixed in the same stretch of work. Routing
-  it through the active queue just to move it out again records nothing extra. About a quarter of
-  the entries below arrived this way, so it is the normal path, not an exception.
+  it through the active queue just to move it out again records nothing extra. This is a normal
+  path, not an exception — including the common variant where the work spans several sittings and
+  only gets written up at the end.
 
 **Newest first — by resolution date, not by ID.** A finding discovered long ago can resolve today,
 so the numbers here are deliberately out of order and must stay that way; only

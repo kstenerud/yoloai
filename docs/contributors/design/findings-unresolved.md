@@ -47,8 +47,8 @@ That is detection, not a guarantee. The guarantee is downstream and unconditiona
 heading, so a collision cannot ship however it arose.
 
 Which is what makes the other path safe: **a finding found and fixed in one stretch of work goes
-straight into `findings-resolved.md`**, skipping this file entirely. That is sanctioned and common
-— about a quarter of resolved findings arrived that way — and it does cost the conflict check,
+straight into `findings-resolved.md`**, skipping this file entirely. That is sanctioned and common,
+and it does cost the conflict check,
 since two PRs allocating the same number into different files will not collide. The duplicate gate
 still catches them, one step later. Filing here first purely to move the entry out again buys the
 earlier signal and records nothing else.
