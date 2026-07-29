@@ -85,6 +85,59 @@ def test_prints_a_bare_integer_so_it_composes(tmp_path: Path) -> None:
     assert r.stdout == "5\n"
 
 
+# --- the corpus is every ref, not just the checked-out tree ------------------
+
+def _commit(repo: Path, message: str) -> None:
+    subprocess.run(["git", "add", "-A"], cwd=repo, check=True)
+    subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-qm", message],
+        cwd=repo,
+        check=True,
+    )
+
+
+def test_an_id_defined_only_on_an_unmerged_branch_is_still_taken(tmp_path: Path) -> None:
+    """PR #44 allocated DF153 on its own branch; this script scanned the checked-out
+    tree, saw nothing above DF152, and handed out 153 a second time. A branch is a
+    sink the file glob cannot reach, so the ref list has to be part of the corpus."""
+    repo = _repo(tmp_path, {f"{_FINDINGS}/findings-unresolved.md": "### DF7 — on main\n"})
+    _commit(repo, "main")
+
+    subprocess.run(["git", "checkout", "-qb", "feature"], cwd=repo, check=True)
+    (repo / _FINDINGS / "findings-unresolved.md").write_text(
+        "### DF7 — on main\n### DF8 — allocated on the branch, not merged yet\n",
+        encoding="utf-8",
+    )
+    _commit(repo, "branch")
+    subprocess.run(["git", "checkout", "-q", "master"], cwd=repo, check=False)
+    subprocess.run(["git", "checkout", "-q", "main"], cwd=repo, check=False)
+
+    r = _run(repo, "DF")
+    assert r.returncode == 0
+    assert r.stdout.strip() == "9", (
+        "DF8 exists on an unmerged branch, so 8 is taken and the next free ID is 9"
+    )
+
+
+def test_the_same_id_on_two_refs_is_not_a_duplicate(tmp_path: Path) -> None:
+    """A finding legitimately appears at the same number on main and on every branch
+    carrying it. Counting cross-ref repeats as duplicates would make the script refuse
+    to allocate whenever any branch exists, so refs raise the ceiling only."""
+    repo = _repo(tmp_path, {f"{_FINDINGS}/findings-unresolved.md": "### DF7 — one finding\n"})
+    _commit(repo, "main")
+    subprocess.run(["git", "checkout", "-qb", "carries-the-same-finding"], cwd=repo, check=True)
+    _commit_noop = subprocess.run(
+        ["git", "-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "--allow-empty", "-m", "b"],
+        cwd=repo,
+        check=True,
+    )
+    assert _commit_noop.returncode == 0
+
+    r = _run(repo, "DF")
+    assert r.returncode == 0, f"cross-ref repeats must not read as duplicates: {r.stderr}"
+    assert r.stdout.strip() == "8"
+
+
 # --- an inconsistent corpus stops it -----------------------------------------
 
 def test_a_duplicate_definition_is_an_error_not_a_number(tmp_path: Path) -> None:
