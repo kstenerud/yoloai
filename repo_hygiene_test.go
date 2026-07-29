@@ -2490,3 +2490,80 @@ func deprecationDate(t *testing.T, title, field string, re *regexp.Regexp, block
 	}
 	return d, true
 }
+
+// allocationSites are the two files where a NEW rationale ID is born and where
+// entries are therefore ordered by number. Everything else that carries D/DF
+// headings is deliberately excluded, and the reasons are not the same:
+//
+//   - decisions/working-notes-archive.md is ordered CHRONOLOGICALLY. It holds
+//     D1–D44 plus D118, which is not a misfile: a D26 collision was resolved by
+//     renumbering the uncited entry in place (commit 847ee63b), so D118 sits
+//     among its 2026-05-28 neighbours where it belongs by date. Sorting that
+//     file by number would move a decision away from the decisions it was made
+//     alongside.
+//   - design/findings-{resolved,deferred,abandoned}.md are ordered NEWEST-FIRST
+//     by resolution date, which does not track ID order — a finding discovered
+//     long ago can resolve today.
+//
+// So this gate is narrow on purpose. Widening it to "all files with D/DF
+// headings" would fail on three files that are correctly ordered by a different
+// key, and the fix someone would reach for is re-sorting them.
+var allocationSites = []struct {
+	relPath string
+	prefix  string
+	re      *regexp.Regexp
+}{
+	{"docs/contributors/design/findings-unresolved.md", "DF", canonicalDFHeadingRe},
+	{"docs/contributors/decisions/working-notes.md", "D", canonicalDHeadingRe},
+}
+
+// TestRepoHygiene_AllocationSites_AreInAscendingIDOrder keeps the two files
+// where IDs are allocated sorted by ID.
+//
+// The point is not tidiness. Allocation is check-then-use: scripts/next-id.sh
+// says 156, you write the entry, and a concurrent PR can take 156 in the gap —
+// which is exactly what happened when PR #44 allocated DF153 on its own branch.
+// Nothing closes that window. Ordering makes the consequence loud: two PRs that
+// both allocate the same number insert at the same place in the same file, so
+// the collision surfaces as a merge conflict at rebase instead of later.
+//
+// That is detection, not a guarantee — the guarantee is
+// TestRepoHygiene_DecisionCitations_ResolveAndAreUnique, which fails on any
+// duplicate heading however it arose. This gate exists because the convention
+// is otherwise unenforced and had already rotted both ways: findings-unresolved
+// had been prepended to AND appended to for months, leaving 45 entries in no
+// order at all, which is how a misfiled number stays invisible (D121).
+func TestRepoHygiene_AllocationSites_AreInAscendingIDOrder(t *testing.T) {
+	root := repoRoot(t)
+	for _, site := range allocationSites {
+		t.Run(filepath.Base(site.relPath), func(t *testing.T) {
+			var ids, lines []int
+			eachLine(t, filepath.Join(root, site.relPath), func(lineNum int, line string) {
+				m := site.re.FindStringSubmatch(line)
+				if m == nil {
+					return
+				}
+				n, err := strconv.Atoi(m[1])
+				if err != nil {
+					t.Fatalf("%s:%d: unparseable id %q", site.relPath, lineNum, m[1])
+				}
+				ids = append(ids, n)
+				lines = append(lines, lineNum)
+			})
+			if len(ids) == 0 {
+				t.Fatalf("%s: no canonical %s headings found — has the heading format changed?",
+					site.relPath, site.prefix)
+			}
+			t.Logf("%s: %d %s entries", site.relPath, len(ids), site.prefix)
+
+			for i := 1; i < len(ids); i++ {
+				if ids[i] <= ids[i-1] {
+					t.Errorf("%s:%d — %s%d appears after %s%d. Entries here are ordered by ID so that "+
+						"two PRs allocating the same number collide as a merge conflict; move it to its "+
+						"numeric slot (a new entry goes at the end).",
+						site.relPath, lines[i], site.prefix, ids[i], site.prefix, ids[i-1])
+				}
+			}
+		})
+	}
+}
