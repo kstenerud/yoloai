@@ -146,7 +146,6 @@ var _ runtime.InteractiveSession = (*Runtime)(nil)
 var _ runtime.DiskUsageReporter = (*Runtime)(nil)
 var _ runtime.RecreateAdvisor = (*Runtime)(nil)
 var _ runtime.ProfileImageBuilder = (*Runtime)(nil)
-var _ runtime.ImagePresenceChecker = (*Runtime)(nil)
 
 // New creates a Runtime and verifies the Docker daemon is reachable. layout
 // carries the threaded environment snapshot; the daemon socket and TLS settings
@@ -1086,14 +1085,4 @@ func ConvertPorts(ports []runtime.PortMapping) (nat.PortMap, nat.PortSet) {
 	}
 
 	return portMap, portSet
-}
-
-// ImageExists reports whether imageRef resolves in this daemon's store,
-// implementing runtime.ImagePresenceChecker. It delegates to the hardened
-// internal probe rather than a bare ImageInspect: on the Docker Desktop
-// containerd store, inspect transiently reports a present image as NotFound,
-// and believing that once rebuilt yoloai-base from scratch on every smoke run
-// until the probe learned to cross-check ImageList with backoff.
-func (r *Runtime) ImageExists(ctx context.Context, imageRef string) (bool, error) {
-	return r.imageExists(ctx, imageRef)
 }

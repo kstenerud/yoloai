@@ -485,7 +485,7 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 // backend's BuildKit invocation), so any auto-detected build secrets (e.g. an
 // ~/.npmrc) are reported and dropped rather than silently ignored or failing
 // the build outright.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
 	if len(secrets) > 0 {
 		fmt.Fprintf(output, "Warning: build secrets are not supported on the apple backend; %d secret(s) will not be available to the build\n", len(secrets)) //nolint:errcheck // best-effort progress
 	}
@@ -501,7 +501,14 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 	}
 	logger.Debug("building profile image via container build", "tag", tag, "sourceDir", sourceDir, "context", dir)
 
-	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForAppleContainer(), r.containerBin, "build", "-t", tag, dir)
+	args := []string{"build"}
+	// `container build` takes -l/--label (verified on container CLI 1.0.0), so the
+	// checksum rides on the image here as it does on every other image backend.
+	if checksum != "" {
+		args = append(args, "--label", runtime.ProfileChecksumLabel+"="+checksum)
+	}
+	args = append(args, "-t", tag, dir)
+	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForAppleContainer(), r.containerBin, args...)
 	// Stream to output as before, but also tee into a tail buffer so a failure's
 	// actionable cause rides on the error itself, not only the (maybe discarded)
 	// stream — same value on both so os/exec keeps its single-pipe path (DF145).
@@ -518,17 +525,45 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 	return nil
 }
 
-// ProfileImageNeedsBuild reports whether the profile image is stale. Delegates
-// to the docker backend's checksum scheme, keyed to apple's own store (DF150).
-func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bool {
-	return dockerrt.ProfileImageNeedsBuild(profileDir, parentDir, "apple")
-}
-
-// RecordProfileBuildChecksum records the profile's Dockerfile checksum after a
-// successful build. Delegates to the docker backend's checksum scheme, keyed
-// to apple's own store (DF150).
-func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
-	dockerrt.RecordProfileBuildChecksum(profileDir, "apple")
+// ProfileImageChecksum reads tag's build checksum out of `container image
+// inspect`, implementing runtime.ProfileImageBuilder.
+//
+// Apple's JSON is not docker's, and the shape is the reason this needs its own
+// reader rather than a shared helper. `container image inspect` returns a
+// top-level ARRAY (it accepts N refs), and each image carries a `variants`
+// array — one entry per platform — whose `config.config` is the OCI image
+// config. So the labels sit two array levels deep, where docker's are a flat
+// Config.Labels. There is no --format/-f on this verb, so it is raw JSON.
+//
+// Any variant carrying the label answers: yoloAI builds single-platform images,
+// and a checksum found under one platform is the checksum this image was built
+// with. Every failure — absent image, no label, unparseable output — returns
+// false, meaning "cannot vouch for it", which the caller reads as "build".
+func (r *Runtime) ProfileImageChecksum(ctx context.Context, tag string) (string, bool) {
+	out, err := r.runContainer(ctx, "image", "inspect", tag)
+	if err != nil {
+		return "", false
+	}
+	var images []struct {
+		Variants []struct {
+			Config struct {
+				Config struct {
+					Labels map[string]string `json:"Labels"`
+				} `json:"config"`
+			} `json:"config"`
+		} `json:"variants"`
+	}
+	if err := json.Unmarshal([]byte(out), &images); err != nil {
+		return "", false
+	}
+	for _, img := range images {
+		for _, v := range img.Variants {
+			if sum, ok := v.Config.Config.Labels[runtime.ProfileChecksumLabel]; ok {
+				return sum, true
+			}
+		}
+	}
+	return "", false
 }
 
 // Prune sweeps orphaned apple containers — `yoloai-*` instances (scoped to this

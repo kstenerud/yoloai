@@ -4,6 +4,8 @@ package profiles
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
@@ -51,8 +53,12 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 		return fmt.Errorf("ensure base image: %w", err)
 	}
 
-	// Walk chain from root to leaf, build each profile that has a Dockerfile
-	prevDir := baseProfileDir
+	// Walk chain from root to leaf, building each profile that has a Dockerfile.
+	// parentChecksum threads the ancestor chain; "" at the root, which preserves
+	// the pre-label behaviour that a yoloai-base rebuild does NOT invalidate
+	// profile images (see DF156 — that gap is real, predates this, and is filed
+	// rather than silently closed here).
+	parentChecksum := ""
 	for _, name := range chain {
 		if name == "base" {
 			continue
@@ -65,36 +71,58 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 		}
 
 		tag := config.ProfileImageTag(layout, name)
-		if force || builder.ProfileImageNeedsBuild(profileDir, prevDir) || imageMissing(ctx, rt, tag) {
+		// The chain checksum folds the parent's in, so an ancestor's Dockerfile
+		// change reaches every descendant without comparing file timestamps.
+		want := chainChecksum(profileDir, parentChecksum)
+		if force || !imageMatches(ctx, builder, tag, want) {
 			fmt.Fprintf(output, "Building profile image %s...\n", tag) //nolint:errcheck // best-effort output
-			if err := builder.BuildProfileImage(ctx, profileDir, tag, secrets, layout, output, logger); err != nil {
+			if err := builder.BuildProfileImage(ctx, profileDir, tag, want, secrets, layout, output, logger); err != nil {
 				return fmt.Errorf("build profile image %s: %w", tag, err)
 			}
-			builder.RecordProfileBuildChecksum(profileDir)
 		}
 
-		prevDir = profileDir
+		parentChecksum = want
 	}
 
 	return nil
 }
 
-// imageMissing reports whether the backend can positively see that tag is NOT in
-// its store. It is deliberately one-directional (DF152).
+// chainChecksum is the profile-image build checksum: this profile's Dockerfile,
+// folded together with its parent's checksum.
 //
-// The build markers record that a build once ran, never that the image is still
-// there — so `yoloai system build <profile>` could read a fresh marker, skip the
-// build, and let the CLI print "Profile image built successfully" while the
-// targeted store held nothing. That is a false success on a direct request, and
-// no launch-time recovery covers it, because nothing is launched.
+// Chaining is what makes an ancestor's change reach a descendant. The scheme it
+// replaces compared the *modification times* of two marker files, which asked
+// "was the parent's bookkeeping touched more recently than mine" — a question
+// about the filesystem rather than about the images. Folding the parent's value
+// in means a parent rebuild changes the child's expected value by construction,
+// at any depth, with nothing to keep in sync.
 //
-// Only a confident "absent" returns true. "Present" and "don't know" both return
-// false, which leaves the marker in charge exactly as before. That asymmetry is
-// what makes a check-then-act probe safe here: it can only ever cause an extra
-// build (harmless, and the user asked for a build), never skip a needed one.
-func imageMissing(ctx context.Context, rt runtime.Backend, tag string) bool {
-	present, known := runtime.ImagePresentFor(ctx, rt, tag)
-	return known && !present
+// Returns "" when the Dockerfile cannot be read, which the caller treats as
+// "cannot vouch" and therefore builds.
+func chainChecksum(profileDir, parentChecksum string) string {
+	data, err := os.ReadFile(filepath.Join(profileDir, "Dockerfile")) //nolint:gosec // G304: profileDir comes from profile resolution
+	if err != nil {
+		return ""
+	}
+	h := sha256.New()
+	h.Write([]byte("Dockerfile"))
+	h.Write(data)
+	h.Write([]byte(parentChecksum))
+	return hex.EncodeToString(h.Sum(nil))
+}
+
+// imageMatches reports whether the store already holds tag built from want.
+//
+// Every "no" answer — absent image, no label, unreadable — is the same answer:
+// we cannot vouch for it, so build. That collapses what used to be three
+// separate questions (is the marker there, does it match, does the image still
+// exist) into one, because the label cannot outlive the image it is on.
+func imageMatches(ctx context.Context, builder runtime.ProfileImageBuilder, tag, want string) bool {
+	if want == "" {
+		return false
+	}
+	got, ok := builder.ProfileImageChecksum(ctx, tag)
+	return ok && got == want
 }
 
 // AutoBuildSecrets detects well-known credential files on the host and

@@ -8,11 +8,15 @@ package containerdrt
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
 	"os"
 	"os/exec"
+
+	"github.com/containerd/containerd/v2/core/content"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sysexec"
@@ -21,7 +25,6 @@ import (
 )
 
 var _ runtime.ProfileImageBuilder = (*Runtime)(nil)
-var _ runtime.ImagePresenceChecker = (*Runtime)(nil)
 
 // BuildProfileImage builds a profile's Dockerfile and makes the result usable by
 // the containerd backend (DF153). Before this, containerd cleared the CapAdd gate
@@ -43,7 +46,7 @@ var _ runtime.ImagePresenceChecker = (*Runtime)(nil)
 //
 // Unlike apple, containerd gets BuildKit `--secret` support for free, since the
 // build is a real `docker build`.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
 	dockerBin, err := exec.LookPath("docker")
 	if err != nil {
 		return fmt.Errorf("docker is required to build profile images for the containerd backend\n" +
@@ -80,6 +83,13 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 	// link is whether the layer blobs exist as content objects, which an earlier
 	// `docker save` materialises as a side effect.
 	args := append([]string{"build"}, dockerrt.AttestationOptOutFlags("docker")...)
+	// The checksum is stamped by docker and survives into containerd's store on
+	// both import paths — the zero-copy namespace link and `docker save | ctr
+	// import` — which is verified by
+	// TestIntegration_DockerBuildLabel_SurvivesImportIntoContainerd.
+	if checksum != "" {
+		args = append(args, "--label", runtime.ProfileChecksumLabel+"="+checksum)
+	}
 	args = append(args, "-t", tag)
 	for _, s := range secrets {
 		args = append(args, "--secret", s)
@@ -113,29 +123,42 @@ func (r *Runtime) importFromDocker(ctx context.Context, dockerBin string, tag st
 	return r.slowPathImport(nsCtx, dockerBin, tag, output)
 }
 
-// ProfileImageNeedsBuild reports whether the profile image is stale for
-// containerd's own image store, via the shared checksum scheme keyed
-// "containerd" (DF150). The key matters: the build happens in docker's store but
-// the sandbox runs from containerd's, and a marker written by the docker backend
-// must not vouch for an image containerd never received.
-func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bool {
-	return dockerrt.ProfileImageNeedsBuild(profileDir, parentDir, "containerd")
-}
-
-// RecordProfileBuildChecksum records the profile's Dockerfile checksum against
-// containerd's store after a successful build. See ProfileImageNeedsBuild.
-func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
-	dockerrt.RecordProfileBuildChecksum(profileDir, "containerd")
-}
-
-// ImageExists reports whether tag resolves in the yoloai containerd namespace
-// with its full descriptor tree accessible, implementing
-// runtime.ImagePresenceChecker.
+// ProfileImageChecksum reads tag's build checksum from the OCI image config in
+// containerd's store, implementing runtime.ProfileImageBuilder.
 //
-// The tree check is not pedantry here: containerd's GC can evict child blobs
-// while leaving the root manifest entry intact, so an image can be "present" by
-// name and unusable in fact. `imageAlreadyReady` is the same predicate Setup
-// trusts before skipping a build, so presence means the same thing to both.
-func (r *Runtime) ImageExists(ctx context.Context, imageRef string) (bool, error) {
-	return r.imageAlreadyReady(r.withNamespace(ctx), imageRef, false), nil
+// It walks image record -> manifest -> config blob rather than reading
+// images.Image.Labels, and the distinction is load-bearing: the record label is
+// local bolt metadata that does not survive a re-import, while the build label
+// lives in the image config and travels with the image. Reading the record label
+// would pass and mean nothing.
+//
+// Every failure returns false — absent image, missing blob, unparseable config —
+// because the caller's only question is whether to build. A missing config blob
+// is a real case here, not paranoia: containerd's GC can evict child content
+// while leaving the image record intact.
+func (r *Runtime) ProfileImageChecksum(ctx context.Context, tag string) (string, bool) {
+	nsCtx := r.withNamespace(ctx)
+	img, err := r.client.GetImage(nsCtx, tag)
+	if err != nil {
+		return "", false
+	}
+	cs := r.client.ContentStore()
+	manifestBlob, err := content.ReadBlob(nsCtx, cs, img.Target())
+	if err != nil {
+		return "", false
+	}
+	var manifest ocispec.Manifest
+	if err := json.Unmarshal(manifestBlob, &manifest); err != nil {
+		return "", false
+	}
+	configBlob, err := content.ReadBlob(nsCtx, cs, manifest.Config)
+	if err != nil {
+		return "", false
+	}
+	var cfg ocispec.Image
+	if err := json.Unmarshal(configBlob, &cfg); err != nil {
+		return "", false
+	}
+	sum, ok := cfg.Config.Labels[runtime.ProfileChecksumLabel]
+	return sum, ok
 }

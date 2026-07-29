@@ -448,44 +448,53 @@ type StdioExecer interface {
 	StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error
 }
 
+// ProfileChecksumLabel is the image label carrying a profile image's build
+// checksum. It is set at build time and read back to decide staleness, so the
+// answer lives on the artifact rather than in a file beside it.
+const ProfileChecksumLabel = "yoloai.profile.checksum"
+
 // ProfileImageBuilder is an optional interface for backends that can build a
 // custom image from a profile's Dockerfile. Image-based backends (docker,
-// podman) implement it; backends with no OCI image concept (tart, seatbelt) do
-// not, and profile Dockerfiles are ignored there.
+// podman, containerd, apple) implement it; backends with no OCI image concept
+// (tart, seatbelt) do not, and profile Dockerfiles are ignored there.
 //
-// buildEnv is the host-environment snapshot the build subprocess draws from
-// (the caller's Layout, never the live process env — §12). The backend
-// allowlists the keys its build CLI actually needs (`HostEnv.EnvForDockerBuild`
-// and its per-backend analogues); it does not inherit os.Environ, and it does
-// not substitute an exec env captured at construction. A multi-principal
-// embedder thus controls exactly which env each principal's profile build sees.
+// # Staleness travels with the image
 //
-// Two invariants an implementation must carry, both learned from defects:
+// The caller computes a checksum, the backend stamps it on the image at build
+// time as ProfileChecksumLabel, and reads it back to answer "what is in the
+// store?". The caller compares. That split is deliberate: the *scheme* — what
+// goes into the checksum, and how a parent's change reaches a child — lives in
+// exactly one place, and a backend only transports a string.
 //
-//   - **Staleness markers are keyed by backend** (DF150). A "have I built this
-//     already?" marker written by one backend must not satisfy another: the
-//     image stores are separate, so a shared marker makes the second backend
-//     skip a build whose image it does not have, and the run fails at pull. Use
-//     the shared scheme — `docker.ProfileImageNeedsBuild(profileDir, parentDir,
-//     backendKey)` and `docker.RecordProfileBuildChecksum(profileDir,
-//     backendKey)` — rather than a private marker, passing the key that names
-//     your image store. A backend name is only a proxy for a store, and where
-//     it is a poor one (docker, which may address several local daemons) the
-//     staleness belongs on the image instead; see DF152.
-//   - **A build failure carries the build tool's own diagnostic** on the error,
-//     not only on the output stream (DF144/DF145). See `standards/go.md` →
-//     Subprocess errors.
+// This replaced a host-side marker file keyed by backend, which was the wrong
+// shape three times over. A file beside the profile cannot know the image was
+// deleted (DF154), cannot tell two docker daemons apart without being keyed by
+// one (DF152), and was keyed for the base image but not the profile image
+// (DF150) — three defects that are all one defect: a record that outlives what
+// it describes. A label cannot outlive its image, because it *is* the image.
 //
-// This interface lives here, with every other optional backend capability, so
-// that a backend can assert it at compile time (`var _ runtime.ProfileImageBuilder
-// = (*Runtime)(nil)`) and so that the catalogue of what a backend may implement
-// is one file rather than a search. It previously lived in
-// `internal/orchestrator/profiles`, where no backend in the public runtime tree
-// could name it — which is how a backend came to be missing it unnoticed.
+// The label name is shared; the extraction is not, and that is expected. Docker
+// reads a flat Config.Labels via the SDK, containerd walks the content store to
+// the OCI config blob, and apple parses `container image inspect` JSON where the
+// labels sit two array levels deep. Differing accessors behind one contract is
+// what this package is for.
+//
+// buildEnv is the host-environment snapshot the build subprocess draws from (the
+// caller's Layout, never the live process env — §12).
+//
+// A build failure must carry the build tool's own diagnostic on the error, not
+// only on the output stream (DF144/DF145) — see `standards/go.md` → Subprocess
+// errors.
 type ProfileImageBuilder interface {
-	BuildProfileImage(ctx context.Context, sourceDir string, tag string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error
-	ProfileImageNeedsBuild(profileDir string, parentDir string) bool
-	RecordProfileBuildChecksum(profileDir string)
+	// BuildProfileImage builds sourceDir's Dockerfile as tag, stamping checksum
+	// as ProfileChecksumLabel.
+	BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error
+
+	// ProfileImageChecksum returns the checksum label on tag as it exists in this
+	// backend's store. ok is false when the image is absent, carries no such
+	// label, or cannot be read — all of which mean "cannot vouch for it", and all
+	// of which the caller treats as needing a build.
+	ProfileImageChecksum(ctx context.Context, tag string) (checksum string, ok bool)
 }
 
 // ProfileImageBuilderOf returns rt as a ProfileImageBuilder if the backend
@@ -493,43 +502,6 @@ type ProfileImageBuilder interface {
 func ProfileImageBuilderOf(rt Backend) (ProfileImageBuilder, bool) {
 	b, ok := rt.(ProfileImageBuilder)
 	return b, ok
-}
-
-// ImagePresenceChecker is an optional interface for backends that can answer
-// whether an image tag is resolvable in their own store.
-//
-// It exists for one question the staleness machinery cannot otherwise ask: the
-// build markers record that a build *ran*, never that the image is *there*, so
-// `yoloai system build <profile>` could consult a marker, skip the build, and
-// report success while the target store held nothing (DF152).
-//
-// **Use it to build more, never to skip.** The answer is true when given and the
-// image is used later, so it is check-then-act and cannot be a correctness
-// guarantee (DF154). Pointed this way the race is harmless: a false "absent"
-// costs one unnecessary rebuild, and a false "present" degrades to the marker,
-// which is the behaviour without this interface at all. Inverting it — trusting
-// "present" to skip work — would reintroduce the failure it exists to close.
-//
-// Backends that cannot answer cheaply simply do not implement it, and callers
-// treat "don't know" as "no opinion" rather than as absent.
-type ImagePresenceChecker interface {
-	ImageExists(ctx context.Context, imageRef string) (bool, error)
-}
-
-// ImagePresentFor reports whether rt can see imageRef in its own store. The
-// second return is false when the backend cannot answer — either it does not
-// implement the interface or the probe itself failed — and callers must treat
-// that as "no opinion", never as absent.
-func ImagePresentFor(ctx context.Context, rt Backend, imageRef string) (present, known bool) {
-	c, ok := rt.(ImagePresenceChecker)
-	if !ok {
-		return false, false
-	}
-	got, err := c.ImageExists(ctx, imageRef)
-	if err != nil {
-		return false, false
-	}
-	return got, true
 }
 
 // CachePruner is an optional interface for backends that maintain an

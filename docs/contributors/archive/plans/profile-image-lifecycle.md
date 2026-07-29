@@ -1,10 +1,15 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 > **ABOUTME:** Plan for the profile-image lifecycle: one `ProfileImageBuilder` interface change
 > serving DF152 and DF154's remaining half, plus containerd's missing implementation (DF153).
 > Sequenced so the correctness fix lands before the optimisations that depend on its shape.
 
 # Profile image lifecycle — staleness that reflects the store
 
-- **Status:** IN-PROGRESS — steps 1 and 2 done; step 3 reopened 2026-07-29 on new evidence, see below
+- **Status:** IMPLEMENTED — all three steps done 2026-07-29; DF152/DF153/DF154/DF150/DF155 resolved, DF156 filed
 - **Depends on:** —
 
 Three open findings are one problem seen from three angles: **yoloAI decides whether to build a

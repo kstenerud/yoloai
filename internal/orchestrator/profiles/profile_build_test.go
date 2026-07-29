@@ -90,3 +90,50 @@ func TestValidateBuildSecret_TildeExpansion(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, "id=npmrc,src="+npmrcPath, got)
 }
+
+// The chain-checksum tests below were retargeted from
+// runtime/docker's profileBuildChecksum, which the D125 gate flagged as dead
+// once the scheme moved here (DF152). Deleting them with it would have dropped
+// the only coverage this logic has — DF105's lesson.
+
+func TestChainChecksum_ValidDockerfile(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"),
+		[]byte("FROM yoloai-base\nRUN apt install -y go"), 0600))
+
+	sum := chainChecksum(dir, "")
+	assert.NotEmpty(t, sum)
+	assert.Len(t, sum, 64, "expected SHA-256 hex string")
+}
+
+func TestChainChecksum_Deterministic(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base"), 0600))
+
+	assert.Equal(t, chainChecksum(dir, ""), chainChecksum(dir, ""))
+}
+
+func TestChainChecksum_MissingDockerfile(t *testing.T) {
+	assert.Empty(t, chainChecksum(t.TempDir(), ""),
+		"no Dockerfile means no checksum, which the caller reads as 'cannot vouch' and builds")
+}
+
+// TestChainChecksum_ParentChangePropagates is the behaviour the marker scheme
+// expressed by comparing file modification times, and the reason chaining
+// replaced it. A parent rebuild has to invalidate every descendant, at any
+// depth — and it now does so by construction rather than by the filesystem
+// happening to order two writes correctly.
+func TestChainChecksum_ParentChangePropagates(t *testing.T) {
+	child := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(child, "Dockerfile"), []byte("FROM parent"), 0600))
+
+	before := chainChecksum(child, "parent-checksum-v1")
+	after := chainChecksum(child, "parent-checksum-v2")
+	assert.NotEqual(t, before, after,
+		"the child's own Dockerfile is unchanged, but its parent moved — the child is stale")
+
+	// And a grandchild inherits the invalidation, which is what "at any depth" means.
+	grand := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(grand, "Dockerfile"), []byte("FROM child"), 0600))
+	assert.NotEqual(t, chainChecksum(grand, before), chainChecksum(grand, after))
+}

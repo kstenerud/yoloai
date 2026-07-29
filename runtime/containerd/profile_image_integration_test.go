@@ -27,8 +27,6 @@ import (
 
 	"github.com/containerd/containerd/v2/core/content"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
-
-	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
 
 // testProfileTag returns a collision-proof name in the test namespace, never a
@@ -100,7 +98,7 @@ func TestIntegration_BuildProfileImage_LandsInContainerdNamespace(t *testing.T) 
 	})
 
 	var out strings.Builder
-	err = rt.BuildProfileImage(ctx, profileDir, tag, nil, layout, &out, slog.New(slog.DiscardHandler))
+	err = rt.BuildProfileImage(ctx, profileDir, tag, "", nil, layout, &out, slog.New(slog.DiscardHandler))
 	// Logged unconditionally: which import path ran (zero-copy namespace link vs
 	// `docker save | ctr import`) is invisible from the result and is the thing a
 	// maintainer wants when this gets slow.
@@ -117,36 +115,6 @@ func TestIntegration_BuildProfileImage_LandsInContainerdNamespace(t *testing.T) 
 	// half-finished link leaves behind, and it fails later at run rather than here.
 	assert.NoError(t, rt.verifyDescriptorTree(nsCtx, rt.client.ContentStore(), img.Target()),
 		"every blob in the descriptor tree must be accessible, or GC has a hole to fall through")
-}
-
-// TestIntegration_ProfileImageChecksum_IsKeyedToContainerd pins DF150's invariant
-// on this backend: the profile directory is shared across backends but the image
-// stores are not, so a build recorded by docker must not tell containerd its own
-// image is fresh. containerd is the sharpest case — it builds *via* docker, so the
-// two stores are unusually easy to conflate.
-func TestIntegration_ProfileImageChecksum_IsKeyedToContainerd(t *testing.T) {
-	requireDaemon(t)
-
-	ctx := context.Background()
-	rt, err := New(ctx, testLayout(t))
-	require.NoError(t, err)
-	defer rt.Close() //nolint:errcheck // best-effort close
-
-	profileDir := t.TempDir()
-	parentDir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(profileDir, "Dockerfile"),
-		[]byte("FROM yoloai-base\n"), 0600))
-
-	require.True(t, rt.ProfileImageNeedsBuild(profileDir, parentDir), "nothing built yet")
-
-	// A docker-side build must not satisfy containerd.
-	dockerrt.RecordProfileBuildChecksum(profileDir, "docker")
-	assert.True(t, rt.ProfileImageNeedsBuild(profileDir, parentDir),
-		"docker built it into docker's store; containerd never received it (DF150)")
-
-	rt.RecordProfileBuildChecksum(profileDir)
-	assert.False(t, rt.ProfileImageNeedsBuild(profileDir, parentDir),
-		"containerd's own record is what clears containerd")
 }
 
 var _ io.Writer = (*strings.Builder)(nil)
