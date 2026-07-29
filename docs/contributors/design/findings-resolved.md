@@ -48,6 +48,19 @@ active file stays a working set. Newest first.
 - **Severity:** MEDIUM (silent skip — a profile with a Dockerfile built nothing and every sandbox on it ran an unmodified `yoloai-base`, with no error)
 - **Pointer:** `runtime/containerd/profile_image.go`; `runtime/containerd/image.go` (`dockerRefFor`, the parameterised pipeline, `tryLink`'s diagnostic); `runtime/containerd/profile_image_integration_test.go`; `runtime/docker/build.go` (`AttestationOptOutFlags`, exported for the second consumer). Plan: [`plans/profile-image-lifecycle.md`](plans/profile-image-lifecycle.md).
 
+### DF155 — concurrent profile builds race on the staleness marker, and nothing locks it (RESOLVED 2026-07-29 — verified benign)
+
+- **Resolved 2026-07-29 by running the check the entry named**, rather than by reasoning about it. Two concurrent `yoloai system build <profile>` runs against a cold profile, on both image-based backends, on one host (containerd v2.2.5, Docker 29.6.1). **Both backends: both runs exit 0, both produce the same image, and the artifact is intact.**
+  - **docker** — both builds exported the *same config digest* (`sha256:28760882…`); BuildKit deduplicates identical inputs. One image, one marker, and the layer's content is present in the built image.
+  - **containerd** — the sharper case, since each run does its own `docker build` *and* its own import into the yoloai namespace. Both produced the same manifest digest (`sha256:1fce3892…`), both imports succeeded, both the short tag and the fully-qualified alias are registered exactly once, and a follow-up build confirms the descriptor tree verifies.
+- **The marker write is a non-event.** Both writers compute the checksum from the same Dockerfile, so both write identical bytes; last-writer-wins converges on the correct value. That was the predicted outcome and it held.
+- **What it actually costs is duplicated work, not corruption.** The two containerd runs each performed a full 104s import, concurrently — so a genuine collision wastes a build and an import rather than breaking anything.
+- **So: still no lock, but the reasoning has moved.** The original entry argued against locking *on suspicion*. The suspicion is now settled, and the remaining case for a lock is efficiency alone. If someone wants it, the mechanism already exists and is proven — `dockerrt.AcquireBaseLock(layout, tag)`, which `Setup` uses for exactly this reason on the base image — so it would be a reuse rather than a new failure surface. It is not required for correctness, and the stale-lock-after-crash cost is real, so this stays a deliberate non-fix rather than an oversight.
+- **Rides:** n/a — no code changed.
+- **Discovered:** 2026-07-29, while closing DF154 · **Workstream:** profile-image lifecycle
+- **Severity:** LOW, and now confirmed rather than assumed
+- **Pointer:** `internal/orchestrator/profiles/profile_build.go` (`EnsureProfileImage`); `runtime/docker/build.go` (`RecordProfileBuildChecksum`, `AcquireBaseLock`).
+
 ### DF149 — `reset` stranded `files/`, `cache/` and `agent-runtime/` at deleted inodes, silently breaking the agent's artifact channel (RESOLVED 2026-07-27)
 
 - **Resolved 2026-07-27** — reset cleared these directories with `os.RemoveAll` + `MkdirAllPerm`, which *replaces* the directory. The host got a fresh inode while the running sandbox's bind mount still resolved to the old, unlinked one, so everything the agent wrote afterwards landed in an orphaned directory (`/proc/self/mountinfo` shows the mount as `…/files//deleted`). Introduced `fileutil.ClearDirContents`, which empties in place and creates the directory when absent, and routed all four reset clearing sites through it (`clearCacheAndFiles`, `clearAgentState`, `reinitLogs`).

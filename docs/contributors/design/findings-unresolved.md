@@ -650,16 +650,6 @@ end is what makes the conflict happen.)
   + `runtime/seatbelt/profile.go:193-199` (the rw share/grant); `internal/orchestrator/engine_network.go:62,84`;
   `runtime/seatbelt/seatbelt.go:827-831`; `internal/orchestrator/lifecycle/restart.go:163,180-208`. Related: DF136.
 
-### DF155 — concurrent profile builds race on the staleness marker, and nothing locks it
-
-- **Discovered:** 2026-07-29, while closing DF154 · **Workstream:** profile-image lifecycle
-- **Severity:** LOW (suspected benign; filed because it is unverified, not because it is known to bite)
-- **Disposition:** PARKED
-- **Description:** Two `yoloai new --profile dev` invocations started together both call `EnsureProfileImage`, both read the marker as stale, both run the build, and both write the marker afterwards with no lock (`RecordProfileBuildChecksum` is a plain `WriteFile`). The same check-then-act shape DF154 is about, one level up.
-- **Not verified, and saying so rather than guessing:** the expected outcome is benign — both builds produce the same tag from the same Dockerfile, and both write identical marker content, so last-writer-wins converges on the right answer at the cost of one wasted build. What is *unestablished* is whether the backends tolerate two concurrent builds of the same tag: BuildKit is understood to handle it, `container build` and the containerd path are not known either way. The cheap check that would settle it is two concurrent `yoloai new --profile` runs against a cold profile on one host, watching for a partial or clobbered image rather than just a slow one.
-- **Do not add a lock on suspicion.** A build lock is a new failure surface (a stale lock file after a crash blocks every future build) bought against a hazard nobody has observed. Verify first; if it is benign, the remedy is a comment saying so, not a mutex.
-- **Pointer:** `internal/orchestrator/profiles/profile_build.go` (`EnsureProfileImage`); `runtime/docker/build.go` (`RecordProfileBuildChecksum`). Split out of [DF154](findings-resolved.md).
-
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

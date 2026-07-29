@@ -113,6 +113,7 @@ rebuilt `yoloai-base` from scratch on every smoke run until it was cross-checked
 
 ## Out of scope
 
-The concurrent-build race, now [DF155](../findings-unresolved.md) — two `yoloai new --profile` runs
-both reading the marker stale, both building, both writing it unlocked. Filed as unverified, with
-the check that would settle it named, and with the argument against adding a lock on suspicion.
+The concurrent-build race, [DF155](../findings-resolved.md) — **checked 2026-07-29 and closed as
+benign** on both image-based backends: identical digests, intact artifacts, converging marker
+writes. The only cost is a duplicated build and import. A lock is now an efficiency option
+(reusing `AcquireBaseLock`), not a correctness need.
