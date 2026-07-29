@@ -591,6 +591,44 @@ Established after the D116 convention audit found four distinct classes of silen
 
 Originally established in D117.
 
+## §17. Reachability beats emphasis — a rule the reader never meets, or meets too narrowly, does nothing
+
+> **Rule.** A document's content is only half its behaviour; the other half is whether the reader arrives at it, and in what frame. Put a warning in the artifact it is about, not only in the index above it, and state a rule's scope before its example — or the example becomes the scope.
+>
+> **Bites when:** writing a rule and judging it done because it is correct and clearly worded. · **See also:** GEN §16, GEN §7, DEV §16.
+
+**Principle.** §16 says prose rots because nothing executes it. This is the other half: prose can be perfectly current and still fail, because being right is not the same as being *reached*. Two failure modes, both observed here within two weeks of each other, and both invisible from the inside — read the document and it says exactly what it should.
+
+The first is **off the retrieval path**. Retrieval is by search, and search lands mid-file. A warning that lives in a directory's `README.md` warns whoever was already going to read the README, which is the population that needed it least. Anyone who greps their way to line 85 of a file three directories down never passes through it.
+
+The second is **the example mistaken for the scope**. A rule illustrated by one case gets applied to that case and no other. This is not misreading; it is the ordinary reading. If the vivid, concrete, copy-pasteable part of a rule is one instance, the instance is what survives.
+
+The corollary is the uncomfortable one: **you cannot test your own documentation by reading it, because you already know what it means.** The gaps are only visible in what a reader who lacks that context actually does. That makes an unfamiliar reader — a new contributor, an agent that has never seen the repo — the only instrument that detects either failure, and it makes their mistakes a measurement rather than a nuisance.
+
+### Pattern
+
+When writing a rule or a warning, ask two questions rather than one. Not just *"is this correct?"* but:
+
+- **"How does a reader arrive here?"** If by search rather than by navigation, the warning belongs in the artifact, repeated N times, not once in an index. Repetition is the cost; reachability is what it buys.
+- **"If someone read only my example, what rule would they infer?"** If that inferred rule is narrower than the one you meant, lead with the scope and demote the example — `every behaviour change carries a test; argv is the common case` rather than `assert the argv`.
+
+Prefer a gate over either (§16, D116): a gate cannot be arrived at wrongly. Where no gate is possible, position is the whole remedy — and note that **emphasis is not position**. Restating a rule more forcefully in the place it already failed to reach changes nothing.
+
+### Worked examples
+
+- **The archive's warning, correct and unreachable.** `archive/README.md` said plainly that nothing in the archive is a live reference. An external contributor's agent found an archived plan by search, read its implementation table as a specification, and shipped a stale image name, a stale path, and reasoning from a superseded design — four review findings from one line of one file. Every word of the warning was already written and correct; none of it was on the path taken. Remedy: an `ARCHIVED` banner in the first lines of all 76 files (D128).
+- **Rule 10's example becoming rule 10's scope.** The same PR's next round: the rule said a behaviour change carries a test that fails when reverted, and named argv assertions as the case. An argv test was written. A second behaviour change in the same PR — which environment the build subprocess draws from — went untested, and reverting it left the whole suite green. The rule was followed exactly as written and the wording was the defect (D129).
+- **The counter-example that separates reach from repetition.** Rule 7 ("file the defects you don't fix") sits in the shortest, most-read document in the repo, and was ignored in that same first round. What produced compliance in round two was not restating it — it was an explicit request from a human reviewer. Emphasis had already been tried, by construction, and had already failed.
+- **A mechanism that gets this right by accident.** §16's `Docs last swept:` date lives in `AGENTS.md`, which is loaded into every session unprompted. It is reachable by construction rather than by discipline, which is exactly why it works and why a warning buried in `make check` output would not (see §16's Pattern).
+
+### Cost-vs-benefit
+
+Cost of applying: duplication. A warning stamped into 76 files instead of one index is 76 places to be wrong, and it sits uneasily beside DRY — accept it, because the alternative is a warning that is right in one place and absent everywhere it is needed. Sequencing scope before example costs a clause. Damage prevented: a rule that reads as followed while its purpose goes unserved, which is worse than an absent rule because it also supplies the confidence that the matter is handled. Threshold: apply when the audience arrives by search rather than navigation, or when the rule's example is more concrete than its statement — which is most of the time, since examples are concrete on purpose.
+
+### Sources
+
+Established after PR #44, the first substantial external contribution, was reviewed as an execution trace of the contributor docs rather than as a contributor's mistakes. Both failure modes above came out of that one PR, in consecutive rounds. Full discussion: D129; the first round's remediation is D128.
+
 ---
 
 # Common over-generalisations to avoid
