@@ -1,11 +1,26 @@
-> **ABOUTME:** History sink for findings drained from findings-unresolved.md once addressed.
-> Items move here so the active queue stays a working set of only the still-open concerns.
+> **ABOUTME:** History sink for findings that are done — drained from findings-unresolved.md, or
+> filed straight here when found and fixed in one go. Ordered by when they resolved, not by ID.
 
 # Resolved findings
 
-History of codebase findings (issues discovered mid-work) that have been addressed. Items
-are moved here from [`findings-unresolved.md`](findings-unresolved.md) once resolved, so the
-active file stays a working set. Newest first.
+History of codebase findings (issues discovered mid-work) that have been addressed. Two ways in,
+both fine:
+
+- **Drained** from [`findings-unresolved.md`](findings-unresolved.md) when a parked finding is
+  fixed, so the active file stays a working set.
+- **Filed straight here** when a finding is found *and* fixed in the same stretch of work. Routing
+  it through the active queue just to move it out again records nothing extra. About a quarter of
+  the entries below arrived this way, so it is the normal path, not an exception.
+
+**Newest first — by resolution date, not by ID.** A finding discovered long ago can resolve today,
+so the numbers here are deliberately out of order and must stay that way; only
+`findings-unresolved.md` and `decisions/working-notes.md` are ID-ordered (D130, and the gate that
+enforces it excludes this file for exactly this reason).
+
+One consequence of the direct path, worth knowing rather than avoiding: an ID allocated straight
+into this file skips the merge-conflict collision check that ID-ordering gives the active queue, so
+a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
+of at rebase. Later, but still before it can ship.
 
 ### DF150 — the profile build-staleness marker was not backend-keyed, so alternating backends skipped a build that never happened (RESOLVED 2026-07-27)
 

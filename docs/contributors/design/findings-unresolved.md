@@ -44,10 +44,14 @@ later.
 
 That is detection, not a guarantee. The guarantee is downstream and unconditional:
 `TestRepoHygiene_DecisionCitations_ResolveAndAreUnique` fails `make check` on any duplicate DF
-heading, so a collision cannot ship however it arose. Note one gap the conflict mechanism does not
-cover — a finding filed *directly* into `findings-resolved.md` (fixed in the same PR that found it)
-lands in a different file, so two such PRs would not conflict. The duplicate gate still catches
-them.
+heading, so a collision cannot ship however it arose.
+
+Which is what makes the other path safe: **a finding found and fixed in one stretch of work goes
+straight into `findings-resolved.md`**, skipping this file entirely. That is sanctioned and common
+— about a quarter of resolved findings arrived that way — and it does cost the conflict check,
+since two PRs allocating the same number into different files will not collide. The duplicate gate
+still catches them, one step later. Filing here first purely to move the entry out again buys the
+earlier signal and records nothing else.
 
 ## Findings
 
