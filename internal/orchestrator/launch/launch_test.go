@@ -53,6 +53,45 @@ func TestGvisorStartHint(t *testing.T) {
 // declared wait budget (slow-booting backends raise it so the secrets dir
 // isn't removed before the guest reads it) and falls back to the package
 // default otherwise.
+// TestMissingImageHint covers DF154: the staleness marker records that a build
+// once ran, never that the image still exists, so a pruned or backend-switched
+// image reaches Create as a tag the store does not have. The backend then tries
+// a registry, and the user gets a pull error for something that was never in a
+// registry. The hint has to name the actual cause and the actual remedy.
+func TestMissingImageHint(t *testing.T) {
+	const ref = "yoloai-cli-dev"
+	notFound := errors.New("create container: Error response from daemon: No such image: " + ref + ":latest")
+
+	// The real case: names the image, says why the record disagreed, gives the command.
+	got := missingImageHint(ref, "dev", notFound)
+	assert.ErrorIs(t, got, notFound, "the original error must stay in the chain")
+	assert.Contains(t, got.Error(), ref)
+	assert.Contains(t, got.Error(), "yoloai system build dev",
+		"the remedy names the profile, since that is the argument the user cannot guess")
+	assert.Contains(t, got.Error(), "never in a registry",
+		"the pull error is the symptom; saying so is the point of the hint")
+
+	// No profile (base image): still actionable, without a bogus argument.
+	got = missingImageHint(ref, "", notFound)
+	assert.Contains(t, got.Error(), "yoloai system build")
+	assert.NotContains(t, got.Error(), "yoloai system build ",
+		"a sandbox with no profile must not be told to build the empty-named one")
+
+	// A not-found for a DIFFERENT image is not this sandbox's problem.
+	other := errors.New("No such image: some-other-image")
+	assert.Equal(t, other, missingImageHint(ref, "dev", other))
+
+	// An unrelated failure that happens to mention the image passes through:
+	// "not found" alone is far too common to key on.
+	unrelated := errors.New("create container: port 8080 already allocated for " + ref)
+	assert.Equal(t, unrelated, missingImageHint(ref, "dev", unrelated))
+
+	// Degenerate inputs stay degenerate.
+	assert.NoError(t, missingImageHint(ref, "dev", nil))
+	assert.Equal(t, notFound, missingImageHint("", "dev", notFound),
+		"with no image ref there is nothing to match against, so claim nothing")
+}
+
 func TestEffectiveSecretsConsumedTimeout(t *testing.T) {
 	assert.Equal(t, secretsConsumedTimeout, effectiveSecretsConsumedTimeout(runtime.BackendDescriptor{}),
 		"no backend override → package default")

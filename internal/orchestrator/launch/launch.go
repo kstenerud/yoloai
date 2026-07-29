@@ -266,7 +266,7 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	_ = os.Remove(readyPath)
 
 	if err := rt.Create(ctx, instanceCfg); err != nil {
-		return gvisorStartHint(st.Isolation, err)
+		return missingImageHint(instanceCfg.ImageRef, st.Profile, gvisorStartHint(st.Isolation, err))
 	}
 	if err := rt.Start(ctx, cname); err != nil {
 		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
@@ -786,7 +786,7 @@ func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach r
 // No keepalive_only patch; the agent is welded into the entrypoint as before.
 func startLegacy(ctx context.Context, rt runtime.Backend, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
 	if err := rt.Create(ctx, instanceCfg); err != nil {
-		return gvisorStartHint(st.Isolation, err)
+		return missingImageHint(instanceCfg.ImageRef, st.Profile, gvisorStartHint(st.Isolation, err))
 	}
 	if err := rt.Start(ctx, cname); err != nil {
 		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
@@ -1039,6 +1039,54 @@ func gvisorStartHint(isolation runtime.IsolationMode, err error) error {
 	default:
 		return err
 	}
+}
+
+// missingImageHint names the real cause when instance creation fails because the
+// image is not in this backend's store (DF154).
+//
+// Staleness is decided entirely by a checksum marker in the profile directory —
+// nothing verifies the image still exists, and nothing can: any such check is
+// check-then-act, and the image can be pruned between the check and this call.
+// So the marker means "a build once ran", not "the image is here", and when the
+// two disagree the backend is asked to create from a tag it does not have. It
+// then does the only thing it can with an unqualified tag and tries a registry,
+// producing a pull or manifest error for an image that was never in a registry —
+// a message that sends the reader to their network and their credentials, which
+// are both fine.
+//
+// The remedy is the one the user cannot guess: rebuild. `--rebuild` and
+// `yoloai system build` both bypass the marker, so recovery is one command; it
+// is knowing which command that is missing.
+//
+// Detection requires the message to name this exact image ref AND carry a
+// not-found marker, because "not found" alone appears in unrelated failures.
+// The docker marker is verified; the containerd/apple forms are informed
+// guesses at CLI text this host cannot exercise, and a miss is harmless — the
+// error passes through exactly as it does today.
+func missingImageHint(imageRef, profile string, err error) error {
+	if err == nil || imageRef == "" || !strings.Contains(err.Error(), imageRef) {
+		return err
+	}
+	msg := err.Error()
+	notFound := strings.Contains(msg, "No such image") || // docker (verified)
+		strings.Contains(msg, "failed to resolve reference") || // containerd
+		strings.Contains(msg, "manifest unknown") ||
+		strings.Contains(msg, "pull access denied") ||
+		strings.Contains(msg, "image not found")
+	if !notFound {
+		return err
+	}
+
+	rebuild := "yoloai system build"
+	if profile != "" {
+		rebuild = "yoloai system build " + profile
+	}
+	return fmt.Errorf("%w\n\nThe image %q is recorded as built but is not in this backend's "+
+		"image store, so creating the instance fell through to a registry pull — it was never "+
+		"in a registry. This happens when the image is removed (a manual delete, a prune, or a "+
+		"backend switch) while the build record in the profile directory survives, since that "+
+		"record tracks the Dockerfile's checksum and not the image's existence. Rebuild it with "+
+		"%q, or re-create the sandbox with --rebuild", err, imageRef, rebuild)
 }
 
 // verifyInstanceRunning checks that the instance is still running after start,
