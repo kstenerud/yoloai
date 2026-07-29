@@ -76,8 +76,34 @@ Consequences worth stating before someone re-derives them:
 - The `ProfileImageBuilder` docstring's `buildEnv` contract still applies: the build subprocess
   draws from `buildEnv`, not from an env captured at construction.
 
-**Prerequisite to check first:** whether the link step generalises to an arbitrary tag or is
-special-cased to `yoloai-base`. If it is special-cased, that is the actual work.
+**Prerequisite: checked 2026-07-29, and the answer is the pessimistic one.** `imageRef` is a
+package-level `const imageRef = "yoloai-base"` (`runtime/containerd/image.go:30`) threaded through
+**11 sites** and six methods: `imageAlreadyReady` (`GetImage`), `buildDockerImage` (the `docker
+build -t`), `slowPathImport` (`docker save`, then `imgSvc.Create`), `linkFromDockerNamespace` (the
+namespace-share and its delete-on-failure), and `IsReady`. None of them takes a tag; the whole
+containerd image pipeline is written for exactly one image.
+
+So step 2 is **not** "implement three methods". It is: parameterise that pipeline by tag, then add
+the profile entry point on top. Concretely —
+
+1. Thread a `tag string` through the six methods above, leaving `Setup` passing the `yoloai-base`
+   const so base behaviour is provably unchanged. This is the bulk of it and it is mechanical.
+2. Confirm the two paths are tag-agnostic in fact, not just in signature. The **slow path**
+   (`docker save | ctr import`) should be, since it carries whatever `docker save` emitted. The
+   **fast path** (`linkFromDockerNamespace`) walks a descriptor tree between namespaces and sets
+   GC ref labels — verify it does not assume a single well-known image, and note it deletes by
+   name on failure, which must delete the *right* name once there is more than one.
+3. Only then add `BuildProfileImage` / `ProfileImageNeedsBuild` / `RecordProfileBuildChecksum`,
+   with the checksum methods delegating to the shared docker scheme keyed `"containerd"`.
+
+The base-image path is the reference for correctness throughout: whatever it does for
+`yoloai-base` is what a profile tag needs, and the const is the only thing standing in the way.
+**Do not skip step 1 by adding a second parallel pipeline for profiles** — two image paths that
+must stay consistent is exactly the shape this project keeps paying for elsewhere.
+
+Worth budgeting honestly: this is the largest of the three steps, needs a Linux host with real
+containerd to verify, and the fast path is delicate (it is a bolt metadata write plus GC ref
+labels, and getting the labels wrong loses blobs to GC rather than failing loudly).
 
 ## 3. Label-based staleness (DF152)
 
@@ -108,6 +134,6 @@ rebuilt `yoloai-base` from scratch on every smoke run until it was cross-checked
 
 ## Out of scope
 
-The concurrent-build race recorded on DF154 — two `yoloai new --profile` runs both reading the
-marker stale, both building, both writing it unlocked. Probably benign, unverified, and it wants
-its own investigation rather than a lock added on suspicion.
+The concurrent-build race, now [DF155](../findings-unresolved.md) — two `yoloai new --profile` runs
+both reading the marker stale, both building, both writing it unlocked. Filed as unverified, with
+the check that would settle it named, and with the argument against adding a lock on suspicion.
