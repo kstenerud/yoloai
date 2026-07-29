@@ -8,6 +8,7 @@ package containerdrt
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
@@ -23,6 +24,9 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/containerd/containerd/v2/core/content"
+	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 )
@@ -146,3 +150,76 @@ func TestIntegration_ProfileImageChecksum_IsKeyedToContainerd(t *testing.T) {
 }
 
 var _ io.Writer = (*strings.Builder)(nil)
+
+// TestIntegration_DockerBuildLabel_SurvivesImportIntoContainerd closes DF152's
+// last reasoned-not-run assumption: that a `docker build --label` "rides along
+// for free" into containerd's store, so the harmonised label scheme can cover
+// this backend without a second mechanism.
+//
+// It verifies the transport, not the feature — BuildProfileImage does not stamp
+// a checksum label yet. What has to be true first is that a label set at docker
+// build time is still readable after our import, whichever path that import
+// takes (zero-copy namespace link, or `docker save | ctr import` on fallback).
+//
+// The readback deliberately walks to the OCI *image config* blob rather than
+// reading `images.Image.Labels`. Those are different things: the record label is
+// local metadata in containerd's bolt store, while a build label lives in the
+// image config and travels with the image. Only the latter is what "staleness
+// travels with the image" means, so only the latter answers the question.
+func TestIntegration_DockerBuildLabel_SurvivesImportIntoContainerd(t *testing.T) {
+	requireDaemon(t)
+	dockerBin, err := exec.LookPath("docker")
+	if err != nil {
+		t.Skip("docker not installed; containerd images are built by it by design")
+	}
+
+	ctx := context.Background()
+	rt, err := New(ctx, testLayout(t))
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = rt.Close() })
+
+	buildDir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(buildDir, "Dockerfile"),
+		[]byte("FROM alpine\nRUN true\n"), 0600))
+
+	const labelKey, labelVal = "yoloai.test.checksum", "df152probe"
+	tag := testProfileTag("ctrlabel")
+	env := []string{"PATH=" + os.Getenv("PATH"), "HOME=" + os.Getenv("HOME")}
+	t.Cleanup(func() {
+		_ = sysexec.CommandContext(context.Background(), env, dockerBin, "rmi", "-f", tag).Run()
+		nsCtx := rt.withNamespace(context.Background())
+		_ = rt.client.ImageService().Delete(nsCtx, tag)
+		_ = rt.client.ImageService().Delete(nsCtx, dockerRefFor(tag))
+	})
+
+	build := sysexec.CommandContext(ctx, env, dockerBin, "build",
+		"--provenance=false", "--sbom=false",
+		"--label", labelKey+"="+labelVal, "-t", tag, buildDir)
+	out, err := build.CombinedOutput()
+	require.NoError(t, err, "docker build:\n%s", out)
+
+	var importOut strings.Builder
+	require.NoError(t, rt.importFromDocker(ctx, dockerBin, tag, &importOut),
+		"import output:\n%s", importOut.String())
+	t.Logf("import path taken:\n%s", importOut.String())
+
+	// Walk image record -> manifest -> config blob, the way a real reader would.
+	nsCtx := rt.withNamespace(ctx)
+	img, err := rt.client.GetImage(nsCtx, tag)
+	require.NoError(t, err, "image must be in the yoloai namespace")
+
+	cs := rt.client.ContentStore()
+	manifestBlob, err := content.ReadBlob(nsCtx, cs, img.Target())
+	require.NoError(t, err)
+	var manifest ocispec.Manifest
+	require.NoError(t, json.Unmarshal(manifestBlob, &manifest))
+
+	configBlob, err := content.ReadBlob(nsCtx, cs, manifest.Config)
+	require.NoError(t, err, "the image config blob must be present in this namespace")
+	var cfg ocispec.Image
+	require.NoError(t, json.Unmarshal(configBlob, &cfg))
+
+	assert.Equal(t, labelVal, cfg.Config.Labels[labelKey],
+		"a docker-set build label must survive into containerd's store, or the harmonised "+
+			"label scheme needs a second mechanism here (DF152)")
+}
