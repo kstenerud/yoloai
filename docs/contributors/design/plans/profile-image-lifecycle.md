@@ -4,7 +4,7 @@
 
 # Profile image lifecycle — staleness that reflects the store
 
-- **Status:** IN-PROGRESS — steps 1 and 2 done; step 3 deliberately paused, see below
+- **Status:** IN-PROGRESS — steps 1 and 2 done; step 3 reopened 2026-07-29 on new evidence, see below
 - **Depends on:** —
 
 Three open findings are one problem seen from three angles: **yoloAI decides whether to build a
@@ -78,11 +78,11 @@ Three things learned here that step 3 should carry:
   between: that mistake was made here, with a plausible-looking 76s → 0.84s measurement that a
   control run refuted.
 
-## 3. Label-based staleness (DF152) — PAUSED, re-evaluate before building
+## 3. Label-based staleness (DF152) — REOPENED, and the shape changed
 
-**Step 1 took the prize.** This plan's ordering constraint said recovery had to land before a label check was safe to add. It did — and in landing it made the label check mostly unnecessary. DF152's failure mode ends "...and the run fails pulling a local-only tag", and `createWithImageRecovery` now catches that, rebuilds, and retries. What remains is avoiding one failed Create attempt on a host that switches docker daemons, bought with a signature change across four backends and a second staleness mechanism to keep consistent with the first.
+**The pause was wrong, and two checks show why** — both recorded on [DF152](../findings-unresolved.md). The provider-switch case is reachable through two first-class backends (`orbstack` and `docker-desktop` both resolve to the docker runtime with key `"docker"` and separate stores), and recovery does not cover `yoloai system build <profile>`, which consults the marker, skips, and prints "Profile image built successfully" without building anything.
 
-That is worth noticing rather than proceeding through: the general fix largely obviated the specific one. Build it when something else also wants a `ctx` and a tag in that signature, or when the daemon-switch case is reported as painful in practice. The design below stands as written for whoever picks it up.
+But the fix is no longer necessarily the label change. Two cheaper, independent moves close both observed failures — key the marker by daemon endpoint (the Runtime already knows it, so no `ctx` needed), and make an explicit build verify rather than trust. Do those first; the label design below is the principled end state and may never be needed.
 
 ### The design, if it is built
 
