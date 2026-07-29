@@ -183,7 +183,11 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 
 **Profile image building:** The sandbox manager calls `Runtime.EnsureImage()` for the base image, then uses container-backend build logic for profile images when Docker, Podman, or Apple `container` is active and the profile has a Dockerfile. Tart and Seatbelt skip profile image building.
 
-**Profile image staleness:** A profile image is considered stale when: (a) it doesn't exist, (b) the profile's Dockerfile has changed since last build (checksum-tracked), or (c) `yoloai-base` has been rebuilt since the profile image was last built. Stale images are automatically rebuilt during `yoloai new --profile`.
+**Profile image staleness:** A profile image is considered stale when (a) this backend has no recorded build for it, (b) the profile's Dockerfile has changed since that build, or (c) the parent profile was rebuilt more recently. Stale images are automatically rebuilt during `yoloai new --profile`.
+
+The record is a checksum marker in the profile directory, **keyed by backend** — `.last-build-checksum-<backendKey>` (DF150). The profile directory is shared across backends but their image stores are not, so each backend's freshness is tracked independently; a profile can be current for docker and stale for apple at the same time.
+
+**Nothing checks whether the image actually exists.** Staleness is inferred entirely from the marker, so a marker that outlives its image — deleted by hand, pruned, or written by a backend that turned out to address a different daemon — reads as "fresh" and the build is skipped. The failure surfaces later and elsewhere, as a pull of a local-only tag. See [DF152](findings-unresolved.md) for the daemon-switch case and [DF154](findings-unresolved.md) for the missing existence check.
 
 **`config.yaml` format:**
 
