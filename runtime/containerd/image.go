@@ -23,6 +23,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
 	"github.com/kstenerud/yoloai/internal/config"
+	yrt "github.com/kstenerud/yoloai/runtime"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 )
@@ -182,6 +183,14 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 	// fallback import itself does, which is why later links succeed. The first
 	// import on a host is slow by construction, not by defect.
 	args := append([]string{"build"}, dockerrt.AttestationOptOutFlags("docker")...)
+	// Stamp which build inputs this base came from. containerd's own staleness
+	// still uses the host-side marker (one store per backend name, so a marker is
+	// exact here) — this label exists for a different question: images built FROM
+	// this base inherit it, so a profile image can be asked which base it
+	// descends from (DF156).
+	if sum := dockerrt.BuildInputsChecksum(); sum != "" {
+		args = append(args, "--label", yrt.BaseChecksumLabel+"="+sum)
+	}
 	args = append(args, "-t", imageRef, "-f", "Dockerfile", "-")
 	buildCmd := sysexec.CommandContext(ctx, r.layout.Env().EnvForDockerBuild(), dockerBin, args...)
 	// Tee the stream into a tail buffer so a build failure's cause rides on the

@@ -448,10 +448,21 @@ type StdioExecer interface {
 	StdioExec(ctx context.Context, name string, cmd []string, stdin io.Reader, stdout, stderr io.Writer) error
 }
 
-// ProfileChecksumLabel is the image label carrying a profile image's build
-// checksum. It is set at build time and read back to decide staleness, so the
-// answer lives on the artifact rather than in a file beside it.
-const ProfileChecksumLabel = "yoloai.profile.checksum"
+// Image labels yoloAI stamps on the images it builds. Both are set at build
+// time and read back to decide staleness, so the answer lives on the artifact
+// rather than in a file beside it.
+const (
+	// ProfileChecksumLabel carries a profile image's own Dockerfile-chain
+	// checksum. Set only on profile images.
+	ProfileChecksumLabel = "yoloai.profile.checksum"
+
+	// BaseChecksumLabel carries the build-inputs checksum of the yoloai-base an
+	// image was built from. Set on the base itself, and **inherited by every
+	// image built FROM it** — OCI config labels propagate through FROM unless
+	// overridden — so a profile image reports which base it descends from
+	// without anything having to record that separately.
+	BaseChecksumLabel = "yoloai.base.checksum"
+)
 
 // ProfileImageBuilder is an optional interface for backends that can build a
 // custom image from a profile's Dockerfile. Image-based backends (docker,
@@ -490,11 +501,20 @@ type ProfileImageBuilder interface {
 	// as ProfileChecksumLabel.
 	BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error
 
-	// ProfileImageChecksum returns the checksum label on tag as it exists in this
-	// backend's store. ok is false when the image is absent, carries no such
-	// label, or cannot be read — all of which mean "cannot vouch for it", and all
-	// of which the caller treats as needing a build.
-	ProfileImageChecksum(ctx context.Context, tag string) (checksum string, ok bool)
+	// ImageLabels returns tag's labels as they exist in this backend's store.
+	//
+	// ok is false when the image is absent or cannot be read — "cannot vouch for
+	// it", which every caller treats as needing a build. A present image with no
+	// labels returns an empty map and ok=true, which is a different fact: the
+	// image is there and says nothing about itself. Callers still treat a missing
+	// *label* as stale, but the distinction keeps "image gone" and "image says
+	// nothing" from collapsing into one unreadable answer.
+	//
+	// Returns the whole map rather than one named label because more than one
+	// question is asked of the same image — its own build checksum, and which
+	// base it descends from — and a per-question accessor would mean a round trip
+	// each and a new method per label.
+	ImageLabels(ctx context.Context, tag string) (labels map[string]string, ok bool)
 }
 
 // ProfileImageBuilderOf returns rt as a ProfileImageBuilder if the backend

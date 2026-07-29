@@ -455,7 +455,15 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	}
 	logger.Debug("building yoloai-base via container build", "context", dir)
 
-	cmd := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, "build", "-t", baseImage, dir)
+	// Same as containerd: apple's own base staleness uses the host-side marker,
+	// and this label is for the inheritance question — a profile image built FROM
+	// this base reports which base it descends from (DF156).
+	baseArgs := []string{"build"}
+	if sum := dockerrt.BuildInputsChecksum(); sum != "" {
+		baseArgs = append(baseArgs, "--label", runtime.BaseChecksumLabel+"="+sum)
+	}
+	baseArgs = append(baseArgs, "-t", baseImage, dir)
+	cmd := sysexec.CommandContext(ctx, r.execEnv, r.containerBin, baseArgs...)
 	// Stream to output as before, but also tee into a tail buffer so a failure's
 	// actionable cause rides on the error itself, not only the (maybe discarded)
 	// stream — same value on both so os/exec keeps its single-pipe path (DF145).
@@ -525,24 +533,23 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 	return nil
 }
 
-// ProfileImageChecksum reads tag's build checksum out of `container image
-// inspect`, implementing runtime.ProfileImageBuilder.
+// ImageLabels reads tag's labels out of `container image inspect`,
+// implementing runtime.ProfileImageBuilder.
 //
-// Apple's JSON is not docker's, and the shape is the reason this needs its own
-// reader rather than a shared helper. `container image inspect` returns a
-// top-level ARRAY (it accepts N refs), and each image carries a `variants`
-// array — one entry per platform — whose `config.config` is the OCI image
-// config. So the labels sit two array levels deep, where docker's are a flat
-// Config.Labels. There is no --format/-f on this verb, so it is raw JSON.
+// Apple's JSON is not docker's, and the shape is why this needs its own reader.
+// `container image inspect` returns a top-level ARRAY (it accepts N refs), and
+// each image carries a `variants` array — one entry per platform — whose
+// `config.config` is the OCI image config. So labels sit two array levels deep,
+// where docker's are a flat Config.Labels. There is no --format on this verb, so
+// it is raw JSON.
 //
-// Any variant carrying the label answers: yoloAI builds single-platform images,
-// and a checksum found under one platform is the checksum this image was built
-// with. Every failure — absent image, no label, unparseable output — returns
-// false, meaning "cannot vouch for it", which the caller reads as "build".
-func (r *Runtime) ProfileImageChecksum(ctx context.Context, tag string) (string, bool) {
+// Labels are merged across variants, first writer winning. yoloAI builds
+// single-platform images, so in practice there is one variant; merging rather
+// than picking avoids depending on which platform happens to be listed first.
+func (r *Runtime) ImageLabels(ctx context.Context, tag string) (map[string]string, bool) {
 	out, err := r.runContainer(ctx, "image", "inspect", tag)
 	if err != nil {
-		return "", false
+		return nil, false
 	}
 	var images []struct {
 		Variants []struct {
@@ -554,16 +561,19 @@ func (r *Runtime) ProfileImageChecksum(ctx context.Context, tag string) (string,
 		} `json:"variants"`
 	}
 	if err := json.Unmarshal([]byte(out), &images); err != nil {
-		return "", false
+		return nil, false
 	}
+	labels := map[string]string{}
 	for _, img := range images {
 		for _, v := range img.Variants {
-			if sum, ok := v.Config.Config.Labels[runtime.ProfileChecksumLabel]; ok {
-				return sum, true
+			for k, val := range v.Config.Config.Labels {
+				if _, seen := labels[k]; !seen {
+					labels[k] = val
+				}
 			}
 		}
 	}
-	return "", false
+	return labels, true
 }
 
 // Prune sweeps orphaned apple containers — `yoloai-*` instances (scoped to this

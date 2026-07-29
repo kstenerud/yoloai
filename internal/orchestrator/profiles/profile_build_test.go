@@ -4,12 +4,18 @@
 package profiles
 
 import (
+	"context"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 func TestAutoBuildSecrets_NpmrcExists(t *testing.T) {
@@ -136,4 +142,54 @@ func TestChainChecksum_ParentChangePropagates(t *testing.T) {
 	grand := t.TempDir()
 	require.NoError(t, os.WriteFile(filepath.Join(grand, "Dockerfile"), []byte("FROM child"), 0600))
 	assert.NotEqual(t, chainChecksum(grand, before), chainChecksum(grand, after))
+}
+
+// labelFake is a ProfileImageBuilder that only answers ImageLabels.
+type labelFake struct {
+	labels map[string]string
+	ok     bool
+}
+
+func (labelFake) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, io.Writer, *slog.Logger) error {
+	return nil
+}
+func (f labelFake) ImageLabels(context.Context, string) (map[string]string, bool) {
+	return f.labels, f.ok
+}
+
+// TestBaseChecksum_ReadsTheLabelAndToleratesAbsence pins the seed's input
+// (DF156). The profile chain is seeded with the base image's own checksum label,
+// so a base rebuild invalidates every profile built on the previous one — and
+// that only works if the read is right.
+//
+// Absence deliberately seeds "" rather than something invalidating: a backend
+// whose base predates the label would otherwise rebuild every profile on every
+// launch forever, and it self-corrects the next time the base is built.
+func TestBaseChecksum_ReadsTheLabelAndToleratesAbsence(t *testing.T) {
+	ctx := context.Background()
+
+	got := baseChecksum(ctx, labelFake{labels: map[string]string{
+		runtime.BaseChecksumLabel: "abc123",
+		"com.yoloai.managed":      "true",
+	}, ok: true})
+	assert.Equal(t, "abc123", got, "the base's own label is what seeds the chain")
+
+	assert.Empty(t, baseChecksum(ctx, labelFake{labels: map[string]string{}, ok: true}),
+		"a base present but unlabelled seeds empty — pre-label behaviour, not a forced rebuild")
+	assert.Empty(t, baseChecksum(ctx, labelFake{ok: false}),
+		"an unreadable base seeds empty rather than inventing a value")
+}
+
+// TestChainChecksum_BaseSeedPropagates is the behaviour DF156 is about: the same
+// profile Dockerfile yields a different checksum when the base underneath it
+// moved, so the profile rebuilds without anything having to compare timestamps
+// or force a rebuild of the base.
+func TestChainChecksum_BaseSeedPropagates(t *testing.T) {
+	dir := t.TempDir()
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "Dockerfile"), []byte("FROM yoloai-base"), 0600))
+
+	assert.NotEqual(t, chainChecksum(dir, "base-v1"), chainChecksum(dir, "base-v2"),
+		"an unchanged profile Dockerfile on a moved base is stale")
+	assert.NotEqual(t, chainChecksum(dir, "base-v1"), chainChecksum(dir, ""),
+		"seeded and unseeded must differ, or the seed is not reaching the hash")
 }

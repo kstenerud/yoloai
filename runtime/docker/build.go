@@ -85,7 +85,9 @@ func RecordBuildChecksum(layout config.Layout, backendKey string) {
 
 // baseChecksumLabel is the image label that stamps the build-inputs checksum onto
 // yoloai-base, so staleness travels with the image in whatever store holds it.
-const baseChecksumLabel = "yoloai.base.checksum"
+// baseChecksumLabel aliases the shared constant so this package's existing
+// readers keep their local name while every backend stamps one label.
+const baseChecksumLabel = runtime.BaseChecksumLabel
 
 // checksumLabelStale reports whether an image carrying the given labels is stale
 // relative to the current build-inputs checksum. An empty want disables the check
@@ -344,21 +346,29 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 	return nil
 }
 
-// ProfileImageChecksum reads the build checksum this daemon's copy of tag was
-// stamped with, implementing runtime.ProfileImageBuilder.
+// ImageLabels reads tag's labels from this daemon, implementing
+// runtime.ProfileImageBuilder.
 //
-// Every failure is the same answer — absent image, no label, unreachable daemon
-// all mean "cannot vouch for it" — because the caller's only question is whether
-// to build. That is precisely what a marker file could not do: it could say
-// "built" about an image that had been deleted.
-func (r *Runtime) ProfileImageChecksum(ctx context.Context, tag string) (string, bool) {
+// ok distinguishes "the image is not here" from "the image is here and carries
+// no labels" — the first means the caller cannot vouch for anything, the second
+// is a real answer about a real image (one built before yoloAI stamped labels).
+func (r *Runtime) ImageLabels(ctx context.Context, tag string) (map[string]string, bool) {
 	insp, err := r.client.ImageInspect(ctx, tag)
-	if err != nil || insp.Config == nil {
-		return "", false
+	if err != nil {
+		return nil, false
 	}
-	sum, ok := insp.Config.Labels[runtime.ProfileChecksumLabel]
-	return sum, ok
+	if insp.Config == nil {
+		return map[string]string{}, true
+	}
+	return insp.Config.Labels, true
 }
+
+// BuildInputsChecksum is the checksum of the embedded base-image build inputs —
+// the Dockerfile and every script COPYed into the image. Exported so backends
+// that build the base by shelling out to docker (containerd) or to their own CLI
+// (apple) can stamp the same value this package stamps, instead of each deriving
+// its own notion of base identity.
+func BuildInputsChecksum() string { return buildInputsChecksum() }
 
 // createProfileBuildContext creates a tar archive from all files in the profile
 // directory for Docker build context.

@@ -126,8 +126,57 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 		fmt.Fprintf(outputOr(st.Output), "Warning: %s\n", w) //nolint:errcheck // best-effort output
 	}
 
+	// Re-ensure the image right before bringing it up, not only at create (DF156).
+	// A sandbox created before a yoloAI upgrade relaunches through here, and its
+	// image was built against a base this binary no longer expects — the host
+	// drives scripts and CLIs that live in that image, so a mismatch is a
+	// host/guest version skew, not cosmetic drift. force=false: the chain
+	// checksum already folds in the base, so a moved base rebuilds the profile
+	// without forcing a base rebuild that Setup has just established is current.
+	if err = ensureImageLineage(ctx, d, st); err != nil {
+		return err
+	}
+
 	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro); err != nil {
 		return err // the deferred rollbackPartialLaunch reaps the injector + container + netns
+	}
+	return nil
+}
+
+// ensureImageLineage brings the sandbox's image up to date with this binary
+// before it is launched (DF156).
+//
+// The create path already does this, but create is not the only way an image
+// gets launched: a stopped sandbox is removed and recreated on `start`, and it
+// carries an image built by whatever yoloAI version created it. Checking only at
+// create leaves every pre-existing sandbox on the old contract, which for a tool
+// whose sandboxes are long-lived is the common case rather than the edge.
+//
+// Backends with no image concept (tart, seatbelt) have no builder and are a
+// no-op — they deliver their scripts at launch already, so the skew this guards
+// against cannot arise there.
+func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) error {
+	if _, ok := runtime.ProfileImageBuilderOf(d.Runtime); !ok {
+		return nil
+	}
+	out, logger := outputOr(st.Output), slog.Default()
+
+	// No profile means the sandbox runs yoloai-base itself, and Setup is the
+	// check for that image. EnsureProfileImage cannot be used here: it resolves a
+	// profile chain, and an empty name fails resolution rather than meaning
+	// "none" — the create path avoids this by returning early before it is
+	// reached, which is why the guard has to be explicit rather than implied.
+	if st.Profile == "" {
+		baseProfileDir := filepath.Join(st.Layout.ProfilesDir(), "base")
+		if err := d.Runtime.Setup(ctx, st.Layout, baseProfileDir, out, logger, false); err != nil {
+			return fmt.Errorf("ensure base image is current: %w", err)
+		}
+		return nil
+	}
+
+	if err := rebuildProfileImage(ctx, d.Runtime, st.Layout, st.Profile,
+		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, logger, false); err != nil {
+		return fmt.Errorf("ensure image is current: %w", err)
 	}
 	return nil
 }

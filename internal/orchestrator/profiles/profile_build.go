@@ -58,7 +58,15 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 	// the pre-label behaviour that a yoloai-base rebuild does NOT invalidate
 	// profile images (see DF156 — that gap is real, predates this, and is filed
 	// rather than silently closed here).
-	parentChecksum := ""
+	// Seed the chain with the base image's own checksum label, so a base rebuild
+	// invalidates every profile built on the previous one (DF156). Read from the
+	// image rather than recomputed from the binary: it states what the store
+	// actually holds, and Setup above has just made that current.
+	//
+	// An unreadable or unstamped base seeds "" — the pre-label behaviour — rather
+	// than forcing a rebuild of everything. That case is a backend whose base
+	// predates the label, and it self-corrects on the next base build.
+	parentChecksum := baseChecksum(ctx, builder)
 	for _, name := range chain {
 		if name == "base" {
 			continue
@@ -85,6 +93,16 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 	}
 
 	return nil
+}
+
+// baseChecksum reads the checksum label off the base image in this backend's
+// store. Empty when there is no base, no label, or it cannot be read.
+func baseChecksum(ctx context.Context, builder runtime.ProfileImageBuilder) string {
+	labels, ok := builder.ImageLabels(ctx, config.BaseImage)
+	if !ok {
+		return ""
+	}
+	return labels[runtime.BaseChecksumLabel]
 }
 
 // chainChecksum is the profile-image build checksum: this profile's Dockerfile,
@@ -121,8 +139,8 @@ func imageMatches(ctx context.Context, builder runtime.ProfileImageBuilder, tag,
 	if want == "" {
 		return false
 	}
-	got, ok := builder.ProfileImageChecksum(ctx, tag)
-	return ok && got == want
+	labels, ok := builder.ImageLabels(ctx, tag)
+	return ok && labels[runtime.ProfileChecksumLabel] == want
 }
 
 // AutoBuildSecrets detects well-known credential files on the host and

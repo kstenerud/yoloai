@@ -123,42 +123,43 @@ func (r *Runtime) importFromDocker(ctx context.Context, dockerBin string, tag st
 	return r.slowPathImport(nsCtx, dockerBin, tag, output)
 }
 
-// ProfileImageChecksum reads tag's build checksum from the OCI image config in
-// containerd's store, implementing runtime.ProfileImageBuilder.
+// ImageLabels reads tag's labels out of the OCI image config in containerd's
+// store, implementing runtime.ProfileImageBuilder.
 //
 // It walks image record -> manifest -> config blob rather than reading
 // images.Image.Labels, and the distinction is load-bearing: the record label is
-// local bolt metadata that does not survive a re-import, while the build label
-// lives in the image config and travels with the image. Reading the record label
-// would pass and mean nothing.
+// local bolt metadata that does not survive a re-import, while build labels live
+// in the image config and travel with the image. Reading the record label would
+// pass and mean nothing.
 //
-// Every failure returns false — absent image, missing blob, unparseable config —
-// because the caller's only question is whether to build. A missing config blob
-// is a real case here, not paranoia: containerd's GC can evict child content
-// while leaving the image record intact.
-func (r *Runtime) ProfileImageChecksum(ctx context.Context, tag string) (string, bool) {
+// A missing config blob returns ok=false rather than an empty map: containerd's
+// GC can evict child content while leaving the image record intact, so "the
+// record exists" is not evidence the image is usable.
+func (r *Runtime) ImageLabels(ctx context.Context, tag string) (map[string]string, bool) {
 	nsCtx := r.withNamespace(ctx)
 	img, err := r.client.GetImage(nsCtx, tag)
 	if err != nil {
-		return "", false
+		return nil, false
 	}
 	cs := r.client.ContentStore()
 	manifestBlob, err := content.ReadBlob(nsCtx, cs, img.Target())
 	if err != nil {
-		return "", false
+		return nil, false
 	}
 	var manifest ocispec.Manifest
 	if err := json.Unmarshal(manifestBlob, &manifest); err != nil {
-		return "", false
+		return nil, false
 	}
 	configBlob, err := content.ReadBlob(nsCtx, cs, manifest.Config)
 	if err != nil {
-		return "", false
+		return nil, false
 	}
 	var cfg ocispec.Image
 	if err := json.Unmarshal(configBlob, &cfg); err != nil {
-		return "", false
+		return nil, false
 	}
-	sum, ok := cfg.Config.Labels[runtime.ProfileChecksumLabel]
-	return sum, ok
+	if cfg.Config.Labels == nil {
+		return map[string]string{}, true
+	}
+	return cfg.Config.Labels, true
 }
