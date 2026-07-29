@@ -28,6 +28,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/envspec"
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
+	"github.com/kstenerud/yoloai/internal/orchestrator/profiles"
 	"github.com/kstenerud/yoloai/internal/orchestrator/runtimeconfig"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	"github.com/kstenerud/yoloai/runtime"
@@ -265,8 +266,8 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	readyPath := filepath.Join(st.SandboxDir, store.SubstrateReadyMarker)
 	_ = os.Remove(readyPath)
 
-	if err := rt.Create(ctx, instanceCfg); err != nil {
-		return missingImageHint(instanceCfg.ImageRef, st.Profile, gvisorStartHint(st.Isolation, err))
+	if err := createWithImageRecovery(ctx, rt, st, instanceCfg); err != nil {
+		return err
 	}
 	if err := rt.Start(ctx, cname); err != nil {
 		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
@@ -785,8 +786,8 @@ func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach r
 // entrypoint (which runs sandbox-setup.py inline) to consume secrets.
 // No keepalive_only patch; the agent is welded into the entrypoint as before.
 func startLegacy(ctx context.Context, rt runtime.Backend, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
-	if err := rt.Create(ctx, instanceCfg); err != nil {
-		return missingImageHint(instanceCfg.ImageRef, st.Profile, gvisorStartHint(st.Isolation, err))
+	if err := createWithImageRecovery(ctx, rt, st, instanceCfg); err != nil {
+		return err
 	}
 	if err := rt.Start(ctx, cname); err != nil {
 		return fmt.Errorf("start instance: %w", gvisorStartHint(st.Isolation, err))
@@ -1041,6 +1042,78 @@ func gvisorStartHint(isolation runtime.IsolationMode, err error) error {
 	}
 }
 
+// isMissingImageErr reports whether err is a Create failure caused by imageRef
+// being absent from this backend's image store.
+//
+// It requires the message to name this exact image ref AND carry a not-found
+// marker, because "not found" alone appears in unrelated failures. The docker
+// marker is verified; the containerd and apple forms are informed guesses at CLI
+// text this host cannot exercise, and a miss is harmless — the caller falls back
+// to the behaviour it had before this classifier existed.
+func isMissingImageErr(imageRef string, err error) bool {
+	if err == nil || imageRef == "" || !strings.Contains(err.Error(), imageRef) {
+		return false
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "No such image") || // docker (verified)
+		strings.Contains(msg, "failed to resolve reference") || // containerd
+		strings.Contains(msg, "manifest unknown") ||
+		strings.Contains(msg, "pull access denied") ||
+		strings.Contains(msg, "image not found")
+}
+
+// rebuildProfileImage is the profile-chain rebuild used to recover from a
+// missing image. Variable for testing (same seam idiom as docker's
+// dockerInfoOutput); production always calls profiles.EnsureProfileImage.
+var rebuildProfileImage = profiles.EnsureProfileImage
+
+// createWithImageRecovery creates the instance and, when that fails because the
+// profile image is not in this backend's store, rebuilds it and retries exactly
+// once (DF154).
+//
+// Recovery rather than a pre-flight check is deliberate. Whether the image
+// exists cannot be established in advance — any such check is true when it runs
+// and the image is used later — so the sound shape is to attempt the operation
+// and handle the failure. This is that handler.
+//
+// Scoped to sandboxes with a profile. A missing *base* image is a different
+// path: `Setup` decides base staleness with a checksum stamped on the image
+// itself, so an absent base is already detected rather than assumed away.
+//
+// The rebuild is forced, which also revalidates the base image. That is usually
+// what is wanted, not waste: whatever removed the profile image — a prune, a
+// backend switch — commonly removed the base with it.
+//
+// Exactly one retry, and only when the classifier fires. A rebuild loop on a
+// genuinely broken Dockerfile has to fail rather than spin, and both failure
+// paths below say a rebuild was already attempted, because "it failed twice for
+// the same reason" is a materially different diagnosis from the first failure.
+func createWithImageRecovery(ctx context.Context, rt runtime.Backend, st *state.State, instanceCfg runtime.InstanceConfig) error {
+	err := gvisorStartHint(st.Isolation, rt.Create(ctx, instanceCfg))
+	if err == nil {
+		return nil
+	}
+	if st.Profile == "" || !isMissingImageErr(instanceCfg.ImageRef, err) {
+		return missingImageHint(instanceCfg.ImageRef, st.Profile, err)
+	}
+
+	out := outputOr(st.Output)
+	fmt.Fprintf(out, "Profile image %s is recorded as built but missing from this backend's store; rebuilding it...\n", //nolint:errcheck // best-effort progress
+		instanceCfg.ImageRef)
+
+	if buildErr := rebuildProfileImage(ctx, rt, st.Layout, st.Profile,
+		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, slog.Default(), true); buildErr != nil {
+		return fmt.Errorf("%w\n\nThis was an automatic rebuild of %q, triggered because creating "+
+			"the instance failed with: %v", buildErr, instanceCfg.ImageRef, err)
+	}
+
+	if retryErr := gvisorStartHint(st.Isolation, rt.Create(ctx, instanceCfg)); retryErr != nil {
+		return fmt.Errorf("%w\n\n%s was rebuilt automatically after the first attempt reported it "+
+			"missing, and creating the instance still failed", retryErr, instanceCfg.ImageRef)
+	}
+	return nil
+}
+
 // missingImageHint names the real cause when instance creation fails because the
 // image is not in this backend's store (DF154).
 //
@@ -1064,16 +1137,7 @@ func gvisorStartHint(isolation runtime.IsolationMode, err error) error {
 // guesses at CLI text this host cannot exercise, and a miss is harmless — the
 // error passes through exactly as it does today.
 func missingImageHint(imageRef, profile string, err error) error {
-	if err == nil || imageRef == "" || !strings.Contains(err.Error(), imageRef) {
-		return err
-	}
-	msg := err.Error()
-	notFound := strings.Contains(msg, "No such image") || // docker (verified)
-		strings.Contains(msg, "failed to resolve reference") || // containerd
-		strings.Contains(msg, "manifest unknown") ||
-		strings.Contains(msg, "pull access denied") ||
-		strings.Contains(msg, "image not found")
-	if !notFound {
+	if !isMissingImageErr(imageRef, err) {
 		return err
 	}
 

@@ -3,8 +3,11 @@
 package launch
 
 import (
+	"context"
 	"errors"
 	"fmt"
+	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
@@ -49,10 +52,6 @@ func TestGvisorStartHint(t *testing.T) {
 	assert.NoError(t, gvisorStartHint(runtime.IsolationModeContainerEnhanced, nil))
 }
 
-// TestEffectiveSecretsConsumedTimeout verifies the host honors a backend's
-// declared wait budget (slow-booting backends raise it so the secrets dir
-// isn't removed before the guest reads it) and falls back to the package
-// default otherwise.
 // TestMissingImageHint covers DF154: the staleness marker records that a build
 // once ran, never that the image still exists, so a pruned or backend-switched
 // image reaches Create as a tag the store does not have. The backend then tries
@@ -92,6 +91,10 @@ func TestMissingImageHint(t *testing.T) {
 		"with no image ref there is nothing to match against, so claim nothing")
 }
 
+// TestEffectiveSecretsConsumedTimeout verifies the host honors a backend's
+// declared wait budget (slow-booting backends raise it so the secrets dir
+// isn't removed before the guest reads it) and falls back to the package
+// default otherwise.
 func TestEffectiveSecretsConsumedTimeout(t *testing.T) {
 	assert.Equal(t, secretsConsumedTimeout, effectiveSecretsConsumedTimeout(runtime.BackendDescriptor{}),
 		"no backend override → package default")
@@ -363,4 +366,114 @@ func TestInstanceLabels(t *testing.T) {
 				"every instance carries its owner, so a sweep never has to infer one")
 		})
 	}
+}
+
+// recoveryRuntime is a fakeRuntime whose Create is scripted per call, so a test
+// can express "fails missing the first time, succeeds the second".
+type recoveryRuntime struct {
+	fakeRuntime
+	errs    []error // consumed in order; nil means success
+	creates int
+}
+
+func (r *recoveryRuntime) Create(_ context.Context, _ runtime.InstanceConfig) error {
+	i := r.creates
+	r.creates++
+	if i < len(r.errs) {
+		return r.errs[i]
+	}
+	return nil
+}
+
+// TestCreateWithImageRecovery covers DF154's recovery half: a profile image the
+// marker vouches for but the store does not have is rebuilt and retried once,
+// rather than surfacing a registry pull error for a tag that was never in a
+// registry.
+func TestCreateWithImageRecovery(t *testing.T) {
+	const ref = "yoloai-cli-dev"
+	missing := errors.New("create container: Error response from daemon: No such image: " + ref)
+	cfg := runtime.InstanceConfig{ImageRef: ref}
+
+	// Swap the rebuild for a recorder; restore after each subtest.
+	type rebuildCall struct {
+		profile string
+		force   bool
+	}
+	install := func(t *testing.T, result error, calls *[]rebuildCall) {
+		t.Helper()
+		prev := rebuildProfileImage
+		rebuildProfileImage = func(_ context.Context, _ runtime.Backend, _ config.Layout, profile string,
+			_ []string, _ io.Writer, _ *slog.Logger, force bool) error {
+			*calls = append(*calls, rebuildCall{profile, force})
+			return result
+		}
+		t.Cleanup(func() { rebuildProfileImage = prev })
+	}
+	st := func() *state.State {
+		return &state.State{Profile: "dev", Output: io.Discard}
+	}
+
+	t.Run("rebuilds and retries once", func(t *testing.T) {
+		var calls []rebuildCall
+		install(t, nil, &calls)
+		rt := &recoveryRuntime{errs: []error{missing}}
+
+		require.NoError(t, createWithImageRecovery(context.Background(), rt, st(), cfg))
+		assert.Equal(t, 2, rt.creates, "one failure, one retry — never more")
+		require.Len(t, calls, 1)
+		assert.Equal(t, "dev", calls[0].profile)
+		assert.True(t, calls[0].force,
+			"the marker is what lied, so the rebuild must bypass it")
+	})
+
+	t.Run("does not retry forever when the image is still missing", func(t *testing.T) {
+		var calls []rebuildCall
+		install(t, nil, &calls)
+		rt := &recoveryRuntime{errs: []error{missing, missing}}
+
+		err := createWithImageRecovery(context.Background(), rt, st(), cfg)
+		require.Error(t, err)
+		assert.Equal(t, 2, rt.creates, "exactly one retry, not a loop")
+		assert.Len(t, calls, 1)
+		assert.Contains(t, err.Error(), "rebuilt automatically",
+			"failing twice for the same reason is a different diagnosis from failing once")
+	})
+
+	t.Run("a failed rebuild surfaces the build error, not the pull error", func(t *testing.T) {
+		var calls []rebuildCall
+		buildErr := errors.New("build profile image: dockerfile parse error on line 3")
+		install(t, buildErr, &calls)
+		rt := &recoveryRuntime{errs: []error{missing}}
+
+		err := createWithImageRecovery(context.Background(), rt, st(), cfg)
+		require.Error(t, err)
+		assert.ErrorIs(t, err, buildErr, "the actionable error is the one the user must fix")
+		assert.Equal(t, 1, rt.creates, "a broken Dockerfile must not be retried")
+		assert.Contains(t, err.Error(), "automatic rebuild")
+	})
+
+	t.Run("an unrelated Create failure is never rebuilt", func(t *testing.T) {
+		var calls []rebuildCall
+		install(t, nil, &calls)
+		other := errors.New("create container: port 8080 already allocated")
+		rt := &recoveryRuntime{errs: []error{other}}
+
+		err := createWithImageRecovery(context.Background(), rt, st(), cfg)
+		assert.ErrorIs(t, err, other)
+		assert.Equal(t, 1, rt.creates)
+		assert.Empty(t, calls, "rebuilding on an unrelated failure would be a 3-minute red herring")
+	})
+
+	t.Run("no profile means the hint only, since base staleness is label-checked", func(t *testing.T) {
+		var calls []rebuildCall
+		install(t, nil, &calls)
+		rt := &recoveryRuntime{errs: []error{missing}}
+		bare := &state.State{Output: io.Discard}
+
+		err := createWithImageRecovery(context.Background(), rt, bare, cfg)
+		require.Error(t, err)
+		assert.Empty(t, calls)
+		assert.Contains(t, err.Error(), "yoloai system build",
+			"still actionable, just not automatic")
+	})
 }

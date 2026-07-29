@@ -4,7 +4,7 @@
 
 # Profile image lifecycle — staleness that reflects the store
 
-- **Status:** PLANNED
+- **Status:** IN-PROGRESS
 - **Depends on:** —
 
 Three open findings are one problem seen from three angles: **yoloAI decides whether to build a
@@ -15,7 +15,7 @@ exists.**
 | --- | --- |
 | [DF152](../findings-unresolved.md) | The marker is keyed by backend *name*, and `docker` may address OrbStack, Docker Desktop or Colima — three stores, one key. |
 | [DF153](../findings-unresolved.md) | containerd never implements the interface at all, so profile Dockerfiles are silently ignored there. |
-| [DF154](../findings-unresolved.md) | Nothing verifies the image exists. Half-addressed: the failure now explains itself; recovery is still manual. |
+| [DF154](../findings-resolved.md) | Nothing verified the image exists. **Done 2026-07-29** — the failure explains itself and recovery is automatic. |
 
 [DF150](../findings-resolved.md) was the fourth and is fixed — it is why the marker is keyed by
 backend at all.
@@ -38,38 +38,27 @@ wrong — which is the only footing on which a label check (or any check) is saf
 
 Build in this order:
 
-1. **Recovery at the use site** (DF154, remaining half).
+1. ~~**Recovery at the use site** (DF154).~~ **Done** — `createWithImageRecovery`, `internal/orchestrator/launch/launch.go`.
 2. **containerd's implementation** (DF153) — independent of the interface change; can be done in
    parallel by someone else.
 3. **Label-based staleness for docker/podman** (DF152) — the interface change.
 
-## 1. Recovery at the use site
+## 1. Recovery at the use site — DONE (2026-07-29)
 
-`missingImageHint` (`internal/orchestrator/launch/launch.go`) already classifies the failure and
-tells the user which command to run. Recovery means running it for them: on a missing-image
-Create failure, rebuild the profile chain and retry Create once.
+`createWithImageRecovery` wraps both `rt.Create` sites: on a missing-image failure it rebuilds the
+profile chain and retries once. The obstacle this plan predicted — that launch lacks the build
+inputs — did not materialise. `state.State` already carries `Layout`, `Profile` and `Output`, and
+`profiles.AutoBuildSecrets` is a pure function of `Layout.HomeDir`, so neither of the two costed
+options was needed and nothing was threaded through. Recorded because the prediction was wrong in
+the cheap direction, and the next estimate should be correspondingly less confident.
 
-**The obstacle is plumbing, not logic.** The launch seam holds `state.State` — which carries
-`Profile` and `ImageRef` — but not the build inputs `profiles.EnsureProfileImage` needs: the
-secrets (`profiles.AutoBuildSecrets(layout.HomeDir)`) and the output writer. `create` has them
-(`prepare_profile.go`), launch does not.
+The rebuild goes through a `var rebuildProfileImage = profiles.EnsureProfileImage` seam so the
+retry policy is testable without a real backend, and the concurrency question that was in "Out of
+scope" is now [DF155](../findings-unresolved.md) rather than a line in a plan that will one day be
+archived.
 
-Options, cheapest first:
-
-- **Recompute at launch.** `AutoBuildSecrets` is a pure function of `layout.HomeDir`, and launch
-  has the layout via `state.Deps`. So launch can reconstruct the inputs rather than have them
-  threaded. Cheapest, and the reconstruction is a re-derivation of something already derived —
-  acceptable if `AutoBuildSecrets` stays pure, worth a comment saying so.
-- **Thread a rebuild closure from `create`.** Explicit, no re-derivation, but adds a field to the
-  launch path for a case that fires rarely.
-
-Retry exactly once, and only when the hint's classifier fires — a rebuild loop on a genuinely
-broken Dockerfile must fail, not spin. On the second failure, surface the original error plus the
-fact that a rebuild was attempted and did not help, which is a materially different diagnosis.
-
-**Test:** a fake backend that fails Create with a not-found error the first time and succeeds the
-second, asserting exactly one rebuild. Plus the negative: a Dockerfile that cannot build must not
-retry forever.
+**This is what unblocks step 3.** A missing image at launch is now recoverable rather than fatal,
+so a staleness check upstream is free to be wrong.
 
 ## 2. containerd's implementation (DF153)
 
