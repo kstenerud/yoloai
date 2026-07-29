@@ -42,6 +42,22 @@ const containerdSocket = "/run/containerd/containerd.sock"
 // at "create netns: operation not permitted". Each stage yields a specific reason.
 func requireAvailable(t *testing.T) {
 	t.Helper()
+	requireDaemon(t)
+	if err := canCreateNetNSFunc(); err != nil {
+		testutil.RequireBackend(t, "containerd", fmt.Sprintf("reachable but this host cannot create network namespaces (needs CAP_SYS_ADMIN/root): %v", err))
+	}
+}
+
+// requireDaemon is requireAvailable without the netns stage: the daemon must be
+// reachable, but nothing about network namespaces is asserted.
+//
+// Split out for the image-side tests (Setup, profile builds), which talk only to
+// containerd's image and content services and never create a container — so the
+// CAP_SYS_ADMIN the CNI stage needs is not a prerequisite for them. Keeping the
+// stricter gate on them would report the image pipeline as untestable on any
+// unprivileged host, which is a false negative about the code under test.
+func requireDaemon(t *testing.T) {
+	t.Helper()
 	if _, err := os.Stat(containerdSocket); err != nil {
 		testutil.RequireBackend(t, "containerd", fmt.Sprintf("%s not found", containerdSocket))
 	}
@@ -50,9 +66,6 @@ func requireAvailable(t *testing.T) {
 		testutil.RequireBackend(t, "containerd", fmt.Sprintf("%s exists but is not connectable: %v", containerdSocket, err))
 	} else {
 		_ = conn.Close()
-	}
-	if err := canCreateNetNSFunc(); err != nil {
-		testutil.RequireBackend(t, "containerd", fmt.Sprintf("reachable but this host cannot create network namespaces (needs CAP_SYS_ADMIN/root): %v", err))
 	}
 }
 

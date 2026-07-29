@@ -14,7 +14,7 @@ exists.**
 | Finding | The angle |
 | --- | --- |
 | [DF152](../findings-unresolved.md) | The marker is keyed by backend *name*, and `docker` may address OrbStack, Docker Desktop or Colima — three stores, one key. |
-| [DF153](../findings-unresolved.md) | containerd never implements the interface at all, so profile Dockerfiles are silently ignored there. |
+| [DF153](../findings-resolved.md) | containerd never implemented the interface, so profile Dockerfiles were silently ignored there. **Done 2026-07-29**, verified on a real daemon. |
 | [DF154](../findings-resolved.md) | Nothing verified the image exists. **Done 2026-07-29** — the failure explains itself and recovery is automatic. |
 
 [DF150](../findings-resolved.md) was the fourth and is fixed — it is why the marker is keyed by
@@ -39,8 +39,7 @@ wrong — which is the only footing on which a label check (or any check) is saf
 Build in this order:
 
 1. ~~**Recovery at the use site** (DF154).~~ **Done** — `createWithImageRecovery`, `internal/orchestrator/launch/launch.go`.
-2. **containerd's implementation** (DF153) — independent of the interface change; can be done in
-   parallel by someone else.
+2. ~~**containerd's implementation** (DF153).~~ **Done** — `runtime/containerd/profile_image.go`.
 3. **Label-based staleness for docker/podman** (DF152) — the interface change.
 
 ## 1. Recovery at the use site — DONE (2026-07-29)
@@ -60,50 +59,24 @@ archived.
 **This is what unblocks step 3.** A missing image at launch is now recoverable rather than fatal,
 so a staleness check upstream is free to be wrong.
 
-## 2. containerd's implementation (DF153)
+## 2. containerd's implementation (DF153) — DONE (2026-07-29)
 
-**containerd has no build of its own.** Its base image comes from shelling out to `docker build`
-and linking the result into the containerd namespace — `runtime/containerd/image.go`,
-`buildDockerImage` + `tryLink`, with a namespace-share/descriptor-walk fast path when Docker runs
-in containerd-snapshotter mode. A profile build takes the same route.
+Built and verified against containerd v2.2.5 + Docker 29.6.1. The prerequisite was the work, as
+predicted: the pipeline is now parameterised by tag, `Setup` still passes the `yoloai-base` const,
+and `dockerRefFor(tag)` replaced the second hardcoded const. No parallel pipeline.
 
-Consequences worth stating before someone re-derives them:
+Three things learned here that step 3 should carry:
 
-- The recorded `backendKey` is `"containerd"` (the store the sandbox runs from) while the builder
-  is docker. The base path already does exactly this — `RecordBuildChecksum(layout, "containerd")`
-  after a `docker build`.
-- containerd inherits docker's build environment and `--secret` support for free, unlike apple.
-- The `ProfileImageBuilder` docstring's `buildEnv` contract still applies: the build subprocess
-  draws from `buildEnv`, not from an env captured at construction.
-
-**Prerequisite: checked 2026-07-29, and the answer is the pessimistic one.** `imageRef` is a
-package-level `const imageRef = "yoloai-base"` (`runtime/containerd/image.go:30`) threaded through
-**11 sites** and six methods: `imageAlreadyReady` (`GetImage`), `buildDockerImage` (the `docker
-build -t`), `slowPathImport` (`docker save`, then `imgSvc.Create`), `linkFromDockerNamespace` (the
-namespace-share and its delete-on-failure), and `IsReady`. None of them takes a tag; the whole
-containerd image pipeline is written for exactly one image.
-
-So step 2 is **not** "implement three methods". It is: parameterise that pipeline by tag, then add
-the profile entry point on top. Concretely —
-
-1. Thread a `tag string` through the six methods above, leaving `Setup` passing the `yoloai-base`
-   const so base behaviour is provably unchanged. This is the bulk of it and it is mechanical.
-2. Confirm the two paths are tag-agnostic in fact, not just in signature. The **slow path**
-   (`docker save | ctr import`) should be, since it carries whatever `docker save` emitted. The
-   **fast path** (`linkFromDockerNamespace`) walks a descriptor tree between namespaces and sets
-   GC ref labels — verify it does not assume a single well-known image, and note it deletes by
-   name on failure, which must delete the *right* name once there is more than one.
-3. Only then add `BuildProfileImage` / `ProfileImageNeedsBuild` / `RecordProfileBuildChecksum`,
-   with the checksum methods delegating to the shared docker scheme keyed `"containerd"`.
-
-The base-image path is the reference for correctness throughout: whatever it does for
-`yoloai-base` is what a profile tag needs, and the const is the only thing standing in the way.
-**Do not skip step 1 by adding a second parallel pipeline for profiles** — two image paths that
-must stay consistent is exactly the shape this project keeps paying for elsewhere.
-
-Worth budgeting honestly: this is the largest of the three steps, needs a Linux host with real
-containerd to verify, and the fast path is delicate (it is a bolt metadata write plus GC ref
-labels, and getting the labels wrong loses blobs to GC rather than failing loudly).
+- **`requireAvailable` was too strong for image tests.** Its CAP_SYS_ADMIN stage exists for CNI, and
+  image tests create no containers. `requireDaemon` is the split. Any DF152 test wants the same.
+- **`tryLink` used to discard why it failed**, so a 50-80s fallback looked like the normal path. It
+  now says. Expect more of this class in the import machinery.
+- **The first import on a host is slow by construction.** BuildKit leaves fresh layers in the
+  snapshotter; the compressed blobs only materialise when something exports them — which the slow
+  fallback itself does. So a cold host takes the import path and every later link succeeds. Do not
+  read a slow first build as a defect, and do not attribute a later fast one to whatever changed in
+  between: that mistake was made here, with a plausible-looking 76s → 0.84s measurement that a
+  control run refuted.
 
 ## 3. Label-based staleness (DF152)
 

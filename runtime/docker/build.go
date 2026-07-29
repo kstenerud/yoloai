@@ -147,7 +147,7 @@ func buildInputsChecksum() string {
 	return hex.EncodeToString(h.Sum(nil))
 }
 
-// attestationOptOutFlags returns the build flags that disable BuildKit
+// AttestationOptOutFlags returns the build flags that disable BuildKit
 // SBOM/provenance attestations — but only for docker, which emits them. The
 // attestation manifest list is the prime suspect for yoloai-base/profile images
 // vanishing between runs on Docker Desktop's containerd image store (forcing a
@@ -155,7 +155,7 @@ func buildInputsChecksum() string {
 // anyway; harmless on the classic overlay2 store. Podman's `build` neither emits
 // such attestations nor accepts --provenance/--sbom (it errors "unknown flag:
 // --provenance"), so the flags are omitted for it.
-func attestationOptOutFlags(binaryName string) []string {
+func AttestationOptOutFlags(binaryName string) []string {
 	if binaryName == "docker" {
 		return []string{"--provenance=false", "--sbom=false"}
 	}
@@ -186,7 +186,7 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 
 	logger.Debug("building yoloai-base image via BuildKit")
 
-	args := append([]string{"build"}, attestationOptOutFlags(r.binaryName)...)
+	args := append([]string{"build"}, AttestationOptOutFlags(r.binaryName)...)
 	// Stamp the build-inputs checksum onto the image so baseImageStale can detect
 	// a stale yoloai-base per store, without a host-side marker — the docker
 	// backend can hold separate images across local providers (OrbStack, Docker
@@ -334,7 +334,7 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 		return fmt.Errorf("create profile build context: %w", err)
 	}
 
-	args := append([]string{"build"}, attestationOptOutFlags(r.binaryName)...)
+	args := append([]string{"build"}, AttestationOptOutFlags(r.binaryName)...)
 	args = append(args, "-t", tag)
 	for _, s := range secrets {
 		args = append(args, "--secret", s)

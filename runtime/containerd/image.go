@@ -33,8 +33,14 @@ const imageRef = "yoloai-base"
 // on the returned error (DF144), so a --json/embedder caller sees the cause.
 const buildErrorTailLines = 20
 
-// dockerImageRef is the full ref Docker uses when storing yoloai-base in containerd.
-const dockerImageRef = "docker.io/library/yoloai-base:latest"
+// dockerRefFor returns the fully-qualified ref Docker stores a locally-built,
+// unqualified tag under. `docker build -t yoloai-cli-dev` lands in containerd as
+// docker.io/library/yoloai-cli-dev:latest, and the namespace-link path looks the
+// image up by that name — so every caller that crosses the docker/containerd
+// boundary needs this normalisation, not the short tag.
+func dockerRefFor(tag string) string {
+	return "docker.io/library/" + tag + ":latest"
+}
 
 // Setup builds the yoloai-base image using Docker and imports it into the
 // containerd yoloai namespace. If force is false and the image already exists
@@ -68,7 +74,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	}
 	defer unlock()
 
-	if r.imageAlreadyReady(ctx, force) {
+	if r.imageAlreadyReady(ctx, imageRef, force) {
 		return nil
 	}
 
@@ -76,7 +82,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	// while Docker still holds a current yoloai-base image. When the build
 	// inputs are unchanged, re-linking is near-instant — a full rebuild here is
 	// the cold-build footgun we are eliminating.
-	if !force && !dockerrt.NeedsBuild(layout, "containerd") && r.tryLink(ctx, output) {
+	if !force && !dockerrt.NeedsBuild(layout, "containerd") && r.tryLink(ctx, imageRef, output) {
 		return nil
 	}
 
@@ -95,23 +101,31 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	// blob in the yoloai namespace via a pure bolt metadata write. GC ref
 	// labels are set on each parent blob so the garbage collector can trace
 	// the full manifest tree and keep all blobs reachable.
-	if r.tryLink(ctx, output) {
+	if r.tryLink(ctx, imageRef, output) {
 		return nil
 	}
 
 	// Slow path: docker save | ctr images import -
 	// Used when Docker is not in containerd-snapshotter mode, or when the
 	// fast path fails verification.
-	return r.slowPathImport(ctx, dockerBin, output)
+	return r.slowPathImport(ctx, dockerBin, imageRef, output)
 }
 
 // tryLink attempts the fast containerd-snapshotter link path, returning true
 // only when the image is fully linked into the yoloai namespace. A false return
 // is expected when Docker is not in containerd-snapshotter mode; the caller then
 // falls back to a build and/or the slow `docker save | ctr import` path.
-func (r *Runtime) tryLink(ctx context.Context, output io.Writer) bool {
+func (r *Runtime) tryLink(ctx context.Context, tag string, output io.Writer) bool {
 	fmt.Fprintln(output, "Linking image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
-	if err := r.linkFromDockerNamespace(ctx); err != nil {
+	if err := r.linkFromDockerNamespace(ctx, tag); err != nil {
+		// Say why. A false return costs the caller a `docker save | ctr import`,
+		// which is minutes rather than milliseconds, and the reason used to be
+		// discarded entirely — so the fallback looked like the normal path and
+		// nobody could tell a not-in-snapshotter-mode host (expected) from a
+		// permission or content error (not). Same discarded-diagnostic class as
+		// DF144/DF145.
+		fmt.Fprintf(output, "Fast namespace link unavailable (%v); falling back to import.\n", err) //nolint:errcheck // best-effort output
+		slog.Default().Debug("containerd namespace link failed; falling back to import", "tag", tag, "err", err)
 		return false
 	}
 	fmt.Fprintln(output, "Image ready.") //nolint:errcheck // best-effort output
@@ -120,11 +134,11 @@ func (r *Runtime) tryLink(ctx context.Context, output io.Writer) bool {
 
 // imageAlreadyReady returns true if force is false and the full image descriptor
 // tree is accessible in the containerd namespace.
-func (r *Runtime) imageAlreadyReady(ctx context.Context, force bool) bool {
+func (r *Runtime) imageAlreadyReady(ctx context.Context, tag string, force bool) bool {
 	if force {
 		return false
 	}
-	img, err := r.client.GetImage(ctx, imageRef)
+	img, err := r.client.GetImage(ctx, tag)
 	if err != nil {
 		return false
 	}
@@ -156,7 +170,20 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 	// dangling intermediate image per Dockerfile step on the containerd image
 	// store, which makes `system prune` churn forever (see
 	// backend-idiosyncrasies.md).
-	buildCmd := sysexec.CommandContext(ctx, r.layout.Env().EnvForDockerBuild(), dockerBin, "build", "-t", imageRef, "-f", "Dockerfile", "-")
+	// Attestation opt-out, same as the docker backend and the profile path — the
+	// attestation index is the prime suspect for images vanishing between runs on
+	// a containerd image store, and a local image has no use for attestations.
+	//
+	// It does not make the namespace link succeed on a cold build: verified here,
+	// where a full rebuild with the flags on still fell back to `docker save |
+	// ctr import`. BuildKit leaves fresh layers in the snapshotter rather than
+	// writing compressed blobs to the content store, so the link's descriptor-tree
+	// verification finds a gap until some export materialises them — which the
+	// fallback import itself does, which is why later links succeed. The first
+	// import on a host is slow by construction, not by defect.
+	args := append([]string{"build"}, dockerrt.AttestationOptOutFlags("docker")...)
+	args = append(args, "-t", imageRef, "-f", "Dockerfile", "-")
+	buildCmd := sysexec.CommandContext(ctx, r.layout.Env().EnvForDockerBuild(), dockerBin, args...)
 	// Tee the stream into a tail buffer so a build failure's cause rides on the
 	// error, not only the (possibly discarded) stream — same value on both so
 	// os/exec keeps its single-pipe path (DF144).
@@ -173,7 +200,7 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 }
 
 // slowPathImport uses "docker save | ctr images import -" to import the image.
-func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, output io.Writer) error {
+func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, tag string, output io.Writer) error {
 	ctrBin, err := exec.LookPath("ctr")
 	if err != nil {
 		return fmt.Errorf("ctr (containerd CLI) not found; install containerd:\n%s", ctrInstallHint())
@@ -181,7 +208,7 @@ func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, output i
 
 	fmt.Fprintln(output, "Importing image into containerd namespace yoloai (this may take a few minutes)...") //nolint:errcheck // best-effort output
 
-	saveCmd := sysexec.CommandContext(ctx, r.execEnv, dockerBin, "save", imageRef)
+	saveCmd := sysexec.CommandContext(ctx, r.execEnv, dockerBin, "save", tag)
 	importCmd := sysexec.CommandContext(ctx, r.execEnv, ctrBin, "-n", "yoloai", "images", "import", "-")
 
 	importCmd.Stdin, err = saveCmd.StdoutPipe()
@@ -217,8 +244,8 @@ func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, output i
 	// (docker.io/library/yoloai-base:latest). Create a short alias so the
 	// rest of yoloai can look it up by imageRef ("yoloai-base").
 	imgSvc := r.client.ImageService()
-	if importedImg, err := imgSvc.Get(ctx, dockerImageRef); err == nil {
-		_, cerr := imgSvc.Create(ctx, images.Image{Name: imageRef, Target: importedImg.Target})
+	if importedImg, err := imgSvc.Get(ctx, dockerRefFor(tag)); err == nil {
+		_, cerr := imgSvc.Create(ctx, images.Image{Name: tag, Target: importedImg.Target})
 		if cerr != nil && !errdefs.IsAlreadyExists(cerr) {
 			return fmt.Errorf("create image alias: %w", cerr)
 		}
@@ -260,7 +287,8 @@ func ctrInstallHint() string {
 //     removed the bolt entries or Docker didn't store compressed blobs in
 //     the content store), an error is returned so the caller can fall back
 //     to the slow import path.
-func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
+func (r *Runtime) linkFromDockerNamespace(ctx context.Context, tag string) error {
+	dockerRef := dockerRefFor(tag)
 	imgSvc := r.client.ImageService()
 	cs := r.client.ContentStore()
 	nsSvc := r.client.NamespaceService()
@@ -271,7 +299,7 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 
 	for _, srcNS := range []string{"moby", "default"} {
 		srcCtx := namespaces.WithNamespace(baseCtx, srcNS)
-		srcImg, err := imgSvc.Get(srcCtx, dockerImageRef)
+		srcImg, err := imgSvc.Get(srcCtx, dockerRef)
 		if err != nil {
 			continue
 		}
@@ -294,7 +322,7 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 		// We create first (before any delete) so the content entries are always
 		// referenced by an image, preventing GC from removing them.
 		_, err = imgSvc.Create(dstCtx, images.Image{
-			Name:   imageRef,
+			Name:   tag,
 			Target: srcImg.Target,
 		})
 		if err != nil {
@@ -303,7 +331,7 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 			}
 			// Already exists — update in place so the reference is never dropped.
 			_, err = imgSvc.Update(dstCtx, images.Image{
-				Name:   imageRef,
+				Name:   tag,
 				Target: srcImg.Target,
 			})
 			if err != nil {
@@ -317,12 +345,12 @@ func (r *Runtime) linkFromDockerNamespace(ctx context.Context) error {
 		// object, or GC removed it), bail out so the caller falls back to
 		// the slow import path.
 		if err := r.verifyDescriptorTree(dstCtx, cs, srcImg.Target); err != nil {
-			_ = imgSvc.Delete(dstCtx, imageRef)
+			_ = imgSvc.Delete(dstCtx, tag)
 			return fmt.Errorf("verify shared content: %w", err)
 		}
 		return nil
 	}
-	return fmt.Errorf("image %q not found in Docker containerd namespaces (moby, default)", dockerImageRef)
+	return fmt.Errorf("image %q not found in Docker containerd namespaces (moby, default)", dockerRef)
 }
 
 // verifyDescriptorTree recursively confirms that every blob in desc's tree

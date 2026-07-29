@@ -355,7 +355,7 @@ linters:
       - path: "runtime/docker/docker\\.go"
         linters: [forbidigo]
         text: "\\.EnvForDockerExec"
-      - path: "runtime/docker/build\\.go|runtime/containerd/image\\.go"
+      - path: "runtime/docker/build\\.go|runtime/containerd/image\\.go|runtime/containerd/profile_image\\.go"
         linters: [forbidigo]
         text: "\\.EnvForDockerBuild"
       - path: "runtime/containerd/containerd\\.go"

@@ -648,38 +648,6 @@ end is what makes the conflict happen.)
   + `runtime/seatbelt/profile.go:193-199` (the rw share/grant); `internal/orchestrator/engine_network.go:62,84`;
   `runtime/seatbelt/seatbelt.go:827-831`; `internal/orchestrator/lifecycle/restart.go:163,180-208`. Related: DF136.
 
-### DF153 — containerd is image-based but does not implement `ProfileImageBuilder`, so profile Dockerfiles are silently skipped there too
-
-- **Discovered:** 2026-07-27 · **Workstream:** PR #44 review (first external contribution)
-- **Severity:** MEDIUM (silent skip — a profile with a Dockerfile builds nothing and every sandbox
-  on that profile runs `yoloai-base` unmodified, with no error). Same class as the pre-fix apple
-  defect this PR closes, and the same class DF150/DF152 cover for the backends that do implement
-  the interface.
-- **Disposition:** PARKED — explicitly out of scope for the PR that found it, per the owner's review.
-- **Description:** `runtime.ProfileImageBuilder` (`runtime/runtime_optional.go`) is implemented by
-  docker, podman (via embedding), and now apple. containerd has its own OCI image store — the same
-  shape of backend docker/podman/apple are — but declares no
-  `var _ runtime.ProfileImageBuilder = (*Runtime)(nil)` and has no `BuildProfileImage`/
-  `ProfileImageNeedsBuild`/`RecordProfileBuildChecksum` methods at all. `ProfileImageBuilderOf`
-  (`runtime_optional.go`) falls through its `ok` branch for containerd exactly as it did for apple
-  before this PR, so a profile's Dockerfile is silently ignored rather than built.
-- **Root cause, and why the interface being back in `runtime_optional.go` matters:**
-  `ProfileImageBuilder` used to live in `internal/orchestrator/profiles`, where no backend in the
-  public runtime tree could compile-time assert it — that's how apple came to be missing it
-  unnoticed, and it's why containerd is missing it unnoticed now. Every other optional capability
-  lives in `runtime/runtime_optional.go` with the `var _ runtime.CachePruner = (*Runtime)(nil)`
-  idiom (`runtime/podman/podman.go:101`); moving `ProfileImageBuilder` there (done in this PR's
-  rebase, DF151) doesn't retrofit a missing assertion into containerd — that stays a per-backend
-  choice — but it does mean the next audit of "which backends assert which optional interfaces"
-  will actually surface the gap instead of it hiding behind a package nothing sweeps.
-- **Remedy sketch — corrected 2026-07-29.** The original sketch said "implement the three methods on `containerd.Runtime`, keyed by `"containerd"`", and that understates it: **containerd has no build of its own.** Its base image is produced by shelling out to `docker build` and then linking the result into the containerd namespace (`runtime/containerd/image.go`, `buildDockerImage` + `tryLink`, with the namespace-share/descriptor-walk fast path for Docker running in containerd-snapshotter mode). A profile build has to take the same route: build via docker, then link the resulting tag in — so the work is a second use of an existing, non-obvious mechanism rather than a fresh `container build` invocation. That also means containerd inherits docker's build environment and secret support for free, unlike apple.
-- **Consequence for the interface:** a containerd profile build produces an image in *docker's* store first and only then in containerd's, so the `backendKey` it records must be `"containerd"` (the store the sandbox will actually run from) while the build itself is docker's. The base-image path already navigates exactly this, recording `RecordBuildChecksum(layout, "containerd")` after a `docker build` — follow it rather than re-deriving it.
-- **Sequenced in** [`plans/profile-image-lifecycle.md`](plans/profile-image-lifecycle.md) — independent of the interface change and parallelisable, but **larger than it looks**. The prerequisite was checked on 2026-07-29 and came back pessimistic: `imageRef` is a package-level `const imageRef = "yoloai-base"` threaded through 11 sites and six methods, so containerd's whole image pipeline is written for exactly one image. The work is to parameterise that pipeline by tag first — leaving `Setup` passing the const so base behaviour is provably unchanged — and only then add the three interface methods. The fast path is the delicate part: it walks a descriptor tree between namespaces and sets GC ref labels, and getting those wrong loses blobs to GC rather than failing loudly.
-- **Pointer:** `runtime/runtime_optional.go` (`ProfileImageBuilder`, `ProfileImageBuilderOf`);
-  `runtime/containerd/containerd.go:106-111` (missing assertion); `runtime/docker/build.go`
-  (`ProfileImageNeedsBuild`, `RecordProfileBuildChecksum`, the shared scheme to reuse); `runtime/apple/apple.go`
-  (the sibling fix this PR made for apple). Related: DF150, DF151, DF152.
-
 ### DF155 — concurrent profile builds race on the staleness marker, and nothing locks it
 
 - **Discovered:** 2026-07-29, while closing DF154 · **Workstream:** profile-image lifecycle

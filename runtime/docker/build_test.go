@@ -38,10 +38,10 @@ func TestChecksumLabelStale(t *testing.T) {
 
 func TestAttestationOptOutFlags_DockerOnly(t *testing.T) {
 	// Docker (BuildKit) emits and accepts SBOM/provenance attestations.
-	assert.Equal(t, []string{"--provenance=false", "--sbom=false"}, attestationOptOutFlags("docker"))
+	assert.Equal(t, []string{"--provenance=false", "--sbom=false"}, AttestationOptOutFlags("docker"))
 	// Podman neither emits them nor accepts the flags — passing them fails with
 	// "unknown flag: --provenance" (the integration-podman CI break).
-	assert.Nil(t, attestationOptOutFlags("podman"))
+	assert.Nil(t, AttestationOptOutFlags("podman"))
 }
 
 func TestCreateBuildContext(t *testing.T) {
