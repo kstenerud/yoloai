@@ -18,10 +18,11 @@ import os
 from typing import Any
 
 
-# RUNTIME_CONFIG_SCHEMA_VERSION must equal the runtimeConfigSchemaVersion
-# constant in sandbox/create.go. Bumped together by W2 (architecture
-# remediation plan) when the runtime-config.json contract changes in a
-# non-additive way.
+# RUNTIME_CONFIG_SCHEMA_VERSION must equal runtimeconfig.SchemaVersion
+# (internal/orchestrator/runtimeconfig). The two are held together by
+# TestSchemaVersion_GoPythonAgreement, a cross-language fence — this is not a
+# convention to remember, it is gated. Bumped together when the
+# runtime-config.json contract changes in a non-additive way.
 RUNTIME_CONFIG_SCHEMA_VERSION: int = 1
 
 
