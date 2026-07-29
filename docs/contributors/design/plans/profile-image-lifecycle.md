@@ -4,7 +4,7 @@
 
 # Profile image lifecycle — staleness that reflects the store
 
-- **Status:** IN-PROGRESS
+- **Status:** IN-PROGRESS — steps 1 and 2 done; step 3 deliberately paused, see below
 - **Depends on:** —
 
 Three open findings are one problem seen from three angles: **yoloAI decides whether to build a
@@ -40,7 +40,7 @@ Build in this order:
 
 1. ~~**Recovery at the use site** (DF154).~~ **Done** — `createWithImageRecovery`, `internal/orchestrator/launch/launch.go`.
 2. ~~**containerd's implementation** (DF153).~~ **Done** — `runtime/containerd/profile_image.go`.
-3. **Label-based staleness for docker/podman** (DF152) — the interface change.
+3. **Label-based staleness for docker/podman** (DF152) — the interface change. **Paused**, not blocked: step 1 removed most of its value. See below.
 
 ## 1. Recovery at the use site — DONE (2026-07-29)
 
@@ -78,7 +78,13 @@ Three things learned here that step 3 should carry:
   between: that mistake was made here, with a plausible-looking 76s → 0.84s measurement that a
   control run refuted.
 
-## 3. Label-based staleness (DF152)
+## 3. Label-based staleness (DF152) — PAUSED, re-evaluate before building
+
+**Step 1 took the prize.** This plan's ordering constraint said recovery had to land before a label check was safe to add. It did — and in landing it made the label check mostly unnecessary. DF152's failure mode ends "...and the run fails pulling a local-only tag", and `createWithImageRecovery` now catches that, rebuilds, and retries. What remains is avoiding one failed Create attempt on a host that switches docker daemons, bought with a signature change across four backends and a second staleness mechanism to keep consistent with the first.
+
+That is worth noticing rather than proceeding through: the general fix largely obviated the specific one. Build it when something else also wants a `ctx` and a tag in that signature, or when the daemon-switch case is reported as painful in practice. The design below stands as written for whoever picks it up.
+
+### The design, if it is built
 
 Mirror the base image: stamp the profile's Dockerfile checksum onto the image as a label at build
 time, read it back to decide staleness. `checksumLabelStale` already exists and generalises with a
