@@ -10,7 +10,10 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
+
+	dockerclient "github.com/docker/docker/client"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/stretchr/testify/assert"
@@ -226,4 +229,35 @@ func TestEnvForDockerBuild_FiltersToAllowlistAndForcesBuildKit(t *testing.T) {
 func TestEnvForDockerBuild_NilSnapshotStillForcesBuildKit(t *testing.T) {
 	env := config.Layout{}.Env().EnvForDockerBuild()
 	assert.Equal(t, []string{"DOCKER_BUILDKIT=1"}, env)
+}
+
+// TestStoreKey_SeparatesDaemonsSharingABinaryName pins DF152's first half: the
+// marker key must name the STORE, not the binary. `orbstack` and
+// `docker-desktop` are both first-class backend ids that resolve to this runtime
+// with binaryName "docker" and a pinned socket, so keying by binary name let a
+// build under one provider answer "already built" for the other, whose store had
+// never seen the image.
+func TestStoreKey_SeparatesDaemonsSharingABinaryName(t *testing.T) {
+	orb := (&Runtime{binaryName: "docker", client: clientForHost(t, "unix:///home/u/.orbstack/run/docker.sock")}).storeKey()
+	dd := (&Runtime{binaryName: "docker", client: clientForHost(t, "unix:///home/u/.docker/run/docker.sock")}).storeKey()
+
+	assert.NotEqual(t, orb, dd,
+		"two docker providers with separate image stores must not share a build marker")
+	assert.True(t, strings.HasPrefix(orb, "docker-"),
+		"the binary name stays legible in the key so a stray marker file is identifiable: %s", orb)
+
+	// Stable across calls — the key becomes a filename, so it must not wobble.
+	assert.Equal(t, orb,
+		(&Runtime{binaryName: "docker", client: clientForHost(t, "unix:///home/u/.orbstack/run/docker.sock")}).storeKey())
+
+	// A different binary against the same endpoint is still a different store.
+	pod := (&Runtime{binaryName: "podman", client: clientForHost(t, "unix:///home/u/.orbstack/run/docker.sock")}).storeKey()
+	assert.NotEqual(t, orb, pod)
+}
+
+func clientForHost(t *testing.T, host string) *dockerclient.Client {
+	t.Helper()
+	c, err := dockerclient.NewClientWithOpts(dockerclient.WithHost(host))
+	require.NoError(t, err)
+	return c
 }

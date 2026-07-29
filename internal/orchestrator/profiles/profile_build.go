@@ -65,7 +65,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 		}
 
 		tag := config.ProfileImageTag(layout, name)
-		if force || builder.ProfileImageNeedsBuild(profileDir, prevDir) {
+		if force || builder.ProfileImageNeedsBuild(profileDir, prevDir) || imageMissing(ctx, rt, tag) {
 			fmt.Fprintf(output, "Building profile image %s...\n", tag) //nolint:errcheck // best-effort output
 			if err := builder.BuildProfileImage(ctx, profileDir, tag, secrets, layout, output, logger); err != nil {
 				return fmt.Errorf("build profile image %s: %w", tag, err)
@@ -77,6 +77,24 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 	}
 
 	return nil
+}
+
+// imageMissing reports whether the backend can positively see that tag is NOT in
+// its store. It is deliberately one-directional (DF152).
+//
+// The build markers record that a build once ran, never that the image is still
+// there — so `yoloai system build <profile>` could read a fresh marker, skip the
+// build, and let the CLI print "Profile image built successfully" while the
+// targeted store held nothing. That is a false success on a direct request, and
+// no launch-time recovery covers it, because nothing is launched.
+//
+// Only a confident "absent" returns true. "Present" and "don't know" both return
+// false, which leaves the marker in charge exactly as before. That asymmetry is
+// what makes a check-then-act probe safe here: it can only ever cause an extra
+// build (harmless, and the user asked for a build), never skip a needed one.
+func imageMissing(ctx context.Context, rt runtime.Backend, tag string) bool {
+	present, known := runtime.ImagePresentFor(ctx, rt, tag)
+	return known && !present
 }
 
 // AutoBuildSecrets detects well-known credential files on the host and

@@ -21,6 +21,7 @@ import (
 )
 
 var _ runtime.ProfileImageBuilder = (*Runtime)(nil)
+var _ runtime.ImagePresenceChecker = (*Runtime)(nil)
 
 // BuildProfileImage builds a profile's Dockerfile and makes the result usable by
 // the containerd backend (DF153). Before this, containerd cleared the CapAdd gate
@@ -125,4 +126,16 @@ func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bo
 // containerd's store after a successful build. See ProfileImageNeedsBuild.
 func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
 	dockerrt.RecordProfileBuildChecksum(profileDir, "containerd")
+}
+
+// ImageExists reports whether tag resolves in the yoloai containerd namespace
+// with its full descriptor tree accessible, implementing
+// runtime.ImagePresenceChecker.
+//
+// The tree check is not pedantry here: containerd's GC can evict child blobs
+// while leaving the root manifest entry intact, so an image can be "present" by
+// name and unusable in fact. `imageAlreadyReady` is the same predicate Setup
+// trusts before skipping a build, so presence means the same thing to both.
+func (r *Runtime) ImageExists(ctx context.Context, imageRef string) (bool, error) {
+	return r.imageAlreadyReady(r.withNamespace(ctx), imageRef, false), nil
 }

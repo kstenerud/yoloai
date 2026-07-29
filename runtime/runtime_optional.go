@@ -495,6 +495,43 @@ func ProfileImageBuilderOf(rt Backend) (ProfileImageBuilder, bool) {
 	return b, ok
 }
 
+// ImagePresenceChecker is an optional interface for backends that can answer
+// whether an image tag is resolvable in their own store.
+//
+// It exists for one question the staleness machinery cannot otherwise ask: the
+// build markers record that a build *ran*, never that the image is *there*, so
+// `yoloai system build <profile>` could consult a marker, skip the build, and
+// report success while the target store held nothing (DF152).
+//
+// **Use it to build more, never to skip.** The answer is true when given and the
+// image is used later, so it is check-then-act and cannot be a correctness
+// guarantee (DF154). Pointed this way the race is harmless: a false "absent"
+// costs one unnecessary rebuild, and a false "present" degrades to the marker,
+// which is the behaviour without this interface at all. Inverting it — trusting
+// "present" to skip work — would reintroduce the failure it exists to close.
+//
+// Backends that cannot answer cheaply simply do not implement it, and callers
+// treat "don't know" as "no opinion" rather than as absent.
+type ImagePresenceChecker interface {
+	ImageExists(ctx context.Context, imageRef string) (bool, error)
+}
+
+// ImagePresentFor reports whether rt can see imageRef in its own store. The
+// second return is false when the backend cannot answer — either it does not
+// implement the interface or the probe itself failed — and callers must treat
+// that as "no opinion", never as absent.
+func ImagePresentFor(ctx context.Context, rt Backend, imageRef string) (present, known bool) {
+	c, ok := rt.(ImagePresenceChecker)
+	if !ok {
+		return false, false
+	}
+	got, err := c.ImageExists(ctx, imageRef)
+	if err != nil {
+		return false, false
+	}
+	return got, true
+}
+
 // CachePruner is an optional interface for backends that maintain an
 // image/snapshot/build cache that accumulates across sandbox runs. The
 // `Prune()` method on the core interface only removes orphaned yoloai

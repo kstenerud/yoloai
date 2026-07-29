@@ -363,13 +363,40 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir string, tag s
 // (re)built. Checks: no checksum file, profile Dockerfile changed, or
 // parent profile was rebuilt more recently.
 func (r *Runtime) ProfileImageNeedsBuild(profileDir string, parentDir string) bool {
-	return ProfileImageNeedsBuild(profileDir, parentDir, r.binaryName)
+	return ProfileImageNeedsBuild(profileDir, parentDir, r.storeKey())
+}
+
+// storeKey names the image store this Runtime is actually talking to, for
+// keying host-side build markers.
+//
+// The binary name alone is not it. `orbstack` and `docker-desktop` are
+// first-class backend ids that both resolve to this runtime with binaryName
+// "docker" and a pinned socket (runtime.ResolveContainerSystem), and podman
+// supports remote connections the same way — so one binary name can address
+// several daemons, each with its own image store. Keying a "have I built this?"
+// marker by the binary name lets a build under one provider answer for another,
+// which is DF150's defect one level up: the key was made per-backend but a
+// backend is not a store.
+//
+// DaemonHost() is the endpoint this client was constructed with, so it is a
+// local read with no round trip. It is hashed rather than used raw because it is
+// a URL and the key becomes a filename; short is enough, since this only has to
+// separate the two or three daemons on one host, not be globally unique. Two
+// spellings of the same socket (a symlinked path) hash differently and cost one
+// extra rebuild, which is the safe direction.
+func (r *Runtime) storeKey() string {
+	host := r.client.DaemonHost()
+	if host == "" {
+		return r.binaryName
+	}
+	sum := sha256.Sum256([]byte(host))
+	return r.binaryName + "-" + hex.EncodeToString(sum[:4])
 }
 
 // RecordProfileBuildChecksum writes the current Dockerfile checksum to disk
 // for staleness detection.
 func (r *Runtime) RecordProfileBuildChecksum(profileDir string) {
-	RecordProfileBuildChecksum(profileDir, r.binaryName)
+	RecordProfileBuildChecksum(profileDir, r.storeKey())
 }
 
 // ProfileImageNeedsBuild reports whether backendKey's profile image is stale:
