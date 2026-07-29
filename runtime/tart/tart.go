@@ -668,9 +668,10 @@ func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ runtime.Isola
 }
 
 // instancePrefix returns the prefix the store prepends to sandbox names to form
-// instance names, for THIS runtime's principal: "yoloai-" by default, or
-// "yoloai-<principal>-" when the Layout is principal-scoped (D58/D59, settable
-// by an integrator via ClientCreateOptions.Principal).
+// instance names, for THIS runtime's principal: always "yoloai-<principal>-"
+// (D58/D59 for the principal axis, settable by an integrator via
+// ClientCreateOptions.Principal; D126 deleted the unscoped "yoloai-" default, so
+// config.InstancePrefix now panics on an empty principal rather than emitting one).
 //
 // It must be derived from the layout, never hardcoded. This used to be a
 // `const instancePrefix = "yoloai-"`, which silently broke every principal-scoped
