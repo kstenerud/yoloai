@@ -47,7 +47,7 @@ found [`plans/apple-container-backend.md`](plans/apple-container-backend.md), re
 implementation table as a specification, and shipped a pre-D126 image name, a stale path to the
 plan's own pre-archive location, and reasoning copied from a design that had since moved. Every
 word of the warning above was already written and correct. None of it was on the path the agent
-took. See [DF151](../design/findings-unresolved.md).
+took. See [DF151](../design/findings-resolved.md), and the cycle log in [procedures/outside-contributions.md](../procedures/outside-contributions.md).
 
 ## Layout
 
