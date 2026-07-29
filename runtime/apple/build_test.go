@@ -57,9 +57,11 @@ func newFakeContainerRuntime(t *testing.T, script string) *Runtime {
 }
 
 // newFakeProfileDir writes a minimal profile directory containing just a
-// Dockerfile — the only file createProfileBuildContext requires to build a
-// tar context (config.yaml and the checksum marker are filtered out, not
-// required in).
+// Dockerfile — the only file BuildProfileImage needs in order to materialize a
+// build context, which on this path is a *directory* written by
+// dockerrt.WriteProfileBuildContextDir rather than the tar the docker backend
+// streams. config.yaml and the per-backend checksum markers are filtered out of
+// that context, so they are not required in.
 func newFakeProfileDir(t *testing.T) string {
 	t.Helper()
 	dir := t.TempDir()
@@ -104,6 +106,29 @@ func TestBuildProfileImage_PassesTagAndAbsoluteContext(t *testing.T) {
 
 	var output strings.Builder
 	err := r.BuildProfileImage(context.Background(), sourceDir, tag, nil, r.layout, &output, slog.New(slog.DiscardHandler))
+	require.NoError(t, err, output.String())
+}
+
+// TestBuildProfileImage_DrawsEnvFromBuildEnvNotTheRuntime pins the other half
+// of the ProfileImageBuilder contract (rule 10): buildEnv is the environment
+// the build subprocess draws from, not the execEnv captured when the Runtime
+// was constructed. The two are the same in the single-principal CLI, which is
+// why using the wrong one is invisible there — it separates only for an
+// embedder that builds profiles for more than one principal, and that is
+// exactly the caller the contract exists for.
+//
+// The fake binary fails loudly if it sees the Runtime's env, so this test
+// fails when the fix is reverted rather than merely covering the line.
+func TestBuildProfileImage_DrawsEnvFromBuildEnvNotTheRuntime(t *testing.T) {
+	script := "#!/bin/sh\n" +
+		"[ -z \"$YOLOAI_RUNTIME_ENV_LEAKED\" ] || { echo 'build ran under r.execEnv, not buildEnv' >&2; exit 7; }\n" +
+		"exit 0\n"
+	r := newFakeContainerRuntime(t, script)
+	r.execEnv = []string{"YOLOAI_RUNTIME_ENV_LEAKED=1"}
+	sourceDir := newFakeProfileDir(t)
+
+	var output strings.Builder
+	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-cli-dev", nil, r.layout, &output, slog.New(slog.DiscardHandler))
 	require.NoError(t, err, output.String())
 }
 
