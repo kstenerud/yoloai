@@ -15,6 +15,7 @@ come back here to route.
 | You want to | Read |
 | --- | --- |
 | Open a PR | [`procedures/pull-requests.md`](procedures/pull-requests.md) |
+| Review a PR from outside the project | [`procedures/outside-contributions.md`](procedures/outside-contributions.md) |
 | File or triage an issue | [`procedures/issues.md`](procedures/issues.md) |
 | Find the files a change touches | [`architecture/where-to-change.md`](architecture/where-to-change.md) |
 | Understand the package layout | [`architecture/README.md`](architecture/README.md) |

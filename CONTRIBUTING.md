@@ -7,6 +7,14 @@ agent, so the rules live in a file agents load automatically:
 The detail behind it is in
 [`docs/contributors/procedures/pull-requests.md`](docs/contributors/procedures/pull-requests.md).
 
+**If the docs are wrong, missing, or led you somewhere unhelpful, that is a bug — please report
+it.** It counts the same as a code bug and is often worth more, because we cannot find these
+ourselves: a doc gap is invisible to whoever wrote it, who already knows what it was supposed to
+say. If a rule was somewhere you would never have looked, or an example read narrower than the
+rule it was illustrating, say so in the PR or open an issue. The first substantial outside PR
+this project received produced five documentation fixes and found a real bug in the process; the
+contributor had done nothing wrong.
+
 Two rules catch nearly everyone, so they are worth repeating here:
 
 - **A user-visible break needs a `docs/BREAKING-CHANGES.md` entry, under `## Unreleased`, in
