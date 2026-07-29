@@ -119,14 +119,19 @@ the newest and belongs about third.
    old form, on the day it lands. Same for any compatibility reader, alias, or shim. The entry
    costs three lines and is the only thing that will ever make retiring it possible — the
    register's own audit found 16 such mechanisms, of which **0** recorded a date.
-10. **A behavior change carries a test that fails when the change is reverted** (D128). Not
-   "the package has tests" — a test that pins *this* behavior. When the behavior is an argv
-   handed to a subprocess, which is most of what the backends do, that means **asserting the
-   argv**: the flags that must be there, and which of them must be absolute. The fake-binary
-   fixture is the established shape and it is cheap (`runtime/apple/build_test.go`). Two traps
-   worth naming, because the first outside PR hit both: a test that asserts only *that* an error
-   was wrapped tests the wrapping, not the fix; and a test whose comment explains why the code
-   does the wrong thing has pinned the defect as intended behavior.
+10. **Every behavior change in the PR carries a test that fails when that change is reverted**
+   (D128, D129). *Every* is the load-bearing word: count the behavior changes, then count the
+   tests that would go red on revert, and make the numbers match. Not "the package has tests",
+   and not "the headline fix has one" — the second change in a PR is the one that escapes.
+   Actually revert each and watch it fail; a test that merely covers the line looks identical
+   until you try. Common cases, none of them the definition: an **argv** handed to a subprocess
+   (assert the flags, and which paths must be absolute); which **environment** a subprocess
+   draws from; an error's **content**, not just that one was returned. The fake-binary fixture
+   covers all three cheaply — `runtime/apple/build_test.go`. Three traps, all drawn from the
+   first two outside PRs: asserting only *that* an error was wrapped tests the wrapping, not the
+   fix; a test whose comment explains why the code does the wrong thing has pinned the defect as
+   intended behavior; and a change that is invisible in the single-principal CLI — because two
+   values coincide there — is exactly the change no manual check will ever catch.
 
 ## The quality gate
 
