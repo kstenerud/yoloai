@@ -577,6 +577,45 @@ itself worth knowing when reading pattern 4.
   the SDK and had silently stopped covering `Labels`, so a harness that bypasses the interface it
   certifies drifts the same way.
 
+### A16 — verified an exploit thoroughly, never asked whether the attacker needed it (2026-07-30)
+
+- **Claimed:** that delivering the runtime scripts as a read-only mount (DF156 remedy c) was also a
+  security fix, because `/yoloai/bin` is writable by the sandbox user. Was one message away from
+  filing it as a finding with a severity.
+- **True:** it is not a security fix at all. The scripts run *as the agent's own principal*, so
+  anything the agent gains by rewriting `status-monitor.py` it gains just as easily by killing the
+  process and running its own copy. A read-only mount raises the effort by nothing and prevents
+  nothing. As a control against the agent it is theater.
+- **Source of the false belief:** the quality of the verification, which was real and beside the
+  point. I proved the mechanism carefully — that a root-owned file inside a user-owned directory
+  can be unlinked and replaced, demonstrated live as uid 1001 against both `status-monitor.py` and
+  `install-firewall.py` — and then checked three containment paths and correctly found each one
+  closed. Every step was sound and every step was downstream of an unexamined premise: that an
+  attacker with code execution as the reader would bother editing the file. Confidence tracked how
+  much I had checked, and I had checked a great deal, none of it the load-bearing thing.
+- **Caught by:** the owner, in one sentence — *"it could just kill the running process and relaunch
+  its own modified version."* Note the shape: the owner had *supplied* the security framing in the
+  previous turn and then withdrew it. Agreement from the owner is not evidence, and an aside is not
+  a premise; I adopted it and then spent a long stretch making it look well-founded.
+- **Cost:** none shipped. Caught before the finding was written, one turn after the claim.
+- **Class:** new, and the mirror of [A15](#a15--six-passing-tests-certified-a-function-no-backend-could-reach-2026-07-30).
+  There, thorough checking certified a path nothing could reach. Here, thorough checking certified a
+  mechanism that works and does not matter. Both are the same underlying failure — **verification
+  aimed one level below the claim** — and neither is detectable by doing more of what I was already
+  doing. The question that dissolves this one takes a sentence: *who is the attacker, what do they
+  already have, and does this mechanism give them anything they lack?* For A15 it was: *which real
+  backend reaches this line?*
+- **A specific habit it argues for:** when a change acquires a *second* justification mid-design,
+  re-derive it from scratch rather than inheriting it. DF156's real grounds — a missing file causes a
+  hard launch failure, and baking couples our releases to the user's rebuild cost — were sound the
+  whole time and needed no help. The security claim was a bonus argument that arrived from outside
+  the analysis, and a bonus argument gets audited least precisely because nothing depends on it.
+- **Gated now?** No, and it is not gatable — no script can ask whether a threat model holds. What is
+  durable is the record: DF156's remedy (c) now states explicitly that the directory is
+  agent-writable and that this is **not** an argument for the mount, so the next contributor who
+  notices the permissions does not repeat the inference. Recording a *rejected* rationale is the
+  point; code shows the surviving branch and never the pruned one ([A14](#a14--reimplemented-an-approach-the-repo-had-already-rejected-2026-07-29)).
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of
