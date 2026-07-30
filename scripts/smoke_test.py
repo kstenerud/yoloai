@@ -1715,21 +1715,45 @@ def write_failure_autopsy(
 
 
 def _destroy_named_sandboxes(ctx: RunContext, names: list[str]) -> None:
-    """Destroy the given sandboxes and drop them from the shared cleanup list.
+    """Destroy the given sandboxes and drop the ones that actually died.
 
     Thread-safe: a backend's retry/VM cleanup destroys exactly the names its own
     attempt created (TestResult.sandboxes), never a positional slice of the
     shared ctx.sandboxes — concurrent backends append to that list, so slicing
     would delete a sibling's sandbox.
+
+    A destroy that times out is REPORTED, not raised. This runs inside a worker
+    thread, so an escaping exception reaches the main thread through
+    `future.result()` and aborts the whole matrix — taking the run summary and
+    the JUnit output with it. That is a bad trade: a slow teardown on one backend
+    should cost one line of output, not the record of the twenty tests that
+    already passed. Observed on macOS/podman, where a `dind` sandbox took over
+    30s to destroy and the run died with a Python traceback instead of a failure
+    report, leaving the surviving artefacts looking like a clean pass (DF160).
+
+    The end-of-run cleanup already does exactly this — catch, report, fall back
+    to `yoloai system prune`. This is the same operation on the sibling path, and
+    it was the one that had not been hardened.
+
+    Names that did NOT die stay in ctx.sandboxes on purpose, so the end-of-run
+    sweep and its prune fallback get another attempt at them; dropping a name
+    whose sandbox still exists is how a leak survives the run.
     """
+    destroyed: list[str] = []
     for name in names:
-        subprocess.run(
-            [ctx.yoloai_bin, "destroy", "--abandon-unapplied", name],
-            capture_output=True,
-            timeout=30,
-        )
+        try:
+            subprocess.run(
+                [ctx.yoloai_bin, "destroy", "--abandon-unapplied", name],
+                capture_output=True,
+                timeout=30,
+            )
+            destroyed.append(name)
+        except subprocess.TimeoutExpired:
+            _emit(ctx, f"  TIMEOUT  destroy {name} (>30s); left for end-of-run cleanup + prune")
+        except OSError as exc:
+            _emit(ctx, f"  WARN     destroy {name} failed: {exc}; left for end-of-run cleanup")
     with ctx.state_lock:
-        ctx.sandboxes = [n for n in ctx.sandboxes if n not in names]
+        ctx.sandboxes = [n for n in ctx.sandboxes if n not in destroyed]
 
 
 def _emit(ctx: RunContext, text: str) -> None:
@@ -3310,6 +3334,50 @@ def _resolve_docker_providers() -> list[tuple[str, str]]:
     return out
 
 
+def _provider_child_argv(
+    parent_argv: list[str], umbrella: Path, provider: str, is_first: bool
+) -> list[str]:
+    """Build one provider child's argv: umbrella subdirectory, and scope.
+
+    Extracted so the wiring is testable, not merely the pieces. A unit test on
+    _strip_opt alone stays green when nothing calls it — the failure mode rule 10
+    in AGENTS.md now names explicitly — and the only thing that makes the umbrella
+    layout real is that the caller's --out-dir is replaced here rather than
+    duplicated (DF160).
+
+    Only the FIRST provider runs the full matrix: podman/seatbelt/tart are
+    daemon-independent, so re-running them per docker provider buys nothing.
+    """
+    argv = _strip_opt(
+        [a for a in parent_argv if a != "--all-docker-providers"], "--out-dir"
+    )
+    argv += ["--out-dir", str(umbrella / provider)]
+    if not is_first:
+        argv += ["--backend", "docker", "--backend", "docker-priv"]
+    return argv
+
+
+def _strip_opt(argv: list[str], opt: str) -> list[str]:
+    """Drop `--opt VALUE` and `--opt=VALUE` from argv.
+
+    The provider cycle re-invokes this script with its own --out-dir; leaving the
+    caller's would pass the flag twice and silently win the wrong way round.
+    """
+    out: list[str] = []
+    skip = False
+    for a in argv:
+        if skip:
+            skip = False
+            continue
+        if a == opt:
+            skip = True
+            continue
+        if a.startswith(opt + "="):
+            continue
+        out.append(a)
+    return out
+
+
 def run_all_providers(args: argparse.Namespace) -> int:
     """Orchestrate one smoke run per installed docker provider (re-exec model).
 
@@ -3330,26 +3398,55 @@ def run_all_providers(args: argparse.Namespace) -> int:
         return 1
 
     print(f"Cycling docker providers: {', '.join(n for n, _ in providers)}")
-    base_argv = [a for a in sys.argv[1:] if a != "--all-docker-providers"]
-    rollup: list[tuple[str, int]] = []
+
+    # One umbrella directory for the whole invocation, with a per-provider
+    # subdirectory inside it. Each provider is a separate child process and would
+    # otherwise mint its own timestamped run dir at the top level, leaving N
+    # sibling directories whose names say nothing about which provider they came
+    # from — and, when only one provider fails, no way to tell the interesting
+    # half from the boring one without opening both. Uploading the wrong half is
+    # then the default outcome, not an accident: a passing run has a summary.txt
+    # and a crashed one may not, so the healthy directory is the more complete
+    # and more convincing artefact (DF160).
+    user_parent = Path(args.out_dir).expanduser() if args.out_dir else _TESTCACHE_ROOT / "runs"
+    _t = time.time()
+    umbrella = user_parent / time.strftime(
+        f"yoloai-smoketest-%Y%m%d-%H%M%S.{int(_t * 1000) % 1000:03d}-all-providers",
+        time.gmtime(_t),
+    )
+    umbrella.mkdir(parents=True, exist_ok=True)
+    print(f"All provider runs land under: {umbrella}")
+
+    rollup: list[tuple[str, str, int]] = []
     for i, (name, endpoint) in enumerate(providers):
-        child_argv = list(base_argv)
-        scope = "full matrix"
-        if i > 0:
-            # Only the docker-daemon-dependent tiers differ per provider; podman/
-            # seatbelt/tart are daemon-independent and already ran on the first.
-            child_argv += ["--backend", "docker", "--backend", "docker-priv"]
-            scope = "docker tiers only"
+        child_argv = _provider_child_argv(sys.argv[1:], umbrella, name, is_first=(i == 0))
+        scope = "full matrix" if i == 0 else "docker tiers only"
         print(f"\n{'=' * 70}\n=== docker provider: {name} ({endpoint}) — {scope}\n{'=' * 70}")
         env = dict(os.environ)
         env["DOCKER_HOST"] = endpoint
         cp = subprocess.run([sys.executable, __file__, *child_argv], env=env)
-        rollup.append((name, cp.returncode))
+        rollup.append((name, scope, cp.returncode))
 
-    print(f"\n{'=' * 70}\nAll-docker-providers rollup:")
-    for name, rc in rollup:
-        print(f"  {name:<16} {'PASS' if rc == 0 else 'FAIL'}")
-    return 0 if all(rc == 0 for _, rc in rollup) else 1
+    lines = [f"{'=' * 70}", "All-docker-providers rollup:"]
+    for name, scope, rc in rollup:
+        lines.append(f"  {name:<16} {'PASS' if rc == 0 else 'FAIL'}  ({scope})")
+    lines.append("")
+    lines.append(
+        "Only the FIRST provider runs the full matrix; the rest cover the docker "
+        "tiers alone, so a directory holding only docker/docker-priv results is "
+        "expected rather than a coverage gap."
+    )
+    lines.append(f"Artifacts: {umbrella}")
+    report = "\n".join(lines)
+    print("\n" + report)
+    # Written inside the umbrella so the uploaded bundle explains itself: which
+    # provider failed, which scope each ran, and that a docker-only subdirectory
+    # is by design.
+    try:
+        (umbrella / "rollup.txt").write_text(report + "\n")
+    except OSError:
+        pass
+    return 0 if all(rc == 0 for _, _, rc in rollup) else 1
 
 
 def main() -> int:
