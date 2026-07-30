@@ -537,6 +537,46 @@ itself worth knowing when reading pattern 4.
   history for the same mechanism** — divergence between siblings is this repo's most repeated defect
   (four instances in one release; see DF152).
 
+### A15 — six passing tests certified a function no backend could reach (2026-07-30)
+
+- **Claimed:** DF156's resume half is built. `InstanceInfo.ImageID` is populated from what each
+  backend records, `warnIfImageLineageStale` compares the instance's image lineage against the base,
+  and *"six branches, one test each, three failing on revert"*. Committed as working.
+- **True:** the function returned on its first line on every backend, always, and had never once run.
+  It hung off `StatusSuspended`, which is set only by `InstanceInfo.Suspended`, which only **tart**
+  sets — and tart implements no `ProfileImageBuilder`, so the capability guard rejected it every
+  time. The intersection of "reports Suspended" and "has images" is **empty**. The case that does
+  occur, Done/Failed relaunching inside the existing container, was never wired. Two of the three
+  backends could not have answered anyway: apple's digest was read from the wrong JSON path and its
+  image is unresolvable *and* deleted on rebuild, and containerd handed back a tag that
+  `ImageLabels` then re-resolved — the exact question the design was built to avoid.
+- **Source of the false belief:** the tests. `lineageFake` reported `Suspended: true` **and**
+  implemented `ProfileImageBuilder`. No backend has that shape, and nothing prevented inventing it.
+  Each branch was verified against a mock of a backend that does not exist, so all six passed and
+  all six were vacuous. Revert-testing was performed and did not help — reverting a line inside an
+  unreachable function still turns its test red, because the test calls the function directly.
+- **Caught by:** the owner asking *"verify that this actually is going to solve the issue properly"* —
+  a question about the whole, where every check I had run was about a part. Tracing the call graph
+  upward from the function to a real backend takes one grep, and nothing in the task as I had framed
+  it ever asked for it.
+- **Cost:** none shipped — caught in the same session. But the feature was complete, tested,
+  committed, and documented as done in the finding, which is as far as a defect can travel here.
+- **Class:** a new one, and the sharpest in the file — **a fake is free to invent a capability
+  combination the product does not contain**, and when it does, its tests certify a dead path. It is
+  the mirror of A5 (a gate that was silently blind): here the tests were the blind gate. Note it
+  defeats rule 10 as written: *"actually revert each and watch it fail"* is satisfied by a vacuous
+  test. Revert-testing proves a test is connected to the code; it says nothing about whether the
+  code is connected to the program.
+- **Gated now?** Partly, and structurally rather than by rule. The fix moved the guarantee into
+  `runtimetest`'s `InstanceLabelsRoundTrip`, a **conformance** case gated on the real capability:
+  every backend that builds images must round-trip Create's labels through Inspect, and no fake can
+  satisfy it. That covers this mechanism. The general habit it argues for, unguarded: **when a check
+  is capability-guarded, name the backends that pass the guard and the statuses that reach it, and
+  confirm the intersection is non-empty** — before writing the first test. Also a specific
+  by-catch worth keeping: the docker/podman conformance helper builds its `container.Config` through
+  the SDK and had silently stopped covering `Labels`, so a harness that bypasses the interface it
+  certifies drifts the same way.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of
