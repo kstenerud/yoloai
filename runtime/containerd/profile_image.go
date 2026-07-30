@@ -25,6 +25,7 @@ import (
 )
 
 var _ runtime.ProfileImageBuilder = (*Runtime)(nil)
+var _ runtime.RuntimeScriptProvider = (*Runtime)(nil)
 
 // BuildProfileImage builds a profile's Dockerfile and makes the result usable by
 // the containerd backend (DF153). Before this, containerd cleared the CapAdd gate
@@ -162,4 +163,17 @@ func (r *Runtime) ImageLabels(ctx context.Context, tag string) (map[string]strin
 		return map[string]string{}, true
 	}
 	return cfg.Config.Labels, true
+}
+
+// ExpectedBaseChecksum implements runtime.ProfileImageBuilder. It returns the
+// docker package's value because this backend's base image is built from that
+// package's embedded resources (buildDockerImage), so the two must agree.
+func (r *Runtime) ExpectedBaseChecksum() string { return dockerrt.BuildInputsChecksum() }
+
+// WriteRuntimeScripts implements runtime.RuntimeScriptProvider. Delegates to the
+// docker package for the same reason ExpectedBaseChecksum does: this backend's
+// base image is built from that package's embedded resources, so the scripts
+// delivered at launch must be the ones that base was built from.
+func (r *Runtime) WriteRuntimeScripts(dir string) error {
+	return dockerrt.WriteRuntimeScripts(dir)
 }

@@ -57,3 +57,42 @@ var embeddedAgentRun = monitor.AgentRunScript()
 // embeddedYoloaiResume provides the in-sandbox resume command (D96 DD4),
 // installed executable in /yoloai/bin as `yoloai-resume`.
 var embeddedYoloaiResume = monitor.YoloaiResumeScript()
+
+// BaseDockerfile returns the embedded base-image Dockerfile — exactly the bytes
+// handed to the builder. Apple's `container build` caps this at 16 KiB
+// (apple/container#735), so nothing decorative may be added to it; see
+// TestDockerfile_FitsAppleBuilderLimit and standards/dockerfile.md.
+func BaseDockerfile() []byte { return embeddedDockerfile }
+
+// referenceHeader is prepended by ReferenceDockerfile. It is deliberately NOT in
+// the Dockerfile itself, for two reasons that point the same way.
+//
+// It would be false there: in the repo, editing that file is precisely how the
+// image changes, so a "no effect" warning is only true of the generated copy.
+// And it would be charged against the 16 KiB budget the builder enforces — a
+// user-facing warning has no business consuming build-context bytes.
+const referenceHeader = `# ============================================================================
+# yoloAI base image — REFERENCE COPY. EDITING THIS FILE HAS NO EFFECT.
+#
+# yoloAI wrote this so you can see what is in the sandbox image. The Dockerfile
+# that actually builds it is compiled into the yoloai binary, so the build never
+# reads this file, and yoloAI overwrites it on every setup — edits vanish with
+# no warning.
+#
+# To change what a sandbox contains, write a profile Dockerfile, which IS read
+# from disk:
+#
+#     mkdir -p ~/.yoloai/profiles/mine
+#     printf 'FROM yoloai-base:latest\nRUN apt-get update && apt-get install -y cowsay\n' \
+#         > ~/.yoloai/profiles/mine/Dockerfile
+#     yoloai new my-sandbox ~/code/project --profile mine
+# ============================================================================
+
+`
+
+// ReferenceDockerfile returns the base Dockerfile with a header explaining that
+// it is a copy and that editing it does nothing. This is what gets written to
+// disk for a human to read; BaseDockerfile is what gets built.
+func ReferenceDockerfile() []byte {
+	return append([]byte(referenceHeader), embeddedDockerfile...)
+}

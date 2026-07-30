@@ -292,7 +292,7 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 		Layout:      config.Layout{Principal: config.CLIPrincipal},
 	}
 
-	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil, brokerOutcome{}, false)
+	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true}}, st, nil, nil, brokerOutcome{}, false, "")
 	require.Error(t, err)
 	msg := err.Error()
 	assert.Contains(t, msg, "container-enhanced", "error names the broken isolation mode")
@@ -313,7 +313,7 @@ func TestBuildInstanceConfig_BrokerOutcome(t *testing.T) {
 	}
 	desc := runtime.BackendDescriptor{Type: "mock"}
 
-	cfg, err := buildInstanceConfig(desc, st, nil, nil, brokerOutcome{}, false)
+	cfg, err := buildInstanceConfig(desc, st, nil, nil, brokerOutcome{}, false, "")
 	require.NoError(t, err)
 	assert.Equal(t, "test", cfg.Hostname, "hostname is the sanitized sandbox name, not the instance id")
 	assert.Equal(t, "", cfg.NetworkMode, "no broker: keep the user's network mode")
@@ -322,7 +322,7 @@ func TestBuildInstanceConfig_BrokerOutcome(t *testing.T) {
 	cfg, err = buildInstanceConfig(desc, st, nil, nil, brokerOutcome{
 		NetworkMode:      "slirp4netns:allow_host_loopback=true",
 		InjectorEndpoint: "172.17.0.1:44115",
-	}, false)
+	}, false, "")
 	require.NoError(t, err)
 	assert.Equal(t, "slirp4netns:allow_host_loopback=true", cfg.NetworkMode, "broker mode overrides")
 	assert.Contains(t, cfg.ContainerEnv, "YOLOAI_BROKER_INJECTOR_ENDPOINT=172.17.0.1:44115", "injector endpoint published")
@@ -345,7 +345,7 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 				Isolation:   isolation,
 				Layout:      config.Layout{Principal: config.CLIPrincipal},
 			}
-			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, CapAdd: true}}, st, nil, nil, brokerOutcome{}, false)
+			_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: "mock", Capabilities: runtime.BackendCaps{NetworkIsolation: true, CapAdd: true}}, st, nil, nil, brokerOutcome{}, false, "")
 			require.NoError(t, err)
 		})
 	}
@@ -360,12 +360,31 @@ func TestBuildInstanceConfig_AllowsNetworkIsolatedOnSupportedModes(t *testing.T)
 func TestInstanceLabels(t *testing.T) {
 	for _, principal := range []config.PrincipalSegment{config.CLIPrincipal, "acme"} {
 		t.Run("principal="+string(principal), func(t *testing.T) {
-			labels := instanceLabels(principal, "mybox")
+			labels := instanceLabels(principal, "mybox", "")
 			assert.Equal(t, "mybox", labels[runtime.LabelSandbox])
 			assert.Equal(t, string(principal), labels[runtime.LabelPrincipal],
 				"every instance carries its owner, so a sweep never has to infer one")
 		})
 	}
+}
+
+// TestInstanceLabels_StampsImageLineage pins DF156's create half. The instance
+// has to carry which yoloai-base its image descends from, because after the
+// container exists that is the only record still able to answer the question —
+// the tag it was created by can be re-pointed by any later rebuild, and on two
+// of the three container backends the image it named is not even resolvable.
+//
+// Empty stays absent rather than becoming an empty-valued label: callers read a
+// missing label as "out of date", and a present-but-empty one would claim a
+// lineage of nothing and read as a mismatch for a different reason.
+func TestInstanceLabels_StampsImageLineage(t *testing.T) {
+	stamped := instanceLabels(config.CLIPrincipal, "mybox", "base-abc123")
+	assert.Equal(t, "base-abc123", stamped[runtime.BaseChecksumLabel],
+		"the lineage the sandbox is judged on after it exists")
+
+	unknown := instanceLabels(config.CLIPrincipal, "mybox", "")
+	assert.NotContains(t, unknown, runtime.BaseChecksumLabel,
+		"nothing known: leave it absent so the absence rule applies, rather than asserting an empty lineage")
 }
 
 // recoveryRuntime is a fakeRuntime whose Create is scripted per call, so a test

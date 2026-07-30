@@ -106,7 +106,11 @@ the newest and belongs about third.
    holding it. A resolved finding is archaeology: `*-resolved.md` is append-only history that
    nothing sweeps and no router points at, so a rule living only there is a rule the next
    contributor cannot find. Both conventions PR #44 broke were sitting in `findings-resolved.md`
-   and nowhere else (DF151).
+   and nowhere else (DF151). **Before fixing one, grep for its shape** — the same *kind* of defect
+   on a sibling path or another backend. Three of a kind means the architecture is generating them
+   and the edge is a symptom; and a sibling path may already solve it, making your fix a second
+   mechanism for one job. Naming that in the finding is mandatory; acting on it is a decision
+   (GEN §18).
 8. **An idea worth building is a plan file** in `design/plans/` — not a bullet in a README, which
    is where a backlog goes to be invisible. Each carries a metadata list under its title:
    `- **Status:**` (`UNSPECIFIED` no design yet / `PLANNED` designed / `IN-PROGRESS` partly built /
@@ -124,7 +128,14 @@ the newest and belongs about third.
    tests that would go red on revert, and make the numbers match. Not "the package has tests",
    and not "the headline fix has one" — the second change in a PR is the one that escapes.
    Actually revert each and watch it fail; a test that merely covers the line looks identical
-   until you try. Common cases, none of them the definition: an **argv** handed to a subprocess
+   until you try. **Red-on-revert is necessary and not sufficient**: reverting a line inside a
+   function nothing can reach still turns its test red, so the check proves a test is wired to the
+   code, never that the code is wired to the program. A fake is free to invent a capability
+   combination the product does not contain, and when it does, its tests certify a dead path — six
+   of them once did. So for anything capability-guarded, **name the backends that pass the guard and
+   the statuses that reach it, and confirm the intersection is non-empty** before writing the first
+   test; prefer a `runtime/runtimetest` conformance case, which no fake can satisfy. Common cases,
+   none of them the definition: an **argv** handed to a subprocess
    (assert the flags, and which paths must be absolute); which **environment** a subprocess
    draws from; an error's **content**, not just that one was returned. The fake-binary fixture
    covers all three cheaply — `runtime/apple/build_test.go`. Three traps, all drawn from the

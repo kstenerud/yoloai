@@ -659,6 +659,44 @@ The pattern: every entry in this list is a true principle's failure mode at the 
 
 ## Closing note
 
+## §18. A sharp edge is a sample — check whether the architecture is generating them
+
+> **Rule.** Before fixing a sharp edge, ask whether it repeats elsewhere. If it does, the edge is a symptom and the architecture is the subject; if it does not, check whether the codebase already solves it somewhere you have not looked.
+>
+> **Bites when:** several fixes in a row feel like fighting the code. · **See also:** GEN §3 (the same question aimed outward), GEN §17, DEV §16.
+
+**Principle.** Death by a thousand cuts is the standing threat. Fixing edge after edge keeps every individual change small, correct and defensible, and can still leave the design worse — because the effort goes into the trees while the forest deteriorates. Each edge is one sample from a distribution. The useful question is never only *"how do I fix this?"* but *"how many of these are there, and why?"*
+
+Two failure modes hide behind a sharp edge, and they call for opposite responses:
+
+- **You are fighting the architecture.** The edge recurs because the design produces edges of that shape. Patching each instance is a tax that compounds and never retires. The proper fix examines the architecture — or examines *your approach to it*, which is the more common answer and the cheaper one.
+- **An elegant solution already exists here.** The edge is only sharp because you are solving it fresh. Somewhere in the codebase a sibling path solved it already, and your bespoke fix is about to become a second mechanism for one job — the thing GEN §3 forbids for external tools, committed internally instead.
+
+### Pattern
+
+On hitting a sharp edge, before writing the fix: (a) grep for the shape, not the symptom — the same *kind* of defect on a sibling path, another backend, the other half of a pair; (b) if it appears more than twice, say so in the finding and ask what generates it; (c) look for a path that already does the thing right, and prefer converging on it over inventing; (d) if you converge, delete the divergence rather than leaving both.
+
+The tell for (a) is a sentence you find yourself writing: *"a mechanism on one path and not its sibling."* When that sentence fits, stop and count.
+
+### Worked examples
+
+All from the profile-image-lifecycle workstream (DF150–DF158), which is the specimen that produced this principle — the pattern was visible in the findings before anyone named it.
+
+- **The elegant solution already existed, and the finding said so mid-flight.** DF156's remedy (c) — deliver the runtime scripts at launch instead of baking them into the image — was first written as "the most invasive option", then corrected: **tart already did it** (`writeVMSetupScripts`), which is why tart was structurally immune to the entire finding. The remedy was not a new mechanism but "making the container backends do what tart already does". Two backends had the right shape and four did not; the fix was convergence, not invention.
+- **Twice more in the same change, both found by being pointed at them.** `tmux.conf` was already *both* baked into the image and bind-mounted over — the exact shape the script delivery needed — and was already materialised into `defaults/` for users to read, the exact shape the readable-Dockerfile copy needed. Neither was discovered by looking; both were supplied.
+- **A size failure whose real cause was redundancy.** The base Dockerfile broke apple's 16 KiB build cap. The obvious fix is to shorten comments. The actual finding was that `standards/dockerfile.md` already documented the same hadolint rationale nearly verbatim — the Dockerfile was duplicating its own standard, and the duplication is what consumed the budget. Trimming words would have fixed the byte count and left the cause.
+- **The generating shape, named.** DF150 (a staleness marker not keyed per backend), DF152 (staleness that could not travel with the image), DF153 (containerd image-based but not implementing `ProfileImageBuilder`), DF156 (four backends bake, two deliver) are four findings in one workstream with one shape: **a capability implemented on some backends and not their siblings, with nothing checking completeness.** That is an architectural property, not four accidents, and the durable answer was structural — a `runtimetest` conformance case that every backend with the capability must satisfy. Compare a fourth bespoke per-backend patch, which is what three of those findings originally proposed.
+
+### Cost-vs-benefit
+
+Cost of applying: a few minutes of grepping the *shape* before writing a fix, plus the willingness to widen scope, or to record that the scope should widen and not do it now. Damage prevented: a compounding maintenance tax; a second mechanism for a job already solved; a codebase that passes every review change-by-change while getting harder to reason about. Threshold: the check is cheap enough to be unconditional. **Acting** on it is not — a finding recording "this is the fourth of its kind, the architecture is the subject" is a complete and often correct response, because rewriting the architecture mid-fix violates §1 and §13. Naming the forest is mandatory; clearing it is a decision.
+
+### Sources
+
+Owner, 2026-07-30, after a session of consecutive sharp-edge fixes in one workstream. The instances above are drawn from that session; the pattern is asserted from them and should be re-checked as the corpus grows (GEN §7).
+
+---
+
 The general principles parallel the development, testing, and security principles in shape: cost-vs-benefit + scope-discipline framing, explicit threshold per principle, worked examples cross-referencing prior decisions, and the consistent posture of preferring small intentional decisions over large unconsidered ones.
 
 The three specialised docs (`development-principles.md`, `testing-principles.md`, `security-principles.md`) each apply general principles to a specific surface — code structure, testing practice, sandbox containment. The general doc names the abstract pattern; the specialised docs ground it in their surface.

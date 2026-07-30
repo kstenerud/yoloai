@@ -4,8 +4,8 @@
 
 # Next release
 
-**Next release version: `v0.10.1`** — the next point release after v0.10.0. Nothing breaking has
-landed on main since; the field escalates on its own to `v0.11.0` the moment something does.
+**Next release version: `v0.11.0`** — escalated from `v0.10.1`: the sandbox image moved from
+Node.js 20 to Node.js 22 LTS, which is user-visible (see `BREAKING-CHANGES.md`, Unreleased).
 
 ## How this works
 
@@ -58,6 +58,16 @@ finding or decision first, and lands here only if it should block the release.
 
 - [DF149](design/findings-resolved.md) — `reset` stranded `files/`, `cache/` and `agent-runtime/` at
   deleted inodes, silently breaking the agent's artifact channel
+- [DF156](design/findings-resolved.md) — a `yoloai-base` rebuild did not invalidate profile images
+  built on the old base
+- [DF157](design/findings-resolved.md) — on the restart path every line of launch progress was
+  rendered as a warning
+- [DF158](design/findings-resolved.md) — the base image pinned Node 20 on an unverified gVisor
+  claim, capping Claude Code and shipping an EOL runtime **(the breaking change: Node 20 → 22)**
+- [DF160](design/findings-unresolved.md) — `dind/podman-priv` times out on macOS, and the smoke
+  harness turns a slow teardown into a crash (harness half fixed; the timeout is not)
+- [DF159](design/findings-unresolved.md) — `exec start: ttrpc: closed` on containerd-vmenhanced
+  during `apply`, once in 38 runs (filed, not fixed — listed because its docs correction ships)
 
 ## Candidates — undecided
 

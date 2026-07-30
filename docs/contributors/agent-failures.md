@@ -537,6 +537,189 @@ itself worth knowing when reading pattern 4.
   history for the same mechanism** — divergence between siblings is this repo's most repeated defect
   (four instances in one release; see DF152).
 
+### A15 — six passing tests certified a function no backend could reach (2026-07-30)
+
+- **Claimed:** DF156's resume half is built. `InstanceInfo.ImageID` is populated from what each
+  backend records, `warnIfImageLineageStale` compares the instance's image lineage against the base,
+  and *"six branches, one test each, three failing on revert"*. Committed as working.
+- **True:** the function returned on its first line on every backend, always, and had never once run.
+  It hung off `StatusSuspended`, which is set only by `InstanceInfo.Suspended`, which only **tart**
+  sets — and tart implements no `ProfileImageBuilder`, so the capability guard rejected it every
+  time. The intersection of "reports Suspended" and "has images" is **empty**. The case that does
+  occur, Done/Failed relaunching inside the existing container, was never wired. Two of the three
+  backends could not have answered anyway: apple's digest was read from the wrong JSON path and its
+  image is unresolvable *and* deleted on rebuild, and containerd handed back a tag that
+  `ImageLabels` then re-resolved — the exact question the design was built to avoid.
+- **Source of the false belief:** the tests. `lineageFake` reported `Suspended: true` **and**
+  implemented `ProfileImageBuilder`. No backend has that shape, and nothing prevented inventing it.
+  Each branch was verified against a mock of a backend that does not exist, so all six passed and
+  all six were vacuous. Revert-testing was performed and did not help — reverting a line inside an
+  unreachable function still turns its test red, because the test calls the function directly.
+- **Caught by:** the owner asking *"verify that this actually is going to solve the issue properly"* —
+  a question about the whole, where every check I had run was about a part. Tracing the call graph
+  upward from the function to a real backend takes one grep, and nothing in the task as I had framed
+  it ever asked for it.
+- **Cost:** none shipped — caught in the same session. But the feature was complete, tested,
+  committed, and documented as done in the finding, which is as far as a defect can travel here.
+- **Class:** a new one, and the sharpest in the file — **a fake is free to invent a capability
+  combination the product does not contain**, and when it does, its tests certify a dead path. It is
+  the mirror of A5 (a gate that was silently blind): here the tests were the blind gate. Note it
+  defeats rule 10 as written: *"actually revert each and watch it fail"* is satisfied by a vacuous
+  test. Revert-testing proves a test is connected to the code; it says nothing about whether the
+  code is connected to the program.
+- **Gated now?** Yes, both halves. **Rule 10 in `AGENTS.md` was amended** (2026-07-30) to say
+  red-on-revert is necessary and not sufficient, and to require naming the backends that pass a
+  capability guard and confirming the intersection is non-empty *before* the first test — this entry
+  had identified rule 10 as insufficient and then left it unchanged, which is the reachability
+  failure GEN §17 warns about: the lesson sat in this log, and this log is a write target that
+  nothing routes an agent to read. Structurally, the fix also moved the guarantee into
+  `runtimetest`'s `InstanceLabelsRoundTrip`, a **conformance** case gated on the real capability:
+  every backend that builds images must round-trip Create's labels through Inspect, and no fake can
+  satisfy it. That covers this mechanism. The general habit it argues for, unguarded: **when a check
+  is capability-guarded, name the backends that pass the guard and the statuses that reach it, and
+  confirm the intersection is non-empty** — before writing the first test. Also a specific
+  by-catch worth keeping: the docker/podman conformance helper builds its `container.Config` through
+  the SDK and had silently stopped covering `Labels`, so a harness that bypasses the interface it
+  certifies drifts the same way.
+
+### A16 — verified an exploit thoroughly, never asked whether the attacker needed it (2026-07-30)
+
+- **Claimed:** that delivering the runtime scripts as a read-only mount (DF156 remedy c) was also a
+  security fix, because `/yoloai/bin` is writable by the sandbox user. Was one message away from
+  filing it as a finding with a severity.
+- **True:** it is not a security fix at all. The scripts run *as the agent's own principal*, so
+  anything the agent gains by rewriting `status-monitor.py` it gains just as easily by killing the
+  process and running its own copy. A read-only mount raises the effort by nothing and prevents
+  nothing. As a control against the agent it is theater.
+- **Source of the false belief:** the quality of the verification, which was real and beside the
+  point. I proved the mechanism carefully — that a root-owned file inside a user-owned directory
+  can be unlinked and replaced, demonstrated live as uid 1001 against both `status-monitor.py` and
+  `install-firewall.py` — and then checked three containment paths and correctly found each one
+  closed. Every step was sound and every step was downstream of an unexamined premise: that an
+  attacker with code execution as the reader would bother editing the file. Confidence tracked how
+  much I had checked, and I had checked a great deal, none of it the load-bearing thing.
+- **Caught by:** the owner, in one sentence — *"it could just kill the running process and relaunch
+  its own modified version."* Note the shape: the owner had *supplied* the security framing in the
+  previous turn and then withdrew it. Agreement from the owner is not evidence, and an aside is not
+  a premise; I adopted it and then spent a long stretch making it look well-founded.
+- **Cost:** none shipped. Caught before the finding was written, one turn after the claim.
+- **Class:** new, and the mirror of [A15](#a15--six-passing-tests-certified-a-function-no-backend-could-reach-2026-07-30).
+  There, thorough checking certified a path nothing could reach. Here, thorough checking certified a
+  mechanism that works and does not matter. Both are the same underlying failure — **verification
+  aimed one level below the claim** — and neither is detectable by doing more of what I was already
+  doing. The question that dissolves this one takes a sentence: *who is the attacker, what do they
+  already have, and does this mechanism give them anything they lack?* For A15 it was: *which real
+  backend reaches this line?*
+- **A specific habit it argues for:** when a change acquires a *second* justification mid-design,
+  re-derive it from scratch rather than inheriting it. DF156's real grounds — a missing file causes a
+  hard launch failure, and baking couples our releases to the user's rebuild cost — were sound the
+  whole time and needed no help. The security claim was a bonus argument that arrived from outside
+  the analysis, and a bonus argument gets audited least precisely because nothing depends on it.
+- **Gated now?** No, and it is not gatable — no script can ask whether a threat model holds. What is
+  durable is the record: DF156's remedy (c) now states explicitly that the directory is
+  agent-writable and that this is **not** an argument for the mount, so the next contributor who
+  notices the permissions does not repeat the inference. Recording a *rejected* rationale is the
+  point; code shows the surviving branch and never the pruned one ([A14](#a14--reimplemented-an-approach-the-repo-had-already-rejected-2026-07-29)).
+
+### A17 — reported a capability as missing that I had built myself, earlier the same day (2026-07-30)
+
+- **Claimed:** that DF156's remaining gap was that a base Dockerfile change "still leaves profile images
+  on the old base", which "now fails as drift rather than as a failed launch, and the detection half
+  reports it". Written into the finding, into two commit messages, and into two summaries to the owner.
+- **True:** it rebuilds. `EnsureProfileImage` seeds the chain checksum from the base image's own label,
+  so a moved base changes every descendant's expected checksum and rebuilds it — and `ensureImageLineage`
+  runs that on the launch path, so `start` on a stopped or removed sandbox gets it too. Verified live
+  after the owner asked: base rebuilt, profile image rebuilt, container recreated on the new image. I
+  had built that seed myself, earlier in the same session, and had *watched it work* — the log line
+  `Building profile image yoloai-cli-df156p...` is in my own verification output from hours before.
+- **Source of the false belief:** describing the system by the part I had most recently worked on. The
+  last thing I built was `warnIfImageLineageStale`, so "what happens when the base moves?" retrieved
+  *warn*. The rebuild lives on a different path, was finished earlier, and had already passed out of
+  working memory. Nothing contradicted me, because a warning genuinely does fire — on the two paths
+  that reuse an existing container. I generalised a real behaviour from a narrow case to the whole
+  system without noticing the case was narrow.
+- **Caught by:** the owner asking *"why does that have to be a warning rather than a rebuild like you'd
+  get if you weren't using a profile?"* — a question whose premise (that a rebuild is what should
+  happen) was simply correct, and which I could only answer by going and looking.
+- **Cost:** a finding carried as open that was in fact closed, and two commit messages overstating what
+  was left. No code was wrong; the description of it was.
+- **Class:** new, and the most mundane of the four recent ones — **recency, not reasoning**. A15 and A16
+  were verification aimed one level below the claim; this needed no verification at all, only recall.
+  It is worse in one respect: those failures were about code I had not exercised, and this was about
+  code whose success I had personally observed. The tell is *tense* — I described a capability in the
+  present ("still leaves") on the strength of a memory of the problem rather than of the fix.
+- **Gated now?** No. The habit it argues for is narrow and checkable: **before writing "X still
+  happens" about the system, name the function that makes it happen and read it.** A claim about
+  present behaviour is a claim about code, and this repo has a grep for that. Note also the smell in the
+  original phrasing — "the ordinary half remains" was inherited verbatim from the finding's own
+  pre-fix text, which is how a stale description survives the work that invalidates it.
+
+### A18 — researched whether a claim was true, never asked whether it had a source (2026-07-30)
+
+- **Claimed:** writing up why the base image pins Node 20, that the gVisor/ARM64 rationale in
+  `bca8af21` was *"the hypothesis that motivated the downgrade, not an observation that survived it.
+  **The observation was a silent crash.**"* Committed to `findings-unresolved.md` in that form.
+- **True:** there was no observation, because there was no platform. **This project has never had a
+  Linux ARM system** — and no CI workflow has ever had an ARM64 runner; the only ARM64 anywhere in
+  the repo is `darwin/arm64` compile-only cross-lint and the macOS tart path. `linux/arm64` appears
+  in no workflow, matrix or smoke tier. The diagnosis named an architecture nobody involved could
+  ever have run.
+- **Source of the false belief:** I treated a commit message as a primary record. Asked to research
+  the claim, I researched *the world* — eight web searches across the gVisor tracker, the Node
+  tracker, gVisor's arm64 syscall table — and correctly reported no public corroboration. Every one
+  of those searches presupposed that the local claim was sourced and the only open question was
+  whether the outside world agreed. I never asked the one-line question that settles it: **on what
+  hardware?** A `grep arm64 .github/workflows` would have done it, and I had already run greps over
+  that directory for other reasons.
+- **Caught by:** the owner, stating a fact about their own hardware — *"We've never had a linux ARM
+  system."* Not a correction of reasoning; a correction of a premise I had never thought to test.
+- **Cost:** the wrong framing reached a finding and a commit message, and I had just spent a
+  research pass building a careful case on top of it. The finding also inherited a softer error:
+  I called the absence of public reports "weak evidence", treating it as one side of a balance, when
+  in fact there was nothing on the other side to balance against.
+- **Class:** new, and it is the inverse of [A16](#a16--verified-an-exploit-thoroughly-never-asked-whether-the-attacker-needed-it-2026-07-30).
+  There I verified a mechanism and never asked whether it mattered; here I verified a claim against
+  external sources and never asked whether it was ever grounded internally. Both are effort spent
+  one level away from the load-bearing question. The tell is specific and checkable: **a claim about
+  a platform is also a claim about access to that platform.** When a rationale names hardware, an
+  architecture, or an environment, establish that the project has it *before* investigating whether
+  the claim about it is true — provenance first, then truth.
+- **Wider point worth keeping.** The claim had sat in the Dockerfile for four and a half months
+  reading as settled fact, and was load-bearing: it pinned Node at 20, which silently froze Claude
+  Code at 2.1.197 and left the project shipping a runtime that went EOL in April 2026 — the exact
+  outcome `questions-resolved.md` #2 had decided against. An unfalsifiable diagnosis is not a
+  harmless one; it is the kind that survives longest, because nothing can dislodge it.
+- **Gated now?** No, and a script cannot ask "did we have that machine". What is durable is
+  [DF158](design/findings-unresolved.md), which now records the provenance gap alongside the
+  technical one, so the next person to read that Dockerfile comment meets the caveat with it.
+
+### A19 — silenced a linter by narrowing a test, on a platform I could not run (2026-07-30)
+
+- **Claimed:** in a test comment, that holding `127.0.0.1:P` still collides with the
+  `filterAvailablePorts` bind of `0.0.0.0:P`, so *"the collision under test is unaffected"*.
+- **True:** on Linux. On macOS/BSD the second bind **succeeds**, so the port is never reported busy,
+  no warning is emitted, and the test silently stops testing anything. It failed on the owner's Mac
+  within the hour.
+- **Source of the false belief:** the change was made to satisfy gosec **G102** ("binds to all
+  interfaces"), not to improve the test. Narrowing the holder to loopback silenced the linter and
+  changed the test's meaning, and I wrote a comment asserting the change was semantically neutral —
+  on the one platform I could execute. The original `:0` was correct precisely because it **mirrored
+  what production binds**; the "fix" broke that correspondence.
+- **Caught by:** the owner's `make check` on darwin. The test's own failure message was the right one
+  (*"a host port already in use must be dropped"*), so the diagnosis took one read — which is the
+  only part of this that went well.
+- **Class:** related to [A18](#a18--researched-whether-a-claim-was-true-never-asked-whether-it-had-a-source-2026-07-30)
+  — an unverified platform claim, written the same day, *after* recording A18 — but with its own
+  distinct trigger worth naming: **a lint fix can change what a test covers.** A linter objects to a
+  shape, not to a meaning; when the shape is load-bearing (here: matching production's bind), the
+  compliant version can be quietly weaker. Two habits follow. When a test must reproduce production
+  behaviour, **the test should do what production does, and the suppression comment should say so** —
+  which is what it now says. And a comment claiming cross-platform equivalence is a claim I usually
+  cannot check, so it should be written as the assumption it is, or not written.
+- **Gated now?** No. `make check` on Linux cannot catch a darwin-only divergence; the cross-lint
+  targets compile for `darwin/arm64` but do not run tests. The real gate is the owner's Mac and CI,
+  which worked.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of

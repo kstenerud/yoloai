@@ -1,18 +1,16 @@
+# Apple's `container build` rejects a Dockerfile over 16 KiB (apple/container
+# #735, still open 2026-07-30), so this file has a hard size budget that nothing
+# in the build itself enforces. TestDockerfile_FitsAppleBuilderLimit guards it.
+# Comments are ~58% of the bytes here: keep the rationale that a reader needs in
+# order to act correctly, and put the archaeology in the finding it cites.
 FROM debian:trixie-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# DL3008 (pin apt-get versions) suppressed: Debian stable rarely changes package
-# behaviour, and pinning every system package would force base-image rebuilds
-# with no behavioural benefit. Security updates flow through `apt-get update`,
-# not version bumps. We pin only the components whose behaviour matters (Node,
-# Go, gosu, rustup) further down.
-#
-# binutils-gold: the Go toolchain links cgo binaries with `-fuse-ld=gold` on
-# linux/arm64 (a long-standing BFD-linker workaround). Debian trixie split gold
-# out of the `binutils` package, so without this an arm64 base build fails with
-# "cannot find 'ld'" when go installs golangci-lint. (No-op on amd64, which uses
-# bfd.) See docs/contributors/backend-idiosyncrasies.md.
+# DL3008 unpinned-apt rationale: standards/dockerfile.md "Pinning".
+# binutils-gold is required for cgo links on linux/arm64 (trixie split gold out
+# of binutils; without it an arm64 base build cannot find `ld`) —
+# backend-idiosyncrasies.md.
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
@@ -49,8 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Docker CE + Compose plugin
-# DL3008: same reasoning as above — Debian repos for docker-ce track upstream
-# Docker releases; pinning would freeze the sandbox on an old Docker version.
+# DL3008: as above; pinning would freeze the sandbox on an old Docker.
 # hadolint ignore=DL3008
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
@@ -68,11 +65,16 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 
-# Node.js 20 LTS via NodeSource (22 has syscall incompatibilities with gVisor ARM64)
-ARG NODE_MAJOR=20
-# DL3008: nodejs version is pinned via the NodeSource repository URL
-# (NODE_MAJOR=20), which is the right pin level for an LTS line. Pinning the
-# minor in apt would lock us to a single security release.
+# Node.js 22 LTS via NodeSource. Was 20 from 2026-03 to 2026-07 on an
+# unevidenced gVisor/ARM64 claim; that cost an EOL runtime and froze Claude Code
+# at 2.1.197 (2.1.198+ need Node >=22). Full account and the residual risk:
+# DF158. If gVisor on ARM64 does dislike Node 22 it shows up in
+# `container-enhanced` there only, and `sandbox.node_check` already logs the node
+# version before agent launch so it surfaces. Revisit with evidence, not a
+# hypothesis.
+ARG NODE_MAJOR=22
+# DL3008: pinned at the NodeSource repo URL (NODE_MAJOR), the right level for an
+# LTS line; pinning the apt minor would lock us to one security release.
 # hadolint ignore=DL3008
 RUN mkdir -p /etc/apt/keyrings \
     && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -90,23 +92,16 @@ RUN curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL "https://go.dev/dl/g
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
     && rm /tmp/go.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
-# Also set via profile.d so shells started fresh (e.g. by AI coding agents)
-# pick up the path even when Docker ENV is not inherited.
-# SC2016 (variable in single quotes) suppressed: the literal `$PATH` is what
-# we want written to /etc/profile.d/golang.sh — it is expanded by the shell
-# that sources the file later, not by Docker at build time.
+# Also via profile.d so freshly-started shells pick up the path when Docker ENV
+# is not inherited. SC2016: the literal `$PATH` is intended — it expands when the
+# file is sourced, not at build time.
 # hadolint ignore=SC2016
 RUN echo 'export PATH="/usr/local/go/bin:$PATH"' > /etc/profile.d/golang.sh
 
-# golangci-lint
-# DL3062 (pin go install version) suppressed: this golangci-lint is installed
-# inside the *sandbox image* for AI agents running yoloAI projects — agents
-# need the current linter set, not a pin tied to yoloAI's release cadence.
-# yoloAI's own `make check` pins golangci-lint explicitly via `go run` (see
-# Makefile §lint target).
-# go install has no native retry flag (unlike the curl installs above), so wrap
-# it in a retry loop — a transient Go-proxy hiccup otherwise fails this whole
-# multi-minute base build, which every user's first run performs.
+# golangci-lint — DL3062 unpinned on purpose: this copy is for agents working in
+# the sandbox and wants the current linter set, not yoloAI's release cadence
+# (yoloAI's own `make check` pins it via `go run`). Retry-wrapped because
+# `go install` has no --retry and a proxy hiccup would fail the whole base build.
 # hadolint ignore=DL3062
 RUN n=0; until [ "$n" -ge 5 ]; do \
       GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest && break; \
@@ -123,30 +118,37 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --retry 5 --retry-delay 2 --retry-all-errors --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
     && chmod -R a+rw "$RUSTUP_HOME" "$CARGO_HOME"
-# SC2016: same reason as the golang.sh write above — `$PATH` is intentional;
-# we want it expanded at shell-source time, not at Docker build time.
+# SC2016: as golang.sh above — `$PATH` expands at source time, not build time.
 # hadolint ignore=SC2016
 RUN echo 'export PATH="/usr/local/cargo/bin:$PATH"' > /etc/profile.d/cargo.sh
 
-# AI coding agents — versions intentionally unpinned; agents must run at
-# current versions to function correctly with their respective APIs.
-# Claude Code via npm (not native binary — native bundles Bun which ignores
-# proxy env vars and auto-updates; see docs/dev/research/implementation.md)
+# AI coding agents — a MINIMUM version, maximum left open: the clients must keep
+# tracking their servers' APIs (an exact pin fails within weeks), while yoloAI
+# drives them by flags hardcoded in internal/agent/agent.go and needs to state
+# which versions have them. Each floor is a version this repo has run against.
+# RAISE ONE ONLY when yoloAI depends on something newer, and say why in the
+# commit; that rebuilds the base and every profile image on it, which is the
+# intended mechanism. Rationale and both traps in full: DF158.
+#
+#  - QUOTE THE SPEC. Unquoted, sh reads `>=2.1.197` as a redirection and npm gets
+#    the bare name — a floor that enforces nothing, silently. Gated by
+#    TestDockerfile_AgentInstallsCarryAQuotedFloor.
+#  - `>=X.Y.Z` is not "latest": npm picks the newest version whose `engines` this
+#    image satisfies, and raising a floor past an engine boundary only warns
+#    (EBADENGINE), leaving an unsupported combination. Check
+#    `npm view <pkg>@<ver> engines.node` against NODE_MAJOR first.
+#
+# Claude Code via npm, not the native binary: that bundles Bun, which ignores
+# proxy env vars and auto-updates. The "fullscreen renderer" upsell that stalled
+# smokes is handled at the agent layer — settings.tui="default", DF52.
 ENV DISABLE_INSTALLATION_CHECKS=1
-# DL3016 (pin npm versions) suppressed: see the comment above — agents'
-# server-side APIs evolve continuously and the CLI clients must track. A pin
-# would lock us to a stale client that fails against the live API within weeks.
-# (The claude "fullscreen renderer" upsell that previously stalled smokes is now
-# handled at the agent layer by pinning the classic renderer — settings.tui=
-# "default" in internal/agent/agent.go — so claude stays unpinned. DF52.)
 # Retry-wrapped (like the golangci-lint install above): a transient npm-registry
 # hiccup otherwise fails the whole multi-minute base build with no recovery.
-# hadolint ignore=DL3016
 RUN n=0; until [ "$n" -ge 5 ]; do \
-      npm install -g @anthropic-ai/claude-code \
-        && npm install -g @google/gemini-cli \
-        && npm install -g @openai/codex \
-        && npm install -g opencode-ai && break; \
+      npm install -g "@anthropic-ai/claude-code@>=2.1.197" \
+        && npm install -g "@google/gemini-cli@>=0.53.0" \
+        && npm install -g "@openai/codex@>=0.146.0" \
+        && npm install -g "opencode-ai@>=1.18.9" && break; \
       n=$((n+1)); echo "npm install failed (attempt $n/5); retrying in 5s"; sleep 5; \
     done; \
     [ "$n" -lt 5 ] || { echo "npm install failed after 5 attempts"; exit 1; }
@@ -162,7 +164,7 @@ RUN n=0; until [ "$n" -ge 5 ]; do \
 RUN curl --retry 5 --retry-delay 2 --retry-all-errors -LsSf https://astral.sh/uv/install.sh \
       | env UV_INSTALL_DIR=/usr/local/bin sh \
     && UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin UV_PYTHON_INSTALL_DIR=/opt/uv/python \
-       uv tool install --python 3.12 aider-chat
+       uv tool install --python 3.12 "aider-chat>=0.86.2"
 
 # VS Code CLI for Remote Tunnels (code tunnel)
 RUN ARCH=$(dpkg --print-architecture | sed 's/amd64/x64/') \

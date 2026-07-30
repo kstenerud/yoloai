@@ -141,21 +141,29 @@ type InstanceInfo struct {
 	Running   bool
 	Suspended bool // true if the instance is suspended (state saved to disk, not consuming CPU/RAM)
 
-	// ImageID identifies the image this instance was actually created from, as
-	// the backend records it — a content-addressed id where the backend has one
-	// (docker's `sha256:…`), not the tag it was created by.
+	// Labels are the instance's own labels, as the backend recorded them when
+	// Create was given InstanceConfig.Labels.
 	//
-	// The distinction is the point. A tag is a moving pointer: rebuild the image
-	// and the tag names something else, while the instance keeps running what it
-	// was created with. Asking the *instance* what it holds is the only way to
-	// learn its actual lineage, which is what a resumed sandbox has to be judged
-	// on — rebuilding an image cannot change a container that already exists
-	// (DF156).
+	// This is where per-instance facts that must outlive a tag belong — the
+	// lineage of the image the instance holds, above all (DF156). A tag is a
+	// moving pointer: rebuild the image and the tag names something else, while
+	// the instance keeps running what it was created with. The instance's own
+	// record is the only thing that still answers "what is this holding?", and it
+	// is the only such record every backend can both write and read.
 	//
-	// Empty when the backend has no image concept (seatbelt runs host processes;
-	// tart clones VM images and does not record a per-instance id), so callers
-	// must treat "" as "cannot say" rather than as a mismatch.
-	ImageID string
+	// Asking for an image *identifier* instead does not work, which is why this
+	// is a label map rather than an id. The three container backends record three
+	// incomparable things — docker a content-addressed id, containerd a tag that
+	// moves, apple an index digest that `container image inspect` cannot resolve
+	// and whose image is deleted outright when the tag is rebuilt — so only
+	// docker's survives a round trip, and a caller holding the string cannot tell
+	// which kind it has. A label is written by us and read back verbatim.
+	//
+	// Empty for backends with no container labels (seatbelt runs host processes;
+	// tart clones VMs), so callers must treat an absent key as "cannot say"
+	// rather than as a mismatch — see runtime.ProfileImageBuilder, which is the
+	// capability that marks a backend able to answer lineage questions at all.
+	Labels map[string]string
 }
 
 // ExecResult holds the output of a non-interactive command execution.

@@ -78,7 +78,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 Pin versions when the package's behaviour can change in ways that break us. Don't pin when the package's behaviour is stable across versions (apt-installed dev tools, system libraries).
 
 - `golang-go` — *not* pinned in apt; Go is installed separately by tag (see "Go install" pattern below).
-- `nodejs` — pinned via NodeSource repository to Node 22 LTS (rationale: `docs/contributors/design/questions-unresolved.md` #2).
+- `nodejs` — pinned via NodeSource repository to Node 22 LTS (rationale: `../design/questions-resolved.md` #2, and DF158).
 - Downloaded binaries (gosu, ko, etc.) — pinned by version + checksum where possible.
 - apt packages without a moving-target risk — left unpinned (hadolint DL3008 is suppressed for those `RUN` lines with `# hadolint ignore=DL3008` and a comment explaining the unpinned choice).
 
@@ -95,6 +95,22 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 ```
 
 The `# hadolint ignore=...` directive immediately precedes the `RUN` line. The explanatory comment is above the directive.
+
+**Keep the justification short, and here rather than there.** The rationale for each standing suppression belongs in this document, once; the Dockerfile carries a pointer. That is not tidiness — it is the size budget below, and a comment duplicated in both places is the first thing to go when the budget bites.
+
+### Size budget: 16 KiB, and it is a hard failure
+
+**Apple's `container build` rejects a Dockerfile larger than 16384 bytes** ([apple/container#735](https://github.com/apple/container/issues/735), open as of 2026-07-30). It fails the build outright — `invalidArgument: "Dockerfile size (N bytes) exceeds the maximum allowed size of 16384 bytes"` — so it is not a soft limit to drift past.
+
+Three things make this easy to trip:
+
+- **Comments are the majority of the file** (~58% at the time of writing), so prose is what consumes the budget, not instructions.
+- **Nothing in the build enforces it.** docker, podman and containerd have no such limit, so a Linux `make check` and a full Linux smoke run both pass while the apple backend is broken. It surfaces only on a Mac.
+- **It was reached by three unremarkable commits.** The file sat at 14012 bytes, then a comment block, a version bump and a header took it to 17645 — the version bump alone landed 33 bytes under the limit without anyone noticing.
+
+`TestDockerfile_FitsAppleBuilderLimit` (`runtime/docker/`) now gates it, so the failure is a red test on any platform rather than a broken build on one. When it fires, the fix is to relocate prose — to this document, to the finding it cites, or to a docstring — not to shave words until it passes.
+
+**The user-facing "do not edit this" header is not part of the budget.** It is prepended when the reference copy is materialised to `defaults/base-image.Dockerfile`, never stored in the built file: the warning is false in the repo (where editing *is* how you change it) and only true of the generated copy, so where it lives is a correctness question before it is a size one.
 
 ### Non-root runtime user
 
