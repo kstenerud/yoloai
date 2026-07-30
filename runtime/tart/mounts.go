@@ -200,35 +200,35 @@ func (r *Runtime) createSingleVMSymlink(ctx context.Context, vmName, target, vfs
 
 // writeVMSetupScripts writes setup script, status monitor, and tmux config to the sandbox dir.
 func writeVMSetupScripts(sandboxPath string) error {
-	scriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
+	scriptPath := filepath.Join(config.BinPath(sandboxPath), "sandbox-setup.py")
 	if err := fileutil.WriteFile(scriptPath, monitor.SetupScript(), 0644); err != nil {
 		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
-	helpersPath := filepath.Join(sandboxPath, binDir, "setup_helpers.py")
+	helpersPath := filepath.Join(config.BinPath(sandboxPath), "setup_helpers.py")
 	if err := fileutil.WriteFile(helpersPath, monitor.SetupHelpers(), 0644); err != nil {
 		return fmt.Errorf("write setup_helpers.py: %w", err)
 	}
-	tmuxIOPath := filepath.Join(sandboxPath, binDir, "tmux_io.py")
+	tmuxIOPath := filepath.Join(config.BinPath(sandboxPath), "tmux_io.py")
 	if err := fileutil.WriteFile(tmuxIOPath, monitor.TmuxIO(), 0644); err != nil {
 		return fmt.Errorf("write tmux_io.py: %w", err)
 	}
-	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
+	monitorPath := filepath.Join(config.BinPath(sandboxPath), "status-monitor.py")
 	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil {
 		return fmt.Errorf("write status monitor: %w", err)
 	}
-	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
+	diagPath := filepath.Join(config.BinPath(sandboxPath), "diagnose-idle.sh")
 	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil {
 		return fmt.Errorf("write diagnose script: %w", err)
 	}
-	agentRunPath := filepath.Join(sandboxPath, binDir, "agent-run.sh")
+	agentRunPath := filepath.Join(config.BinPath(sandboxPath), "agent-run.sh")
 	if err := fileutil.WriteFile(agentRunPath, monitor.AgentRunScript(), 0755); err != nil {
 		return fmt.Errorf("write agent-run.sh: %w", err)
 	}
-	resumePath := filepath.Join(sandboxPath, binDir, "yoloai-resume")
+	resumePath := filepath.Join(config.BinPath(sandboxPath), "yoloai-resume")
 	if err := fileutil.WriteFile(resumePath, monitor.YoloaiResumeScript(), 0755); err != nil {
 		return fmt.Errorf("write yoloai-resume: %w", err)
 	}
-	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
+	tmuxConfPath := filepath.Join(config.TmuxPath(sandboxPath), "tmux.conf")
 	if err := fileutil.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)
 	}

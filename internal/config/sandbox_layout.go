@@ -75,6 +75,10 @@ const (
 	WorkDirName         = "work"
 	VSCodeCLIDirName    = "vscode-cli"
 	ContextFileName     = "context.md"
+	// SecretsDirName holds credentials staged for the guest to read once at
+	// startup, then removed. It was a bare literal at three call sites until
+	// 2026-07-30; naming it is what lets its tier be changed in one place.
+	SecretsDirName = "secrets"
 	// ContainerLogFileName is the guest-written container log the containerd
 	// backend bind-mounts and tails.
 	ContainerLogFileName = "log.txt"
@@ -227,6 +231,12 @@ func WorkBasePath(sandboxDir string) string {
 // TmuxPath returns the tmux config/socket directory within a sandbox.
 func TmuxPath(sandboxDir string) string {
 	return filepath.Join(sandboxDir, TmuxDirName)
+}
+
+// SecretsPath returns the ephemeral credential staging directory within a
+// sandbox. Guest-read once at startup and then removed by the backend.
+func SecretsPath(sandboxDir string) string {
+	return filepath.Join(sandboxDir, SecretsDirName)
 }
 
 // VSCodeCLIPath returns the VS Code CLI state directory within a sandbox.

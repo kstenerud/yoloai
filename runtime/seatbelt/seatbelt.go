@@ -73,14 +73,6 @@ func init() {
 }
 
 const (
-	// backendDir holds backend-specific files within the sandbox directory.
-	backendDir = config.BackendDirName
-
-	// binDir holds executable scripts within the sandbox directory.
-	binDir = config.BinDirName
-
-	// tmuxDir holds tmux config and sockets within the sandbox directory.
-	tmuxDir = config.TmuxDirName
 
 	// pidFileName stores the sandbox-exec process ID.
 	pidFileName = "pid"
@@ -120,6 +112,16 @@ func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 	return descriptor
 }
 
+// sandboxDirForName returns the sandbox directory for an instance name.
+//
+// Converged on containerd's helper of the same name (GEN §18) rather than left
+// as 13 inline joins: the sandbox dir is the root every tier hangs off, so it
+// needs exactly one construction site per backend for a tier move to be a
+// one-place change.
+func (r *Runtime) sandboxDirForName(name string) string {
+	return filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+}
+
 // ResolveCopyMount returns the sandbox copy directory path. Seatbelt runs the
 // agent directly on the host, so it must read :copy files from their actual
 // sandbox location rather than from a container bind-mount at the original path.
@@ -157,11 +159,18 @@ func New(_ context.Context, layout config.Layout, homeDir string) (*Runtime, err
 // directory, patches working_dir for :copy mode, generates the SBPL
 // profile, and writes the entrypoint script and tmux config.
 func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(cfg.Name))
+	sandboxPath := r.sandboxDirForName(cfg.Name)
 
-	for _, dir := range []string{backendDir, binDir, tmuxDir} {
-		if err := fileutil.MkdirAll(filepath.Join(sandboxPath, dir), 0750); err != nil {
-			return fmt.Errorf("create %s dir: %w", dir, err)
+	// Built from the path builders rather than joined from names: these three
+	// live in different tiers once the sandbox dir is tiered, so a loop over
+	// bare directory names is the one shape that cannot follow the move.
+	for _, dir := range []string{
+		config.BackendPath(sandboxPath),
+		config.BinPath(sandboxPath),
+		config.TmuxPath(sandboxPath),
+	} {
+		if err := fileutil.MkdirAll(dir, 0750); err != nil {
+			return fmt.Errorf("create %s dir: %w", filepath.Base(dir), err)
 		}
 	}
 
@@ -169,7 +178,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	if err != nil {
 		return fmt.Errorf("marshal instance config: %w", err)
 	}
-	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName), cfgData, 0600); err != nil {
+	if err := fileutil.WriteFile(filepath.Join(config.BackendPath(sandboxPath), seatbeltConfigFileName), cfgData, 0600); err != nil {
 		return fmt.Errorf("write instance config: %w", err)
 	}
 
@@ -182,7 +191,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	}
 
 	profile := GenerateProfile(cfg, sandboxPath, r.homeDir)
-	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, profileFileName), []byte(profile), 0600); err != nil {
+	if err := fileutil.WriteFile(filepath.Join(config.BackendPath(sandboxPath), profileFileName), []byte(profile), 0600); err != nil {
 		return fmt.Errorf("write SBPL profile: %w", err)
 	}
 
@@ -196,7 +205,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 	}
 	if len(symlinks) > 0 {
 		manifest := strings.Join(symlinks, "\n") + "\n"
-		if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, symlinkManifestName), []byte(manifest), 0600); err != nil {
+		if err := fileutil.WriteFile(filepath.Join(config.BackendPath(sandboxPath), symlinkManifestName), []byte(manifest), 0600); err != nil {
 			return fmt.Errorf("write symlink manifest: %w", err)
 		}
 	}
@@ -206,7 +215,7 @@ func (r *Runtime) Create(_ context.Context, cfg runtime.InstanceConfig) error {
 
 // copySecretsToSandbox copies secret files from mount specs into the sandbox secrets directory.
 func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error {
-	secretsDir := filepath.Join(sandboxPath, "secrets")
+	secretsDir := config.SecretsPath(sandboxPath)
 	if err := fileutil.MkdirAll(secretsDir, 0700); err != nil {
 		return fmt.Errorf("create secrets dir: %w", err)
 	}
@@ -234,35 +243,35 @@ func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error 
 
 // writeSandboxScripts writes the setup, monitor, and tmux config files.
 func writeSandboxScripts(sandboxPath string) error {
-	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
+	setupScriptPath := filepath.Join(config.BinPath(sandboxPath), "sandbox-setup.py")
 	if err := fileutil.WriteFile(setupScriptPath, monitor.SetupScript(), 0644); err != nil {
 		return fmt.Errorf("write sandbox-setup.py: %w", err)
 	}
-	helpersPath := filepath.Join(sandboxPath, binDir, "setup_helpers.py")
+	helpersPath := filepath.Join(config.BinPath(sandboxPath), "setup_helpers.py")
 	if err := fileutil.WriteFile(helpersPath, monitor.SetupHelpers(), 0644); err != nil {
 		return fmt.Errorf("write setup_helpers.py: %w", err)
 	}
-	tmuxIOPath := filepath.Join(sandboxPath, binDir, "tmux_io.py")
+	tmuxIOPath := filepath.Join(config.BinPath(sandboxPath), "tmux_io.py")
 	if err := fileutil.WriteFile(tmuxIOPath, monitor.TmuxIO(), 0644); err != nil {
 		return fmt.Errorf("write tmux_io.py: %w", err)
 	}
-	monitorPath := filepath.Join(sandboxPath, binDir, "status-monitor.py")
+	monitorPath := filepath.Join(config.BinPath(sandboxPath), "status-monitor.py")
 	if err := fileutil.WriteFile(monitorPath, monitor.Script(), 0644); err != nil {
 		return fmt.Errorf("write status-monitor.py: %w", err)
 	}
-	diagPath := filepath.Join(sandboxPath, binDir, "diagnose-idle.sh")
+	diagPath := filepath.Join(config.BinPath(sandboxPath), "diagnose-idle.sh")
 	if err := fileutil.WriteFile(diagPath, monitor.DiagnoseScript(), 0755); err != nil {
 		return fmt.Errorf("write diagnose-idle.sh: %w", err)
 	}
-	agentRunPath := filepath.Join(sandboxPath, binDir, "agent-run.sh")
+	agentRunPath := filepath.Join(config.BinPath(sandboxPath), "agent-run.sh")
 	if err := fileutil.WriteFile(agentRunPath, monitor.AgentRunScript(), 0755); err != nil {
 		return fmt.Errorf("write agent-run.sh: %w", err)
 	}
-	resumePath := filepath.Join(sandboxPath, binDir, "yoloai-resume")
+	resumePath := filepath.Join(config.BinPath(sandboxPath), "yoloai-resume")
 	if err := fileutil.WriteFile(resumePath, monitor.YoloaiResumeScript(), 0755); err != nil {
 		return fmt.Errorf("write yoloai-resume: %w", err)
 	}
-	tmuxConfPath := filepath.Join(sandboxPath, tmuxDir, "tmux.conf")
+	tmuxConfPath := filepath.Join(config.TmuxPath(sandboxPath), "tmux.conf")
 	if err := fileutil.WriteFile(tmuxConfPath, embeddedTmuxConf, 0600); err != nil {
 		return fmt.Errorf("write tmux.conf: %w", err)
 	}
@@ -272,7 +281,7 @@ func writeSandboxScripts(sandboxPath string) error {
 // Start launches the sandboxed process in the background and waits for
 // the tmux session to become available.
 func (r *Runtime) Start(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+	sandboxPath := r.sandboxDirForName(name)
 
 	// Check if already running
 	if r.isRunning(sandboxPath) {
@@ -281,7 +290,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Load instance config saved by Create
 	var cfg runtime.InstanceConfig
-	cfgPath := filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName)
+	cfgPath := filepath.Join(config.BackendPath(sandboxPath), seatbeltConfigFileName)
 	cfgData, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return fmt.Errorf("read instance config: %w", err)
@@ -297,7 +306,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	// up the /private/var SBPL fix or sandbox-setup.py changes after a data-dir
 	// migration relocated (but did not rewrite) the frozen Create-time files.
 	profile := GenerateProfile(cfg, sandboxPath, r.homeDir)
-	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, profileFileName), []byte(profile), 0600); err != nil {
+	if err := fileutil.WriteFile(filepath.Join(config.BackendPath(sandboxPath), profileFileName), []byte(profile), 0600); err != nil {
 		return fmt.Errorf("regenerate profile: %w", err)
 	}
 	if err := writeSandboxScripts(sandboxPath); err != nil {
@@ -305,15 +314,15 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	}
 
 	// Open log file for stderr capture
-	logPath := filepath.Join(sandboxPath, backendDir, processLogFileName)
+	logPath := filepath.Join(config.BackendPath(sandboxPath), processLogFileName)
 	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open log: %w", err)
 	}
 
 	// Launch sandbox-exec with the SBPL profile running the setup script
-	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
-	setupScriptPath := filepath.Join(sandboxPath, binDir, "sandbox-setup.py")
+	profilePath := filepath.Join(config.BackendPath(sandboxPath), profileFileName)
+	setupScriptPath := filepath.Join(config.BinPath(sandboxPath), "sandbox-setup.py")
 
 	// P1 vs P2: run the full sandbox-setup.py monitor (tmux + agent) only when the
 	// sandbox layer provisioned a runtime-config.json. Absent it — a bare runtime
@@ -353,7 +362,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	// reference a dead process. This is handled by: (1) the waitForTmux loop
 	// below detects early process exit via procDone, and (2) killByPID and
 	// isRunning gracefully handle stale PID files.
-	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	pidPath := filepath.Join(config.BackendPath(sandboxPath), pidFileName)
 	if err := fileutil.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
 		_ = cmd.Process.Kill()
 		_ = cmd.Wait()
@@ -401,10 +410,10 @@ func (r *Runtime) awaitInstanceReady(ctx context.Context, sandboxPath, logPath s
 
 // Stop kills the sandbox-exec process and the tmux server.
 func (r *Runtime) Stop(_ context.Context, name string) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+	sandboxPath := r.sandboxDirForName(name)
 
 	// Kill tmux server via socket
-	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
+	tmuxSock := filepath.Join(config.TmuxPath(sandboxPath), tmuxSocketName)
 	if _, err := os.Stat(tmuxSock); err == nil {
 		killCmd := sysexec.Command(r.execEnv, "tmux", "-S", tmuxSock, "kill-server")
 		_ = killCmd.Run()
@@ -418,13 +427,13 @@ func (r *Runtime) Stop(_ context.Context, name string) error {
 
 // Remove stops the instance and removes all sandbox state from disk.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+	sandboxPath := r.sandboxDirForName(name)
 
 	_ = r.Stop(ctx, name)
 
 	// Clean up external mount symlinks before removing the sandbox directory,
 	// since the symlink manifest lives inside sandboxPath.
-	manifestPath := filepath.Join(sandboxPath, backendDir, symlinkManifestName)
+	manifestPath := filepath.Join(config.BackendPath(sandboxPath), symlinkManifestName)
 	if data, err := os.ReadFile(manifestPath); err == nil { //nolint:gosec // G304: path within sandbox dir
 		for linkPath := range strings.SplitSeq(strings.TrimSpace(string(data)), "\n") {
 			if linkPath == "" {
@@ -442,11 +451,11 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 // Inspect returns the current state of the sandboxed process.
 func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo, error) {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+	sandboxPath := r.sandboxDirForName(name)
 
 	// Use the instance config as the existence marker — it's written by Create,
 	// while the PID file only exists after Start.
-	cfgPath := filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName)
+	cfgPath := filepath.Join(config.BackendPath(sandboxPath), seatbeltConfigFileName)
 	if _, err := os.Stat(cfgPath); os.IsNotExist(err) {
 		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
@@ -459,7 +468,7 @@ func (r *Runtime) Inspect(_ context.Context, name string) (runtime.InstanceInfo,
 // Exec runs a command inside the sandbox. For tmux commands, injects the
 // per-sandbox socket. For other commands, runs under sandbox-exec.
 func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (runtime.ExecResult, error) {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+	sandboxPath := r.sandboxDirForName(name)
 
 	if !r.isRunning(sandboxPath) {
 		return runtime.ExecResult{}, runtime.ErrNotRunning
@@ -477,7 +486,7 @@ func (r *Runtime) Exec(_ context.Context, name string, cmd []string, _ string) (
 // the bridge keeps error output from stair-stepping under the CLI's raw mode and
 // makes the path safe for non-CLI embedders whose streams aren't real *os.Files.
 func (r *Runtime) InteractiveExec(_ context.Context, name string, cmd []string, _ string, _ string, streams runtime.IOStreams) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+	sandboxPath := r.sandboxDirForName(name)
 	execCmd := r.buildExecCommand(sandboxPath, cmd)
 	return ptybridge.Exec(execCmd, streams)
 }
@@ -567,7 +576,7 @@ func resolveGitBinary(ctx context.Context, env []string) (gitBin, toolchainExecD
 // before confining, so it need not be inside the profile's allowed paths.
 func (r *Runtime) writeGitProfile(name, profile string) (path string, cleanup func(), err error) {
 	noop := func() {}
-	dir := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name), backendDir)
+	dir := config.BackendPath(r.sandboxDirForName(name))
 	f, err := os.CreateTemp(dir, "git-profile-*.sb")
 	if err != nil {
 		if f, err = os.CreateTemp("", "yoloai-git-profile-*.sb"); err != nil {
@@ -595,7 +604,7 @@ func (r *Runtime) Close() error {
 
 // DiagHint returns a seatbelt-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	logPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(instanceName), backendDir, processLogFileName)
+	logPath := filepath.Join(config.BackendPath(r.sandboxDirForName(instanceName)), processLogFileName)
 	return fmt.Sprintf("check log at %s", logPath)
 }
 
@@ -688,7 +697,7 @@ func (r *Runtime) sandboxName(instanceName string) string {
 
 // isRunning checks if the sandbox-exec process is alive.
 func (r *Runtime) isRunning(sandboxPath string) bool {
-	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	pidPath := filepath.Join(config.BackendPath(sandboxPath), pidFileName)
 	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return false
@@ -713,7 +722,7 @@ func (r *Runtime) isRunning(sandboxPath string) bool {
 // the process is fully gone before returning, preventing race conditions
 // when --replace destroys and recreates the sandbox directory.
 func (r *Runtime) killByPID(sandboxPath string) {
-	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	pidPath := filepath.Join(config.BackendPath(sandboxPath), pidFileName)
 	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return
@@ -765,7 +774,7 @@ func (r *Runtime) sandboxEnv() []string {
 
 // waitForTmux polls until the tmux session appears via the per-sandbox socket.
 func (r *Runtime) waitForTmux(ctx context.Context, sandboxPath string, procDone <-chan error) error {
-	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
+	tmuxSock := filepath.Join(config.TmuxPath(sandboxPath), tmuxSocketName)
 	deadline := time.Now().Add(30 * time.Second)
 
 	for {
@@ -813,7 +822,7 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 	}
 
 	// Run under sandbox-exec with the SBPL profile
-	profilePath := filepath.Join(sandboxPath, backendDir, profileFileName)
+	profilePath := filepath.Join(config.BackendPath(sandboxPath), profileFileName)
 	args := []string{"-f", profilePath}
 	args = append(args, cmd...)
 	c := sysexec.Command(r.execEnv, r.sandboxExecBin, args...)
@@ -839,7 +848,7 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 
 // buildTmuxCommand injects the per-sandbox socket into a tmux command.
 func (r *Runtime) buildTmuxCommand(sandboxPath string, cmd []string) *exec.Cmd {
-	tmuxSock := filepath.Join(sandboxPath, tmuxDir, tmuxSocketName)
+	tmuxSock := filepath.Join(config.TmuxPath(sandboxPath), tmuxSocketName)
 
 	// cmd[0] is "tmux", inject -S <socket> after it
 	args := []string{"-S", tmuxSock}
@@ -854,7 +863,7 @@ func (r *Runtime) buildTmuxCommand(sandboxPath string, cmd []string) *exec.Cmd {
 func (r *Runtime) patchConfigWorkingDir(sandboxPath string, mounts []runtime.MountSpec) error {
 	// Find the workdir mount: it's the first non-readonly mount whose
 	// source is under <sandboxPath>/work/
-	workPrefix := filepath.Join(sandboxPath, "work") + "/"
+	workPrefix := config.WorkBasePath(sandboxPath) + "/"
 	var copySource string
 	for _, m := range mounts {
 		if !m.ReadOnly && strings.HasPrefix(m.HostPath, workPrefix) {

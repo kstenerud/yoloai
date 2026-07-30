@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -58,11 +59,11 @@ func TestSeatbelt_CreateInspectRemove(t *testing.T) {
 	// The sandbox directory layout should now exist.
 	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), rt.sandboxName(cfg.Name))
 	require.DirExists(t, sandboxPath, "sandbox directory should be created")
-	require.DirExists(t, filepath.Join(sandboxPath, backendDir),
+	require.DirExists(t, filepath.Join(sandboxPath, config.BackendDirName),
 		"backend dir should be created")
-	require.FileExists(t, filepath.Join(sandboxPath, backendDir, profileFileName),
+	require.FileExists(t, filepath.Join(sandboxPath, config.BackendDirName, profileFileName),
 		"SBPL profile should be written")
-	require.FileExists(t, filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName),
+	require.FileExists(t, filepath.Join(sandboxPath, config.BackendDirName, seatbeltConfigFileName),
 		"instance config should be persisted")
 
 	// Inspect before Start — process is not running, but Inspect must succeed.

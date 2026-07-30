@@ -749,7 +749,7 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 func TestKillByPID_WaitsForExit(t *testing.T) {
 	// Set up a sandbox directory with a PID file
 	sandboxPath := t.TempDir()
-	backendPath := filepath.Join(sandboxPath, backendDir)
+	backendPath := filepath.Join(sandboxPath, config.BackendDirName)
 	if err := os.MkdirAll(backendPath, 0750); err != nil {
 		t.Fatal(err)
 	}
