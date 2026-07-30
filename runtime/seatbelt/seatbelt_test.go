@@ -43,8 +43,49 @@ func TestGenerateProfile_ReadOnlyMount(t *testing.T) {
 	if !strings.Contains(profile, `(allow file-read* (subpath "/path/to/src"))`) {
 		t.Error("read-only mount should produce file-read* rule")
 	}
-	if strings.Contains(profile, `file-write* (subpath "/path/to/src")`) {
-		t.Error("read-only mount should NOT produce file-write* rule")
+	// Distinguishes allow from deny on purpose: a bare `file-write* (subpath …)`
+	// substring check matched both, and since the deny landed it would report a
+	// read-only mount as writable. The contract is "no write GRANT".
+	if strings.Contains(profile, `(allow file-read* file-write* (subpath "/path/to/src"))`) {
+		t.Error("read-only mount must not produce a write grant")
+	}
+	// And the deny has to be there, or a broader grant elsewhere silently makes
+	// the mount writable — which is what it did until 2026-07-30 (DF161).
+	if !strings.Contains(profile, `(deny file-write* (subpath "/path/to/src"))`) {
+		t.Error("read-only mount must produce an explicit write deny")
+	}
+}
+
+// TestGenerateProfile_NestedMountsResolveMostSpecificLast pins the ordering rule
+// that makes nesting work in both directions under last-match-wins. Emitting all
+// denies then all allows would leave a read-only dir inside a read-write one
+// writable; the reverse grouping would leave a read-write dir inside a read-only
+// one unwritable. Only ordering by depth gets both right.
+func TestGenerateProfile_NestedMountsResolveMostSpecificLast(t *testing.T) {
+	cfg := runtime.InstanceConfig{
+		Name: "test",
+		Mounts: []runtime.MountSpec{
+			{HostPath: "/outer", ContainerPath: "/outer", ReadOnly: true},
+			{HostPath: "/outer/inner", ContainerPath: "/outer/inner"},
+			{HostPath: "/rwroot", ContainerPath: "/rwroot"},
+			{HostPath: "/rwroot/locked", ContainerPath: "/rwroot/locked", ReadOnly: true},
+		},
+	}
+	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
+
+	idx := func(rule string) int {
+		i := strings.LastIndex(profile, rule)
+		if i < 0 {
+			t.Fatalf("profile is missing %s\n%s", rule, profile)
+		}
+		return i
+	}
+
+	if idx(`(allow file-read* file-write* (subpath "/outer/inner"))`) < idx(`(deny file-write* (subpath "/outer"))`) {
+		t.Error("a read-write dir nested in a read-only one must be granted AFTER the enclosing deny")
+	}
+	if idx(`(deny file-write* (subpath "/rwroot/locked"))`) < idx(`(allow file-read* file-write* (subpath "/rwroot"))`) {
+		t.Error("a read-only dir nested in a read-write one must be denied AFTER the enclosing grant")
 	}
 }
 

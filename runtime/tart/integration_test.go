@@ -112,17 +112,13 @@ func TestTartConformance(t *testing.T) {
 			// A tart boot is a multi-GB clone (~90-118s); amortize the read-only
 			// subtests onto one shared instance (speedup plan, lever 1).
 			SharesReadOnlyInstance: true,
-			// Conformance mounts at /mnt/test — a container-centric path. On the
-			// macOS guest the root volume is read-only (the SIP-sealed system
-			// volume), so /mnt does not exist and cannot be created even as root:
-			// `sudo mkdir -p /mnt/test` fails with "Read-only file system". (Note
-			// the guest DOES have passwordless sudo — `sudo -n true` succeeds as
-			// the admin user; the setup symlinks rely on it — so sudo is not the
-			// obstacle here, the read-only rootfs is.) The failing `ln` then emits
-			// "No such file or directory" (since DF30 surfaced verbatim; it used
-			// to be mislabeled "instance not found" by mapTartError). Real mount
-			// wiring is exercised by the sandbox-level lifecycle tests.
-			SkipMounts: "conformance /mnt/test can't be created in the macOS guest: the root volume is read-only (SIP-sealed), so /mnt is absent and uncreatable even as root; same container-path assumption seatbelt skips",
+			// Mounts runs. It was skipped until 2026-07-30 because the conformance
+			// mounted at /mnt/test: on the macOS guest the root volume is
+			// SIP-sealed, so /mnt does not exist and cannot be created even as root
+			// (`sudo mkdir -p /mnt/test` → "Read-only file system"; the guest does
+			// have passwordless sudo, so sudo was never the obstacle). The suite now
+			// mounts under /tmp and resolves the guest path through
+			// ResolveGuestMountPath, which is what tart's re-rooting needs (DF161).
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 				if cfg.ImageRef == "" {
 					cfg.ImageRef = "yoloai-base"

@@ -70,6 +70,12 @@ finding or decision first, and lands here only if it should block the release.
   harness turns a slow teardown into a crash (harness half fixed; the timeout is not)
 - [DF159](design/findings-unresolved.md) — `exec start: ttrpc: closed` on containerd-vmenhanced
   during `apply`, once in 38 runs (filed, not fixed — listed because its docs correction ships)
+- [sandbox-share-tiering.md](design/plans/sandbox-share-tiering.md) — sandbox directory share
+  tiering (host-only / read-only / read-write), closing DF136 and DF148
+- [DF161](design/findings-resolved.md) — mount conformance was skipped on the only two backends
+  whose mounts are unusual, over one hardcoded path
+- [DF162](design/findings-resolved.md) — seatbelt's `:ro` mounts were not read-only whenever a
+  broader rule granted write **(the second breaking change: `:ro` is now enforced)**
 
 ## Candidates — undecided
 

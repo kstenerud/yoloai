@@ -67,20 +67,84 @@ func TestSeatbelt_HostTierIsUnwritableFromInside(t *testing.T) {
 	assert.NoError(t, err, "the deny must not extend past the host tier — the rest of the sandbox dir stays writable")
 }
 
+// TestSeatbelt_ReadOnlyMountHoldsUnderABroaderGrant drives the user-facing
+// `--dir <path>:ro` path (buildSingleAuxDirMount → MountSpec{ReadOnly:true} →
+// GenerateProfile) with a host path that sits inside one of the profile's own
+// broad write grants — the per-user temp tree, which tempPaths() grants
+// read+write wholesale.
+//
+// Seatbelt expresses a read-only mount as the *absence* of a write grant, and an
+// allow-read never revokes a write allowed by a broader rule, so this is the case
+// where ":ro" silently is not. Every other backend enforces read-only with a real
+// read-only mount and is unconditional (DF161).
+func TestSeatbelt_ReadOnlyMountHoldsUnderABroaderGrant(t *testing.T) {
+	rt, ctx := seatbeltSetup(t)
+
+	// t.TempDir() is under /private/var/folders — inside tempPaths()' grant.
+	hostDir := t.TempDir()
+	victim := filepath.Join(hostDir, "readonly.txt")
+	require.NoError(t, os.WriteFile(victim, []byte("original"), 0o600))
+
+	name := "yoloai-test-ro-mount-grant"
+	_ = rt.Remove(ctx, name) // evict any stale leftover from a failed run
+	require.NoError(t, rt.Create(ctx, runtime.InstanceConfig{
+		Name:   name,
+		Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: hostDir, ReadOnly: true}},
+	}))
+	t.Cleanup(func() { _ = rt.Remove(context.Background(), name) })
+	require.NoError(t, rt.Start(ctx, name))
+
+	_, err := rt.Exec(ctx, name, []string{"sh", "-c", "echo tampered > " + victim}, "")
+	assert.Error(t, err, "a write to a :ro mount must fail even when a broader rule grants write over the same path")
+
+	after, readErr := os.ReadFile(victim) //nolint:gosec // G304: the test's own fixture path
+	require.NoError(t, readErr)
+	assert.Equal(t, "original", string(after), "the read-only mount's contents must be unchanged")
+}
+
+// TestSeatbelt_NestedMountsEnforceMostSpecific checks the ordering rule against
+// the kernel rather than against the profile text. The unit test pins where the
+// rules land in the file; this pins that SBPL resolves overlapping subpath rules
+// the way that ordering assumes — most specific wins — in both nesting
+// directions. They are separate failures: the text could be ordered correctly and
+// the resolution still not be positional.
+func TestSeatbelt_NestedMountsEnforceMostSpecific(t *testing.T) {
+	rt, ctx := seatbeltSetup(t)
+
+	root := t.TempDir()
+	roOuter := filepath.Join(root, "outer")
+	rwInner := filepath.Join(roOuter, "inner")
+	require.NoError(t, os.MkdirAll(rwInner, 0o750))
+
+	name := "yoloai-test-nested-mounts"
+	_ = rt.Remove(ctx, name) // evict any stale leftover from a failed run
+	require.NoError(t, rt.Create(ctx, runtime.InstanceConfig{
+		Name: name,
+		Mounts: []runtime.MountSpec{
+			{HostPath: roOuter, ContainerPath: roOuter, ReadOnly: true},
+			{HostPath: rwInner, ContainerPath: rwInner},
+		},
+	}))
+	t.Cleanup(func() { _ = rt.Remove(context.Background(), name) })
+	require.NoError(t, rt.Start(ctx, name))
+
+	_, err := rt.Exec(ctx, name, []string{"sh", "-c", "echo blocked > " + filepath.Join(roOuter, "x.txt")}, "")
+	assert.Error(t, err, "the read-only outer dir must stay read-only")
+
+	_, err = rt.Exec(ctx, name, []string{"sh", "-c", "echo allowed > " + filepath.Join(rwInner, "x.txt")}, "")
+	assert.NoError(t, err, "the read-write dir nested inside it must stay writable")
+}
+
 func TestSeatbeltConformance(t *testing.T) {
 	rt, ctx := seatbeltSetup(t)
 	runtimetest.RunInterfaceConformance(t, func(t *testing.T) runtimetest.InterfaceBackend {
 		return runtimetest.InterfaceBackend{
 			Runtime: rt,
 			Ctx:     ctx,
-			// The conformance mounts at /mnt/test, but seatbelt runs on the host
-			// where /mnt isn't writable without root — so the container→host
-			// symlink can't be created and /mnt/test doesn't exist. This is the
-			// conformance's container-path assumption, not a seatbelt mount-
-			// capability gap: the SBPL RW/RO grant generation is unit-tested
-			// (TestGenerateProfile_{ReadOnly,ReadWrite}Mount), and real mounts at
-			// writable paths run in the smoke matrix.
-			SkipMounts: "conformance mounts at /mnt/test; seatbelt is host-side and /mnt isn't writable without root (grants are unit-tested via GenerateProfile_*Mount)",
+			// Mounts runs. It was skipped until 2026-07-30 on the conformance's
+			// /mnt/test assumption — seatbelt is host-side and /mnt is not writable
+			// without root, so the container→host symlink was never created. The
+			// suite now mounts under /tmp, which the host can create (DF161).
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 				_ = rt.Remove(ctx, cfg.Name) // evict any stale leftover from a failed run
 				require.NoError(t, rt.Create(ctx, cfg))

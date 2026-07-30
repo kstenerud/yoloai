@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os/exec"
 	"path/filepath"
+	"slices"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -30,31 +31,69 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	writeProfileHomeDir(&b, homeDir)
 	writeProfileNetwork(&b, cfg.NetworkMode)
 	writeProfileDevices(&b)
-	writeProfileHostTierDeny(&b, sandboxDir)
+	writeProfileTrailingRules(&b, sandboxDir, cfg.Mounts)
 
 	return b.String()
 }
 
-// writeProfileHostTierDeny denies all writes to the sandbox's host-only tier.
+// profileRule is one trailing filesystem rule, carried with its path so the
+// block can be ordered by specificity before being written.
+type profileRule struct {
+	path  string
+	allow bool
+}
+
+// writeProfileTrailingRules emits every rule that has to win over the grants
+// above it. SBPL is last-match-wins, so for the paths named here this block —
+// not the order of the writers above — is what actually decides write access.
 //
-// It is emitted LAST on purpose. SBPL is last-match-wins, and several earlier
-// rules grant write over paths that contain the tier — the broad sandbox-dir
-// allow always, and the temp-dir allow whenever the sandbox lives under a temp
-// path (every test does). A deny placed before them is silently overridden.
+// It exists because a read-only mount is expressed above as an allow-read and
+// nothing else, and an allow-read does not revoke a write granted by a broader
+// rule. Broader rules abound: the temp tree, the Xcode/SwiftPM caches, the
+// sandbox dir, any enclosing read-write mount. Without an explicit deny,
+// `--dir <path>:ro` is silently read-write whenever the path falls inside one of
+// them — measured, not theorised (DF161). Every other backend gets this for free
+// from a real read-only mount; seatbelt is the one that has to say it.
 //
-// A subpath deny, not one rule per file: the host tier is a *directory*, so this
-// single rule covers every host-only record that exists today and every one
-// added later. That is what demotes the earlier objection to this approach — it
-// was a denylist only while the tier was a scatter of files in a flat dir.
+// Rules are ordered by path depth, shallowest first, so the **most specific**
+// rule is the last to match. That is what makes nesting behave in both
+// directions: a read-write dir inside a read-only one stays writable, and a
+// read-only dir inside a read-write one stays read-only. Emitting all denies
+// then all allows (or the reverse) would get one of those two backwards.
 //
-// The variants are resolved from the parent rather than from the tier itself:
-// resolvePathVariants leans on EvalSymlinks, which fails on a path that does not
-// exist yet, and the tier dir is created lazily (config.EnsureHostTier). Resolving
-// sandboxDir — which always exists by the time a profile is generated — and then
-// appending the tier name yields both /var/… and /private/var/… spellings whether
-// or not the directory is there, so the deny cannot be dodged via the unresolved
-// spelling (DF136).
-func writeProfileHostTierDeny(b *strings.Builder, sandboxDir string) {
+// The host-only tier is written after the sorted block and is unconditional:
+// nothing legitimately writes there, so it outranks even the sandbox-dir grant
+// it sits inside (DF136).
+func writeProfileTrailingRules(b *strings.Builder, sandboxDir string, mounts []runtime.MountSpec) {
+	var rules []profileRule
+	add := func(path string, allow bool) {
+		for _, variant := range resolvePathVariants(path) {
+			rules = append(rules, profileRule{path: variant, allow: allow})
+		}
+	}
+	for _, m := range mounts {
+		if m.HostPath == "" {
+			continue
+		}
+		add(m.HostPath, !m.ReadOnly)
+	}
+	// The sandbox dir participates in the same ordering: a `--dir ~:ro` encloses
+	// it, and yoloAI's own state must stay writable through that.
+	add(sandboxDir, true)
+
+	slices.SortStableFunc(rules, func(x, y profileRule) int {
+		return strings.Count(x.path, string(filepath.Separator)) - strings.Count(y.path, string(filepath.Separator))
+	})
+
+	b.WriteString("; Trailing rules — last-match-wins, most specific last\n")
+	for _, r := range rules {
+		if r.allow {
+			fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", r.path)
+		} else {
+			fmt.Fprintf(b, "(deny file-write* (subpath %q))\n", r.path)
+		}
+	}
+
 	b.WriteString("; Host-only tier: never writable from inside the sandbox (DF136)\n")
 	for _, p := range resolvePathVariants(sandboxDir) {
 		fmt.Fprintf(b, "(deny file-write* (subpath %q))\n", filepath.Join(p, config.HostTierName))

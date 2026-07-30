@@ -23,6 +23,29 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### On Seatbelt, a `:ro` directory is now genuinely read-only
+
+**Previous behavior:** `--dir <path>:ro` on the Seatbelt backend granted the agent
+read *and write* whenever `<path>` fell inside a broader rule that granted write —
+`/tmp`, `/private/tmp`, the per-user temp tree (`/private/var/folders`),
+`~/Library/Caches/org.swift.swiftpm`, `~/Library/Developer/Xcode`, the sandbox
+directory, or any enclosing `:rw` directory. Elsewhere `:ro` behaved correctly, so
+the difference was invisible unless you tested it on one of those paths. Every other
+backend was, and is, unaffected.
+
+**New behavior:** the generated SBPL profile emits an explicit write deny for each
+read-only directory, so `:ro` is enforced regardless of what else the profile grants.
+Nesting still resolves most-specific-first: a `:rw` directory inside a `:ro` one stays
+writable, and a `:ro` directory inside a `:rw` one is now genuinely read-only.
+
+**Why this is listed as a break:** writes that previously succeeded now fail. If a
+workflow depended — knowingly or not — on writing into a `:ro` directory on one of the
+paths above, it stops working. The old behavior was a defect (DF162), but it was
+observable, so the change is called out rather than filed silently as a fix.
+
+**If you need write access:** declare the directory `:rw`, which is what the previous
+behavior was silently giving you.
+
 ### The sandbox image ships Node.js 22 LTS instead of Node.js 20
 
 **Previous behavior:** the base image installed Node.js 20 LTS, so every sandbox ran

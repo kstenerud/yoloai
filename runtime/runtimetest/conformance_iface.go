@@ -66,6 +66,19 @@ type InterfaceBackend struct {
 	MaxConcurrentInstances int
 }
 
+// mountTargetBase is where the mount section asks for its bind, with a per-subtest
+// suffix appended.
+//
+// Under /tmp rather than /mnt, and the choice is load-bearing rather than
+// cosmetic: /mnt is absent and uncreatable on a macOS guest (SIP-sealed root
+// volume) and not writable on a macOS host without root, so it excluded the two
+// backends whose mount semantics differ most from the container norm — the exact
+// population the suite exists to compare. /tmp is writable on a macOS host,
+// present in a macOS guest, and present in every container image. The section is
+// not about where a mount lands, so it has no reason to insist on a path only
+// Linux containers can honour (DF161).
+const mountTargetBase = "/tmp/yoloai-conformance-mnt"
+
 // instanceGate bounds how many instances boot concurrently. A nil tokens channel
 // means unbounded. It is the one place the per-backend concurrency policy — a
 // static cap, or tart's dynamic free-slot census — turns into a limit.
@@ -421,12 +434,32 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 			t.Skip(b.SkipMounts)
 		}
 
+		// Where the guest sees a mount is the backend's answer, not the suite's:
+		// tart re-roots every mount under /Users/admin/host/... So ask, through the
+		// same interface production asks through (setupAuxDir does this so the
+		// recorded MountPath is one that exists in the guest). Exec'ing the
+		// requested container path instead would test the suite's assumption about
+		// the backend rather than the backend. It is the identity for /tmp on every
+		// backend today — and deliberately still routed through the call, because a
+		// suite that certifies mount behaviour while bypassing the mount-path
+		// interface is how this drifted in the first place (DF161).
+		guestPath := func(containerPath string) string {
+			return runtime.ResolveGuestMountPathFor(b.Runtime, containerPath)
+		}
+
+		// Per-subtest targets: a host-side backend materialises a mount as a
+		// symlink at this literal path on the host, and seatbelt's mountSymlinks
+		// skips a target that already exists — so two parallel subtests sharing one
+		// path would leave the second silently unmounted, passing for the wrong
+		// reason or failing for an unrelated one.
+		rwTarget, roTarget := mountTargetBase+"-rw", mountTargetBase+"-ro"
+
 		t.Run("ReadWrite", func(t *testing.T) {
 			hostDir := t.TempDir()
 			name := boot(t, b, runtime.InstanceConfig{
-				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: false}},
+				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: rwTarget, ReadOnly: false}},
 			})
-			_, err := b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo hello > /mnt/test/output.txt"}, "")
+			_, err := b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo hello > " + guestPath(rwTarget) + "/output.txt"}, "")
 			require.NoError(t, err)
 			content, err := os.ReadFile(filepath.Join(hostDir, "output.txt")) //nolint:gosec // G304: test suite writes under t.TempDir(); no sudo chown concern
 			require.NoError(t, err)
@@ -437,13 +470,17 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 			hostDir := t.TempDir()
 			require.NoError(t, os.WriteFile(filepath.Join(hostDir, "readonly.txt"), []byte("original"), 0o600)) //nolint:forbidigo // test suite writes under t.TempDir(); no sudo chown concern
 			name := boot(t, b, runtime.InstanceConfig{
-				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: true}},
+				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: roTarget, ReadOnly: true}},
 			})
-			res, err := b.Runtime.Exec(b.Ctx, name, []string{"cat", "/mnt/test/readonly.txt"}, "")
+			res, err := b.Runtime.Exec(b.Ctx, name, []string{"cat", guestPath(roTarget) + "/readonly.txt"}, "")
 			require.NoError(t, err)
 			assert.Equal(t, "original", res.Stdout)
 
-			_, err = b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo modified > /mnt/test/readonly.txt"}, "")
+			// Note for a host-side backend: hostDir is under the per-user temp tree,
+			// which seatbelt's profile grants read+write wholesale. This assertion
+			// therefore only holds because a read-only mount now emits an explicit
+			// deny; it was the failure that exposed that it did not (DF161).
+			_, err = b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo modified > " + guestPath(roTarget) + "/readonly.txt"}, "")
 			assert.Error(t, err, "write to a read-only mount must fail")
 		})
 	})
