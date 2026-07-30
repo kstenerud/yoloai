@@ -106,7 +106,11 @@ the newest and belongs about third.
    holding it. A resolved finding is archaeology: `*-resolved.md` is append-only history that
    nothing sweeps and no router points at, so a rule living only there is a rule the next
    contributor cannot find. Both conventions PR #44 broke were sitting in `findings-resolved.md`
-   and nowhere else (DF151).
+   and nowhere else (DF151). **Before fixing one, grep for its shape** — the same *kind* of defect
+   on a sibling path or another backend. Three of a kind means the architecture is generating them
+   and the edge is a symptom; and a sibling path may already solve it, making your fix a second
+   mechanism for one job. Naming that in the finding is mandatory; acting on it is a decision
+   (GEN §18).
 8. **An idea worth building is a plan file** in `design/plans/` — not a bullet in a README, which
    is where a backlog goes to be invisible. Each carries a metadata list under its title:
    `- **Status:**` (`UNSPECIFIED` no design yet / `PLANNED` designed / `IN-PROGRESS` partly built /
