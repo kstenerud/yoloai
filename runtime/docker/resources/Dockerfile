@@ -128,25 +128,48 @@ RUN curl --retry 5 --retry-delay 2 --retry-all-errors --proto '=https' --tlsv1.2
 # hadolint ignore=SC2016
 RUN echo 'export PATH="/usr/local/cargo/bin:$PATH"' > /etc/profile.d/cargo.sh
 
-# AI coding agents — versions intentionally unpinned; agents must run at
-# current versions to function correctly with their respective APIs.
+# AI coding agents — a MINIMUM version, with the maximum left open, so the
+# original requirement still holds: agents' server-side APIs evolve continuously
+# and the CLI clients must track, and an exact pin would lock us to a client that
+# fails against the live API within weeks. The floor adds the other half — yoloAI
+# drives these CLIs by hardcoded flags (internal/agent/agent.go), so it needs to
+# be able to say which versions those flags exist in (DF158).
+#
+# Each floor is the version this repo has actually run against, so it is a tested
+# low-water mark rather than an invented one. RAISE ONE ONLY when yoloAI starts
+# depending on something newer, and say why in the commit — the number cannot
+# carry that itself. Raising any floor edits this Dockerfile, which changes
+# buildInputsChecksum, which rebuilds the base and every profile image built on
+# it; that is the intended mechanism, and the reason no separate cache-busting
+# marker is needed.
+#
+# `>=X.Y.Z` does NOT simply mean "latest". npm installs the newest version whose
+# `engines` the image satisfies, so a package that raises its Node requirement
+# caps here silently — claude-code is frozen at 2.1.197 because 2.1.198 onward
+# require Node >=22 and NODE_MAJOR is 20 (DF158). Worse, raising a floor PAST such
+# a boundary does not fail: npm emits EBADENGINE as a warning (engine-strict is
+# false) and installs an unsupported combination that starts and then misbehaves
+# somewhere unattributable. Before raising any floor, check `npm view <pkg>@<ver>
+# engines.node` against NODE_MAJOR.
+#
+# THE QUOTES ARE LOAD-BEARING. Unquoted, `sh` reads `>=2.1.197` as a redirection:
+# it creates a file named `=2.1.197`, hands npm the bare package name, and
+# SUCCEEDS — installing latest against a floor that enforces nothing, with no
+# error and no trace but a stray file. TestDockerfile_AgentInstallsCarryAQuotedFloor
+# pins this. Verified directly, 2026-07-30.
+#
 # Claude Code via npm (not native binary — native bundles Bun which ignores
-# proxy env vars and auto-updates; see docs/dev/research/implementation.md)
+# proxy env vars and auto-updates; see docs/dev/research/implementation.md).
+# The claude "fullscreen renderer" upsell that previously stalled smokes is
+# handled at the agent layer — settings.tui="default" in agent.go, DF52.
 ENV DISABLE_INSTALLATION_CHECKS=1
-# DL3016 (pin npm versions) suppressed: see the comment above — agents'
-# server-side APIs evolve continuously and the CLI clients must track. A pin
-# would lock us to a stale client that fails against the live API within weeks.
-# (The claude "fullscreen renderer" upsell that previously stalled smokes is now
-# handled at the agent layer by pinning the classic renderer — settings.tui=
-# "default" in internal/agent/agent.go — so claude stays unpinned. DF52.)
 # Retry-wrapped (like the golangci-lint install above): a transient npm-registry
 # hiccup otherwise fails the whole multi-minute base build with no recovery.
-# hadolint ignore=DL3016
 RUN n=0; until [ "$n" -ge 5 ]; do \
-      npm install -g @anthropic-ai/claude-code \
-        && npm install -g @google/gemini-cli \
-        && npm install -g @openai/codex \
-        && npm install -g opencode-ai && break; \
+      npm install -g "@anthropic-ai/claude-code@>=2.1.197" \
+        && npm install -g "@google/gemini-cli@>=0.53.0" \
+        && npm install -g "@openai/codex@>=0.146.0" \
+        && npm install -g "opencode-ai@>=1.18.9" && break; \
       n=$((n+1)); echo "npm install failed (attempt $n/5); retrying in 5s"; sleep 5; \
     done; \
     [ "$n" -lt 5 ] || { echo "npm install failed after 5 attempts"; exit 1; }
@@ -162,7 +185,7 @@ RUN n=0; until [ "$n" -ge 5 ]; do \
 RUN curl --retry 5 --retry-delay 2 --retry-all-errors -LsSf https://astral.sh/uv/install.sh \
       | env UV_INSTALL_DIR=/usr/local/bin sh \
     && UV_TOOL_DIR=/opt/uv/tools UV_TOOL_BIN_DIR=/usr/local/bin UV_PYTHON_INSTALL_DIR=/opt/uv/python \
-       uv tool install --python 3.12 aider-chat
+       uv tool install --python 3.12 "aider-chat>=0.86.2"
 
 # VS Code CLI for Remote Tunnels (code tunnel)
 RUN ARCH=$(dpkg --print-architecture | sed 's/amd64/x64/') \
