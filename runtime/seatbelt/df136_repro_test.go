@@ -64,7 +64,7 @@ func TestDF136_ConfinedAgentCannotRedirectApplyTarget(t *testing.T) {
 	require.NoError(t, os.MkdirAll(home, 0o750))
 
 	sandboxDir := filepath.Join(root, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, config.BackendDirName), 0o750))
+	require.NoError(t, os.MkdirAll(config.BackendPath(sandboxDir), 0o750))
 
 	// legitDir is where the sandbox was legitimately created against; victimDir
 	// is an unrelated host path the agent has no business writing (stand-in for

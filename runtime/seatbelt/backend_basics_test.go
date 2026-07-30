@@ -59,11 +59,11 @@ func TestSeatbelt_CreateInspectRemove(t *testing.T) {
 	// The sandbox directory layout should now exist.
 	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), rt.sandboxName(cfg.Name))
 	require.DirExists(t, sandboxPath, "sandbox directory should be created")
-	require.DirExists(t, filepath.Join(sandboxPath, config.BackendDirName),
+	require.DirExists(t, config.BackendPath(sandboxPath),
 		"backend dir should be created")
-	require.FileExists(t, filepath.Join(sandboxPath, config.BackendDirName, profileFileName),
+	require.FileExists(t, filepath.Join(config.BackendPath(sandboxPath), profileFileName),
 		"SBPL profile should be written")
-	require.FileExists(t, filepath.Join(sandboxPath, config.BackendDirName, seatbeltConfigFileName),
+	require.FileExists(t, filepath.Join(config.BackendPath(sandboxPath), seatbeltConfigFileName),
 		"instance config should be persisted")
 
 	// Inspect before Start — process is not running, but Inspect must succeed.

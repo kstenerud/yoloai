@@ -224,7 +224,7 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	}
 
 	// Check context.md exists and has content
-	contextData, err := os.ReadFile(filepath.Join(sandboxDir, "context.md")) //nolint:gosec // G304: test helper path
+	contextData, err := os.ReadFile(config.ContextPath(sandboxDir))
 	if err != nil {
 		t.Fatalf("read context.md: %v", err)
 	}
@@ -295,7 +295,7 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	}
 
 	// context.md should exist
-	if _, err := os.Stat(filepath.Join(sandboxDir, "context.md")); err != nil {
+	if _, err := os.Stat(config.ContextPath(sandboxDir)); err != nil {
 		t.Error("context.md should be created")
 	}
 

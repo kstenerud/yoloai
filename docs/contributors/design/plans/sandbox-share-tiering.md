@@ -29,7 +29,7 @@ is `internal/config/sandbox_layout.go` rather than `store/paths.go` (see sequenc
 
 | Tier | Contents |
 | --- | --- |
-| `host/` | `environment.json`, `sandbox-state.json`, `agent.json`, `netpolicy.json`, `backend/` (SBPL profile, pids, VM/CNI state), `network-diag.txt` |
+| `host/` | `environment.json`, `sandbox-state.json`, `agent.json`, `netpolicy.json`, `backend/` (SBPL profile, pids, VM/CNI state), `network-diag.txt`, `injector.json`/`injector.log`/`injector-token`, `context.md` (host-side reference copy) |
 | `ro/` | `runtime-config.json`, `bin/` (guest-exec'd scripts), `prompt.txt`/`resume-prompt.txt`, `machine-id`, `home-seed/`, `secrets/` (ephemeral, guest-read) |
 | `rw/` | `logs/` (+ the `.secrets-consumed`/`.substrate-ready` markers), `agent-runtime/`, `agent-status.json`, `files/`, `cache/`, `home/`, `work/`, `tmux/`, `setup.log`, `vscode-cli/`, the create-done marker |
 
@@ -50,8 +50,7 @@ the same bytes on every backend; ~20 fragile path-joins stay untouched).
 
 **Six files the table above missed** (found 2026-07-27 by funnelling every ad-hoc path joiner
 through `internal/config/sandbox_layout.go` — the table was written from the host+guest *access*
-maps, which never enumerated these). Each is classified from what the code already says about it,
-but none has been reviewed against the design:
+maps, which never enumerated these).
 
 **Reviewed against the code 2026-07-30 — two of the six were wrong.** Each row below now cites what
 was checked (every consumer of the path builder, and whether the file appears in any `MountSpec`),
@@ -62,7 +61,7 @@ not what a comment says about it.
 | `injector.json` (pid/addr record) | `host/` | ✅ read only by the host-orphan sweep (`broker.LoadRecord`); in no `MountSpec` |
 | `injector.log` | `host/` | ✅ opened by the host-side injector (`internal/broker/host.go:179`); in no `MountSpec` |
 | `injector-token` | `host/` | ✅ and load-bearing — `PlaceholderToken`'s docstring: *"lives host-side (0600, never bind-mounted), so a co-resident container cannot learn another sandbox's token"*. The guest gets the value delivered at launch, never the file |
-| `context.md` | ~~`ro/`~~ → **`host/`** | ❌ **was wrong.** `ContextFilePath` has exactly one consumer and it is a *write* (`envsetup/context.go:169`, commented "reference copy"). Nothing reads it, nothing mounts it. The "read by the agent" evidence conflated it with the agent's **native** context file, which the same function writes two lines later into `agent-runtime/` — a different file, already `rw/` |
+| `context.md` | **`host/`** (moved 2026-07-30) | ❌ **was wrong.** `ContextFilePath` has exactly one consumer and it is a *write* (`envsetup/context.go:169`, commented "reference copy"). Nothing reads it, nothing mounts it. The "read by the agent" evidence conflated it with the agent's **native** context file, which the same function writes two lines later into `agent-runtime/` — a different file, already `rw/` |
 | `log.txt` (containerd) | ~~`rw/`~~ → **none; it is dead** | ❌ **was wrong, and worse than misfiled.** No writer exists anywhere — not in Go, not in the guest Python — and it is in no `MountSpec`; the task is created with null IO. One consumer, a read, in `containerd.Logs()`, which therefore always returns "". Three comments call it a "bind-mounted file" the guest writes. See [DF163](../findings-unresolved.md) |
 | `lifecycle-on-create-done` | `rw/` | ✅ written by the **guest** Python on-create hook, `os.Stat`ed by the host (`syncLifecycleMarker`) — so the guest genuinely needs write |
 | `bin/` (launch-delivered scripts) | `ro/` | ✅ host writes on every launch, guest execs; returns its own read-only `MountSpec` (`deliverRuntimeScripts`) |
@@ -93,7 +92,15 @@ Re-run the funnel grep after every rebase; it is the only thing that finds them.
 **Two judgment calls (owner-approved):**
 - `tmux/` → `rw` wholesale: it holds a runtime-created socket (needs write); `tmux.conf` rides along
   writable — low-risk, the agent's own multiplexer running as the agent, no privilege boundary.
-- the seatbelt process-log moves from `backend/` to `rw/logs/`, so `backend/` is cleanly host-only.
+- ~~the seatbelt process-log moves from `backend/` to `rw/logs/`, so `backend/` is cleanly
+  host-only.~~ **Unnecessary — checked on hardware 2026-07-30, and `backend/` is host-only with the
+  log still in it.** The concern was that a sandboxed process writing `stderr.log` inside `host/`
+  would be blocked by the host-tier deny. It is not: the **host** opens the file and assigns it as
+  the child's stdio (`cmd.Stderr = logFile`), so the confined process inherits an open descriptor
+  and never opens that path. SBPL denies path operations, not inherited fds. Verified by moving
+  `backend/` into `host/` and running the full seatbelt integration suite plus the DF136 guard
+  green. Worth keeping as a specimen: the judgment call was sound reasoning about SBPL and wrong
+  about *which* operation the guest performs — a question the code answers in one line.
 
 **Migration:** existing sandboxes are flat → schema bump **v5→v6** with a `TierLayout` migrator
 following the v3→v4 overlay-flatten precedent (scratch on the same filesystem, atomic promotion,
@@ -113,6 +120,12 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    step-4 migrator lands, **an existing sandbox reads as missing**, since its records are still at
    the flat paths. `config.EnsureHostTier` makes each host-tier writer create its own tier, so
    nothing depends on the creator having made it.
+2c. **The rest of the host tier — landed 2026-07-30.** `network-diag.txt`, `backend/`, the three
+   injector files and `context.md` join the four metadata records inside `host/`. A builder-only
+   change, which is the whole return on the funnel: the backends follow without being touched.
+   Tier membership is now pinned literally in one place (`internal/config/sandbox_tier_test.go`)
+   rather than implied by scattered fixtures, since every other test goes *through* the builders
+   and so would follow a silent move.
 2b. **The seatbelt host-tier deny — landed 2026-07-30.** One `(deny file-write* (subpath …/host))`,
    emitted last, kernel-verified. Closes the seatbelt half of DF136 now rather than at step 3, and
    is a permanent backstop rather than a stopgap; see § The seatbelt host-tier deny.

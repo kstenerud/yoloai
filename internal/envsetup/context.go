@@ -8,6 +8,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/runtime"
@@ -167,6 +168,9 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, spec EnvSpec)
 
 	// Write context.md at sandbox root (reference copy)
 	contextPath := store.ContextFilePath(sandboxDir)
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("ensure host tier: %w", err)
+	}
 	if err := fileutil.WriteFile(contextPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("write context.md: %w", err)
 	}

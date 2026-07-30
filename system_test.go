@@ -123,11 +123,11 @@ func TestLiveInjectorPIDs_ProtectsOnlyLiveSandboxes(t *testing.T) {
 
 	good := mkSandboxDir(t, c, "good")
 	writeEnv(t, good, `{"version":3}`)
-	require.NoError(t, os.WriteFile(filepath.Join(good, "injector.json"), []byte(`{"pid":111,"addr":"127.0.0.1:1"}`), 0o600))
+	require.NoError(t, os.WriteFile(config.InjectorRecordPath(good), []byte(`{"pid":111,"addr":"127.0.0.1:1"}`), 0o600))
 
 	broken := mkSandboxDir(t, c, "broken")
 	writeEnv(t, broken, `{not json`)
-	require.NoError(t, os.WriteFile(filepath.Join(broken, "injector.json"), []byte(`{"pid":222,"addr":"127.0.0.1:2"}`), 0o600))
+	require.NoError(t, os.WriteFile(config.InjectorRecordPath(broken), []byte(`{"pid":222,"addr":"127.0.0.1:2"}`), 0o600))
 
 	keep := c.liveInjectorPIDs()
 

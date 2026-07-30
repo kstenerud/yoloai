@@ -95,6 +95,7 @@ func captureNetworkDiagnostics(ctx context.Context, r *Runtime, name string, tas
 		"ls", "-la", "/run/cni/networks/yoloai/")
 
 	outPath := config.NetworkDiagPath(sandboxDir)
+	_ = config.EnsureHostTier(sandboxDir) // best-effort: a diagnostic dump, warned about below on failure
 	if err := fileutil.WriteFile(outPath, buf.Bytes(), 0o644); err != nil {
 		slog.Warn("failed to write network-diag.txt",
 			"event", "sandbox.network.diag.write_error",

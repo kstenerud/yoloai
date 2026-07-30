@@ -176,6 +176,7 @@ func (h *SidecarHost) spawn(spec InjectorSpec, bindPort string) (string, error) 
 	}
 	cmd.Stdin = inR
 	cmd.Stdout = outW
+	_ = config.EnsureHostTier(spec.SandboxDir) // best-effort: the log is a diagnostic, not a dependency
 	if logf, lerr := fileutil.OpenFile(config.InjectorLogPath(spec.SandboxDir), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); lerr == nil {
 		cmd.Stderr = logf
 		defer func() { _ = logf.Close() }()
@@ -279,6 +280,9 @@ func PlaceholderToken(sandboxDir string) (string, error) {
 		return "", fmt.Errorf("broker: generate placeholder token: %w", err)
 	}
 	tok := hex.EncodeToString(buf)
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return "", fmt.Errorf("broker: ensure host tier: %w", err)
+	}
 	if err := fileutil.WriteFile(path, []byte(tok), 0600); err != nil {
 		return "", fmt.Errorf("broker: persist %s: %w", placeholderTokenFile, err)
 	}
@@ -311,6 +315,9 @@ func saveRecord(sandboxDir string, rec *InjectorRecord) error {
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return fmt.Errorf("broker: marshal %s: %w", injectorRecordFile, err)
+	}
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("broker: ensure host tier: %w", err)
 	}
 	if err := fileutil.WriteFile(recordPath(sandboxDir), data, 0600); err != nil {
 		return fmt.Errorf("broker: write %s: %w", injectorRecordFile, err)

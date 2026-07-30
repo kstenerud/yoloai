@@ -125,29 +125,29 @@ func NetpolicyPath(sandboxDir string) string {
 
 // NetworkDiagPath returns the path to network-diag.txt within a sandbox.
 func NetworkDiagPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, NetworkDiagFileName)
+	return filepath.Join(HostTierDir(sandboxDir), NetworkDiagFileName)
 }
 
 // BackendPath returns the backend-specific state directory within a sandbox
 // (SBPL profile, pids, VM/CNI state).
 func BackendPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, BackendDirName)
+	return filepath.Join(HostTierDir(sandboxDir), BackendDirName)
 }
 
 // InjectorRecordPath returns the path to the injector's pid/addr record.
 func InjectorRecordPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, InjectorRecordFileName)
+	return filepath.Join(HostTierDir(sandboxDir), InjectorRecordFileName)
 }
 
 // InjectorLogPath returns the path to the injector's host-side log.
 func InjectorLogPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, InjectorLogFileName)
+	return filepath.Join(HostTierDir(sandboxDir), InjectorLogFileName)
 }
 
 // InjectorTokenPath returns the path to the sandbox's injector placeholder
 // token.
 func InjectorTokenPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, InjectorTokenFileName)
+	return filepath.Join(HostTierDir(sandboxDir), InjectorTokenFileName)
 }
 
 // Read-only-tier paths. The guest reads these; only the host writes them.
@@ -251,7 +251,7 @@ func ContainerLogPath(sandboxDir string) string {
 
 // ContextPath returns the path to context.md within a sandbox.
 func ContextPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, ContextFileName)
+	return filepath.Join(HostTierDir(sandboxDir), ContextFileName)
 }
 
 // CreateDoneMarkerPath returns the path to the on-create-completed marker.
