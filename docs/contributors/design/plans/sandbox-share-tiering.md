@@ -114,7 +114,15 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    read-only mount and is unconditional. The two backends are converging on one invariant by
    different mechanisms, and only one of them is self-enforcing.
 4. The v6 `TierLayout` migrator.
-5. Tests on real docker/tart/seatbelt; the DF136/DF148 reproductions flip to "rejected".
+5. **The guarantee is a conformance case, not per-backend tests.** The `runtimetest` mount section
+   now runs on all six backends (DF161, landed 2026-07-30), so the tier invariant has a home no
+   fake can satisfy: assert *from inside the guest* that `host/` is unreachable and that `ro/` is
+   readable and not writable. Before writing it, name the backends that reach the assertion and
+   confirm the intersection is non-empty (rule 10, A15) — a capability-guarded check whose guard
+   nothing passes is six green vacuous tests. Then DF136 and DF148 drain: DF136's seatbelt half
+   already has (step 2b), its tart half waits on step 3. The invariant itself graduates into
+   `architecture/host-layout.md`; a rule that lives only in a resolved finding is unreachable
+   (D128 (3), DF151).
 
 ## Problem
 
@@ -174,14 +182,25 @@ Notes:
 
 **Docker** — already correct. No change; it is the reference the other two converge on.
 
-**Seatbelt** — file-granular (SBPL), so it can express all three tiers directly. Two options:
-- *Allowlist (target):* replace the broad `(allow file-read* file-write* (subpath sandboxDir))` with
-  explicit per-item rules — read-write on the read-write tier, read-only on the read-only tier, and
-  *no rule* for the host-only tier (default-deny covers it). Safe-by-default: a new host-only file is
-  protected automatically. Cost: enumerate exactly what the agent needs; a miss fails closed and
-  loudly at runtime.
-- *Denylist (interim):* keep the broad grant, append `(deny file-write* (literal <env.json>))` and
-  one for `sandbox-state.json`. See § Interim.
+**Seatbelt** — file-granular (SBPL), so it can express all three tiers. **Decided (owner,
+2026-07-30): the allowlist *and* an explicit deny backstop — not one or the other.**
+- *Allowlist:* replace the broad `(allow file-read* file-write* (subpath sandboxDir))` with explicit
+  per-tier rules. That grant has to actually **go**, not be supplemented: it is DF136 itself, and the
+  `ro/` tier cannot mean anything while it stands.
+- *Deny backstop:* `ro/` and `host/` each carry `(deny file-write* (subpath …))` in the trailing
+  block. **This is not belt-and-braces, and the reason corrects what this section used to say.** It
+  claimed a host-only tier needs *no rule* because "default-deny covers it", and that a new
+  host-only file would therefore be "protected automatically". **That is false on seatbelt, and was
+  measured false.** Absence of a grant is not a denial — it holds only while nothing *else* grants
+  write, and this profile grants write broadly: the temp tree, the Xcode and SwiftPM caches, the
+  sandbox dir, any enclosing read-write mount. A `:ro` mount under any of them was silently writable
+  until 2026-07-30 (DF162). On seatbelt every negative permission must be **stated**, positioned
+  last, and ordered by specificity.
+- Status: the `host/` deny is landed (§ The seatbelt host-tier deny); `ro/`'s lands with step 3.
+- Contrast tart, which needs no equivalent: its `:ro` VirtioFS share is a real read-only mount and
+  holds unconditionally. The two backends converge on one invariant by different mechanisms, and
+  only one of them is self-enforcing — so "grant read on `ro/`" is a weaker sentence here than the
+  identical words are there.
 
 **Tart** — directory-granular (VirtioFS shares a whole directory subtree; a single file cannot be
 excluded). Realize the tiers as **directory** shares, which tart already supports:
@@ -275,16 +294,22 @@ tier assignment follows access, not threat model. Just do not bank a security cl
 
 ## Open questions
 
-- **Seatbelt: allowlist vs. keep-the-deny.** The allowlist is safe-by-default but risks missing an
-  access the agent needs (fails closed, but noisily). Decide whether to pay the enumeration cost or
-  keep a maintained denylist of host-only files.
-- **Tart: subdir reorg vs. relocate-metadata-only.** The `rw/`+`ro/` reorg is the clean convergence;
-  a lighter variant relocates only `environment.json`/`sandbox-state.json` to a sibling host-only
-  dir and leaves the rest shared read-write (smaller change, but leaves `runtime-config.json` and
-  the `bin/` scripts guest-writable — i.e. does not close DF148). Choose based on whether DF148 is
-  in scope for the same effort.
-- **Migration shape.** In-place move of existing sandbox dirs vs. dual-shape readers with a
-  settling period. Ties into the deprecation register entry.
+- **Migration shape.** In-place move of existing sandbox dirs vs. dual-shape readers with a settling
+  period. Ties into the deprecation register entry (rule 9). **The only genuinely open one**, and it
+  is now the gate on merging: since step 2 an existing sandbox reads as missing, and no test anywhere
+  covers an upgrade — `scripts/smoke_test.py` has no schema, migration or pre-existing-sandbox case,
+  and `releasetest` creates fresh sandboxes, so a green release gate says nothing about it.
+- **The seven late-classified entries** (§ Confirmed design) are still classified from what the code
+  says about them, and still not reviewed against the design. Cheap, and it feeds step 3.
+
+**Answered, kept because the reasoning is the transferable part:**
+
+- ~~Seatbelt: allowlist vs. keep-the-deny.~~ **Both** (owner, 2026-07-30). Framing them as
+  alternatives was the error: the allowlist replaces the broad grant, the deny makes the result
+  non-defeasible. See § Per-backend realization for why "default-deny covers it" does not hold here.
+- ~~Tart: subdir reorg vs. relocate-metadata-only.~~ **The reorg**, settled in § Confirmed design —
+  the light variant leaves `runtime-config.json` and `bin/` guest-writable and so does not close
+  DF148, which is in scope.
 
 ## Related
 
