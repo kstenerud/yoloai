@@ -669,6 +669,17 @@ earlier signal and records nothing else.
 - **What to capture if (a) recurs:** whether the inner dockerd ever started, the podman machine's own load at the time, and whether `destroy` was slow because the sandbox was wedged or because podman-macOS teardown is simply slow under that nesting. The five unrelated destroys timing out at >60s in the same run points at the latter.
 - **Pointer:** `scripts/smoke_test.py` (`_destroy_named_sandboxes`, `_provider_child_argv`, `run_all_providers`); `scripts/tests/test_smoke_cleanup_resilience.py`. Sibling: [DF159](#df159--exec-start-ttrpc-closed-on-containerd-vmenhanced-during-apply-once-in-38-runs) — both are smoke-reliability findings where the diagnostic surface, not the defect, was the expensive part.
 
+### DF163 — containerd's `log.txt` has no writer and is in no mount, so `Logs()` always returns empty
+
+- **Discovered:** 2026-07-30, reviewing the sandbox-tiering plan's late file classifications against the code · **Workstream:** sandbox-dir tiering / containerd
+- **Severity:** LOW as a defect (a diagnostic returns nothing where it looks like it returns something), MEDIUM as a documentation problem — three comments describe a mechanism that does not exist, and one of them is the constant's own doc.
+- **Rides:** any.
+- **What is wrong.** `config.ContainerLogPath` (`<sandboxDir>/log.txt`) has exactly one consumer in the tree: `runtime/containerd/logs.go:23`, a **read**. There is no writer — none in Go, none in the guest Python — and the path appears in **no `MountSpec`**, so no guest can write it either; containerd's own task is created with null IO. `Runtime.Logs()` therefore reads a file nothing creates and returns `""` on every call, which its "returns empty string if the log file does not exist" contract makes indistinguishable from an empty log.
+- **The comments say otherwise, in three places.** `logs.go:6` and `:19` call it a "bind-mounted file"; `lifecycle.go:467` says "agent logs go to bind-mounted log.txt"; and `sandbox_layout.go:78` calls it "the guest-written container log". None of that is currently true. It reads as settled fact and was believed during the tiering classification, which is how it ended up assigned a tier (`rw/`) rather than being questioned.
+- **Two possible fixes, and the choice is a product question rather than a cleanup one.** Either **wire it** — bind `log.txt` into the guest and have the agent's output reach it, making `containerd.Logs()` do what its callers assume — or **delete it** and have `Logs()` say plainly that containerd has no log tail, the way seatbelt's absent cache reporting is handled. Which one depends on whether a log tail is wanted for containerd at all; `logs.go:48` already suggests `cat <sandbox>/log.txt` to users as a diagnostic, so today that advice points at a file that never exists.
+- **Not fixed here, and not a tiering blocker.** A file with no writer and no mount has no guest-access class, so it simply leaves the tier table (see [sandbox-share-tiering.md](plans/sandbox-share-tiering.md)) rather than moving within it. Filed under rule 7 rather than fixed in scope, because the fix is a decision about containerd's diagnostics.
+- **Pointer:** `runtime/containerd/logs.go`, `runtime/containerd/lifecycle.go:467`, `internal/config/sandbox_layout.go:78-80,237-239`.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

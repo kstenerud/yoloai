@@ -53,14 +53,25 @@ through `internal/config/sandbox_layout.go` — the table was written from the h
 maps, which never enumerated these). Each is classified from what the code already says about it,
 but none has been reviewed against the design:
 
-| File | Tier | Evidence |
+**Reviewed against the code 2026-07-30 — two of the six were wrong.** Each row below now cites what
+was checked (every consumer of the path builder, and whether the file appears in any `MountSpec`),
+not what a comment says about it.
+
+| File | Tier | Verified |
 | --- | --- | --- |
-| `injector.json` (pid/addr record) | `host/` | host-side injector bookkeeping; guest never reads it |
-| `injector.log` | `host/` | written by the host-side injector process |
-| `injector-token` | `host/` | `internal/broker` states it is "never bind-mounted", which is what stops a co-resident container learning another sandbox's token |
-| `context.md` | `ro/` | seeded by the host, read by the agent |
-| `log.txt` (containerd) | `rw/` | `runtime/containerd/logs.go` calls it a "bind-mounted file" the guest writes |
-| `lifecycle-on-create-done` | `rw/` | the create-done marker the table already lists under `rw` |
+| `injector.json` (pid/addr record) | `host/` | ✅ read only by the host-orphan sweep (`broker.LoadRecord`); in no `MountSpec` |
+| `injector.log` | `host/` | ✅ opened by the host-side injector (`internal/broker/host.go:179`); in no `MountSpec` |
+| `injector-token` | `host/` | ✅ and load-bearing — `PlaceholderToken`'s docstring: *"lives host-side (0600, never bind-mounted), so a co-resident container cannot learn another sandbox's token"*. The guest gets the value delivered at launch, never the file |
+| `context.md` | ~~`ro/`~~ → **`host/`** | ❌ **was wrong.** `ContextFilePath` has exactly one consumer and it is a *write* (`envsetup/context.go:169`, commented "reference copy"). Nothing reads it, nothing mounts it. The "read by the agent" evidence conflated it with the agent's **native** context file, which the same function writes two lines later into `agent-runtime/` — a different file, already `rw/` |
+| `log.txt` (containerd) | ~~`rw/`~~ → **none; it is dead** | ❌ **was wrong, and worse than misfiled.** No writer exists anywhere — not in Go, not in the guest Python — and it is in no `MountSpec`; the task is created with null IO. One consumer, a read, in `containerd.Logs()`, which therefore always returns "". Three comments call it a "bind-mounted file" the guest writes. See [DF163](../findings-unresolved.md) |
+| `lifecycle-on-create-done` | `rw/` | ✅ written by the **guest** Python on-create hook, `os.Stat`ed by the host (`syncLifecycleMarker`) — so the guest genuinely needs write |
+| `bin/` (launch-delivered scripts) | `ro/` | ✅ host writes on every launch, guest execs; returns its own read-only `MountSpec` (`deliverRuntimeScripts`) |
+
+**Both errors have the same shape, and it is the shape this table was already warned about.** Each
+was classified from a sentence *near* the file — a comment, a docstring — rather than from its
+consumers. `context.md` had a plausible-sounding purpose that belonged to a sibling file;
+`log.txt` had three comments describing a mechanism that does not exist. Reading what the code
+*says* reproduces the author's belief, including where the belief is stale.
 
 The lesson generalizes: a classification table built by enumerating *accesses* misses any file
 whose access nobody happened to describe. The path-builder funnel enumerates by *construction*
