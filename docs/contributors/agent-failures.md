@@ -567,7 +567,12 @@ itself worth knowing when reading pattern 4.
   defeats rule 10 as written: *"actually revert each and watch it fail"* is satisfied by a vacuous
   test. Revert-testing proves a test is connected to the code; it says nothing about whether the
   code is connected to the program.
-- **Gated now?** Partly, and structurally rather than by rule. The fix moved the guarantee into
+- **Gated now?** Yes, both halves. **Rule 10 in `AGENTS.md` was amended** (2026-07-30) to say
+  red-on-revert is necessary and not sufficient, and to require naming the backends that pass a
+  capability guard and confirming the intersection is non-empty *before* the first test — this entry
+  had identified rule 10 as insufficient and then left it unchanged, which is the reachability
+  failure GEN §17 warns about: the lesson sat in this log, and this log is a write target that
+  nothing routes an agent to read. Structurally, the fix also moved the guarantee into
   `runtimetest`'s `InstanceLabelsRoundTrip`, a **conformance** case gated on the real capability:
   every backend that builds images must round-trip Create's labels through Inspect, and no fake can
   satisfy it. That covers this mechanism. The general habit it argues for, unguarded: **when a check

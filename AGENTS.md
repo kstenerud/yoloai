@@ -124,7 +124,14 @@ the newest and belongs about third.
    tests that would go red on revert, and make the numbers match. Not "the package has tests",
    and not "the headline fix has one" — the second change in a PR is the one that escapes.
    Actually revert each and watch it fail; a test that merely covers the line looks identical
-   until you try. Common cases, none of them the definition: an **argv** handed to a subprocess
+   until you try. **Red-on-revert is necessary and not sufficient**: reverting a line inside a
+   function nothing can reach still turns its test red, so the check proves a test is wired to the
+   code, never that the code is wired to the program. A fake is free to invent a capability
+   combination the product does not contain, and when it does, its tests certify a dead path — six
+   of them once did. So for anything capability-guarded, **name the backends that pass the guard and
+   the statuses that reach it, and confirm the intersection is non-empty** before writing the first
+   test; prefer a `runtime/runtimetest` conformance case, which no fake can satisfy. Common cases,
+   none of them the definition: an **argv** handed to a subprocess
    (assert the flags, and which paths must be absolute); which **environment** a subprocess
    draws from; an error's **content**, not just that one was returned. The fake-binary fixture
    covers all three cheaply — `runtime/apple/build_test.go`. Three traps, all drawn from the
