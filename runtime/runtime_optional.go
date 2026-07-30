@@ -515,6 +515,23 @@ type ProfileImageBuilder interface {
 	// base it descends from — and a per-question accessor would mean a round trip
 	// each and a new method per label.
 	ImageLabels(ctx context.Context, tag string) (labels map[string]string, ok bool)
+
+	// ExpectedBaseChecksum returns the BaseChecksumLabel value this binary's
+	// embedded build inputs produce — the same expression Setup evaluates when
+	// deciding whether the base image needs rebuilding.
+	//
+	// It is the right side of a lineage comparison whenever the left side is an
+	// image or instance that already exists and the store cannot be trusted to be
+	// current. Reading the base *tag*'s label instead is a false negative in the
+	// case that matters most: immediately after an upgrade with nothing yet
+	// rebuilt, the tag and the sandbox both still carry the old checksum and
+	// agree, while the host binary has already moved (DF156). Paths that have
+	// just run Setup may read the tag; paths that have not must use this.
+	//
+	// It is a content hash of the embedded files, not an identity of the binary,
+	// so a rebuilt binary whose resources are unchanged returns the same value and
+	// invalidates nothing.
+	ExpectedBaseChecksum() string
 }
 
 // ProfileImageBuilderOf returns rt as a ProfileImageBuilder if the backend

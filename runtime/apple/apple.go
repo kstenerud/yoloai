@@ -294,26 +294,26 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 			State string `json:"state"`
 		} `json:"status"`
 		Configuration struct {
-			Image struct {
-				Reference string `json:"reference"`
-				Digest    string `json:"digest"`
-			} `json:"image"`
+			Labels map[string]string `json:"labels"`
 		} `json:"configuration"`
 	}
 	if err := json.Unmarshal([]byte(out), &arr); err != nil || len(arr) == 0 {
 		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
-	// Prefer the digest: it names the image this instance actually holds, where
-	// the reference is a tag that may since have been rebuilt to something else.
-	// Unverified field names — apple's inspect shape is only exercisable on a
-	// Mac — so an absent digest simply leaves ImageID empty, which callers read
-	// as "cannot say" rather than as a mismatch.
-	imageID := arr[0].Configuration.Image.Digest
-	if imageID == "" {
-		imageID = arr[0].Configuration.Image.Reference
-	}
+	// Container labels are the lineage record here, and on apple they are the
+	// only one available. Verified on macOS 26: the container does record the
+	// image it holds, but as an index digest that `container image inspect`
+	// rejects ("image not found"), and rebuilding the tag deletes the superseded
+	// image outright rather than leaving it dangling as docker does — so the
+	// image it named is unreadable in principle, not merely unaddressed. Apple
+	// also does not inherit image labels onto the container the way docker does,
+	// so nothing arrives without the Create-time stamp.
+	//
 	// Apple container has no state-to-disk suspend (AC14) → Suspended stays false.
-	return runtime.InstanceInfo{Running: arr[0].Status.State == "running", ImageID: imageID}, nil
+	return runtime.InstanceInfo{
+		Running: arr[0].Status.State == "running",
+		Labels:  arr[0].Configuration.Labels,
+	}, nil
 }
 
 // Exec runs a command in a running container and returns its captured output
@@ -590,6 +590,11 @@ func (r *Runtime) ImageLabels(ctx context.Context, tag string) (map[string]strin
 	}
 	return labels, true
 }
+
+// ExpectedBaseChecksum implements runtime.ProfileImageBuilder. It returns the
+// docker package's value because buildBaseImage builds this backend's base from
+// that package's embedded resources, so the two must agree.
+func (r *Runtime) ExpectedBaseChecksum() string { return dockerrt.BuildInputsChecksum() }
 
 // Prune sweeps orphaned apple containers — `yoloai-*` instances (scoped to this
 // runtime's principal) that no longer correspond to a known sandbox. Mirrors the

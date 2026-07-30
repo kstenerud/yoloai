@@ -133,11 +133,12 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	// host/guest version skew, not cosmetic drift. force=false: the chain
 	// checksum already folds in the base, so a moved base rebuilds the profile
 	// without forcing a base rebuild that Setup has just established is current.
-	if err = ensureImageLineage(ctx, d, st); err != nil {
+	baseChecksum, err := ensureImageLineage(ctx, d, st)
+	if err != nil {
 		return err
 	}
 
-	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro); err != nil {
+	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro, baseChecksum); err != nil {
 		return err // the deferred rollbackPartialLaunch reaps the injector + container + netns
 	}
 	return nil
@@ -155,9 +156,17 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 // Backends with no image concept (tart, seatbelt) have no builder and are a
 // no-op — they deliver their scripts at launch already, so the skew this guards
 // against cannot arise there.
-func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) error {
-	if _, ok := runtime.ProfileImageBuilderOf(d.Runtime); !ok {
-		return nil
+//
+// It returns the base-lineage checksum the now-current image carries, for
+// stamping onto the instance. The value is READ off the image rather than taken
+// from the binary: what gets recorded should be what the sandbox actually holds,
+// so that an image carrying something unexpected is preserved as evidence rather
+// than overwritten with what we assume. Empty when there is nothing to record,
+// which callers treat as "cannot say".
+func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) (string, error) {
+	builder, ok := runtime.ProfileImageBuilderOf(d.Runtime)
+	if !ok {
+		return "", nil
 	}
 	out, logger := outputOr(st.Output), slog.Default()
 
@@ -169,16 +178,18 @@ func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) erro
 	if st.Profile == "" {
 		baseProfileDir := filepath.Join(st.Layout.ProfilesDir(), "base")
 		if err := d.Runtime.Setup(ctx, st.Layout, baseProfileDir, out, logger, false); err != nil {
-			return fmt.Errorf("ensure base image is current: %w", err)
+			return "", fmt.Errorf("ensure base image is current: %w", err)
 		}
-		return nil
+	} else if err := rebuildProfileImage(ctx, d.Runtime, st.Layout, st.Profile,
+		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, logger, false); err != nil {
+		return "", fmt.Errorf("ensure image is current: %w", err)
 	}
 
-	if err := rebuildProfileImage(ctx, d.Runtime, st.Layout, st.Profile,
-		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, logger, false); err != nil {
-		return fmt.Errorf("ensure image is current: %w", err)
+	labels, ok := builder.ImageLabels(ctx, st.ImageRef)
+	if !ok {
+		return "", nil // unreadable image: record nothing rather than a guess
 	}
-	return nil
+	return labels[runtime.BaseChecksumLabel], nil
 }
 
 // rollbackPartialLaunch reverses a failed LaunchContainer: it stops+removes the
@@ -246,10 +257,10 @@ func UsesSidecarFirewall(rt runtime.Backend, isolation runtime.IsolationMode, ne
 // comes up on a keepalive_only holder and sandbox-setup.py is launched as a
 // separate process over it — the S3 re-route. Otherwise it follows the legacy
 // path: the agent is welded into the entrypoint as before.
-func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome) error {
+func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, baseChecksum string) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	sidecarFirewall := UsesSidecarFirewall(rt, st.Isolation, st.NetworkMode)
-	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, bro, sidecarFirewall)
+	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, bro, sidecarFirewall, baseChecksum)
 	if err != nil {
 		return err
 	}
@@ -885,7 +896,9 @@ func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
 // container as YOLOAI_BROKER_INJECTOR_ENDPOINT so the entrypoint can allowlist it
 // under isolation. The isolation-mode gating below keys on st.NetworkMode (the
 // user-facing isolation), which the override never changes.
-func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, bro brokerOutcome, sidecarFirewall bool) (runtime.InstanceConfig, error) {
+// baseChecksum is the lineage of the image this instance is about to be created
+// from, stamped onto the instance so it survives the tag being re-pointed.
+func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, bro brokerOutcome, sidecarFirewall bool, baseChecksum string) (runtime.InstanceConfig, error) {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	caps := desc.Capabilities
 
@@ -931,7 +944,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		Ports:        ports,
 		NetworkMode:  networkMode,
 		UseInit:      true,
-		Labels:       instanceLabels(st.Layout.Principal, st.Name),
+		Labels:       instanceLabels(st.Layout.Principal, st.Name, baseChecksum),
 		ContainerEnv: containerEnv,
 	}
 
@@ -967,11 +980,27 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 // and the owning principal. Both are always set: every principal is non-empty
 // (D126), so there is no default to elide and no unlabelled instance for a sweep
 // to have to guess about (runtime.IsOrphanCandidate, D62).
-func instanceLabels(principal config.PrincipalSegment, name string) map[string]string {
-	return map[string]string{
+//
+// baseChecksum records which yoloai-base the instance's image descends from, so
+// a sandbox that is relaunched rather than recreated can still be judged against
+// the running binary (DF156). It is stamped here, at the one moment the answer is
+// known for certain: the image has just been made current and the tag has not yet
+// had a chance to move. Omitted when empty, because the absence of the label is
+// itself meaningful — callers read it as "out of date", and writing "" would
+// assert a lineage of nothing.
+//
+// On docker this is belt and braces: the daemon folds an image's labels into its
+// containers' at create, so the value would arrive inherited. containerd and
+// apple do not, so there this stamp is the only source.
+func instanceLabels(principal config.PrincipalSegment, name, baseChecksum string) map[string]string {
+	labels := map[string]string{
 		runtime.LabelSandbox:   name,
 		runtime.LabelPrincipal: string(principal),
 	}
+	if baseChecksum != "" {
+		labels[runtime.BaseChecksumLabel] = baseChecksum
+	}
+	return labels
 }
 
 // effectiveSecretsConsumedTimeout is the host's cap on waiting for the

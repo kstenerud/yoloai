@@ -196,8 +196,14 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Env
 }
 
 // handleTerminalStatus relaunches the agent after it has exited (Done/Failed).
-func handleTerminalStatus(ctx context.Context, d state.Deps, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
+//
+// The relaunch happens INSIDE the existing container (tmux respawn-pane), so
+// nothing here re-resolves the image — which makes this the container backends'
+// real stale-lineage case, and the common one: a long-lived sandbox that has
+// finished a task, sat through a yoloAI upgrade, and is asked to run another.
+func handleTerminalStatus(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
 	slog.Info("relaunching agent", "event", "sandbox.start.agent.relaunch", "sandbox", name)
+	warnIfImageLineageStale(ctx, d, cname, name, n)
 	switch {
 	case customPrompt:
 		if err := relaunchAgentWithCustomPrompt(ctx, d, name, meta, promptText); err != nil {
@@ -288,7 +294,7 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 		defer cleanupResumeFiles(d, name)
 	}
 
-	warnIfImageLineageStale(ctx, d, cname, n)
+	warnIfImageLineageStale(ctx, d, cname, name, n)
 
 	// Resume the VM: tart run resumes from suspended state, kills the stale
 	// tmux session, and runs the setup script for a fresh agent.
@@ -308,44 +314,50 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	return nil
 }
 
-// warnIfImageLineageStale warns when a resumed instance is holding an image this
-// binary no longer expects (DF156).
+// warnIfImageLineageStale warns when a sandbox that is being relaunched in place
+// holds an image this binary no longer expects (DF156).
 //
-// Warn, never fix: the container already exists, so rebuilding the image cannot
-// change what it is running — only re-creating the sandbox would, and that
-// discards the in-container state the user suspended in order to keep.
+// It belongs on every path that reuses an existing container rather than
+// creating one. Those paths cannot self-heal: a rebuild changes the tag, not the
+// container, and the container is what is about to run. Paths that DO create a
+// container are already handled upstream by launch.ensureImageLineage, which
+// rebuilds instead of warning because there it is free to.
 //
-// The question is asked of the *instance*, not of the tag. `InstanceInfo.ImageID`
-// names the image the container actually holds; the tag it was created by may
-// since point at something entirely different, which is exactly the case this
-// exists to catch. Every unresolvable branch warns, and that is deliberate:
-// an image record that is gone (observed in the field — Docker keeps the layers
-// for a running container but drops the image object) is the strongest possible
-// evidence that we cannot vouch for what is inside.
-func warnIfImageLineageStale(ctx context.Context, d state.Deps, cname string, n *notices) {
+// The question is asked of the *instance*, via the lineage label stamped on it
+// at create. The tag it was created by may since point somewhere else entirely,
+// which is the case this exists to catch, and an image identifier is not a usable
+// substitute — see runtime.InstanceInfo.Labels for why the three container
+// backends cannot agree on one.
+//
+// The comparison is against the binary, never against the base tag in the store.
+// Reading the tag agrees with the sandbox precisely when nothing has been
+// rebuilt yet, which is the state every upgrade starts in, so it would stay
+// silent through the most common occurrence of the very drift it looks for.
+//
+// An absent label reads as stale, by the same decision the base path already
+// made (checksumLabelStale): an image predating the scheme cannot vouch for
+// itself, and one warning is the right price.
+func warnIfImageLineageStale(ctx context.Context, d state.Deps, cname, name string, n *notices) {
 	builder, ok := runtime.ProfileImageBuilderOf(d.Runtime)
 	if !ok {
 		return // no image concept (tart, seatbelt): scripts are delivered at launch
 	}
-	info, err := d.Runtime.Inspect(ctx, cname)
-	if err != nil || info.ImageID == "" {
-		return // cannot identify the instance's image; say nothing rather than guess
-	}
-	baseLabels, ok := builder.ImageLabels(ctx, config.BaseImage)
-	if !ok {
-		return // no base to compare against; Setup owns that problem
-	}
-	want := baseLabels[runtime.BaseChecksumLabel]
+	want := builder.ExpectedBaseChecksum()
 	if want == "" {
-		return // base predates the label; nothing to compare
+		return // this binary cannot state what it expects; nothing to compare
 	}
-	if got, ok := builder.ImageLabels(ctx, info.ImageID); ok && got[runtime.BaseChecksumLabel] == want {
+	info, err := d.Runtime.Inspect(ctx, cname)
+	if err != nil {
+		return // cannot reach the instance; say nothing rather than guess
+	}
+	if info.Labels[runtime.BaseChecksumLabel] == want {
 		return
 	}
 	n.warnf("this sandbox is running an image built against a different yoloai-base than this "+
 		"version of yoloai expects, so in-sandbox tooling may not match what the host drives. "+
-		"Resuming leaves it as-is; re-create the sandbox to pick up the current base "+
-		"(yoloai destroy %s, then yoloai new ...)", cname)
+		"Starting it leaves the image as-is; `yoloai restart %s` rebuilds and re-creates the "+
+		"container, keeping the sandbox's files but discarding anything installed inside it "+
+		"since it was created", name)
 }
 
 // maybeWarnRecreateAdvisory emits the backend's recreate advisory (DF22) when a
@@ -414,7 +426,7 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 		return nil
 
 	case status.StatusDone, status.StatusFailed:
-		return handleTerminalStatus(ctx, d, name, meta, opts, promptText, customPrompt, n)
+		return handleTerminalStatus(ctx, d, cname, name, meta, opts, promptText, customPrompt, n)
 
 	case status.StatusSuspended:
 		return handleSuspendedResume(ctx, d, cname, name, meta, opts, promptText, customPrompt, n)

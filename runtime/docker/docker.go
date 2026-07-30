@@ -685,13 +685,16 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 		return runtime.InstanceInfo{}, fmt.Errorf("inspect container: %w", err)
 	}
 
-	return runtime.InstanceInfo{
-		Running: info.State.Running,
-		// info.Image is the image ID the container was created from, distinct
-		// from info.Config.Image which is the tag it was created by and may
-		// since point elsewhere.
-		ImageID: info.Image,
-	}, nil
+	inst := runtime.InstanceInfo{Running: info.State.Running}
+	// Docker merges the image's labels into the container's at create, so a
+	// container inherits its image's lineage even when yoloAI did not stamp it —
+	// which is why pre-existing docker sandboxes answer correctly with no
+	// migration. Explicit container labels win on collision, and yoloAI sets the
+	// lineage label from the same image, so the two agree by construction.
+	if info.Config != nil {
+		inst.Labels = info.Config.Labels
+	}
+	return inst, nil
 }
 
 // Exec runs a command inside a running Docker container and returns the result.

@@ -60,6 +60,12 @@ func createContainer(t *testing.T, rt DockerCompatRuntime, ctx context.Context, 
 		Cmd:          []string{"infinity"},
 		WorkingDir:   cfg.WorkingDir,
 		ExposedPorts: exposedPorts,
+		// This helper drives the SDK rather than Runtime.Create so the subtests
+		// below can assert host-config facts, which means every InstanceConfig
+		// field it forgets is a field the docker/podman conformance run silently
+		// stops covering. Labels carry instance lineage (DF156) and are read back
+		// by InstanceLabelsRoundTrip.
+		Labels: cfg.Labels,
 	}
 
 	hostConfig := &container.HostConfig{

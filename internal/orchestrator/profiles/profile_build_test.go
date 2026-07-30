@@ -156,6 +156,7 @@ func (labelFake) BuildProfileImage(context.Context, string, string, string, []st
 func (f labelFake) ImageLabels(context.Context, string) (map[string]string, bool) {
 	return f.labels, f.ok
 }
+func (labelFake) ExpectedBaseChecksum() string { return "" }
 
 // TestBaseChecksum_ReadsTheLabelAndToleratesAbsence pins the seed's input
 // (DF156). The profile chain is seeded with the base image's own checksum label,

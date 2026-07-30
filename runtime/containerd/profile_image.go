@@ -163,3 +163,8 @@ func (r *Runtime) ImageLabels(ctx context.Context, tag string) (map[string]strin
 	}
 	return cfg.Config.Labels, true
 }
+
+// ExpectedBaseChecksum implements runtime.ProfileImageBuilder. It returns the
+// docker package's value because this backend's base image is built from that
+// package's embedded resources (buildDockerImage), so the two must agree.
+func (r *Runtime) ExpectedBaseChecksum() string { return dockerrt.BuildInputsChecksum() }

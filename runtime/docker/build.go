@@ -370,6 +370,12 @@ func (r *Runtime) ImageLabels(ctx context.Context, tag string) (map[string]strin
 // its own notion of base identity.
 func BuildInputsChecksum() string { return buildInputsChecksum() }
 
+// ExpectedBaseChecksum implements runtime.ProfileImageBuilder. It is the same
+// value baseImageStale compares the base image's label against, so a caller
+// asking "is this instance's lineage current?" evaluates the identical predicate
+// Setup uses to decide whether to rebuild.
+func (r *Runtime) ExpectedBaseChecksum() string { return buildInputsChecksum() }
+
 // createProfileBuildContext creates a tar archive from all files in the profile
 // directory for Docker build context.
 func createProfileBuildContext(sourceDir string) (io.Reader, error) {

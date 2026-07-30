@@ -261,6 +261,32 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 		assert.ErrorIs(t, err, runtime.ErrNotFound)
 	})
 
+	// An image-building backend MUST round-trip the labels Create was given back
+	// out through Inspect, because that is the only per-instance record able to
+	// outlive the tag the instance was created by — it carries the image lineage
+	// a stopped or finished sandbox is judged on (DF156).
+	//
+	// This is a conformance case rather than a unit test on purpose. The
+	// resume-lineage check first shipped covered by six passing tests against a
+	// fake that reported an image id AND implemented ProfileImageBuilder — a
+	// combination no real backend has — which is why nobody noticed the code path
+	// could not be reached. Only a real backend can satisfy this.
+	//
+	// Gated on ProfileImageBuilder because that is exactly the set with images to
+	// have lineage: tart clones VMs and seatbelt runs host processes, and neither
+	// has container labels to return.
+	mutating("InstanceLabelsRoundTrip", func(t *testing.T, b InterfaceBackend) {
+		if _, ok := runtime.ProfileImageBuilderOf(b.Runtime); !ok {
+			t.Skip("no image concept: nothing builds images here, so no lineage to record")
+		}
+		const key, want = "yoloai.test.lineage", "conformance-value"
+		name := boot(t, b, runtime.InstanceConfig{Labels: map[string]string{key: want}})
+		info, err := b.Runtime.Inspect(b.Ctx, name)
+		require.NoError(t, err)
+		assert.Equal(t, want, info.Labels[key],
+			"Create's labels must come back from Inspect: a lineage record the backend drops is a check that silently never fires")
+	})
+
 	mutating("InspectStopped", func(t *testing.T, b InterfaceBackend) {
 		name := boot(t, b, runtime.InstanceConfig{})
 		require.NoError(t, b.Runtime.Stop(b.Ctx, name))

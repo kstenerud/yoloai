@@ -7,6 +7,7 @@ package lifecycle
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"io/fs"
@@ -1459,36 +1460,55 @@ func TestApplyBrokerOption_PersistsAndIsIdempotent(t *testing.T) {
 	assert.True(t, reloaded.BrokerDisabled, "auto does not disturb a persisted choice")
 }
 
-// lineageFake is a Backend whose Inspect reports a chosen image id and whose
-// ImageLabels answers per-ref, so the resume warning can be exercised without a
-// daemon.
+// lineageFake is a Backend whose Inspect reports chosen instance labels.
+//
+// It deliberately does NOT implement ProfileImageBuilder — lineageBuilderFake
+// does. The previous version of this fake was both a Backend reporting
+// Suspended and a ProfileImageBuilder, a combination no real backend has, and
+// that is precisely how six passing tests came to cover a function nothing could
+// reach: only tart reports Suspended and tart builds no images. The capability
+// now has to be composed in explicitly, so a test cannot silently invent a
+// backend shape the product does not have. The standing guard against the same
+// mistake is runtimetest's InstanceLabelsRoundTrip, which no fake can satisfy.
 type lineageFake struct {
 	runtime.Backend
-	imageID    string
+	labels     map[string]string
 	inspectErr error
-	labels     map[string]map[string]string
 }
 
 func (f lineageFake) Inspect(context.Context, string) (runtime.InstanceInfo, error) {
-	return runtime.InstanceInfo{Running: false, Suspended: true, ImageID: f.imageID}, f.inspectErr
+	return runtime.InstanceInfo{Running: false, Labels: f.labels}, f.inspectErr
 }
 
-func (f lineageFake) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, io.Writer, *slog.Logger) error {
+// lineageBuilderFake adds the ProfileImageBuilder capability, which is what
+// marks a backend as having images whose lineage can be stale at all.
+type lineageBuilderFake struct {
+	lineageFake
+	expected string
+	// storeLabels is what the base tag reports, modelling a store that has not
+	// been rebuilt yet. Deliberately answerable rather than a panic: the defect
+	// this guards against is not "reads the store", it is "agrees with a store
+	// that is as stale as the sandbox", and only a real answer can show that.
+	storeLabels map[string]string
+}
+
+func (lineageBuilderFake) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, io.Writer, *slog.Logger) error {
 	return nil
 }
 
-func (f lineageFake) ImageLabels(_ context.Context, ref string) (map[string]string, bool) {
-	l, ok := f.labels[ref]
-	return l, ok
+func (f lineageBuilderFake) ImageLabels(context.Context, string) (map[string]string, bool) {
+	return f.storeLabels, f.storeLabels != nil
 }
 
-// TestWarnIfImageLineageStale covers DF156's resume half. A resumed container
-// cannot be fixed by rebuilding — it already holds what it holds — so the only
-// honest action is to say so, and the check has to ask the INSTANCE what it is
-// running rather than ask the tag.
+func (f lineageBuilderFake) ExpectedBaseChecksum() string { return f.expected }
+
+// TestWarnIfImageLineageStale covers DF156's relaunch-in-place half. Such a
+// container cannot be fixed by rebuilding — it already holds what it holds — so
+// the only honest action is to say so, and the check has to ask the INSTANCE
+// what it is running rather than ask the tag.
 func TestWarnIfImageLineageStale(t *testing.T) {
 	const cur, old = "base-current", "base-old"
-	base := map[string]string{runtime.BaseChecksumLabel: cur}
+	inst := func(labels map[string]string) lineageFake { return lineageFake{labels: labels} }
 
 	cases := []struct {
 		name     string
@@ -1497,34 +1517,32 @@ func TestWarnIfImageLineageStale(t *testing.T) {
 		why      string
 	}{
 		{"matching lineage is silent",
-			lineageFake{imageID: "img-a", labels: map[string]map[string]string{
-				config.BaseImage: base, "img-a": {runtime.BaseChecksumLabel: cur}}},
-			false, "the container holds an image built on the current base"},
+			lineageBuilderFake{lineageFake: inst(map[string]string{runtime.BaseChecksumLabel: cur}), expected: cur},
+			false, "the container holds an image built on the base this binary embeds"},
 		{"different base warns",
-			lineageFake{imageID: "img-a", labels: map[string]map[string]string{
-				config.BaseImage: base, "img-a": {runtime.BaseChecksumLabel: old}}},
+			lineageBuilderFake{lineageFake: inst(map[string]string{runtime.BaseChecksumLabel: old}), expected: cur},
 			true, "built on a base this binary no longer expects"},
-		{"unlabelled image warns",
-			lineageFake{imageID: "img-a", labels: map[string]map[string]string{
-				config.BaseImage: base, "img-a": {}}},
-			true, "absence of the label means out of date, by decision"},
-		{"vanished image record warns",
-			lineageFake{imageID: "img-gone", labels: map[string]map[string]string{config.BaseImage: base}},
-			true, "observed in the field: docker keeps layers for a running container but drops " +
-				"the image object, and that is the strongest evidence we cannot vouch for it"},
-		{"unstamped base says nothing",
-			lineageFake{imageID: "img-a", labels: map[string]map[string]string{
-				config.BaseImage: {}, "img-a": {}}},
-			false, "no base label to compare against; warning would be noise on every resume"},
-		{"unidentifiable instance says nothing",
-			lineageFake{imageID: "", labels: map[string]map[string]string{config.BaseImage: base}},
-			false, "a backend that cannot name the instance's image must not be guessed at"},
+		{"unlabelled instance warns",
+			lineageBuilderFake{lineageFake: inst(map[string]string{}), expected: cur},
+			true, "absence of the label means out of date, by the same decision the base path made"},
+		{"nil labels warn",
+			lineageBuilderFake{lineageFake: inst(nil), expected: cur},
+			true, "a backend that returned no labels at all cannot vouch for the instance"},
+		{"binary that cannot state its expectation says nothing",
+			lineageBuilderFake{lineageFake: inst(map[string]string{runtime.BaseChecksumLabel: old}), expected: ""},
+			false, "no right-hand side to compare against; warning would be unfalsifiable"},
+		{"unreachable instance says nothing",
+			lineageBuilderFake{lineageFake: lineageFake{inspectErr: errors.New("daemon down")}, expected: cur},
+			false, "an inspect failure is not evidence of staleness"},
+		{"backend with no images says nothing",
+			inst(map[string]string{}),
+			false, "tart and seatbelt deliver scripts at launch; they have no image to be stale"},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			n := &notices{}
-			warnIfImageLineageStale(context.Background(), state.Deps{Runtime: tc.rt}, "box", n)
+			warnIfImageLineageStale(context.Background(), state.Deps{Runtime: tc.rt}, "yoloai-cli-box", "box", n)
 			if tc.wantWarn {
 				require.Len(t, n.list, 1, tc.why)
 				assert.Equal(t, NoticeWarn, n.list[0].Level)
@@ -1534,4 +1552,148 @@ func TestWarnIfImageLineageStale(t *testing.T) {
 			}
 		})
 	}
+}
+
+// buildingMock is a lifecycleMockRuntime that also builds images, i.e. the shape
+// every backend the lineage check applies to actually has.
+type buildingMock struct {
+	*lifecycleMockRuntime
+	expected string
+}
+
+func (buildingMock) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, io.Writer, *slog.Logger) error {
+	return nil
+}
+func (buildingMock) ImageLabels(context.Context, string) (map[string]string, bool) {
+	return nil, false
+}
+func (m buildingMock) ExpectedBaseChecksum() string { return m.expected }
+
+// TestStart_Done_WarnsOnStaleLineage is the reachability test, and it is the
+// point of this whole change (DF156).
+//
+// The first implementation of the lineage check was correct in isolation and
+// dead in practice: it hung off the Suspended status, which only tart reports,
+// and tart builds no images — so the guard on the first line returned before
+// anything else ran, on every backend, always. Six unit tests passed against a
+// fake that reported both, a combination the product does not contain.
+//
+// The reachable case is Done/Failed. The agent has exited, the container is
+// still up, and `start` relaunches the agent INSIDE it — no image is re-resolved
+// anywhere on that path. That is the ordinary life of a long-lived sandbox
+// across a yoloAI upgrade, and it is why the check has to be driven through
+// Start here rather than called directly.
+func TestStart_Done_WarnsOnStaleLineage(t *testing.T) {
+	tmpDir := t.TempDir()
+	const name = "test-lineage-done"
+	createTestSandbox(t, tmpDir, name, "/tmp/project", "copy")
+
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	statusData := fmt.Sprintf(`{"status":"done","exit_code":0,"timestamp":%d}`, time.Now().Unix())
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.AgentStatusFile), []byte(statusData), 0600))
+
+	// Running container, holding an image built on a base this binary has moved past.
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{
+				Running: true,
+				Labels:  map[string]string{runtime.BaseChecksumLabel: "base-from-the-old-binary"},
+			}, nil
+		},
+	}
+	d := newLifecycleDeps(buildingMock{mock, "base-this-binary-expects"}, tmpDir)
+
+	// The relaunch itself fails (no runtime-config.json); the warning is emitted
+	// before that, which is what is being asserted.
+	result, _ := Start(context.Background(), d, name, StartOptions{})
+
+	var warns []string
+	for _, n := range result.Notices {
+		if n.Level == NoticeWarn {
+			warns = append(warns, n.Message)
+		}
+	}
+	require.NotEmpty(t, warns, "a Done sandbox on a stale image must be told so — this is the case that occurs")
+	assert.Contains(t, strings.Join(warns, "\n"), "different yoloai-base")
+}
+
+// TestStart_Done_SilentOnCurrentLineage is the other half: the warning must not
+// fire for a sandbox that is fine, or it becomes noise on every start and gets
+// ignored exactly when it matters.
+func TestStart_Done_SilentOnCurrentLineage(t *testing.T) {
+	tmpDir := t.TempDir()
+	const name = "test-lineage-done-ok"
+	createTestSandbox(t, tmpDir, name, "/tmp/project", "copy")
+
+	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
+	statusData := fmt.Sprintf(`{"status":"done","exit_code":0,"timestamp":%d}`, time.Now().Unix())
+	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.AgentStatusFile), []byte(statusData), 0600))
+
+	const current = "base-this-binary-expects"
+	mock := &lifecycleMockRuntime{
+		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{
+				Running: true,
+				Labels:  map[string]string{runtime.BaseChecksumLabel: current},
+			}, nil
+		},
+	}
+	d := newLifecycleDeps(buildingMock{mock, current}, tmpDir)
+
+	result, _ := Start(context.Background(), d, name, StartOptions{})
+
+	for _, n := range result.Notices {
+		assert.NotContains(t, n.Message, "different yoloai-base",
+			"an up-to-date sandbox must start quietly")
+	}
+}
+
+// TestWarnIfImageLineageStale_ComparesAgainstBinaryNotStore is the false
+// negative the id-based version shipped with, isolated (DF156).
+//
+// After an upgrade with nothing yet rebuilt, the base tag in the store and the
+// sandbox's image BOTH still carry the previous checksum. Any check whose
+// right-hand side is the store therefore finds agreement and stays quiet — in
+// the one state every upgrade begins in. The binary is the only source that has
+// actually moved, so it is the only correct right-hand side.
+//
+// The fake models that state exactly: the sandbox and the store both report the
+// old checksum, and only the binary reports the new one. An implementation whose
+// right-hand side is the store finds agreement and stays silent, failing here.
+func TestWarnIfImageLineageStale_ComparesAgainstBinaryNotStore(t *testing.T) {
+	const stale, current = "base-v1", "base-v2"
+	rt := lineageBuilderFake{
+		lineageFake: lineageFake{labels: map[string]string{runtime.BaseChecksumLabel: stale}},
+		expected:    current,
+		storeLabels: map[string]string{runtime.BaseChecksumLabel: stale},
+	}
+
+	n := &notices{}
+	warnIfImageLineageStale(context.Background(), state.Deps{Runtime: rt}, "yoloai-cli-box", "box", n)
+
+	require.Len(t, n.list, 1,
+		"the sandbox and the un-rebuilt base tag agree with each other and disagree with the binary; "+
+			"only comparing against the binary catches it")
+}
+
+// TestWarnIfImageLineageStale_RemedyIsRestartByBareName pins the message's
+// actionable half (DF156).
+//
+// `yoloai restart` is Stop+Start, which lands on the stopped branch, removes and
+// re-creates the container through launch.ensureImageLineage — so it rebuilds
+// and re-creates while the host-side sandbox directory survives. `destroy`, what
+// this first advised, throws that away for no reason. And the name has to be the
+// SANDBOX name: the instance name carries the principal prefix, so pasting it
+// into any yoloai command fails.
+func TestWarnIfImageLineageStale_RemedyIsRestartByBareName(t *testing.T) {
+	rt := lineageBuilderFake{lineageFake: lineageFake{labels: map[string]string{}}, expected: "base-v2"}
+
+	n := &notices{}
+	warnIfImageLineageStale(context.Background(), state.Deps{Runtime: rt}, "yoloai-cli-box", "box", n)
+
+	require.Len(t, n.list, 1)
+	msg := n.list[0].Message
+	assert.Contains(t, msg, "yoloai restart box", "must name a command the user can paste")
+	assert.NotContains(t, msg, "yoloai-cli-box", "the instance name is not addressable by the CLI")
+	assert.NotContains(t, msg, "destroy", "destroying discards the sandbox for no benefit")
 }
