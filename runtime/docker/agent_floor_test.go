@@ -68,3 +68,50 @@ func TestDockerfile_AgentInstallsCarryAQuotedFloor(t *testing.T) {
 		}
 	})
 }
+
+// TestDockerfile_FitsAppleBuilderLimit gates the one build constraint no build on
+// this platform can discover.
+//
+// Apple's `container build` refuses a Dockerfile over 16384 bytes outright
+// (apple/container#735, open as of 2026-07-30) — `invalidArgument: "Dockerfile
+// size (N bytes) exceeds the maximum allowed size"`. docker, podman and
+// containerd have no such limit, so a green Linux `make check` AND a green full
+// Linux smoke run both coexist with a completely broken apple backend. It shows
+// up only on a Mac, which is exactly the class of defect that deserves a cheap
+// portable assertion instead.
+//
+// It is easy to trip because comments are the majority of this file: it sat at
+// 14012 bytes, and a comment block plus a version bump plus a header took it to
+// 17645 — with the version bump alone landing 33 bytes under the cap unnoticed.
+// So this asserts real headroom rather than the bare limit, and when it fires the
+// fix is to relocate prose (standards/dockerfile.md, the cited finding, a
+// docstring), not to shave words until it passes.
+func TestDockerfile_FitsAppleBuilderLimit(t *testing.T) {
+	const appleMax = 16384
+	// Enough slack that an ordinary comment edit cannot silently consume the last
+	// of it, and small enough to leave the file usable.
+	const wantHeadroom = 1024
+
+	size := len(BaseDockerfile())
+	assert.LessOrEqual(t, size, appleMax-wantHeadroom,
+		"the embedded Dockerfile is %d bytes; apple/container rejects anything over %d, and this "+
+			"keeps %d bytes of headroom so the next comment edit is not the one that breaks the "+
+			"apple backend on a machine you cannot test. Relocate prose rather than trimming to fit.",
+		size, appleMax, wantHeadroom)
+}
+
+// TestReferenceDockerfile_HeaderIsNotChargedToTheBuild pins the split. The
+// "editing this does nothing" header belongs on the generated copy only: it is
+// false in the repo, where editing IS how the image changes, and it must not
+// consume build-context bytes against apple's cap. Prepending it to the built
+// file would be wrong on both counts, and the second one breaks a backend.
+func TestReferenceDockerfile_HeaderIsNotChargedToTheBuild(t *testing.T) {
+	built, reference := string(BaseDockerfile()), string(ReferenceDockerfile())
+
+	assert.NotContains(t, built, "EDITING THIS FILE HAS NO EFFECT",
+		"the header must not be in the bytes handed to the builder")
+	assert.Contains(t, reference, "EDITING THIS FILE HAS NO EFFECT",
+		"the generated copy is the one that needs the warning")
+	assert.True(t, strings.HasSuffix(reference, built),
+		"the reference copy must be the built file verbatim plus a header, or it documents something else")
+}

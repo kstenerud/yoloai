@@ -41,6 +41,7 @@ inclusion test first, then add a row to the index.
 
 | Symptom / error message | Section |
 |---|---|
+| `container build` fails: `Dockerfile size (N bytes) exceeds the maximum allowed size of 16384`; or on older versions `Transport became inactive`. Linux backends unaffected | [Apple: `container build` rejects a Dockerfile over 16 KiB](#apple-container-build-rejects-a-dockerfile-over-16-kib) |
 | Apple sandbox: TUI loses left gutter / leading chars orphan onto row above, only on tmux scroll; `^b r` heals it; Docker clean; both emulators affected | [Apple: exec -t forces ONLCR, corrupting column tracking](#apple-container-exec--t-forces-onlcr-on-the-host-local-bridge-pty-corrupting-the-apps-column-tracking-on-scroll) |
 | Brokered agent on podman-macOS hangs on first API call; one-shot curl to the injector works | [Podman Machine: gvproxy stalls streaming](#podman-machine-macos-gvproxy-host-forward-passes-a-one-shot-curl-but-stalls-the-agents-streaming-connection) |
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
@@ -2492,6 +2493,35 @@ accumulate, and `system prune` only ever removes the truly-orphaned ones.
 **Belongs here:** the durable fact is POSIX `flock(2)` semantics — the lock binds to the open fd, not the path — which is what makes eager unlink-while-held safe; the design choice it licenses is ours.
 
 ## Apple container (`container` CLI)
+
+### Apple: `container build` rejects a Dockerfile over 16 KiB
+
+**Symptom:** the base image build fails with
+`Error: invalidArgument: "Dockerfile size (17645 bytes) exceeds the maximum
+allowed size of 16384 bytes. See https://github.com/apple/container/issues/735."`
+Seen as `TestApple_SetupBuildsBase` failing with `container build exited with
+code 1`. On older `container` versions the same cause reportedly surfaced as
+`Transport became inactive` instead, which names nothing useful.
+
+**Explanation:** apple/container cannot transfer a Container-file larger than
+16384 bytes to its BuildKit instance ([#735](https://github.com/apple/container/issues/735),
+still open as of 2026-07-30). It is a transport limit, not a parser limit, so it
+has nothing to do with the Dockerfile's content being valid — and **comments
+count**. yoloAI's base Dockerfile is ~58% comments, so prose is what consumes
+the budget.
+
+**Why it bites without warning:** docker, podman and containerd have no such
+limit. A green Linux `make check` and a green full Linux smoke run both coexist
+with a completely broken apple backend, so this is only ever discovered on a Mac
+— and it was, by three commits that each looked harmless (14012 → 15525 → 16351
+→ 17645 bytes; the middle one landed 33 bytes under the cap unnoticed).
+
+**Fix:** `TestDockerfile_FitsAppleBuilderLimit` (`runtime/docker/`) asserts the
+embedded Dockerfile stays 1 KiB under the cap, so the failure is now a red test
+on any platform. The user-facing "do not edit this copy" header is prepended at
+materialisation (`ReferenceDockerfile`) rather than stored in the built file, so
+it costs no budget. When the gate fires, relocate prose to
+`standards/dockerfile.md` or to the finding it cites; do not shave words to fit.
 
 ### Apple: `--mount type=virtiofs` rejects a file source; use `-v` for file mounts
 

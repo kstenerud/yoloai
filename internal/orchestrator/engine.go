@@ -283,7 +283,7 @@ func (e *Engine) ensureDefaultsDir() error {
 	// describe an image two releases old. A reference copy that can go stale is
 	// worse than none: it reads as authoritative and answers the question wrong.
 	if err := fileutil.WriteFilePerm(filepath.Join(defaultsDir, "base-image.Dockerfile"),
-		dockerrt.BaseDockerfile(), 0644); err != nil {
+		dockerrt.ReferenceDockerfile(), 0644); err != nil {
 		return fmt.Errorf("write defaults/base-image.Dockerfile: %w", err)
 	}
 	return nil

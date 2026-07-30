@@ -34,11 +34,15 @@ func TestScaffold_MaterialisesTheBaseDockerfile(t *testing.T) {
 	path := filepath.Join(layout.DefaultsDir(), "base-image.Dockerfile")
 	written, err := os.ReadFile(path) //nolint:gosec // test-controlled path
 	require.NoError(t, err, "the base Dockerfile must be readable on disk, or the image is undocumented")
-	assert.Equal(t, dockerrt.BaseDockerfile(), written, "it must be this binary's copy, byte for byte")
+	assert.Equal(t, dockerrt.ReferenceDockerfile(), written,
+		"it must be this binary's copy, byte for byte, header included")
+	assert.True(t, strings.HasSuffix(string(written), string(dockerrt.BaseDockerfile())),
+		"the body must be exactly what gets built, or the copy documents something else")
 
 	assert.Contains(t, string(written), "EDITING THIS FILE HAS NO EFFECT",
 		"the copy must say it is a copy: it sits beside profile Dockerfiles that ARE read from disk, "+
-			"so a reader's default assumption is the wrong one")
+			"so a reader's default assumption is the wrong one. The header lives here and NOT in the "+
+			"built file — it is false in the repo, and it would eat into apple's 16 KiB build cap")
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)
@@ -62,7 +66,7 @@ func TestScaffold_RefreshesAStaleBaseDockerfile(t *testing.T) {
 
 	written, err := os.ReadFile(path) //nolint:gosec // test-controlled path
 	require.NoError(t, err)
-	assert.Equal(t, dockerrt.BaseDockerfile(), written,
+	assert.Equal(t, dockerrt.ReferenceDockerfile(), written,
 		"a stale copy must be overwritten, not preserved")
 	assert.False(t, strings.Contains(string(written), "debian:ancient"))
 }

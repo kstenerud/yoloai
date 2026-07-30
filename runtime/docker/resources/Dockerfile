@@ -1,42 +1,16 @@
-# ============================================================================
-# yoloAI base image — REFERENCE COPY. EDITING THIS FILE HAS NO EFFECT.
-#
-# If you are reading this at ~/.yoloai/…/defaults/base-image.Dockerfile, it was
-# written there by yoloAI so you can see what is in the sandbox image. It is a
-# copy. The Dockerfile that actually builds the image is compiled into the yoloai
-# binary (//go:embed), so the build never reads this file, and yoloAI overwrites
-# it on every setup — your edits will vanish without warning.
-#
-# To change what a sandbox contains, write a profile Dockerfile instead:
-#
-#     mkdir -p ~/.yoloai/profiles/my-profile
-#     printf 'FROM yoloai-base:latest\nRUN apt-get update && apt-get install -y cowsay\n' \
-#         > ~/.yoloai/profiles/my-profile/Dockerfile
-#     yoloai new my-sandbox ~/code/project --profile my-profile
-#
-# Profile Dockerfiles are read from disk and are the supported way to add
-# packages, pin a different toolchain, or override anything below.
-#
-# Contributors: the real file is runtime/docker/resources/Dockerfile in the
-# yoloAI repo. Changing it changes buildInputsChecksum, which rebuilds this base
-# and every profile image built on it.
-# ============================================================================
-
+# Apple's `container build` rejects a Dockerfile over 16 KiB (apple/container
+# #735, still open 2026-07-30), so this file has a hard size budget that nothing
+# in the build itself enforces. TestDockerfile_FitsAppleBuilderLimit guards it.
+# Comments are ~58% of the bytes here: keep the rationale that a reader needs in
+# order to act correctly, and put the archaeology in the finding it cites.
 FROM debian:trixie-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-# DL3008 (pin apt-get versions) suppressed: Debian stable rarely changes package
-# behaviour, and pinning every system package would force base-image rebuilds
-# with no behavioural benefit. Security updates flow through `apt-get update`,
-# not version bumps. We pin only the components whose behaviour matters (Node,
-# Go, gosu, rustup) further down.
-#
-# binutils-gold: the Go toolchain links cgo binaries with `-fuse-ld=gold` on
-# linux/arm64 (a long-standing BFD-linker workaround). Debian trixie split gold
-# out of the `binutils` package, so without this an arm64 base build fails with
-# "cannot find 'ld'" when go installs golangci-lint. (No-op on amd64, which uses
-# bfd.) See docs/contributors/backend-idiosyncrasies.md.
+# DL3008 unpinned-apt rationale: standards/dockerfile.md "Pinning".
+# binutils-gold is required for cgo links on linux/arm64 (trixie split gold out
+# of binutils; without it an arm64 base build cannot find `ld`) —
+# backend-idiosyncrasies.md.
 # hadolint ignore=DL3008
 RUN apt-get update && apt-get install -y --no-install-recommends \
     tmux \
@@ -73,8 +47,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     && rm -rf /var/lib/apt/lists/*
 
 # Docker CE + Compose plugin
-# DL3008: same reasoning as above — Debian repos for docker-ce track upstream
-# Docker releases; pinning would freeze the sandbox on an old Docker version.
+# DL3008: as above; pinning would freeze the sandbox on an old Docker.
 # hadolint ignore=DL3008
 RUN install -m 0755 -d /etc/apt/keyrings \
     && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://download.docker.com/linux/debian/gpg -o /etc/apt/keyrings/docker.asc \
@@ -92,25 +65,16 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 
-# Node.js 22 LTS via NodeSource.
-#
-# Was 20 from 2026-03 to 2026-07, on the rationale that "Node 22 has syscall
-# incompatibilities with gVisor ARM64". That claim named a platform this project
-# has never had — no Linux ARM machine, and no ARM64 runner in any CI workflow —
-# so it cannot have been observed, and no public report of it exists either
-# (DF158, A18). Meanwhile Node 20 went EOL in April 2026 and the pin silently
-# froze Claude Code at 2.1.197, since 2.1.198 onward require Node >=22.
-#
-# The residual risk is real but unmeasured and one-sided: if gVisor on ARM64 does
-# dislike Node 22, it shows up in `container-enhanced` isolation on that
-# architecture only, and `sandbox.node_check` (sandbox-setup.py) already logs the
-# node version before agent launch precisely so such a failure surfaces instead
-# of presenting as a silent session death. Revisit with evidence, not with a
+# Node.js 22 LTS via NodeSource. Was 20 from 2026-03 to 2026-07 on an
+# unevidenced gVisor/ARM64 claim; that cost an EOL runtime and froze Claude Code
+# at 2.1.197 (2.1.198+ need Node >=22). Full account and the residual risk:
+# DF158. If gVisor on ARM64 does dislike Node 22 it shows up in
+# `container-enhanced` there only, and `sandbox.node_check` already logs the node
+# version before agent launch so it surfaces. Revisit with evidence, not a
 # hypothesis.
 ARG NODE_MAJOR=22
-# DL3008: nodejs version is pinned via the NodeSource repository URL
-# (NODE_MAJOR), which is the right pin level for an LTS line. Pinning the
-# minor in apt would lock us to a single security release.
+# DL3008: pinned at the NodeSource repo URL (NODE_MAJOR), the right level for an
+# LTS line; pinning the apt minor would lock us to one security release.
 # hadolint ignore=DL3008
 RUN mkdir -p /etc/apt/keyrings \
     && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL https://deb.nodesource.com/gpgkey/nodesource-repo.gpg.key \
@@ -128,23 +92,16 @@ RUN curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL "https://go.dev/dl/g
     && tar -C /usr/local -xzf /tmp/go.tar.gz \
     && rm /tmp/go.tar.gz
 ENV PATH="/usr/local/go/bin:${PATH}"
-# Also set via profile.d so shells started fresh (e.g. by AI coding agents)
-# pick up the path even when Docker ENV is not inherited.
-# SC2016 (variable in single quotes) suppressed: the literal `$PATH` is what
-# we want written to /etc/profile.d/golang.sh — it is expanded by the shell
-# that sources the file later, not by Docker at build time.
+# Also via profile.d so freshly-started shells pick up the path when Docker ENV
+# is not inherited. SC2016: the literal `$PATH` is intended — it expands when the
+# file is sourced, not at build time.
 # hadolint ignore=SC2016
 RUN echo 'export PATH="/usr/local/go/bin:$PATH"' > /etc/profile.d/golang.sh
 
-# golangci-lint
-# DL3062 (pin go install version) suppressed: this golangci-lint is installed
-# inside the *sandbox image* for AI agents running yoloAI projects — agents
-# need the current linter set, not a pin tied to yoloAI's release cadence.
-# yoloAI's own `make check` pins golangci-lint explicitly via `go run` (see
-# Makefile §lint target).
-# go install has no native retry flag (unlike the curl installs above), so wrap
-# it in a retry loop — a transient Go-proxy hiccup otherwise fails this whole
-# multi-minute base build, which every user's first run performs.
+# golangci-lint — DL3062 unpinned on purpose: this copy is for agents working in
+# the sandbox and wants the current linter set, not yoloAI's release cadence
+# (yoloAI's own `make check` pins it via `go run`). Retry-wrapped because
+# `go install` has no --retry and a proxy hiccup would fail the whole base build.
 # hadolint ignore=DL3062
 RUN n=0; until [ "$n" -ge 5 ]; do \
       GOPATH=/tmp/gopath go install github.com/golangci/golangci-lint/v2/cmd/golangci-lint@latest && break; \
@@ -161,45 +118,29 @@ ENV RUSTUP_HOME=/usr/local/rustup \
 RUN curl --retry 5 --retry-delay 2 --retry-all-errors --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs \
       | sh -s -- -y --default-toolchain stable --profile minimal --no-modify-path \
     && chmod -R a+rw "$RUSTUP_HOME" "$CARGO_HOME"
-# SC2016: same reason as the golang.sh write above — `$PATH` is intentional;
-# we want it expanded at shell-source time, not at Docker build time.
+# SC2016: as golang.sh above — `$PATH` expands at source time, not build time.
 # hadolint ignore=SC2016
 RUN echo 'export PATH="/usr/local/cargo/bin:$PATH"' > /etc/profile.d/cargo.sh
 
-# AI coding agents — a MINIMUM version, with the maximum left open, so the
-# original requirement still holds: agents' server-side APIs evolve continuously
-# and the CLI clients must track, and an exact pin would lock us to a client that
-# fails against the live API within weeks. The floor adds the other half — yoloAI
-# drives these CLIs by hardcoded flags (internal/agent/agent.go), so it needs to
-# be able to say which versions those flags exist in (DF158).
+# AI coding agents — a MINIMUM version, maximum left open: the clients must keep
+# tracking their servers' APIs (an exact pin fails within weeks), while yoloAI
+# drives them by flags hardcoded in internal/agent/agent.go and needs to state
+# which versions have them. Each floor is a version this repo has run against.
+# RAISE ONE ONLY when yoloAI depends on something newer, and say why in the
+# commit; that rebuilds the base and every profile image on it, which is the
+# intended mechanism. Rationale and both traps in full: DF158.
 #
-# Each floor is the version this repo has actually run against, so it is a tested
-# low-water mark rather than an invented one. RAISE ONE ONLY when yoloAI starts
-# depending on something newer, and say why in the commit — the number cannot
-# carry that itself. Raising any floor edits this Dockerfile, which changes
-# buildInputsChecksum, which rebuilds the base and every profile image built on
-# it; that is the intended mechanism, and the reason no separate cache-busting
-# marker is needed.
+#  - QUOTE THE SPEC. Unquoted, sh reads `>=2.1.197` as a redirection and npm gets
+#    the bare name — a floor that enforces nothing, silently. Gated by
+#    TestDockerfile_AgentInstallsCarryAQuotedFloor.
+#  - `>=X.Y.Z` is not "latest": npm picks the newest version whose `engines` this
+#    image satisfies, and raising a floor past an engine boundary only warns
+#    (EBADENGINE), leaving an unsupported combination. Check
+#    `npm view <pkg>@<ver> engines.node` against NODE_MAJOR first.
 #
-# `>=X.Y.Z` does NOT simply mean "latest". npm installs the newest version whose
-# `engines` the image satisfies, so a package that raises its Node requirement
-# caps here silently — claude-code is frozen at 2.1.197 because 2.1.198 onward
-# require Node >=22 and NODE_MAJOR is 20 (DF158). Worse, raising a floor PAST such
-# a boundary does not fail: npm emits EBADENGINE as a warning (engine-strict is
-# false) and installs an unsupported combination that starts and then misbehaves
-# somewhere unattributable. Before raising any floor, check `npm view <pkg>@<ver>
-# engines.node` against NODE_MAJOR.
-#
-# THE QUOTES ARE LOAD-BEARING. Unquoted, `sh` reads `>=2.1.197` as a redirection:
-# it creates a file named `=2.1.197`, hands npm the bare package name, and
-# SUCCEEDS — installing latest against a floor that enforces nothing, with no
-# error and no trace but a stray file. TestDockerfile_AgentInstallsCarryAQuotedFloor
-# pins this. Verified directly, 2026-07-30.
-#
-# Claude Code via npm (not native binary — native bundles Bun which ignores
-# proxy env vars and auto-updates; see docs/dev/research/implementation.md).
-# The claude "fullscreen renderer" upsell that previously stalled smokes is
-# handled at the agent layer — settings.tui="default" in agent.go, DF52.
+# Claude Code via npm, not the native binary: that bundles Bun, which ignores
+# proxy env vars and auto-updates. The "fullscreen renderer" upsell that stalled
+# smokes is handled at the agent layer — settings.tui="default", DF52.
 ENV DISABLE_INSTALLATION_CHECKS=1
 # Retry-wrapped (like the golangci-lint install above): a transient npm-registry
 # hiccup otherwise fails the whole multi-minute base build with no recovery.
