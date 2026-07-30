@@ -649,6 +649,45 @@ itself worth knowing when reading pattern 4.
   original phrasing — "the ordinary half remains" was inherited verbatim from the finding's own
   pre-fix text, which is how a stale description survives the work that invalidates it.
 
+### A18 — researched whether a claim was true, never asked whether it had a source (2026-07-30)
+
+- **Claimed:** writing up why the base image pins Node 20, that the gVisor/ARM64 rationale in
+  `bca8af21` was *"the hypothesis that motivated the downgrade, not an observation that survived it.
+  **The observation was a silent crash.**"* Committed to `findings-unresolved.md` in that form.
+- **True:** there was no observation, because there was no platform. **This project has never had a
+  Linux ARM system** — and no CI workflow has ever had an ARM64 runner; the only ARM64 anywhere in
+  the repo is `darwin/arm64` compile-only cross-lint and the macOS tart path. `linux/arm64` appears
+  in no workflow, matrix or smoke tier. The diagnosis named an architecture nobody involved could
+  ever have run.
+- **Source of the false belief:** I treated a commit message as a primary record. Asked to research
+  the claim, I researched *the world* — eight web searches across the gVisor tracker, the Node
+  tracker, gVisor's arm64 syscall table — and correctly reported no public corroboration. Every one
+  of those searches presupposed that the local claim was sourced and the only open question was
+  whether the outside world agreed. I never asked the one-line question that settles it: **on what
+  hardware?** A `grep arm64 .github/workflows` would have done it, and I had already run greps over
+  that directory for other reasons.
+- **Caught by:** the owner, stating a fact about their own hardware — *"We've never had a linux ARM
+  system."* Not a correction of reasoning; a correction of a premise I had never thought to test.
+- **Cost:** the wrong framing reached a finding and a commit message, and I had just spent a
+  research pass building a careful case on top of it. The finding also inherited a softer error:
+  I called the absence of public reports "weak evidence", treating it as one side of a balance, when
+  in fact there was nothing on the other side to balance against.
+- **Class:** new, and it is the inverse of [A16](#a16--verified-an-exploit-thoroughly-never-asked-whether-the-attacker-needed-it-2026-07-30).
+  There I verified a mechanism and never asked whether it mattered; here I verified a claim against
+  external sources and never asked whether it was ever grounded internally. Both are effort spent
+  one level away from the load-bearing question. The tell is specific and checkable: **a claim about
+  a platform is also a claim about access to that platform.** When a rationale names hardware, an
+  architecture, or an environment, establish that the project has it *before* investigating whether
+  the claim about it is true — provenance first, then truth.
+- **Wider point worth keeping.** The claim had sat in the Dockerfile for four and a half months
+  reading as settled fact, and was load-bearing: it pinned Node at 20, which silently froze Claude
+  Code at 2.1.197 and left the project shipping a runtime that went EOL in April 2026 — the exact
+  outcome `questions-resolved.md` #2 had decided against. An unfalsifiable diagnosis is not a
+  harmless one; it is the kind that survives longest, because nothing can dislodge it.
+- **Gated now?** No, and a script cannot ask "did we have that machine". What is durable is
+  [DF158](design/findings-unresolved.md), which now records the provenance gap alongside the
+  technical one, so the next person to read that Dockerfile comment meets the caveat with it.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of
