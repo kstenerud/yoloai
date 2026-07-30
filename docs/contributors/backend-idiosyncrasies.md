@@ -144,6 +144,7 @@ inclusion test first, then add a row to the index.
 | Smoke test: `stop_start` fails "agent idle"; pane shows `Error: Exit code N` + a clarifying question; other backends pass | [Smoke harness: agent stalls when the sentinel command errors](#agent-stalls-when-the-sentinel-command-errors) |
 | `create task: ... more than one sandbox exists with the provided prefix "..."` (containerd-vm, under concurrency) | [Kata: shim resolves sandboxes by name prefix](#kata-shim-resolves-a-sandbox-from-the-container-id-by-prefix-prefix-related-names-collide) |
 | `create task: failed to create shim task: ttrpc: closed` on **restart** (Stop then Start) of a containerd/Kata sandbox | [containerd: restart must re-create the netns Stop tore down](#containerd-restart-stopstart-must-re-establish-the-netns-that-stop-tore-down) |
+| `exec start: ttrpc: closed` during `exec` into an **already-running** containerd/Kata task (e.g. `yoloai apply` → `git diff`), after a healthy restart | [DF159](design/findings-unresolved.md) — different cause from the row above; one non-reproducing occurrence, no fix |
 | Is it safe to delete a `.lock` file while holding its flock? (prune / Destroy) | [Removing a .lock file while holding its flock is safe](#removing-a-lock-file-while-holding-its-flock-is-safe) |
 | Tart base build / `tart run` fails with `The number of VMs exceeds the system limit` or VM self-stops at boot, but `tart list` shows nothing running | [Tart: orphaned Virtualization VM processes consume the macOS VM limit](#orphaned-virtualization-vm-processes-survive-a-crashed-tart-run-and-silently-consume-the-macos-vm-limit) |
 | `tart delete <name>` fails with `instance not found` for a VM that exists (e.g. `delete old base: instance not found` during base promote) | [Tart: delete of a running VM reports "instance not found"](#tart-delete-of-a-running-vm-fails-with-a-misleading-instance-not-found-stop-first) |
@@ -2869,6 +2870,16 @@ with the sandbox state unchanged.
 same container — fails at task creation with `create task: failed to create shim
 task: ttrpc: closed`. Consistent, not a flake; retrying `NewTask` does **not**
 help (the failure is a missing resource, not a transient one).
+
+**First, check which failure you have.** `ttrpc: closed` is containerd's report
+that the shim connection dropped, for *any* reason — it names the transport and
+never the cause, which is why this entry's own first hypothesis ("the socket
+needs ~500ms, retry it") was wrong and a bounded retry was built and discarded
+before the real cause was found. The diagnosis below applies to **task creation
+on restart**. A drop during `exec` into an already-running task is something
+else and is not fixed by any of this — see [DF159](design/findings-unresolved.md),
+where it appeared once in 38 runs and did not reproduce. Do not read "consistent,
+not a flake" as a property of the string.
 
 **Explanation:** `Create` calls `setupCNI`, which creates a **named** network
 namespace at `/var/run/netns/yoloai-<name>` and pins it into the container's OCI
