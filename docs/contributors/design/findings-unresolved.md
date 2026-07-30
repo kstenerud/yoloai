@@ -699,25 +699,6 @@ earlier signal and records nothing else.
     Remaining cost to price honestly: one more mount on every sandbox, a host-side materialisation directory to place and reclaim, and confirming the read-only mount behaves on apple and containerd (docker/podman are the same shape as the existing `/yoloai/*` mounts).
 - **Pointer:** `internal/orchestrator/profiles/profile_build.go` (`EnsureProfileImage`, the `parentChecksum := ""` seed and `chainChecksum`); `runtime/docker/build.go` (`buildInputsChecksum`, the value that would seed it). Sibling: [DF152](#df152--profile-image-staleness-cannot-travel-with-the-image-because-the-interface-takes-neither-a-context-nor-a-tag).
 
-### DF157 — on the restart path every line of launch progress is rendered as a warning
-
-- **Discovered:** 2026-07-30, verifying DF156 end to end on Linux · **Workstream:** profile-image lifecycle
-- **Severity:** LOW — cosmetic, but loud: an ordinary `yoloai restart` of a sandbox whose base moved prints ~35 consecutive `Warning:` lines that are in fact routine build progress.
-- **Rides:** any. Nothing user-visible is withdrawn; the notice *level* changes, not the messages.
-- **Observed.** `yoloai restart df156prof` on a stale-lineage sandbox emitted, among many:
-  ```
-  Warning: #35 exporting layers 75.9s done
-  Warning: #34 [31/31] RUN chmod +x /yoloai/bin/entrypoint.sh …
-  Warning: Base image resources updated, rebuilding...
-  Warning: Building profile image yoloai-cli-df156p...
-  ```
-  None of those is a warning. The base rebuild succeeded and the sandbox started normally.
-- **Cause.** `recreateContainer` sets `state.State.Output` to `&noticeWriter{notices: n, level: NoticeWarn}` (`restart.go:220`), so *every* line any launch-path helper writes to `st.Output` becomes a `NoticeWarn`. `st.Output` is not a warning channel — it is the launch path's general progress stream, and of its four consumers in `launch.go` only two are warnings (`filterAvailablePorts`, and the adjacent `Fprintf(…, "Warning: %s\n", w)`), while the other two are progress: `ensureImageLineage`'s image builds and the DF154 missing-image rebuild notice.
-- **Why it appeared now.** The wiring is old and was correct when written: the comment on `recreateContainer` says *"incidental progress (e.g. a port-availability warning from filterAvailablePorts)"*, and at that time a warning was the only thing that ever reached it. `ensureImageLineage` (`ae0597c9`, DF156) is what first made the restart path build images, and a build streams. So this is a **latent misclassification exposed by a new writer**, not a regression in the writer — the same shape as a single-level channel acquiring a second kind of message.
-- **A second symptom follows from the code, though it was not reproduced here:** `launch.go:126` writes its own literal `"Warning: "` prefix into `st.Output`, and the CLI renders a `NoticeWarn` with that prefix too, so on the restart path that line should surface as `Warning: Warning: …`. Triggering it needs an already-bound host port, which this session did not set up. Read from the source, not observed.
-- **Direction, not a decision.** One writer cannot carry two levels, so either the level moves to the call site (helpers emit structured notices, or take separate info/warn writers) or `st.Output` is declared informational and the two genuine warnings get their own channel. The second is smaller and matches what the field already means everywhere else — `Create` passes a real `io.Writer` and prints build progress to the terminal unprefixed, which is the behaviour restart should match.
-- **Pointer:** `internal/orchestrator/lifecycle/restart.go` (the `Output:` field), `internal/orchestrator/lifecycle/notice.go` (`noticeWriter`), `internal/orchestrator/launch/launch.go` lines 123/126/171/1178 (the four consumers).
-
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

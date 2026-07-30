@@ -112,10 +112,13 @@ func mergeLaunchEnv(layout config.Layout, meta *store.Environment, extraEnv map[
 	return envVars, nil
 }
 
-// recreateContainer creates a new Docker container from environment.json. Incidental
-// progress (e.g. a port-availability warning from filterAvailablePorts) is
-// surfaced through n as Notices rather than a raw writer, since the restart
-// entry points (Start/Reset) return their output as a *Result's Notices (F8).
+// recreateContainer creates a new Docker container from environment.json. The
+// launch path's progress — a port-availability warning from filterAvailablePorts,
+// an image build streamed by ensureImageLineage — is surfaced through n as
+// Notices rather than a raw writer, since the restart entry points (Start/Reset)
+// return their output as a *Result's Notices (F8). noticeWriter classifies each
+// line's level from the line itself, so the mixed stream lands correctly without
+// this call site having to know which helpers write what (DF157).
 func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *notices) error {
 	agentDef, acfg, err := requireAgent(d, name)
 	if err != nil {
@@ -217,7 +220,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		ConfigJSON:        configData,
 		Layout:            d.Layout,
 		HomeDir:           d.Layout.HomeDir,
-		Output:            &noticeWriter{notices: n, level: NoticeWarn},
+		Output:            &noticeWriter{notices: n},
 	}
 
 	if resume {

@@ -43,6 +43,20 @@ import (
 // timeout the caller removes the secrets dir anyway (we never leak it).
 const secretsConsumedTimeout = 30 * time.Second
 
+// WarningPrefix marks a line written to state.State.Output as a warning rather
+// than progress. That stream carries both — port-availability warnings from
+// filterAvailablePorts alongside a streamed image build from ensureImageLineage —
+// so a line's level can only be read from the line.
+//
+// On the create path Output is a terminal and the prefix simply prints. On the
+// restart path it is a noticeWriter, which classifies on this exact constant and
+// strips it, so the level survives into a structured Notice instead of the whole
+// stream being labelled one way. It is exported for that consumer: sharing the
+// literal is what stops the producer and the classifier from drifting apart,
+// which is how every line of build progress came to be reported as a warning
+// (DF157).
+const WarningPrefix = "Warning: "
+
 // LaunchContainer creates a sandbox instance from State, starts it,
 // and cleans up credential temp files. Used by both initial creation and
 // recreation from environment.json.
@@ -123,7 +137,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	ports = filterAvailablePorts(ports, outputOr(st.Output))
 
 	for _, w := range advisoryWarnings(ctx, d.Runtime, st.Isolation) {
-		fmt.Fprintf(outputOr(st.Output), "Warning: %s\n", w) //nolint:errcheck // best-effort output
+		fmt.Fprintf(outputOr(st.Output), WarningPrefix+"%s\n", w) //nolint:errcheck // best-effort output
 	}
 
 	// Re-ensure the image right before bringing it up, not only at create (DF156).
@@ -1285,7 +1299,7 @@ func filterAvailablePorts(ports []runtime.PortMapping, output io.Writer) []runti
 	for _, p := range ports {
 		l, err := net.Listen("tcp", fmt.Sprintf(":%d", p.HostPort))
 		if err != nil {
-			fmt.Fprintf(output, "Warning: skipping port %d:%d — host port %d is already in use\n", //nolint:errcheck // best-effort output
+			fmt.Fprintf(output, WarningPrefix+"skipping port %d:%d — host port %d is already in use\n", //nolint:errcheck // best-effort output
 				p.HostPort, p.ContainerPort, p.HostPort)
 			continue
 		}

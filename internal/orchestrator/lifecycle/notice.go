@@ -8,6 +8,8 @@ import (
 	"bytes"
 	"fmt"
 	"strings"
+
+	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 )
 
 // NoticeLevel classifies a Notice for rendering — informational status vs. a
@@ -48,15 +50,29 @@ func (n *notices) warnf(format string, args ...any) {
 }
 
 // noticeWriter adapts the notices accumulator onto io.Writer: each newline-
-// terminated line written becomes one Notice at the configured level. It lets a
-// streaming helper that only knows how to Fprintf a warning (filterAvailablePorts
-// on the restart path) feed the structured-notice channel instead of a raw
-// stream — so the restart path shares one port-filter implementation with Create
-// (which writes to a real io.Writer) while still surfacing warnings through the
-// Start/Reset result's Notices. F8.
+// terminated line written becomes one Notice. It lets a streaming helper that
+// only knows how to Fprintf to a writer feed the structured-notice channel
+// instead of a raw stream — so the restart path shares one implementation of
+// each such helper with Create (which passes a real io.Writer) while still
+// surfacing the result through the Start/Reset result's Notices. F8.
+//
+// The level is read from the line, not configured on the writer, because a
+// single writer carries both kinds: state.State.Output is the launch path's
+// general progress stream, and of its consumers some warn (filterAvailablePorts)
+// while others stream an image build. Configuring one level for the whole stream
+// therefore mislabels one kind or the other, and it mislabelled the larger:
+// every line of BuildKit progress arrived as a warning, which RenderNotices
+// sends to stderr and does not suppress under --json (DF157).
+//
+// Keying on launch.WarningPrefix rather than adding a second sink keeps one
+// source of truth for the level — the message text — and it is already the
+// source the create path uses, so a helper that says "Warning:" is correct on
+// both paths and one that does not is informational on both. The cost is that
+// the level is stringly-typed; the benefit is that there is no second channel
+// for a future helper to be wired into wrongly, and no way for the two paths to
+// disagree about a line they both carry.
 type noticeWriter struct {
 	notices *notices
-	level   NoticeLevel
 	buf     []byte
 }
 
@@ -64,6 +80,9 @@ type noticeWriter struct {
 // non-blank line as a Notice. A trailing partial line (no newline yet) is held
 // in buf until the next Write completes it; the helpers that write here always
 // newline-terminate, so nothing is lost in practice.
+//
+// The prefix is stripped when it classifies, because RenderNotices re-adds it
+// for a NoticeWarn — retaining it here rendered as "Warning: Warning: …".
 func (w *noticeWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for {
@@ -72,7 +91,11 @@ func (w *noticeWriter) Write(p []byte) (int, error) {
 			break
 		}
 		if line := strings.TrimSpace(string(w.buf[:i])); line != "" {
-			w.notices.list = append(w.notices.list, Notice{Level: w.level, Message: line})
+			level := NoticeInfo
+			if after, found := strings.CutPrefix(line, launch.WarningPrefix); found {
+				level, line = NoticeWarn, after
+			}
+			w.notices.list = append(w.notices.list, Notice{Level: level, Message: line})
 		}
 		w.buf = w.buf[i+1:]
 	}
