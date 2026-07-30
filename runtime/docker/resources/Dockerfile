@@ -1,3 +1,27 @@
+# ============================================================================
+# yoloAI base image — REFERENCE COPY. EDITING THIS FILE HAS NO EFFECT.
+#
+# If you are reading this at ~/.yoloai/…/defaults/base-image.Dockerfile, it was
+# written there by yoloAI so you can see what is in the sandbox image. It is a
+# copy. The Dockerfile that actually builds the image is compiled into the yoloai
+# binary (//go:embed), so the build never reads this file, and yoloAI overwrites
+# it on every setup — your edits will vanish without warning.
+#
+# To change what a sandbox contains, write a profile Dockerfile instead:
+#
+#     mkdir -p ~/.yoloai/profiles/my-profile
+#     printf 'FROM yoloai-base:latest\nRUN apt-get update && apt-get install -y cowsay\n' \
+#         > ~/.yoloai/profiles/my-profile/Dockerfile
+#     yoloai new my-sandbox ~/code/project --profile my-profile
+#
+# Profile Dockerfiles are read from disk and are the supported way to add
+# packages, pin a different toolchain, or override anything below.
+#
+# Contributors: the real file is runtime/docker/resources/Dockerfile in the
+# yoloAI repo. Changing it changes buildInputsChecksum, which rebuilds this base
+# and every profile image built on it.
+# ============================================================================
+
 FROM debian:trixie-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]

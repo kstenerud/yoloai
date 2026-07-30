@@ -17,6 +17,13 @@ import (
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
 	tmuxres "github.com/kstenerud/yoloai/internal/resources/tmux"
 	"github.com/kstenerud/yoloai/runtime"
+	// dockerrt is imported for the embedded base-image Dockerfile only, not to
+	// drive a backend. That package is already the owner of the shared base build
+	// resources — containerd and apple both build their base from it — and the
+	// Dockerfile cannot move to a neutral package the way tmux.conf did, because
+	// it COPYs its sibling files in that same directory. So this reaches for a
+	// resource, not for docker.
+	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
 	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
@@ -264,6 +271,20 @@ func (e *Engine) ensureDefaultsDir() error {
 		if err := fileutil.WriteFile(tmuxConfPath, tmuxres.Embedded(), 0644); err != nil {
 			return fmt.Errorf("write defaults/tmux.conf: %w", err)
 		}
+	}
+	// Materialize the base image's Dockerfile so users can read what is in the
+	// sandbox they are handed. The build never reads it — the real one is
+	// embedded in the binary — so this is documentation, and its own banner says
+	// so.
+	//
+	// Overwritten unconditionally, unlike tmux.conf above. That file is written
+	// once because a user may customize it and the mount then binds their copy;
+	// this one has no such role, so "leave what is already there" would let it
+	// describe an image two releases old. A reference copy that can go stale is
+	// worse than none: it reads as authoritative and answers the question wrong.
+	if err := fileutil.WriteFilePerm(filepath.Join(defaultsDir, "base-image.Dockerfile"),
+		dockerrt.BaseDockerfile(), 0644); err != nil {
+		return fmt.Errorf("write defaults/base-image.Dockerfile: %w", err)
 	}
 	return nil
 }

@@ -57,3 +57,9 @@ var embeddedAgentRun = monitor.AgentRunScript()
 // embeddedYoloaiResume provides the in-sandbox resume command (D96 DD4),
 // installed executable in /yoloai/bin as `yoloai-resume`.
 var embeddedYoloaiResume = monitor.YoloaiResumeScript()
+
+// BaseDockerfile returns the embedded base-image Dockerfile. Exported so the
+// orchestrator can materialise a readable copy next to the other defaults: the
+// build itself never reads from disk, so without this the only description of
+// what a sandbox contains lives inside the binary.
+func BaseDockerfile() []byte { return embeddedDockerfile }

@@ -49,6 +49,11 @@ Dockerfile `FROM yoloai-base` that installs the Node 20 you need, used via
 `yoloai new --profile <name>`. Note that doing so re-imposes the Claude Code cap for
 sandboxes on that profile.
 
+**To see exactly what the base image contains,** yoloAI now writes a readable copy of
+that Dockerfile to `<data-dir>/defaults/base-image.Dockerfile` (refreshed whenever a
+sandbox is created). It is a reference only — its own header says so — because the
+build reads the embedded copy, never the disk.
+
 ## v0.10.0
 
 ### A sandbox's container/VM hostname is now the sandbox name
