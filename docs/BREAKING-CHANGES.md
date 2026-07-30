@@ -79,15 +79,17 @@ build reads the embedded copy, never the disk.
 ### Host-only sandbox metadata moved into a `host/` subdirectory
 
 **Previous behavior:** a sandbox directory was flat. `environment.json`,
-`sandbox-state.json`, `agent.json` and `netpolicy.json` sat at
-`<dataDir>/sandboxes/<name>/`, alongside everything the in-sandbox agent needs.
+`sandbox-state.json`, `agent.json`, `netpolicy.json`, `network-diag.txt`,
+`context.md`, the injector's `injector.json` / `injector.log` / `injector-token`,
+and the `backend/` directory (SBPL profile, pid files, VM and CNI state) all sat
+at `<dataDir>/sandboxes/<name>/`, alongside everything the in-sandbox agent needs.
 On tart and Seatbelt the whole sandbox directory is shared into the guest
 read-write, so those four records were agent-writable — the root of DF136
 (rewrite `environment.json`'s `HostPath` and a host-side `apply` writes wherever
 that path points) and DF148.
 
-**New behavior:** they live in `<dataDir>/sandboxes/<name>/host/`, the host-only
-access tier, which is never shared into a guest on any backend. The tier is a
+**New behavior:** they all live under `<dataDir>/sandboxes/<name>/host/`, the
+host-only access tier, which is never shared into a guest on any backend. The tier is a
 physical directory, so a record's guest-access class is determined by where it
 sits rather than by a list that has to be maintained. Nothing in any guest ever
 read these files, so no in-sandbox behavior changes.
@@ -96,7 +98,9 @@ read these files, so no in-sandbox behavior changes.
 version are not readable until they are migrated. The `TierLayout` migrator that
 performs the move is not in this change — until it lands, an existing sandbox
 reports as missing. `Sandbox.EnvironmentPath()` returns the new location;
-embedders that build the path themselves rather than calling it must be updated.
+embedders that build the path themselves rather than calling it must be updated —
+and note that now includes anything reaching into `backend/`, whose per-backend
+contents (`profile.sb`, `pid`, `instance.json`) moved with it.
 This is the first half of the tiering work (`docs/contributors/design/plans/sandbox-share-tiering.md`);
 `runtime-config.json`, `bin/` and the rest move in the read-only and read-write
 tiers separately.
