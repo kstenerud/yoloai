@@ -688,6 +688,33 @@ itself worth knowing when reading pattern 4.
   [DF158](design/findings-unresolved.md), which now records the provenance gap alongside the
   technical one, so the next person to read that Dockerfile comment meets the caveat with it.
 
+### A19 — silenced a linter by narrowing a test, on a platform I could not run (2026-07-30)
+
+- **Claimed:** in a test comment, that holding `127.0.0.1:P` still collides with the
+  `filterAvailablePorts` bind of `0.0.0.0:P`, so *"the collision under test is unaffected"*.
+- **True:** on Linux. On macOS/BSD the second bind **succeeds**, so the port is never reported busy,
+  no warning is emitted, and the test silently stops testing anything. It failed on the owner's Mac
+  within the hour.
+- **Source of the false belief:** the change was made to satisfy gosec **G102** ("binds to all
+  interfaces"), not to improve the test. Narrowing the holder to loopback silenced the linter and
+  changed the test's meaning, and I wrote a comment asserting the change was semantically neutral —
+  on the one platform I could execute. The original `:0` was correct precisely because it **mirrored
+  what production binds**; the "fix" broke that correspondence.
+- **Caught by:** the owner's `make check` on darwin. The test's own failure message was the right one
+  (*"a host port already in use must be dropped"*), so the diagnosis took one read — which is the
+  only part of this that went well.
+- **Class:** related to [A18](#a18--researched-whether-a-claim-was-true-never-asked-whether-it-had-a-source-2026-07-30)
+  — an unverified platform claim, written the same day, *after* recording A18 — but with its own
+  distinct trigger worth naming: **a lint fix can change what a test covers.** A linter objects to a
+  shape, not to a meaning; when the shape is load-bearing (here: matching production's bind), the
+  compliant version can be quietly weaker. Two habits follow. When a test must reproduce production
+  behaviour, **the test should do what production does, and the suppression comment should say so** —
+  which is what it now says. And a comment claiming cross-platform equivalence is a claim I usually
+  cannot check, so it should be written as the assumption it is, or not written.
+- **Gated now?** No. `make check` on Linux cannot catch a darwin-only divergence; the cross-lint
+  targets compile for `darwin/arm64` but do not run tests. The real gate is the owner's Mac and CI,
+  which worked.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of

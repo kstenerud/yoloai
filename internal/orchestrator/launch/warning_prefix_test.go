@@ -27,11 +27,14 @@ import (
 func TestFilterAvailablePorts_MarksItsWarning(t *testing.T) {
 	// Hold a real port for the duration, so the helper's own net.Listen fails
 	// for the reason it exists to detect rather than for a simulated one.
-	// Loopback rather than all interfaces (gosec G102): the helper binds
-	// 0.0.0.0, which still collides with a loopback holder on the same port, so
-	// the collision under test is unaffected — and the assertion that the port
-	// was dropped is what would catch it if that ever stopped being true.
-	held, err := net.Listen("tcp", "127.0.0.1:0")
+	//
+	// The holder MUST bind the same way filterAvailablePorts does — all
+	// interfaces, not loopback. Holding 127.0.0.1:P and expecting a 0.0.0.0:P
+	// bind to collide is Linux-specific: on macOS/BSD that second bind succeeds,
+	// so the port is never reported busy and this test silently stops testing
+	// anything. Observed as a real failure on darwin, where the helper bound a
+	// port a loopback listener already held.
+	held, err := net.Listen("tcp", ":0") //nolint:gosec // G102: must mirror filterAvailablePorts' own bind; a loopback holder does not collide on BSD
 	require.NoError(t, err)
 	defer held.Close() //nolint:errcheck // test cleanup
 	busy := held.Addr().(*net.TCPAddr).Port
