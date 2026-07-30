@@ -48,8 +48,11 @@ library/
 │       └── tmux.conf        # Optional tmux config override
 ├── sandboxes/
 │   └── <name>/
-│       ├── environment.json   # Sandbox metadata (agent, workdir, baseline SHA)
-│       ├── sandbox-state.json # Per-sandbox runtime state (agent_files_initialized, etc.)
+│       ├── host/              # Host-only tier — never shared into any guest
+│       │   ├── environment.json   # Sandbox metadata (agent, workdir, baseline SHA)
+│       │   ├── sandbox-state.json # Per-sandbox runtime state (agent_files_initialized, etc.)
+│       │   ├── agent.json         # Resolved agent config
+│       │   └── netpolicy.json     # Network policy
 │       ├── runtime-config.json # Runtime config (agent cmd, tmux settings)
 │       ├── agent-status.json  # Agent status (written by status monitor)
 │       ├── context.md         # Sandbox environment description (dirs, network, resources)
@@ -78,6 +81,25 @@ library/
 └── cache/                   # Global cache directory (e.g., overlay detection, base image checksum)
 ```
 
+
+## The sandbox dir is tiered by guest access (in progress)
+
+A sandbox directory is being split into three physical tiers — `host/` (never shared),
+`ro/` (guest-read), `rw/` (guest-read-write) — so that a file's guest-access class is
+**where it sits**, not an entry on a list that has to be maintained. The invariant is the
+one docker already upholds by binding named items rather than the sandbox root: *host-only
+metadata is never inside a guest-visible region.*
+
+**Only `host/` exists today.** It holds the four records above; `backend/`,
+`network-diag.txt` and the injector files are classified host-only but have not moved yet,
+and `ro`/`rw` content is still flat at the sandbox root. Until the rest lands, tart and
+seatbelt still share the whole sandbox root read-write, which is the open half of DF136
+and DF148 — the tier directory is in place, the enforcement is not. Design, sequencing and
+per-backend realization: [sandbox-share-tiering.md](../design/plans/sandbox-share-tiering.md).
+
+Build paths with the `internal/config` helpers (`EnvironmentPath`, `BinPath`, …), never an
+ad-hoc `filepath.Join` on a sandbox dir: the builder is what makes a file's tier a single
+place to change, and a call site that re-derives the layout silently opts out of it.
 
 ## Build-staleness markers are keyed by backend
 

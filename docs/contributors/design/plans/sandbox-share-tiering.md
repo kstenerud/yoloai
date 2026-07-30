@@ -67,6 +67,18 @@ whose access nobody happened to describe. The path-builder funnel enumerates by 
 instead, so it cannot miss one — which is the argument for keeping the funnel as the gate rather
 than the table.
 
+**And a seventh entry that is not a missed file but a new producer** (found 2026-07-30 rebasing
+onto main). DF156's remedy (c) landed `deliverRuntimeScripts`
+(`internal/orchestrator/launch/launch.go`), which writes the runtime scripts into `bin/` **on every
+launch** and returns its own read-only `MountSpec` for them. `bin/` was already classified `ro/`, so
+the tier is unchanged and host-written/guest-read is the same shape as `runtime-config.json`. What
+is new is a *fourth* mount spec for step 3 to repoint, on a path that did not exist when the
+sequencing was written. Note the failure mode this exposes: the funnel is a gate only against call
+sites that exist when it is built — a branch that funnels and then waits accumulates new ad-hoc
+joiners on main, invisibly, because they conflict with nothing. This one arrived that way
+(`filepath.Join(st.SandboxDir, config.BinDirName)`, rebased clean, repaired to `config.BinPath`).
+Re-run the funnel grep after every rebase; it is the only thing that finds them.
+
 **Two judgment calls (owner-approved):**
 - `tmux/` → `rw` wholesale: it holds a runtime-created socket (needs write); `tmux.conf` rides along
   writable — low-risk, the agent's own multiplexer running as the agent, no privilege boundary.
@@ -218,8 +230,21 @@ wiring.
   all backends.
 - **DF148** — `runtime-config.json` moves to the read-only tier (matching Docker); the guest can no
   longer rewrite a file the host reads back.
-- Latent hardening: the `bin/` setup/monitor scripts the guest currently *execs* become
-  read-only too, so they cannot be rewritten from inside the sandbox.
+**Not a third thing it closes, and the plan said otherwise until 2026-07-30.** An earlier bullet
+here claimed "latent hardening: the `bin/` scripts the guest execs become read-only, so they cannot
+be rewritten from inside the sandbox." **That is not a security benefit and must not be cited as
+one.** The scripts run as the agent's own principal, so anything the agent gains by rewriting one it
+gains by killing the process and running its own copy; read-only raises the effort by nothing. The
+general test, and the reason the other two bullets survive it: a read-only grant is a real control
+only where the agent can write a file that a **more privileged** principal later executes or trusts.
+For `bin/` that set was enumerated and found empty (DF156, resolved). For `environment.json` and
+`runtime-config.json` it is non-empty and the privileged reader is the **host** — which is exactly
+why DF136 and DF148 are real and this was not. Recorded rather than deleted because the inference is
+re-derivable from the permissions alone: A16 is the record of it being made and retracted, and it
+was made a second time, from this bullet, on 2026-07-30.
+
+Keep `bin/` in `ro/` regardless — a guest that never writes it should not have write access, and
+tier assignment follows access, not threat model. Just do not bank a security claim on it.
 
 ## Open questions
 
