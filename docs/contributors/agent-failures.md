@@ -750,6 +750,41 @@ is known, is probably not the *writing* of an entry but the **format** — a "Ca
 cannot be omitted, so pattern 4 stays computable. Revisit at ~20 specimens, or when an entry appears
 whose class already has three siblings.
 
+### A20 — accepted a skip reason as a constraint, then engineered around the defect it was hiding (2026-07-30)
+
+- **Claimed:** that the conformance mount section could not run on seatbelt or tart, because it binds
+  at `/mnt/test` and neither macOS-family backend can create `/mnt`. Reported it as a fixed cost and
+  designed around it — a new `TierIsolation` conformance section with a new fixture field, so the
+  tiering invariant would have somewhere to live that did not need the skipped section.
+- **True:** `/mnt/test` was an arbitrary literal in two subtests. Moving it under `/tmp` un-skips both
+  backends, and all four other backends are unaffected. The skip had concealed a **second** and worse
+  fact: seatbelt's read-only mounts were not read-only whenever a broader rule granted write over the
+  same path ([DF162](design/findings-resolved.md)), which is user-reachable via `--dir <path>:ro` and
+  needed no compromised agent. Neither skip was hiding a capability gap; one was hiding a security
+  defect.
+- **Source of the false belief:** both skip strings are *well-written*. They name a real mechanism
+  (SIP-sealed root volume; `/mnt` unwritable without root), cite the unit tests that cover the gap,
+  and one explicitly says it is "the conformance's container-path assumption, not a capability gap".
+  I read them as a diagnosis and inherited it. They are a diagnosis — of the symptom. Nothing in
+  either says "and this literal is arbitrary", because the person writing a skip is explaining why
+  the test cannot run, not auditing whether the test had to ask for that path.
+- **Caught by:** the owner, in one line — *"why do we need /mnt/test? Isn't there another way?"* Note
+  what it is not: it is not a correction of a fact. Every fact I had reported was true. It questions
+  whether the constraint was a constraint, which is the one move that was unavailable from inside a
+  frame where the skip reason was the premise.
+- **The second half is the sharper one.** After un-skipping, seatbelt's `ReadOnly` subtest failed. I
+  diagnosed it correctly — the profile's broad temp grant covers `t.TempDir()` — and then wrote a
+  plan to give the suite a fixture root outside that grant, and filed the constraint as "a trap for
+  whoever fixes this". That is engineering *around* a defect, having already found it. The failing
+  test was not telling me its fixture was in the wrong place; it was telling me `:ro` did not work.
+  One is a test problem and one is a product bug, and I picked the reading that kept the scope small.
+- **Cost:** none shipped — both were caught inside the session, the second by the owner's standing
+  "do it properly" rather than a specific correction. But the workaround was fully designed, written
+  into a finding as advice to the next person, and would have shipped a permanent fixture-placement
+  rule enshrining a security bug as an environment property.
+- **Class:** new, and it is the inverse of [A14](#a14--reimplemented-an-approach-the-repo-had-already-rejected-2026-07-29). There I re-derived a decision the repo had already made because I read the code and not the record. Here I read the record — the skip strings — and treated it as settled *because* it was well-argued. **A written rationale is evidence about what someone concluded, never about what they checked.** The tell is specific: a skip, a `nolint`, a `t.Skip`, a "known limitation" comment is a place where someone stopped, and the reason they stopped is the part least likely to have been re-examined since.
+- **Gated now?** No, and the useful habit is narrow enough to state: **when a test is disabled, check what it would assert if enabled, before accepting why it is disabled.** Two questions, in this order — *is the obstacle essential or incidental?* and, if you get past it and the test fails, *is this a test problem or a product problem?* The second is the one that pays: a newly-enabled test that fails is reporting on the product by default, and treating its failure as a fixture problem needs positive evidence, not convenience. Both skips here were years-cheap to keep and one of them was hiding a HIGH-severity defect the whole time.
+
 **One thing is ready ahead of that, though** (pattern 4b): the repo-relative-citation rule for
 findings. It has two specimens (A1, A8), needs no new mechanism, and turns an existing hook's known
 hole into coverage. That is a lower bar than "gate this file" and should not wait for it.
