@@ -67,6 +67,39 @@ def test_seatbelt_sigtrap_fingerprint(tmp_path: Path) -> None:
     assert any("Seatbelt" in lbl for lbl in labels)
 
 
+def test_ttrpc_closed_fingerprint_refuses_to_name_a_cause(tmp_path: Path) -> None:
+    """`ttrpc: closed` fires, and must NOT classify.
+
+    DF159 argued against fingerprinting this string because one that labelled it
+    as the known flake would classify the next deterministic regression (DF72's
+    shape) as something to re-run. This fingerprint exists on the opposite claim:
+    that the string names the transport and not the cause. So the properties worth
+    pinning are that it matches at all, that it says so in its label, and that it
+    carries the capture list — not which finding it points at.
+    """
+    log = "yoloai apply: git diff (patch): exec start: ttrpc: closed\n"
+    hits = smoke_test.scan_fingerprints(_make_attempt(tmp_path, setup_log=log))
+    match = next((h for h in hits if "ttrpc" in h.fp.label), None)
+    assert match is not None, "the ttrpc fingerprint must fire on the transport error"
+    assert "NOT identified" in match.fp.label, (
+        "the label must decline to name a cause; a classifying label is the version "
+        "DF159 correctly rejected"
+    )
+    for owed in ("ctr -n yoloai task ls", "shim log", "still running"):
+        assert owed.lower() in match.fp.hint.lower(), f"hint must carry {owed!r}"
+
+
+def test_ttrpc_fingerprint_precedes_the_timeout_catchall(tmp_path: Path) -> None:
+    """Ordering is the mechanism: FINGERPRINTS is scanned most-specific-first, so
+    a transport error must not be headlined as a generic harness timeout."""
+    attempt = _make_attempt(tmp_path, setup_log="exec start: ttrpc: closed\n")
+    hits = smoke_test.scan_fingerprints(attempt, "sentinel 'done' not seen in 300s")
+    labels = [h.fp.label for h in hits]
+    ttrpc = next(i for i, lbl in enumerate(labels) if "ttrpc" in lbl)
+    timeout = next(i for i, lbl in enumerate(labels) if lbl.startswith("harness timeout"))
+    assert ttrpc < timeout, "the transport error must outrank the generic timeout catch-all"
+
+
 def test_no_fingerprint_when_artifacts_clean(tmp_path: Path) -> None:
     hits = smoke_test.scan_fingerprints(_make_attempt(tmp_path, setup_log="all good\n"))
     assert hits == []

@@ -1359,6 +1359,32 @@ FINGERPRINTS: list[Fingerprint] = [
         "stop <name> && yoloai start <name>) — retrying this test is pointless "
         "until it's fixed",
     ),
+    # Deliberately does NOT name a finding, and that is the whole design of it.
+    # `ttrpc: closed` is containerd reporting a dropped shim connection: it names
+    # the transport and never the cause, and has already carried two unrelated
+    # ones — DF72 (a deleted netns at task creation: deterministic, serious, fixed)
+    # and DF159 (an exec into a healthy running task: transient, one occurrence in
+    # 38 runs, cause unknown). DF159 argued against a fingerprint for exactly this
+    # reason, and was right about the version it was arguing against: one that
+    # labelled the string as the known flake would classify the next deterministic
+    # regression as a thing to re-run. This one asserts the opposite — that the
+    # string is not diagnostic — and exists to hand over DF159's capture list at
+    # the moment someone is looking at the failure, which is the only moment the
+    # state it asks for still exists.
+    Fingerprint(
+        "containerd shim connection dropped (`ttrpc: closed`) — cause NOT identified by this string",
+        r"ttrpc: closed",
+        "containerd-restart-stopstart-must-re-establish-the-netns-that-stop-tore-down",
+        hint=(
+            "this string is transport-level and carries at least two distinct causes "
+            "(DF72: deleted netns at task creation, deterministic; DF159: exec into a "
+            "healthy running task, transient). Do NOT read it as either, and do not "
+            "re-run before capturing: was the agent process still alive; did the task "
+            "still exist (`ctr -n yoloai task ls`); the Kata shim log for this sandbox; "
+            "and whether the exec raced the agent's own exit (an `agent is still "
+            "running` note in the same output is the thread worth pulling)"
+        ),
+    ),
     Fingerprint(
         "harness timeout (sentinel not seen / command timed out)",
         r"sentinel '.*' not seen|command timed out",
