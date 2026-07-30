@@ -151,3 +151,48 @@ func TestSidecarBinds_RendersReadOnly(t *testing.T) {
 	})
 	assert.Equal(t, []string{"/h/bin:/yoloai/bin:ro", "/h/rw:/yoloai/rw"}, got)
 }
+
+// TestImageIdentityInputs_ExcludeTheDeliveredScripts is the checksum split
+// (DF156). The base image's identity must not depend on files that are delivered
+// at launch and bind-mounted over: hashing them made every release touching any of
+// eleven frequently-edited scripts restale the base, and through the chain
+// checksum every profile image built on it — charging the user a rebuild of their
+// apt layers because a yoloAI Python file moved.
+func TestImageIdentityInputs_ExcludeTheDeliveredScripts(t *testing.T) {
+	identity := imageIdentityInputs()
+
+	var names []string
+	for _, f := range identity {
+		assert.False(t, f.runtimeBin,
+			"%s is delivered at launch and mounted over, so it cannot define the image's identity", f.name)
+		names = append(names, f.name)
+	}
+	assert.Equal(t, []string{"Dockerfile", "tmux.conf"}, names,
+		"Dockerfile is the user-facing content; tmux.conf stays because its mount is config-gated, so its baked copy can still be the one that runs")
+}
+
+// TestBuildInputsChecksum_IsComputedFromTheIdentitySubset connects the selection
+// to the value that is actually stamped on the image. Without this, imageIdentityInputs
+// could be correct while buildInputsChecksum still hashed everything — a test on
+// the selector alone would stay green (the A15 shape).
+func TestBuildInputsChecksum_IsComputedFromTheIdentitySubset(t *testing.T) {
+	assert.Equal(t, checksumOf(imageIdentityInputs()), buildInputsChecksum(),
+		"the stamped checksum must be the identity subset's, or the split has no effect")
+	assert.NotEqual(t, checksumOf(baseBuildInputs()), buildInputsChecksum(),
+		"hashing the whole table is the pre-split behaviour this replaced")
+}
+
+// TestChecksumOf_RespondsToContentAndOrder pins what the checksum is for. The
+// embedded constants cannot be varied, so this exercises the hash over synthesized
+// inputs: content must matter (or a base change goes undetected) and order must
+// matter (which is why the table says append, do not sort).
+func TestChecksumOf_RespondsToContentAndOrder(t *testing.T) {
+	a := buildInput{name: "a", content: []byte("1")}
+	b := buildInput{name: "b", content: []byte("2")}
+
+	assert.NotEqual(t, checksumOf([]buildInput{a, b}), checksumOf([]buildInput{b, a}),
+		"order must change the hash: reordering the identity entries restales every base image")
+	changed := buildInput{name: "a", content: []byte("9")}
+	assert.NotEqual(t, checksumOf([]buildInput{a, b}), checksumOf([]buildInput{changed, b}),
+		"content must change the hash, or a Dockerfile edit would never rebuild the base")
+}

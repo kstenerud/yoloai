@@ -124,10 +124,10 @@ type buildInput struct {
 // the embed set without entering every consumer of it — the failure DF156's
 // sharp case is an instance of.
 //
-// **Order is load-bearing.** buildInputsChecksum hashes name and content in slice
-// order, and that checksum is the base image's identity label: reordering this
-// table marks every existing yoloai-base stale and rebuilds it once on every host.
-// Append; do not sort.
+// **Order is load-bearing.** buildInputsChecksum hashes the identity subset in
+// slice order, and that checksum is the base image's identity label: reordering
+// the entries it selects marks every existing yoloai-base stale and rebuilds it
+// once on every host. Append; do not sort.
 //
 // It still cannot catch a file added to the Dockerfile and not here (nothing
 // typechecks a COPY line); TestBaseBuildInputs_MatchTheDockerfilesBinCopies
@@ -151,15 +151,63 @@ func baseBuildInputs() []buildInput {
 	}
 }
 
-// buildInputsChecksum computes a combined SHA-256 of the embedded build inputs.
-func buildInputsChecksum() string {
-	h := sha256.New()
+// imageIdentityInputs selects the embedded files whose content actually
+// determines what a base image *is* — and therefore what makes an image built on
+// it stale.
+//
+// The runtimeBin scripts are excluded, which is the whole point (DF156). They are
+// delivered from the running binary on every launch and bind-mounted over
+// /yoloai/bin, on the agent container and on the firewall sidecar alike, so the
+// copies baked into the image are never the ones that run. Hashing them made every
+// yoloAI release that touched any of eleven frequently-edited scripts restale the
+// base — and, through the chain checksum, every profile image built on it, which
+// is a full rebuild of the user's apt layers because our script moved. That is the
+// wrong party paying, and once delivery is unconditional there is nothing left to
+// detect.
+//
+// The Dockerfile stays because it *is* the user-facing content: apt packages, the
+// toolchains and agent CLIs their layers are built against. tmux.conf stays for a
+// narrower reason worth stating, because it looks like a script and is not: its
+// mount is config-gated (`tmux_conf: host` leaves /yoloai/tmux/tmux.conf unmounted
+// and the baked copy live), so unlike the scripts it can still be the file that
+// runs.
+//
+// No second "scripts changed" checksum accompanies this. Nothing would consume
+// one — delivery is unconditional, so the delivered scripts are current by
+// construction — and a value computed for symmetry with no reader is exactly the
+// speculative API D125 forbids.
+func imageIdentityInputs() []buildInput {
+	var identity []buildInput
 	for _, f := range baseBuildInputs() {
+		if !f.runtimeBin {
+			identity = append(identity, f)
+		}
+	}
+	return identity
+}
+
+// checksumOf hashes name and content in slice order. Split out from
+// buildInputsChecksum so a test can hash a set the embedded constants cannot be
+// varied to produce.
+func checksumOf(inputs []buildInput) string {
+	h := sha256.New()
+	for _, f := range inputs {
 		h.Write([]byte(f.name))
 		h.Write(f.content)
 	}
 	return hex.EncodeToString(h.Sum(nil))
 }
+
+// buildInputsChecksum computes the base image's identity checksum.
+//
+// This value changed when the runtimeBin scripts left it, so the first launch
+// after upgrading past that commit restales every existing yoloai-base and
+// rebuilds it once per host per backend. That is the same one-time cost the
+// missing-label rule already accepts, and it buys the opposite behaviour
+// afterwards: script-only releases stop rebuilding anything, and a lineage
+// warning on resume once again means real package drift rather than "yoloAI
+// edited a Python file".
+func buildInputsChecksum() string { return checksumOf(imageIdentityInputs()) }
 
 // WriteRuntimeScripts materialises the /yoloai/bin script set into dir, for a
 // caller that bind-mounts it into the sandbox instead of relying on the copies
