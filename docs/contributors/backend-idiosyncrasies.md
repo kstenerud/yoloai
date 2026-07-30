@@ -301,6 +301,28 @@ All bind mount targets must pre-exist in the container image:
 
 See commit fc3be64.
 
+**Measured 2026-07-30, and the stated mechanism did not reproduce.** On the current Linux
+box the guest rootfs is mounted **read-write**:
+
+```
+# findmnt -no SOURCE,FSTYPE,OPTIONS /
+kataShared[/passthrough/yoloai-cli-probe/rootfs] virtiofs rw,nodev,relatime
+```
+
+With a writable rootfs, kata-agent *can* create a missing target — and does. The
+conformance mount section binds at `/tmp/yoloai-conformance-mnt-*`, which pre-exists in no
+image, and it passes on containerd/Kata (DF161). `/tmp` is not a separate mount in the
+guest, so this is a rootfs target, i.e. exactly the case the rule above says fails silently.
+
+**Do not act on this by removing the pre-created paths.** Three readings fit and they are not
+distinguished: the rootfs may have been read-only when the rule was written and changed
+since; the original failure may have had a different cause that the read-only-rootfs
+explanation was fitted to; or the behaviour may vary by Kata version, VMM (QEMU vs
+Firecracker) or config. The rule is cheap to keep and the failure it describes is silent,
+which is the worst kind to re-acquire. What is established is narrow: **on this
+configuration, a non-pre-existing rootfs target is created rather than silently skipped.**
+Anyone who knows the original failure's conditions should reconcile this.
+
 ---
 
 ### Kata shim teardown lag: `Delete()` fails transiently after task exit
