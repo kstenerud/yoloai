@@ -243,7 +243,7 @@ func deliverRuntimeScripts(d state.Deps, st *state.State) ([]runtime.MountSpec, 
 	if !ok {
 		return nil, nil
 	}
-	dir := filepath.Join(st.SandboxDir, config.BinDirName)
+	dir := config.BinPath(st.SandboxDir)
 	if err := provider.WriteRuntimeScripts(dir); err != nil {
 		return nil, fmt.Errorf("deliver runtime scripts: %w", err)
 	}
