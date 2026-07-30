@@ -48,6 +48,33 @@ func TestGenerateProfile_ReadOnlyMount(t *testing.T) {
 	}
 }
 
+// TestGenerateProfile_HostTierDenyIsLastAndCoversEverySpelling pins the two
+// properties that make the host-tier deny actually deny anything. Position:
+// SBPL is last-match-wins, so a write grant emitted after it silently reinstates
+// the write — and the profile grants write over the whole sandbox dir, and over
+// the temp tree that every test's sandbox dir lives in. Spelling: the deny has to
+// name the same path variants the allows do, or a write through the unresolved
+// /var/… spelling walks past a deny written only for /private/var/….
+func TestGenerateProfile_HostTierDenyIsLastAndCoversEverySpelling(t *testing.T) {
+	sandboxDir := t.TempDir()
+	profile := GenerateProfile(runtime.InstanceConfig{Name: "test"}, sandboxDir, "/Users/testuser")
+
+	for _, variant := range resolvePathVariants(sandboxDir) {
+		want := fmt.Sprintf("(deny file-write* (subpath %q))", filepath.Join(variant, config.HostTierName))
+		if !strings.Contains(profile, want) {
+			t.Errorf("profile must deny writes to the host tier spelled %q\nprofile:\n%s", variant, profile)
+		}
+	}
+
+	firstDeny := strings.Index(profile, "(deny file-write* (subpath")
+	if firstDeny < 0 {
+		t.Fatalf("no host-tier deny in profile:\n%s", profile)
+	}
+	if lastGrant := strings.LastIndex(profile, "(allow file-read* file-write*"); lastGrant > firstDeny {
+		t.Error("a write grant is emitted after the host-tier deny; SBPL is last-match-wins, so the deny is dead text")
+	}
+}
+
 func TestGenerateProfile_ReadWriteMount(t *testing.T) {
 	cfg := runtime.InstanceConfig{
 		Name: "test",

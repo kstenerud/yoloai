@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -29,8 +30,36 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	writeProfileHomeDir(&b, homeDir)
 	writeProfileNetwork(&b, cfg.NetworkMode)
 	writeProfileDevices(&b)
+	writeProfileHostTierDeny(&b, sandboxDir)
 
 	return b.String()
+}
+
+// writeProfileHostTierDeny denies all writes to the sandbox's host-only tier.
+//
+// It is emitted LAST on purpose. SBPL is last-match-wins, and several earlier
+// rules grant write over paths that contain the tier — the broad sandbox-dir
+// allow always, and the temp-dir allow whenever the sandbox lives under a temp
+// path (every test does). A deny placed before them is silently overridden.
+//
+// A subpath deny, not one rule per file: the host tier is a *directory*, so this
+// single rule covers every host-only record that exists today and every one
+// added later. That is what demotes the earlier objection to this approach — it
+// was a denylist only while the tier was a scatter of files in a flat dir.
+//
+// The variants are resolved from the parent rather than from the tier itself:
+// resolvePathVariants leans on EvalSymlinks, which fails on a path that does not
+// exist yet, and the tier dir is created lazily (config.EnsureHostTier). Resolving
+// sandboxDir — which always exists by the time a profile is generated — and then
+// appending the tier name yields both /var/… and /private/var/… spellings whether
+// or not the directory is there, so the deny cannot be dodged via the unresolved
+// spelling (DF136).
+func writeProfileHostTierDeny(b *strings.Builder, sandboxDir string) {
+	b.WriteString("; Host-only tier: never writable from inside the sandbox (DF136)\n")
+	for _, p := range resolvePathVariants(sandboxDir) {
+		fmt.Fprintf(b, "(deny file-write* (subpath %q))\n", filepath.Join(p, config.HostTierName))
+	}
+	b.WriteString("\n")
 }
 
 // GenerateGitProfile builds a DEDICATED, tight SBPL profile for running a single

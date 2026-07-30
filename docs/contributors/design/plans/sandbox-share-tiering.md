@@ -102,8 +102,17 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    step-4 migrator lands, **an existing sandbox reads as missing**, since its records are still at
    the flat paths. `config.EnsureHostTier` makes each host-tier writer create its own tier, so
    nothing depends on the creator having made it.
+2b. **The seatbelt host-tier deny — landed 2026-07-30.** One `(deny file-write* (subpath …/host))`,
+   emitted last, kernel-verified. Closes the seatbelt half of DF136 now rather than at step 3, and
+   is a permanent backstop rather than a stopgap; see § The seatbelt host-tier deny.
 3. `create.go` dir creation + the backend wiring (`mounts.Build`, tart two-share + view, seatbelt
-   per-tier grants + view).
+   per-tier grants + view). **Seatbelt's `ro/` grant carries a `(deny file-write* (subpath …/ro))`
+   backstop on the same pattern** (owner, 2026-07-30). This is not belt-and-braces for its own sake:
+   seatbelt expresses read-only as the *absence* of a write grant, so it holds only while nothing
+   else grants write over that path — measured, DF161, where the profile's own broad temp grant
+   silently defeated a read-only mount. Tart needs no equivalent; its `:ro` VirtioFS share is a real
+   read-only mount and is unconditional. The two backends are converging on one invariant by
+   different mechanisms, and only one of them is self-enforcing.
 4. The v6 `TierLayout` migrator.
 5. Tests on real docker/tart/seatbelt; the DF136/DF148 reproductions flip to "rejected".
 
@@ -187,20 +196,38 @@ This requires moving the guest-facing content under `rw/` and `ro/` subdirs and 
 mount points and the tart symlink wiring (`runtime/tart/mounts.go`). It is a layout change, but it
 uses only existing sharing primitives.
 
-## Interim: the seatbelt deny (shippable now, superseded by the allowlist)
+## The seatbelt host-tier deny — landed 2026-07-30, and no longer an interim
 
-Before the full reorg, the seatbelt half of DF136 can be closed in ~2 lines: append, **after** the
-existing broad allow, `(deny file-write* (literal <sandboxDir/environment.json>))` and the same for
-`sandbox-state.json`. **Confirmed on macOS Tahoe seatbelt (2026-07-20):**
-- Rule precedence is **last-match-wins**: the later `deny` overrides the earlier `allow (subpath …)`
-  for that path; other files in the dir stay writable.
-- `file-write*` on the literal path covers **write, unlink, and rename-over** — delete-and-recreate
-  and `mv`-over-it are both blocked, so there is no obvious bypass of the single-file deny.
+This section used to describe a stopgap: `(deny file-write* (literal <sandboxDir/environment.json>))`
+plus one line per host-only file, kept second-best because *"every future host-only file needs its
+own line"*. **That objection died when the tier became a directory.** One
+`(deny file-write* (subpath <sandboxDir>/host))` covers every host-only record that exists now and
+every one added later, with nothing to maintain — so the deny is not a weaker alternative to the
+allowlist, it is the **backstop the allowlist should keep**. Implemented in
+`writeProfileHostTierDeny` (`runtime/seatbelt/profile.go`).
 
-This is prevention (strictly stronger than signing — the agent cannot even corrupt the file), but it
-is a *denylist*: every future host-only file needs its own line, which is why it is the interim and
-the allowlist is the target. It does **not** help tart (no file-granular exclusion), so tart waits
-for the reorg.
+Two properties make it work, and both are ways it could have read as correct while doing nothing:
+
+- **Position.** It is emitted *last*. SBPL is last-match-wins, and the profile grants write over the
+  whole sandbox dir, and over the temp tree that every test's sandbox dir lives inside. A deny
+  written before either is dead text.
+- **Spelling.** The variants are resolved from `sandboxDir` (which always exists) and the tier name
+  appended, not resolved from the tier dir itself — `resolvePathVariants` uses `EvalSymlinks`, which
+  fails on a path that does not exist yet, and the tier is created lazily. Resolving the parent
+  yields both the `/var/…` and `/private/var/…` spellings whether or not the directory is there, so
+  a write through the unresolved spelling cannot walk past a deny written only for the resolved one.
+
+**Verified against the kernel, not against the profile text** (macOS, 2026-07-30):
+`TestSeatbelt_HostTierIsUnwritableFromInside` boots a real sandbox-exec'd process, fails its write
+into `host/`, and confirms the record is byte-identical afterwards — while a write elsewhere in the
+sandbox dir still succeeds, so the deny is scoped rather than blanket. With the rule removed the test
+fails and the record on disk reads `tampered`, i.e. it reproduces DF136 exactly.
+
+**Still open, and not addressed by this:** tart has no file-granular exclusion, so tart's half of
+DF136 waits for the step-3 reorg; and `ro/` has no equivalent backstop yet because the tier does not
+exist yet (see sequencing step 3). Earlier framing of the deny as inferior-to-allowlist is retained
+above deliberately — the reasoning was right for a flat layout and wrong for a tiered one, and that
+distinction is the transferable part.
 
 ## Migration
 
