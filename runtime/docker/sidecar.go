@@ -34,6 +34,22 @@ func sidecarLabels(name string, principal config.PrincipalSegment) map[string]st
 	}
 }
 
+// sidecarBinds renders spec.Mounts as docker bind strings. A sidecar inherits
+// none of the target's mounts — it is a fresh container off an image — so
+// anything the launch path delivers by mount has to be repeated here or the
+// sidecar sees only what the image baked (DF156).
+func sidecarBinds(mounts []runtime.MountSpec) []string {
+	binds := make([]string, 0, len(mounts))
+	for _, m := range mounts {
+		bind := m.HostPath + ":" + m.ContainerPath
+		if m.ReadOnly {
+			bind += ":ro"
+		}
+		binds = append(binds, bind)
+	}
+	return binds
+}
+
 // RunNetnsSidecar runs spec.Argv in a throwaway container joined to the target's
 // network namespace (--network container:<target>) with the requested
 // capabilities, blocks until it exits, and removes it. A non-zero exit is an
@@ -62,6 +78,7 @@ func (r *Runtime) RunNetnsSidecar(ctx context.Context, spec runtime.NetnsSidecar
 	hostConfig := &container.HostConfig{
 		NetworkMode: container.NetworkMode("container:" + spec.Target),
 		CapAdd:      spec.CapAdd,
+		Binds:       sidecarBinds(spec.Mounts),
 	}
 
 	if _, err := r.client.ContainerCreate(ctx, containerConfig, hostConfig, &network.NetworkingConfig{}, nil, name); err != nil {

@@ -99,33 +99,102 @@ func checksumLabelStale(want string, labels map[string]string) bool {
 	return labels[baseChecksumLabel] != want
 }
 
+// buildInput is one embedded file that participates in the base image build.
+//
+// guestMode is the mode the file needs *in the guest*, matching the Dockerfile's
+// own `chmod +x` list. It is unused by the build (the Dockerfile sets final
+// permissions itself) and load-bearing only for WriteRuntimeScripts, which
+// delivers these files at launch and has no Dockerfile to fix them up
+// afterwards.
+//
+// runtimeBin marks the files the Dockerfile COPYs into /yoloai/bin — the set the
+// host process drives by absolute path, and therefore the set that must come from
+// the running binary rather than from whatever a profile image inherited (DF156).
+// Dockerfile is build-only; tmux.conf lands in /yoloai/tmux and has its own mount.
+type buildInput struct {
+	name       string
+	content    []byte
+	guestMode  os.FileMode
+	runtimeBin bool
+}
+
+// baseBuildInputs is the single source of truth for the embedded file set, shared
+// by buildInputsChecksum, createBuildContext and WriteRuntimeScripts. It existed
+// as three hand-maintained copies of the same list, which is how a file can enter
+// the embed set without entering every consumer of it — the failure DF156's
+// sharp case is an instance of.
+//
+// **Order is load-bearing.** buildInputsChecksum hashes name and content in slice
+// order, and that checksum is the base image's identity label: reordering this
+// table marks every existing yoloai-base stale and rebuilds it once on every host.
+// Append; do not sort.
+//
+// It still cannot catch a file added to the Dockerfile and not here (nothing
+// typechecks a COPY line); TestBaseBuildInputs_MatchTheDockerfilesBinCopies
+// closes that half by parsing the Dockerfile.
+func baseBuildInputs() []buildInput {
+	const exec, data = 0o755, 0o644
+	return []buildInput{
+		{"Dockerfile", embeddedDockerfile, data, false},
+		{"entrypoint.sh", embeddedEntrypoint, exec, true},
+		{"entrypoint.py", embeddedEntrypointPy, exec, true},
+		{"firewall.py", embeddedFirewallPy, data, true},
+		{"install-firewall.py", embeddedInstallFirewallPy, exec, true},
+		{"sandbox-setup.py", embeddedSandboxSetup, data, true},
+		{"setup_helpers.py", embeddedSetupHelpers, data, true},
+		{"tmux_io.py", embeddedTmuxIO, data, true},
+		{"status-monitor.py", embeddedStatusMonitor, data, true},
+		{"diagnose-idle.sh", embeddedDiagnoseIdle, exec, true},
+		{"agent-run.sh", embeddedAgentRun, exec, true},
+		{"yoloai-resume", embeddedYoloaiResume, exec, true},
+		{"tmux.conf", embeddedTmuxConf, data, false},
+	}
+}
+
 // buildInputsChecksum computes a combined SHA-256 of the embedded build inputs.
 func buildInputsChecksum() string {
 	h := sha256.New()
-	type namedContent struct {
-		name    string
-		content []byte
-	}
-	files := []namedContent{
-		{"Dockerfile", embeddedDockerfile},
-		{"entrypoint.sh", embeddedEntrypoint},
-		{"entrypoint.py", embeddedEntrypointPy},
-		{"firewall.py", embeddedFirewallPy},
-		{"install-firewall.py", embeddedInstallFirewallPy},
-		{"sandbox-setup.py", embeddedSandboxSetup},
-		{"setup_helpers.py", embeddedSetupHelpers},
-		{"tmux_io.py", embeddedTmuxIO},
-		{"status-monitor.py", embeddedStatusMonitor},
-		{"diagnose-idle.sh", embeddedDiagnoseIdle},
-		{"agent-run.sh", embeddedAgentRun},
-		{"yoloai-resume", embeddedYoloaiResume},
-		{"tmux.conf", embeddedTmuxConf},
-	}
-	for _, f := range files {
+	for _, f := range baseBuildInputs() {
 		h.Write([]byte(f.name))
 		h.Write(f.content)
 	}
 	return hex.EncodeToString(h.Sum(nil))
+}
+
+// WriteRuntimeScripts materialises the /yoloai/bin script set into dir, for a
+// caller that bind-mounts it into the sandbox instead of relying on the copies
+// baked into the image (DF156 remedy c).
+//
+// Delivering at launch is what decouples a yoloAI release from the user's image:
+// these scripts are what the *host process* is built against, not what the user's
+// Dockerfile layers are, so inheriting them through FROM couples our changing to
+// their rebuilding — and a profile image predating a newly-added script cannot
+// satisfy the host at all. tart has always worked this way (writeVMSetupScripts);
+// this is the container backends catching up.
+//
+// Modes are set explicitly because the guest runs these by absolute path: the
+// six the Dockerfile chmods +x must arrive executable, and there is no Dockerfile
+// on this path to fix them up afterwards. WriteFilePerm rather than a plain write
+// because os.WriteFile applies its mode only when *creating* — a copy left by an
+// older binary would keep whatever mode it had, and an executable that lost its
+// bit fails the launch rather than degrading.
+//
+// 0750 on the directory matches every other sandbox subdirectory. It is readable
+// in the guest because the entrypoint remaps the in-container yoloai user to the
+// host uid that owns it, which is also why these files need no world bits.
+func WriteRuntimeScripts(dir string) error {
+	if err := fileutil.MkdirAll(dir, 0o750); err != nil {
+		return fmt.Errorf("create runtime script dir %s: %w", dir, err)
+	}
+	for _, f := range baseBuildInputs() {
+		if !f.runtimeBin {
+			continue
+		}
+		if err := fileutil.WriteFilePerm(filepath.Join(dir, f.name), f.content, f.guestMode); err != nil {
+			return fmt.Errorf("write runtime script %s: %w", f.name, err)
+		}
+	}
+	return nil
 }
 
 // AttestationOptOutFlags returns the build flags that disable BuildKit
@@ -259,37 +328,22 @@ func createBuildContext() (io.Reader, error) {
 	var buf bytes.Buffer
 	tw := tar.NewWriter(&buf)
 
-	files := []struct {
-		tarName string
-		content []byte
-	}{
-		{"Dockerfile", embeddedDockerfile},
-		{"entrypoint.sh", embeddedEntrypoint},
-		{"entrypoint.py", embeddedEntrypointPy},
-		{"firewall.py", embeddedFirewallPy},
-		{"install-firewall.py", embeddedInstallFirewallPy},
-		{"sandbox-setup.py", embeddedSandboxSetup},
-		{"setup_helpers.py", embeddedSetupHelpers},
-		{"tmux_io.py", embeddedTmuxIO},
-		{"status-monitor.py", embeddedStatusMonitor},
-		{"diagnose-idle.sh", embeddedDiagnoseIdle},
-		{"agent-run.sh", embeddedAgentRun},
-		{"yoloai-resume", embeddedYoloaiResume},
-		{"tmux.conf", embeddedTmuxConf},
-	}
-
-	for _, f := range files {
+	// Mode 0644 for every entry, deliberately not buildInput.guestMode: the
+	// Dockerfile chmods what it needs after COPY, so the tar mode is inert here,
+	// and varying it would change the COPY layers' content and cost a cache miss
+	// on the next base build for no behavioural gain.
+	for _, f := range baseBuildInputs() {
 		header := &tar.Header{
-			Name:    f.tarName,
+			Name:    f.name,
 			Size:    int64(len(f.content)),
 			Mode:    0644,
 			ModTime: time.Now(),
 		}
 		if err := tw.WriteHeader(header); err != nil {
-			return nil, fmt.Errorf("write tar header for %s: %w", f.tarName, err)
+			return nil, fmt.Errorf("write tar header for %s: %w", f.name, err)
 		}
 		if _, err := tw.Write(f.content); err != nil {
-			return nil, fmt.Errorf("write tar content for %s: %w", f.tarName, err)
+			return nil, fmt.Errorf("write tar content for %s: %w", f.name, err)
 		}
 	}
 
@@ -425,3 +479,8 @@ func createProfileBuildContext(sourceDir string) (io.Reader, error) {
 
 	return &buf, nil
 }
+
+// WriteRuntimeScripts implements runtime.RuntimeScriptProvider. The package-level
+// function is the implementation; this method exposes it as a backend capability
+// so the launch path can ask "does this backend bake?" rather than name docker.
+func (r *Runtime) WriteRuntimeScripts(dir string) error { return WriteRuntimeScripts(dir) }

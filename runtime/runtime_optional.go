@@ -541,6 +541,42 @@ func ProfileImageBuilderOf(rt Backend) (ProfileImageBuilder, bool) {
 	return b, ok
 }
 
+// RuntimeScriptDir is where a launch delivers the runtime scripts inside the
+// sandbox. It is the path the host process drives by absolute name — the
+// entrypoint, the session runner, the status monitor and the firewall installer
+// all live here — so it is a host↔guest contract, not an implementation detail.
+const RuntimeScriptDir = "/yoloai/bin"
+
+// RuntimeScriptProvider is an optional backend interface: materialise the runtime
+// scripts this backend's sandboxes need into a host directory, so the launch path
+// can deliver them rather than relying on the copies baked into the image.
+//
+// Implemented by the backends that bake — the four image backends — which are
+// exactly the four the staleness applies to. tart and seatbelt deliberately do
+// not implement it: tart already writes these scripts into the sandbox dir on
+// every launch (writeVMSetupScripts) and seatbelt runs them as host processes,
+// so both already deliver at launch and there is nothing to convert.
+//
+// Why a capability rather than orchestrator-owned content: four of the eleven
+// scripts (the entrypoints, firewall.py, install-firewall.py) are container
+// concerns embedded in runtime/docker, so the file set is genuinely backend-tier.
+// containerd and apple delegate to that package, as they already do for
+// ExpectedBaseChecksum, because they build their base from the same resources.
+type RuntimeScriptProvider interface {
+	// WriteRuntimeScripts writes the scripts into dir, creating it if needed, with
+	// modes that a guest uid differing from the host's can still read and execute.
+	// Overwrites in place: dir may hold an older binary's copies.
+	WriteRuntimeScripts(dir string) error
+}
+
+// RuntimeScriptProviderOf returns rt as a RuntimeScriptProvider if the backend
+// bakes runtime scripts into its images and therefore needs them delivered at
+// launch instead; ok is false for backends that already deliver them.
+func RuntimeScriptProviderOf(rt Backend) (RuntimeScriptProvider, bool) {
+	p, ok := rt.(RuntimeScriptProvider)
+	return p, ok
+}
+
 // CachePruner is an optional interface for backends that maintain an
 // image/snapshot/build cache that accumulates across sandbox runs. The
 // `Prune()` method on the core interface only removes orphaned yoloai
@@ -730,6 +766,18 @@ type NetnsSidecarSpec struct {
 	// CapAdd lists Linux capabilities to grant the sidecar (e.g. NET_ADMIN) — the
 	// capabilities the agent container is deliberately denied.
 	CapAdd []string
+	// Mounts are bind mounts for the sidecar, in the same form the launch path
+	// gives Create.
+	//
+	// A sidecar runs from an *image* with none of the target's mounts, so anything
+	// the launch path delivers by mount rather than by baking is absent here unless
+	// it is repeated. That is not a detail: the firewall installer runs as a
+	// sidecar reading /yoloai/bin/install-firewall.py, so once the runtime scripts
+	// are delivered at launch (RuntimeScriptProvider, DF156) the sidecar reads
+	// whatever the profile image happened to bake — which is the very staleness
+	// being removed, in the one place that fails the launch outright rather than
+	// drifting quietly.
+	Mounts []MountSpec
 }
 
 // NetnsSidecarRunner is an optional backend interface: run a short-lived helper

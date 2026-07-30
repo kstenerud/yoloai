@@ -132,6 +132,7 @@ var _ runtime.Backend = (*Runtime)(nil)
 var _ runtime.InteractiveSession = (*Runtime)(nil)
 var _ runtime.GitExecer = (*Runtime)(nil)
 var _ runtime.ProfileImageBuilder = (*Runtime)(nil)
+var _ runtime.RuntimeScriptProvider = (*Runtime)(nil)
 
 // New constructs the apple Runtime after verifying platform, the CLI, and the
 // macOS version gate. The apiserver is not started here — Setup does that on
@@ -700,4 +701,12 @@ func macOSMajor() (int, error) {
 		macOSMajorVal, macOSMajorErr = strconv.Atoi(s)
 	})
 	return macOSMajorVal, macOSMajorErr
+}
+
+// WriteRuntimeScripts implements runtime.RuntimeScriptProvider. Delegates to the
+// docker package for the same reason ExpectedBaseChecksum does: buildBaseImage
+// builds this backend's base from that package's embedded resources, so the
+// scripts delivered at launch must be the ones that base was built from.
+func (r *Runtime) WriteRuntimeScripts(dir string) error {
+	return dockerrt.WriteRuntimeScripts(dir)
 }

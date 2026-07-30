@@ -152,6 +152,16 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 		return err
 	}
 
+	// Deliver the runtime scripts from this binary rather than from whatever the
+	// image baked, which is what keeps a yoloAI upgrade from requiring a rebuild
+	// of the user's image (DF156). Appended after the image work above so it wins
+	// on path collision with anything the image put at /yoloai/bin.
+	scriptMount, err := deliverRuntimeScripts(d, st)
+	if err != nil {
+		return err
+	}
+	mnts = append(mnts, scriptMount...)
+
 	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro, baseChecksum); err != nil {
 		return err // the deferred rollbackPartialLaunch reaps the injector + container + netns
 	}
@@ -204,6 +214,44 @@ func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) (str
 		return "", nil // unreadable image: record nothing rather than a guess
 	}
 	return labels[runtime.BaseChecksumLabel], nil
+}
+
+// deliverRuntimeScripts materialises this binary's runtime scripts into the
+// sandbox directory and returns the mount that puts them at
+// runtime.RuntimeScriptDir. Nil for backends that already deliver at launch
+// (tart writes them itself, seatbelt runs them as host processes), which is why
+// the capability is the gate rather than a backend name.
+//
+// It runs on EVERY launch, not only at create, because that is the whole point:
+// the scripts the sandbox runs are then always the ones the running binary was
+// built with, whatever the image contains. A sandbox recreated after an upgrade
+// picks them up with no rebuild of anything.
+//
+// The destination is the sandbox's own bin/ — the directory tart and seatbelt
+// already use for exactly these files, already named (config.BinDirName) and
+// already created with the sandbox. Nothing new to place, and nothing new to
+// reclaim: destroying the sandbox removes it. Per-sandbox rather than shared also
+// means a running sandbox keeps the scripts it launched with, instead of having
+// them swapped underneath it by an upgrade in another terminal.
+//
+// Read-only because nothing in the guest has any business writing here; the
+// scripts are yoloAI's own implementation, not a user surface. That is hygiene,
+// not a security boundary — an agent that wanted to subvert them would kill the
+// process and run its own copy, which no mount option prevents (DF156, A16).
+func deliverRuntimeScripts(d state.Deps, st *state.State) ([]runtime.MountSpec, error) {
+	provider, ok := runtime.RuntimeScriptProviderOf(d.Runtime)
+	if !ok {
+		return nil, nil
+	}
+	dir := filepath.Join(st.SandboxDir, config.BinDirName)
+	if err := provider.WriteRuntimeScripts(dir); err != nil {
+		return nil, fmt.Errorf("deliver runtime scripts: %w", err)
+	}
+	return []runtime.MountSpec{{
+		HostPath:      dir,
+		ContainerPath: runtime.RuntimeScriptDir,
+		ReadOnly:      true,
+	}}, nil
 }
 
 // rollbackPartialLaunch reverses a failed LaunchContainer: it stops+removes the
@@ -408,6 +456,12 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 // come from the sandbox's runtime-config.json (the same source the in-container
 // entrypoint used) and the injector endpoint from the broker outcome; both are
 // passed to the sidecar via the environment. A non-zero install fails the launch.
+// The sidecar gets the same runtime-script mount the agent container does. It runs
+// from an image with none of the target's mounts, so once the scripts are
+// delivered at launch rather than baked, an unmounted sidecar would read
+// install-firewall.py out of whatever the profile image inherited — the exact
+// staleness being removed, in the one place that fails the launch outright
+// instead of drifting quietly (DF156).
 func installFirewallSidecar(ctx context.Context, rt runtime.Backend, st *state.State, cname string, bro brokerOutcome) error {
 	runner, ok := runtime.NetnsSidecarRunnerOf(rt)
 	if !ok {
@@ -425,12 +479,18 @@ func installFirewallSidecar(ctx context.Context, rt runtime.Backend, st *state.S
 		env = append(env, "YOLOAI_BROKER_INJECTOR_ENDPOINT="+bro.InjectorEndpoint)
 	}
 
+	scriptMount, err := deliverRuntimeScripts(state.Deps{Runtime: rt}, st)
+	if err != nil {
+		return err
+	}
+
 	spec := runtime.NetnsSidecarSpec{
 		Target: cname,
 		Image:  st.ImageRef,
-		Argv:   []string{"python3", "/yoloai/bin/install-firewall.py"},
+		Argv:   []string{"python3", runtime.RuntimeScriptDir + "/install-firewall.py"},
 		Env:    env,
 		CapAdd: []string{"NET_ADMIN"},
+		Mounts: scriptMount,
 	}
 	if err := runNetnsSidecarWithRetry(ctx, runner, spec, st.Name); err != nil {
 		return fmt.Errorf("install network-isolation firewall: %w", err)
