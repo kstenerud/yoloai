@@ -4,8 +4,8 @@
 
 # Next release
 
-**Next release version: `v0.10.1`** — the next point release after v0.10.0. Nothing breaking has
-landed on main since; the field escalates on its own to `v0.11.0` the moment something does.
+**Next release version: `v0.11.0`** — escalated from `v0.10.1`: the sandbox image moved from
+Node.js 20 to Node.js 22 LTS, which is user-visible (see `BREAKING-CHANGES.md`, Unreleased).
 
 ## How this works
 

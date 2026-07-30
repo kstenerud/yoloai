@@ -68,10 +68,24 @@ RUN install -m 0755 -d /etc/apt/keyrings \
     && rm -rf /var/lib/apt/lists/*
 
 
-# Node.js 20 LTS via NodeSource (22 has syscall incompatibilities with gVisor ARM64)
-ARG NODE_MAJOR=20
+# Node.js 22 LTS via NodeSource.
+#
+# Was 20 from 2026-03 to 2026-07, on the rationale that "Node 22 has syscall
+# incompatibilities with gVisor ARM64". That claim named a platform this project
+# has never had — no Linux ARM machine, and no ARM64 runner in any CI workflow —
+# so it cannot have been observed, and no public report of it exists either
+# (DF158, A18). Meanwhile Node 20 went EOL in April 2026 and the pin silently
+# froze Claude Code at 2.1.197, since 2.1.198 onward require Node >=22.
+#
+# The residual risk is real but unmeasured and one-sided: if gVisor on ARM64 does
+# dislike Node 22, it shows up in `container-enhanced` isolation on that
+# architecture only, and `sandbox.node_check` (sandbox-setup.py) already logs the
+# node version before agent launch precisely so such a failure surfaces instead
+# of presenting as a silent session death. Revisit with evidence, not with a
+# hypothesis.
+ARG NODE_MAJOR=22
 # DL3008: nodejs version is pinned via the NodeSource repository URL
-# (NODE_MAJOR=20), which is the right pin level for an LTS line. Pinning the
+# (NODE_MAJOR), which is the right pin level for an LTS line. Pinning the
 # minor in apt would lock us to a single security release.
 # hadolint ignore=DL3008
 RUN mkdir -p /etc/apt/keyrings \

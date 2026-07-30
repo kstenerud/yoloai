@@ -23,6 +23,32 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### The sandbox image ships Node.js 22 LTS instead of Node.js 20
+
+**Previous behavior:** the base image installed Node.js 20 LTS, so every sandbox ran
+user code, agent CLIs and any `npm`-installed tooling against Node 20.
+
+**New behavior:** the base image installs Node.js 22 LTS (`ARG NODE_MAJOR=22`).
+Anything in a sandbox that depends on the runtime major — a native addon compiled
+against Node 20's ABI, a package whose `engines` field excludes 22, a project pinned
+by `.nvmrc` expectations — sees the new major on the next launch. Node 22 is
+backward compatible with 20 for ordinary JavaScript, so most sandboxes are
+unaffected; native modules are the realistic exception.
+
+**Why:** Node 20 reached end of life in April 2026, so the previous image shipped an
+unsupported runtime. It also silently capped Claude Code at 2.1.197 — releases from
+2.1.198 onward declare `engines.node >=22`, so `npm` installed the newest
+Node-20-compatible version and every subsequent Claude release widened the gap. The
+version had been lowered from 22 in March 2026 on the rationale that "Node 22 has
+syscall incompatibilities with gVisor ARM64"; that claim named a platform the project
+has never possessed and no public report corroborates it (DF158).
+
+**If you need Node 20:** the base image is built from a Dockerfile embedded in the
+binary and is not editable, so pin the runtime in a profile instead — a profile
+Dockerfile `FROM yoloai-base` that installs the Node 20 you need, used via
+`yoloai new --profile <name>`. Note that doing so re-imposes the Claude Code cap for
+sandboxes on that profile.
+
 ## v0.10.0
 
 ### A sandbox's container/VM hostname is now the sandbox name
