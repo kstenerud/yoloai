@@ -898,10 +898,20 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 		return runtime.InstanceInfo{}, fmt.Errorf("inspect container: %w", err)
 	}
 
+	// The container record names the image it was created from. containerd
+	// stores that as a reference rather than a digest, so it is a weaker
+	// identifier than docker's — enough to answer "which image", not enough to
+	// distinguish two rebuilds sharing a tag. Callers comparing lineage should
+	// read the image's labels rather than trusting this string to change.
+	imageID := ""
+	if img, ierr := ctr.Image(ctx); ierr == nil {
+		imageID = img.Name()
+	}
+
 	task, err := ctr.Task(ctx, nil)
 	if err != nil {
 		if errdefs.IsNotFound(err) {
-			return runtime.InstanceInfo{Running: false}, nil
+			return runtime.InstanceInfo{Running: false, ImageID: imageID}, nil
 		}
 		return runtime.InstanceInfo{}, fmt.Errorf("load task: %w", err)
 	}
@@ -913,6 +923,7 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 
 	return runtime.InstanceInfo{
 		Running: status.Status == client.Running,
+		ImageID: imageID,
 	}, nil
 }
 

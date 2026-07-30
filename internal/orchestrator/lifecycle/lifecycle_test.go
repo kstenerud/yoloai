@@ -8,7 +8,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"io/fs"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -1455,4 +1457,81 @@ func TestApplyBrokerOption_PersistsAndIsIdempotent(t *testing.T) {
 	// Auto after an explicit choice leaves it untouched (sticky).
 	require.NoError(t, applyBrokerOption(d, StartOptions{}, sandboxDir, reloaded, &notices{}))
 	assert.True(t, reloaded.BrokerDisabled, "auto does not disturb a persisted choice")
+}
+
+// lineageFake is a Backend whose Inspect reports a chosen image id and whose
+// ImageLabels answers per-ref, so the resume warning can be exercised without a
+// daemon.
+type lineageFake struct {
+	runtime.Backend
+	imageID    string
+	inspectErr error
+	labels     map[string]map[string]string
+}
+
+func (f lineageFake) Inspect(context.Context, string) (runtime.InstanceInfo, error) {
+	return runtime.InstanceInfo{Running: false, Suspended: true, ImageID: f.imageID}, f.inspectErr
+}
+
+func (f lineageFake) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, io.Writer, *slog.Logger) error {
+	return nil
+}
+
+func (f lineageFake) ImageLabels(_ context.Context, ref string) (map[string]string, bool) {
+	l, ok := f.labels[ref]
+	return l, ok
+}
+
+// TestWarnIfImageLineageStale covers DF156's resume half. A resumed container
+// cannot be fixed by rebuilding — it already holds what it holds — so the only
+// honest action is to say so, and the check has to ask the INSTANCE what it is
+// running rather than ask the tag.
+func TestWarnIfImageLineageStale(t *testing.T) {
+	const cur, old = "base-current", "base-old"
+	base := map[string]string{runtime.BaseChecksumLabel: cur}
+
+	cases := []struct {
+		name     string
+		rt       runtime.Backend
+		wantWarn bool
+		why      string
+	}{
+		{"matching lineage is silent",
+			lineageFake{imageID: "img-a", labels: map[string]map[string]string{
+				config.BaseImage: base, "img-a": {runtime.BaseChecksumLabel: cur}}},
+			false, "the container holds an image built on the current base"},
+		{"different base warns",
+			lineageFake{imageID: "img-a", labels: map[string]map[string]string{
+				config.BaseImage: base, "img-a": {runtime.BaseChecksumLabel: old}}},
+			true, "built on a base this binary no longer expects"},
+		{"unlabelled image warns",
+			lineageFake{imageID: "img-a", labels: map[string]map[string]string{
+				config.BaseImage: base, "img-a": {}}},
+			true, "absence of the label means out of date, by decision"},
+		{"vanished image record warns",
+			lineageFake{imageID: "img-gone", labels: map[string]map[string]string{config.BaseImage: base}},
+			true, "observed in the field: docker keeps layers for a running container but drops " +
+				"the image object, and that is the strongest evidence we cannot vouch for it"},
+		{"unstamped base says nothing",
+			lineageFake{imageID: "img-a", labels: map[string]map[string]string{
+				config.BaseImage: {}, "img-a": {}}},
+			false, "no base label to compare against; warning would be noise on every resume"},
+		{"unidentifiable instance says nothing",
+			lineageFake{imageID: "", labels: map[string]map[string]string{config.BaseImage: base}},
+			false, "a backend that cannot name the instance's image must not be guessed at"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			n := &notices{}
+			warnIfImageLineageStale(context.Background(), state.Deps{Runtime: tc.rt}, "box", n)
+			if tc.wantWarn {
+				require.Len(t, n.list, 1, tc.why)
+				assert.Equal(t, NoticeWarn, n.list[0].Level)
+				assert.Contains(t, n.list[0].Message, "different yoloai-base")
+			} else {
+				assert.Empty(t, n.list, tc.why)
+			}
+		})
+	}
 }

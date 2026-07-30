@@ -293,12 +293,27 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 		Status struct {
 			State string `json:"state"`
 		} `json:"status"`
+		Configuration struct {
+			Image struct {
+				Reference string `json:"reference"`
+				Digest    string `json:"digest"`
+			} `json:"image"`
+		} `json:"configuration"`
 	}
 	if err := json.Unmarshal([]byte(out), &arr); err != nil || len(arr) == 0 {
 		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
+	// Prefer the digest: it names the image this instance actually holds, where
+	// the reference is a tag that may since have been rebuilt to something else.
+	// Unverified field names — apple's inspect shape is only exercisable on a
+	// Mac — so an absent digest simply leaves ImageID empty, which callers read
+	// as "cannot say" rather than as a mismatch.
+	imageID := arr[0].Configuration.Image.Digest
+	if imageID == "" {
+		imageID = arr[0].Configuration.Image.Reference
+	}
 	// Apple container has no state-to-disk suspend (AC14) → Suspended stays false.
-	return runtime.InstanceInfo{Running: arr[0].Status.State == "running"}, nil
+	return runtime.InstanceInfo{Running: arr[0].Status.State == "running", ImageID: imageID}, nil
 }
 
 // Exec runs a command in a running container and returns its captured output

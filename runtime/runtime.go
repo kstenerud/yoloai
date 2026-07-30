@@ -140,6 +140,22 @@ type InstanceConfig struct {
 type InstanceInfo struct {
 	Running   bool
 	Suspended bool // true if the instance is suspended (state saved to disk, not consuming CPU/RAM)
+
+	// ImageID identifies the image this instance was actually created from, as
+	// the backend records it — a content-addressed id where the backend has one
+	// (docker's `sha256:…`), not the tag it was created by.
+	//
+	// The distinction is the point. A tag is a moving pointer: rebuild the image
+	// and the tag names something else, while the instance keeps running what it
+	// was created with. Asking the *instance* what it holds is the only way to
+	// learn its actual lineage, which is what a resumed sandbox has to be judged
+	// on — rebuilding an image cannot change a container that already exists
+	// (DF156).
+	//
+	// Empty when the backend has no image concept (seatbelt runs host processes;
+	// tart clones VM images and does not record a per-instance id), so callers
+	// must treat "" as "cannot say" rather than as a mismatch.
+	ImageID string
 }
 
 // ExecResult holds the output of a non-interactive command execution.

@@ -288,6 +288,8 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 		defer cleanupResumeFiles(d, name)
 	}
 
+	warnIfImageLineageStale(ctx, d, cname, n)
+
 	// Resume the VM: tart run resumes from suspended state, kills the stale
 	// tmux session, and runs the setup script for a fresh agent.
 	if err := d.Runtime.Start(ctx, cname); err != nil {
@@ -304,6 +306,46 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 
 	n.infof("Sandbox %s resumed", name)
 	return nil
+}
+
+// warnIfImageLineageStale warns when a resumed instance is holding an image this
+// binary no longer expects (DF156).
+//
+// Warn, never fix: the container already exists, so rebuilding the image cannot
+// change what it is running — only re-creating the sandbox would, and that
+// discards the in-container state the user suspended in order to keep.
+//
+// The question is asked of the *instance*, not of the tag. `InstanceInfo.ImageID`
+// names the image the container actually holds; the tag it was created by may
+// since point at something entirely different, which is exactly the case this
+// exists to catch. Every unresolvable branch warns, and that is deliberate:
+// an image record that is gone (observed in the field — Docker keeps the layers
+// for a running container but drops the image object) is the strongest possible
+// evidence that we cannot vouch for what is inside.
+func warnIfImageLineageStale(ctx context.Context, d state.Deps, cname string, n *notices) {
+	builder, ok := runtime.ProfileImageBuilderOf(d.Runtime)
+	if !ok {
+		return // no image concept (tart, seatbelt): scripts are delivered at launch
+	}
+	info, err := d.Runtime.Inspect(ctx, cname)
+	if err != nil || info.ImageID == "" {
+		return // cannot identify the instance's image; say nothing rather than guess
+	}
+	baseLabels, ok := builder.ImageLabels(ctx, config.BaseImage)
+	if !ok {
+		return // no base to compare against; Setup owns that problem
+	}
+	want := baseLabels[runtime.BaseChecksumLabel]
+	if want == "" {
+		return // base predates the label; nothing to compare
+	}
+	if got, ok := builder.ImageLabels(ctx, info.ImageID); ok && got[runtime.BaseChecksumLabel] == want {
+		return
+	}
+	n.warnf("this sandbox is running an image built against a different yoloai-base than this "+
+		"version of yoloai expects, so in-sandbox tooling may not match what the host drives. "+
+		"Resuming leaves it as-is; re-create the sandbox to pick up the current base "+
+		"(yoloai destroy %s, then yoloai new ...)", cname)
 }
 
 // maybeWarnRecreateAdvisory emits the backend's recreate advisory (DF22) when a

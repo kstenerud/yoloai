@@ -687,6 +687,10 @@ func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInf
 
 	return runtime.InstanceInfo{
 		Running: info.State.Running,
+		// info.Image is the image ID the container was created from, distinct
+		// from info.Config.Image which is the tag it was created by and may
+		// since point elsewhere.
+		ImageID: info.Image,
 	}, nil
 }
 
