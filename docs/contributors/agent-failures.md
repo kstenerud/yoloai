@@ -616,6 +616,39 @@ itself worth knowing when reading pattern 4.
   notices the permissions does not repeat the inference. Recording a *rejected* rationale is the
   point; code shows the surviving branch and never the pruned one ([A14](#a14--reimplemented-an-approach-the-repo-had-already-rejected-2026-07-29)).
 
+### A17 — reported a capability as missing that I had built myself, earlier the same day (2026-07-30)
+
+- **Claimed:** that DF156's remaining gap was that a base Dockerfile change "still leaves profile images
+  on the old base", which "now fails as drift rather than as a failed launch, and the detection half
+  reports it". Written into the finding, into two commit messages, and into two summaries to the owner.
+- **True:** it rebuilds. `EnsureProfileImage` seeds the chain checksum from the base image's own label,
+  so a moved base changes every descendant's expected checksum and rebuilds it — and `ensureImageLineage`
+  runs that on the launch path, so `start` on a stopped or removed sandbox gets it too. Verified live
+  after the owner asked: base rebuilt, profile image rebuilt, container recreated on the new image. I
+  had built that seed myself, earlier in the same session, and had *watched it work* — the log line
+  `Building profile image yoloai-cli-df156p...` is in my own verification output from hours before.
+- **Source of the false belief:** describing the system by the part I had most recently worked on. The
+  last thing I built was `warnIfImageLineageStale`, so "what happens when the base moves?" retrieved
+  *warn*. The rebuild lives on a different path, was finished earlier, and had already passed out of
+  working memory. Nothing contradicted me, because a warning genuinely does fire — on the two paths
+  that reuse an existing container. I generalised a real behaviour from a narrow case to the whole
+  system without noticing the case was narrow.
+- **Caught by:** the owner asking *"why does that have to be a warning rather than a rebuild like you'd
+  get if you weren't using a profile?"* — a question whose premise (that a rebuild is what should
+  happen) was simply correct, and which I could only answer by going and looking.
+- **Cost:** a finding carried as open that was in fact closed, and two commit messages overstating what
+  was left. No code was wrong; the description of it was.
+- **Class:** new, and the most mundane of the four recent ones — **recency, not reasoning**. A15 and A16
+  were verification aimed one level below the claim; this needed no verification at all, only recall.
+  It is worse in one respect: those failures were about code I had not exercised, and this was about
+  code whose success I had personally observed. The tell is *tense* — I described a capability in the
+  present ("still leaves") on the strength of a memory of the problem rather than of the fix.
+- **Gated now?** No. The habit it argues for is narrow and checkable: **before writing "X still
+  happens" about the system, name the function that makes it happen and read it.** A claim about
+  present behaviour is a claim about code, and this repo has a grep for that. Note also the smell in the
+  original phrasing — "the ordinary half remains" was inherited verbatim from the finding's own
+  pre-fix text, which is how a stale description survives the work that invalidates it.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of
