@@ -137,7 +137,7 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    silently defeated a read-only mount. Tart needs no equivalent; its `:ro` VirtioFS share is a real
    read-only mount and is unconditional. The two backends are converging on one invariant by
    different mechanisms, and only one of them is self-enforcing.
-4. The v6 `TierLayout` migrator.
+4. The v6 `TierLayout` migrator — **and it now precedes 3c's `rw/` move, not follows it** ([DF164](../findings-unresolved.md), 2026-07-31). Attempting 3c surfaced that every pre-v6 migrator addresses the sandbox through the *live* path builders, so each tier move silently repoints them at a layout their input does not have. It cannot be fixed inside step 3 because the fix *is* the migration design: either era-pin the paths (a frozen pre-tier module, plus `SaveAt` variants — a migrator that reads flat and writes tiered never updates the record it re-reads, so it re-migrates forever), or run the tier move as a pre-pass ahead of the numbered ladder so every other migrator keeps working unchanged. The second is simpler and is the current preference. Decide this **before** finishing 3c.
 5. **The guarantee is a conformance case, not per-backend tests.** The `runtimetest` mount section
    now runs on all six backends (DF161, landed 2026-07-30), so the tier invariant has a home no
    fake can satisfy: assert *from inside the guest* that `host/` is unreachable and that `ro/` is
