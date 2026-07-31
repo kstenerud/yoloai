@@ -357,6 +357,34 @@ func (mgr *Manager) StartWithOptions(ctx context.Context, name string, opts Star
 
 Keep both layers in the same package. Don't split them into separate packages — that forces callers to import two packages for one concept.
 
+### Readers do not mutate
+
+A function that reads state writes nothing — no file, no directory, no backfill, no repair. `Load*`,
+`Read*`, `Get*`, `*Status`, `Detect*` and their kin observe; `Save*`, `Write*`, `Ensure*`,
+`Create*`, `Migrate*` change things. A caller must be able to tell which it is from the name, at the
+call site, without opening the function.
+
+This generalizes D61's no-write-on-read rule, which so far has been stated only for migration
+(`store.LoadEnvironment` balks with `ErrNeedsMigration` rather than migrating a stale record, and
+`config.RealmStatus` inspects without touching). The rule is not really about migration. It is about
+being able to point a reader at a directory — a scratch tree, a backup, another user's realm, a
+read-only mount — and know the directory is the same afterwards.
+
+Two consequences worth stating, because both are easy to violate by accident:
+
+- **Directory creation counts as mutation.** `config.EnsureHostTier` belongs in `Save*` paths only;
+  today every call site is one, and that is a property to keep rather than a coincidence.
+- **Get-or-create is legitimate, but must be named for it.** `broker.PlaceholderToken` generates and
+  persists a token on first call. The behaviour is right and its docstring says so, but the name
+  reads as a pure accessor, which is the failure this rule is trying to prevent. New code in that
+  shape gets an `Ensure`-style name.
+
+Why it earns a standard rather than a habit: a reader that quietly writes turns "inspect this tree"
+into "modify this tree", and the callers who care most — audits, dry-runs, `--check`, and the
+pre-commit verification in
+[migration-by-duplication.md](../design/plans/migration-by-duplication.md) — are exactly the ones
+that have no way to notice.
+
 ## Code Organization Patterns
 
 - **Accept interfaces, return structs** — define interfaces at the point of consumption, not alongside the implementation

@@ -7,7 +7,7 @@
 - **Status:** IN-PROGRESS — design confirmed with the owner 2026-07-20; being built on branch
   `sandbox-share-tiering`. The concrete design is in § Confirmed design below; the earlier prose
   stands as the reasoning that led there. Empirical facts are marked confirmed-on-hardware.
-- **Depends on:** staged-migration.md
+- **Depends on:** migration-by-duplication.md
 - **Note:** step 4 is a migration and cannot land without that framework change ([DF164](../findings-unresolved.md)).
 
 ## Confirmed design (2026-07-20)
@@ -161,7 +161,7 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    silently defeated a read-only mount. Tart needs no equivalent; its `:ro` VirtioFS share is a real
    read-only mount and is unconditional. The two backends are converging on one invariant by
    different mechanisms, and only one of them is self-enforcing.
-4. The v6 `TierLayout` migrator — **and it now precedes 3c's `rw/` move, not follows it** ([DF164](../findings-unresolved.md), 2026-07-31). Attempting 3c surfaced that every pre-v6 migrator addresses the sandbox through the *live* path builders, so each tier move silently repoints them at a layout their input does not have. It cannot be fixed inside step 3 because the fix *is* the migration design: either era-pin the paths (a frozen pre-tier module, plus `SaveAt` variants — a migrator that reads flat and writes tiered never updates the record it re-reads, so it re-migrates forever), or run the tier move as a pre-pass ahead of the numbered ladder so every other migrator keeps working unchanged. The second is simpler and is the current preference. Decide this **before** finishing 3c.
+4. The v6 `TierLayout` migrator — **and it now precedes 3c's `rw/` move, not follows it** ([DF164](../findings-unresolved.md), 2026-07-31). Attempting 3c surfaced that every pre-v6 migrator addresses the sandbox through the *live* path builders, so each tier move silently repoints them at a layout their input does not have. It cannot be fixed inside step 3 because the fix *is* the migration design: either era-pin the paths (a frozen pre-tier module, plus `SaveAt` variants — a migrator that reads flat and writes tiered never updates the record it re-reads, so it re-migrates forever), or run the tier move as a pre-pass ahead of the numbered ladder so every other migrator keeps working unchanged. **Settled 2026-07-31 in favour of era-pinning**, against the pre-pass that this line previously preferred: a version-independent pre-pass has to answer "is this already tiered?" by sniffing the directory shape, and a plain-int stamp with no artifact-sniffing is the rule this project already runs on (D61). So `SchemaTiered = 6` runs **last**, every migrator below it is pinned to literal flat paths, and the mechanism is [migration-by-duplication.md](migration-by-duplication.md).
 5. **The guarantee is a conformance case, not per-backend tests.** The `runtimetest` mount section
    now runs on all six backends (DF161, landed 2026-07-30), so the tier invariant has a home no
    fake can satisfy: assert *from inside the guest* that `host/` is unreachable and that `ro/` is
@@ -342,11 +342,12 @@ tier assignment follows access, not threat model. Just do not bank a security cl
 
 ## Open questions
 
-- **Migration shape.** In-place move of existing sandbox dirs vs. dual-shape readers with a settling
-  period. Ties into the deprecation register entry (rule 9). **The only genuinely open one**, and it
-  is now the gate on merging: since step 2 an existing sandbox reads as missing, and no test anywhere
-  covers an upgrade — `scripts/smoke_test.py` has no schema, migration or pre-existing-sandbox case,
-  and `releasetest` creates fresh sandboxes, so a green release gate says nothing about it.
+- **Upgrade coverage** — what remains of the migration question, and still the gate on merging.
+  The *shape* is settled ([migration-by-duplication.md](migration-by-duplication.md), and the
+  deprecation register entry it owes under rule 9), but since step 2 an existing sandbox reads as
+  missing and no test anywhere covers an upgrade: `scripts/smoke_test.py` has no schema, migration
+  or pre-existing-sandbox case, and `releasetest` creates fresh sandboxes, so a green release gate
+  says nothing about it.
 - **The seven late-classified entries** (§ Confirmed design) are still classified from what the code
   says about them, and still not reviewed against the design. Cheap, and it feeds step 3.
 

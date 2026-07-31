@@ -792,3 +792,44 @@ hole into coverage. That is a lower bar than "gate this file" and should not wai
 **When in doubt about whether something belongs: does it have a Caught-by that is not "the owner"?**
 If yes, it is evidence a mechanism worked and belongs here for that reason alone — the successes are
 as scarce as the failures and twice as useful.
+
+### A21 — audited a design correctly, then recommended against it on a criterion I had invented (2026-07-31)
+
+- **Claimed:** that the v5→v6 tier move should be built as an in-place rename shuffle rather than the
+  staged copy-and-promote the plan described. The supporting audit was sound and every fact in it
+  checked out — `repopulate` deep-copies (`promote.go:356`) so tree-level promotion costs 2× the
+  sandboxes dir; the migrators are not "parameterised on the root"; scratch resumability contradicts
+  `scratch.go`'s own invariant. From those I concluded that staging was "much larger than the
+  disease" and proposed the cheap alternative.
+- **True:** the cheap alternative is the one design that cannot satisfy the requirement. The owner,
+  in one sentence — *"If the migration fails, then the user will be stuck halfway, unable to
+  downgrade and unable to run the current version"* — named the criterion: what matters is the state
+  a **failed** migration leaves the user in. Under it, an in-place shuffle is strictly worst (a
+  deterministic failure bricks both directions), and the duplication I had costed as the objection
+  is the entire point. My follow-up was no better: I proposed hardlinks to recover the cost, and got
+  *"hardlinks are fine until you encounter a fs that doesn't support it"*.
+- **Source of the error, and it is not a factual one.** I evaluated the designs on the axis I could
+  measure — resource cost on the success path — and treated the failure state as a residual
+  probability to minimize. The owner's axis was the failure state itself, with cost as the free
+  variable: *migration is rare, therefore it can be heavy*. Both axes are defensible; only one was
+  the owner's, and I never asked which. Every fact in the audit stayed true when the axis flipped;
+  the recommendation inverted completely.
+- **Caught by:** the owner, in one line, twice. Note what neither line was: a correction of a fact.
+  The audit was not wrong, which is exactly why nothing internal to it could have flagged the
+  problem — a fact-check on my own analysis returns clean.
+- **The cost, and the shape of it.** Nothing shipped; it was a design conversation and the plan was
+  rewritten afterwards to the corrected design. But the correction also *deleted* most of what I had
+  been elaborating — the staged ladder, the `Requires` axis, the `repopulate` opt-out, the
+  hardlink/reflink tier — because once "heavy is fine" is on the table the machinery collapses.
+  Roughly: I had been optimizing a constraint the owner would have relaxed for free if asked.
+- **Class:** new, and the inverse of the A14/A20 pair. Those are failures to check a *premise* I
+  inherited from the repo. This is a failure to check a premise I supplied myself — an evaluation
+  criterion, which is the least visible kind because it never appears as a claim, only as the shape
+  of the recommendation. **A20's lesson was that a written rationale is evidence about what someone
+  concluded, never about what they checked. This one's is narrower: an audit is evidence about the
+  facts, never about which of them matter.**
+- **Gated now?** No, but the habit is cheap and states in one line: **when a recommendation trades
+  safety against cost, the acceptable failure state and the resource budget are the owner's to set —
+  ask for both before recommending, not after.** The tell is a design comparison where one option
+  wins on effort and another wins on what happens when it breaks. That is not a technical tie to be
+  broken by judgement; it is a question with an owner.
