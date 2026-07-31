@@ -23,10 +23,14 @@ import (
 // non-empty path.
 var noLayout = config.NewLayout("/tmp/yoloai-containerd-test")
 
-// TestCNIStatePath verifies the CNI state file path is within the backend dir.
+// TestCNIStatePath verifies the CNI state file path is within the backend dir,
+// which since the host-tier move lives under host/ — CNI state is backend
+// bookkeeping no guest may see. The expectation stays a literal on purpose: a
+// path test that builds its expectation from the builder it is testing cannot
+// fail when the layout moves (DF164).
 func TestCNIStatePath(t *testing.T) {
 	path := cniStatePath("/home/user/.yoloai/sandboxes/mybox")
-	assert.Equal(t, "/home/user/.yoloai/sandboxes/mybox/backend/cni-state.json", path)
+	assert.Equal(t, "/home/user/.yoloai/sandboxes/mybox/host/backend/cni-state.json", path)
 }
 
 // TestTeardownCNI_MissingState verifies teardownCNI is a no-op if cni-state.json is absent.
@@ -40,7 +44,7 @@ func TestTeardownCNI_MissingState(t *testing.T) {
 // TestTeardownCNI_Idempotent verifies a second teardown after the state file is removed is a no-op.
 func TestTeardownCNI_Idempotent(t *testing.T) {
 	dir := t.TempDir()
-	backendDir := filepath.Join(dir, "backend")
+	backendDir := filepath.Join(dir, "host", "backend") // literal host tier, as above
 	require.NoError(t, os.MkdirAll(backendDir, 0o750))
 
 	// Write a minimal state file.
