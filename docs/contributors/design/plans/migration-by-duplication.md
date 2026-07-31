@@ -21,6 +21,16 @@ see are in a layout it has never heard of. **If the failure is deterministic rat
 the user is stuck in both directions.** That, not "units at mixed versions", is the problem worth
 building for — it is the owner's framing and it is what settled this design.
 
+**State the guarantee precisely, because the obvious phrasing overreaches.** It is *not* "the binary
+you had yesterday still works" — a user upgrading v3→v6 who fails at the last step has a realm at
+v5, which their v3 binary cannot read either. What the design guarantees is that **the realm is
+always left at a schema version some released tag can read**, never stranded between two. That is a
+guarantee the repo can already act on: `config.PriorReleaseRange` (`schema_releases.go:37`) maps a
+schema to the release range whose builds read it, precisely so `system migrate` can name concrete
+versions to downgrade to. The v5→v6 step must append its `{Schema: 6, Tag: …}` entry when it ships,
+per that file's maintenance note — a migration that lands without it silently loses the escape
+route this whole design exists to preserve.
+
 The other half is [DF164](../findings-unresolved.md): every pre-v6 migrator addresses the sandbox
 through the *live* path builders, so moving a file into a tier silently repoints them at the layout
 they are migrating *to*. That is a separate, mechanical defect (see § Era-pinned addressing) and no
@@ -55,6 +65,22 @@ its six-state classifier and crash tests stay exactly as they are.
 The rule this yields is one sentence, with no qualifiers and one code path for every migration
 present and future: *migration duplicates the sandboxes tree; it pre-checks 2× free space and
 refuses before touching anything.*
+
+**Three wiring details that are not obvious from `Promotion`'s interface:**
+
+- **Verification belongs at the end of `Build`.** `Promotion.Run` is one call — build, stage, swap —
+  so there is no seam between steps 3 and 4 to hook. There does not need to be: `Build` runs
+  *before* the `U`→`U_^^_orig` rename (`promote.go:173-195`), so a verification failure returned
+  from `Build` propagates out with the live tree untouched. That is what makes the check free.
+- **The ready marker cannot be the realm stamp.** `IsReady` tests a marker *inside* the promoted
+  unit, and the realm stamp lives at `DataDir/.schema-version` — a **sibling** of `sandboxes/`, not
+  a child. So the tree unit needs its own durable marker written into the tree, with the realm stamp
+  following the promotion exactly as `stampSchemaAdvancing` already does for the per-sandbox
+  migrators (`migrate_principal.go:373`). The marker is a stamp, not a shape sniff, so it stays on
+  the right side of D61.
+- **`ScratchDir` is consumed.** `buildAndStage` renames the scratch dir itself into place
+  (`promote.go:204`), so it must be a *subdirectory* under `ScratchPath(home)` — the pattern
+  `OverlayFlatten` already uses (`migrate_overlay.go:264`) — not the scratch root.
 
 ## What the constraints deleted
 
@@ -188,6 +214,12 @@ exactly one file says "this is what v3 looked like".
 path builders.* Every layout move regenerates this defect otherwise. It graduates into `standards/`
 with the test shape DF164 taught — fixtures seeded with literal paths, never with the builder the
 migrator reads with, because a fixture built by the same builder cannot fail when the layout moves.
+
+**One thing the migrator's input domain excludes.** Sandboxes created by a build of *this branch*
+are neither released-v5-flat nor v6-tiered: step 2 landed `EnsureHostTier` on the host-tier write
+paths, so a v5-stamped sandbox created here already has a partial `host/`. No released version
+produces that state, so it is not a migration case — it is the known "an existing sandbox reads as
+missing" window on the branch, and such sandboxes are recreated rather than migrated.
 
 ## What this does not cover
 
