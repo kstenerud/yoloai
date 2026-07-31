@@ -29,22 +29,27 @@ type Netpolicy struct {
 
 // Save writes netpolicy.json to the given sandbox directory.
 func Save(sandboxDir string, np *Netpolicy) error {
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
+	}
+	return SaveTo(config.NetpolicyPath(sandboxDir), np)
+}
+
+// SaveTo writes the record to an explicit path, stamping and serializing it
+// exactly as Save does but resolving nothing: the caller supplies the path and
+// owns the directory's existence. It exists for migrators, which must address
+// the layout of the era they are migrating FROM (internal/config/pretier,
+// DF164). Everything else calls Save.
+func SaveTo(path string, np *Netpolicy) error {
 	np.Version = schemaVersion
 
 	data, err := json.MarshalIndent(np, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", NetpolicyFile, err)
 	}
-
-	if err := config.EnsureHostTier(sandboxDir); err != nil {
-		return fmt.Errorf("create host tier: %w", err)
-	}
-
-	path := config.NetpolicyPath(sandboxDir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", NetpolicyFile, err)
 	}
-
 	return nil
 }
 

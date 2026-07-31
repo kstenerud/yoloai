@@ -254,21 +254,28 @@ func MigrateEnvironment(meta *Environment) error {
 // parses. AtomicWriteFile closes both: temp + fsync + rename + dir fsync, so a
 // reader sees the old record or the new one, and never neither.
 func SaveEnvironment(dir string, meta *Environment) error {
+	if err := config.EnsureHostTier(dir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
+	}
+	return SaveEnvironmentTo(EnvironmentFilePath(dir), meta)
+}
+
+// SaveEnvironmentTo writes the record to an explicit path, stamping and
+// serializing it exactly as SaveEnvironment does but resolving nothing: the
+// caller supplies the path and owns the directory's existence.
+//
+// It exists for migrators, which must address the layout of the era they are
+// migrating FROM — see internal/config/pretier and DF164. Everything else calls
+// SaveEnvironment, which resolves the current layout and creates its tier.
+func SaveEnvironmentTo(path string, meta *Environment) error {
 	meta.Version = metaVersion
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", EnvironmentFile, err)
 	}
-
-	if err := config.EnsureHostTier(dir); err != nil {
-		return fmt.Errorf("create host tier: %w", err)
-	}
-
-	path := EnvironmentFilePath(dir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", EnvironmentFile, err)
 	}
-
 	return nil
 }
 
@@ -301,8 +308,18 @@ func ContainerUser(meta *Environment, hostUID int) string {
 // otherwise the dropped agent/model keys would vanish silently before the
 // migration could relocate them.
 func LoadEnvironment(dir string) (*Environment, error) {
-	path := EnvironmentFilePath(dir)
+	return LoadEnvironmentFrom(EnvironmentFilePath(dir))
+}
 
+// LoadEnvironmentFrom reads the record from an explicit path, applying exactly
+// the same version checks as LoadEnvironment but resolving nothing.
+//
+// It exists for migrators, which must address the layout of the era they are
+// migrating FROM — see internal/config/pretier and DF164. Everything else calls
+// LoadEnvironment. Like every reader here it writes nothing (standards/go.md,
+// "Readers do not mutate"), which is what lets a migration point it at a staged
+// tree and know the tree is unchanged afterwards.
+func LoadEnvironmentFrom(path string) (*Environment, error) {
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir, not user input
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", EnvironmentFile, err)

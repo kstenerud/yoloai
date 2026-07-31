@@ -27,22 +27,27 @@ type AgentConfig struct {
 
 // Save writes agent.json to the given sandbox directory.
 func Save(sandboxDir string, cfg *AgentConfig) error {
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
+	}
+	return SaveTo(config.AgentConfigPath(sandboxDir), cfg)
+}
+
+// SaveTo writes the record to an explicit path, stamping and serializing it
+// exactly as Save does but resolving nothing: the caller supplies the path and
+// owns the directory's existence. It exists for migrators, which must address
+// the layout of the era they are migrating FROM (internal/config/pretier,
+// DF164). Everything else calls Save.
+func SaveTo(path string, cfg *AgentConfig) error {
 	cfg.Version = schemaVersion
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", AgentConfigFile, err)
 	}
-
-	if err := config.EnsureHostTier(sandboxDir); err != nil {
-		return fmt.Errorf("create host tier: %w", err)
-	}
-
-	path := config.AgentConfigPath(sandboxDir)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", AgentConfigFile, err)
 	}
-
 	return nil
 }
 

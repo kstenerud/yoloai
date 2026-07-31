@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/config/pretier"
 	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
 	"github.com/kstenerud/yoloai/store"
@@ -61,7 +62,11 @@ func MigrateAgentConfigs(layout config.Layout) error {
 // steps 2 and 3, the values are already in their sibling files, the record is
 // still < v3, and a re-run repeats the (idempotent) steps to completion.
 func migrateAgentConfigRecord(sandboxDir string) error {
-	path := store.EnvironmentFilePath(sandboxDir)
+	// Every path here is pre-tier (flat), because that is the layout the records
+	// this migrator reads were written in. Routing any of them through the live
+	// builders points them at host/ and the migrator silently finds nothing —
+	// DF164.
+	path := pretier.EnvironmentPath(sandboxDir)
 	data, err := os.ReadFile(path) //nolint:gosec // G304: trusted sandbox subpath
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
@@ -85,12 +90,14 @@ func migrateAgentConfigRecord(sandboxDir string) error {
 	}
 
 	// (2a) Durable copy of inside-process config, before touching the record.
-	if err := agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: legacy.AgentType, Model: legacy.Model}); err != nil {
+	if err := agentcfg.SaveTo(pretier.AgentConfigPath(sandboxDir),
+		&agentcfg.AgentConfig{AgentType: legacy.AgentType, Model: legacy.Model}); err != nil {
 		return fmt.Errorf("write %s: %w", agentcfg.AgentConfigFile, err)
 	}
 
 	// (2b) Durable copy of network policy, before touching the record.
-	if err := netpolicycfg.Save(sandboxDir, &netpolicycfg.Netpolicy{Mode: legacy.NetworkMode, Allow: legacy.NetworkAllow}); err != nil {
+	if err := netpolicycfg.SaveTo(pretier.NetpolicyPath(sandboxDir),
+		&netpolicycfg.Netpolicy{Mode: legacy.NetworkMode, Allow: legacy.NetworkAllow}); err != nil {
 		return fmt.Errorf("write %s: %w", netpolicycfg.NetpolicyFile, err)
 	}
 
@@ -105,7 +112,11 @@ func migrateAgentConfigRecord(sandboxDir string) error {
 	if err := store.MigrateEnvironment(&meta); err != nil {
 		return err
 	}
-	if err := store.SaveEnvironment(sandboxDir, &meta); err != nil {
+	// Written back flat, at the same path it was read from. A migrator that read
+	// flat and wrote tiered would leave the record it re-reads unchanged, so the
+	// version check above would never advance and the sandbox would re-migrate
+	// forever (DF164).
+	if err := store.SaveEnvironmentTo(path, &meta); err != nil {
 		return err
 	}
 	return nil
