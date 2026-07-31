@@ -7,7 +7,8 @@
 - **Status:** IN-PROGRESS — design confirmed with the owner 2026-07-20; being built on branch
   `sandbox-share-tiering`. The concrete design is in § Confirmed design below; the earlier prose
   stands as the reasoning that led there. Empirical facts are marked confirmed-on-hardware.
-- **Depends on:** —
+- **Depends on:** staged-migration.md
+- **Note:** step 4 is a migration and cannot land without that framework change ([DF164](../findings-unresolved.md)).
 
 ## Confirmed design (2026-07-20)
 
@@ -88,6 +89,29 @@ sites that exist when it is built — a branch that funnels and then waits accum
 joiners on main, invisibly, because they conflict with nothing. This one arrived that way
 (`filepath.Join(st.SandboxDir, config.BinDirName)`, rebased clean, repaired to `config.BinPath`).
 Re-run the funnel grep after every rebase; it is the only thing that finds them.
+
+**Four guest-created root entries that no Go constant names** (enumerated 2026-07-31 by diffing
+`sandbox_layout.go`/`dirs.go` against every `os.path.join(yoloai_dir, …)` in the guest scripts). The
+tier mover has to classify these, and two of them are absent from the table above entirely:
+
+| Entry | Tier | Note |
+| --- | --- | --- |
+| `home/` | `rw/` | sandbox HOME (seatbelt/tart); in the table, no builder |
+| `setup.log` | `rw/` | written by tart's setup command (`>'%s/setup.log'`); in the table, no builder |
+| `xcodebuild-firstlaunch.log` | `rw/` | guest-written; **was missing from the table** |
+| `xcodebuild-firstlaunch.started` | `rw/` | guest-written marker; **was missing from the table** |
+
+Overlay-era `upper`/`lower` are *not* a root concern — they sit inside `work/<encoded>/`, so `work/`
+moving as a unit carries them.
+
+**Unrecognized entries default to `host/`, loudly.** Not because `host/` is a good guess, but because
+it is the *fail-safe* direction: a misclassification into `host/` can only remove guest access, which
+surfaces as a missing file at runtime, whereas a default of `rw/` silently grants the agent access to
+something nobody classified. The mover warns with the entry name, and the four above are listed
+explicitly so the warning means "something new appeared" rather than firing on every upgrade. This is
+the fourth time this table has been found incomplete — six missed, two misclassified, two absent — and
+the mover, by having to classify every entry it meets, is the first mechanism that makes it complete
+by construction rather than by enumeration.
 
 **Two judgment calls (owner-approved):**
 - `tmux/` → `rw` wholesale: it holds a runtime-created socket (needs write); `tmux.conf` rides along
