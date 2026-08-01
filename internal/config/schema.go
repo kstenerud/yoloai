@@ -28,7 +28,7 @@ import (
 // never ahead of the data (the truth invariant). MigrateLibrary must NOT advance
 // the stamp past libraryFrozenVersion, or it would green the gate over
 // un-migrated sandboxes.
-const LibrarySchemaVersion = SchemaPrincipalRenamed
+const LibrarySchemaVersion = SchemaTiered
 
 // libraryFrozenVersion is the ceiling of the sealed MigrateLibrary +
 // MigrateAgentConfigs ladder (the v2->v3 agent.json split and earlier). Framework
@@ -67,6 +67,12 @@ const (
 	// the CLI adopts the "cli" principal and existing "yoloai-<name>" instances
 	// are renamed/recreated to "yoloai-cli-<name>" (D126).
 	SchemaPrincipalRenamed = 5
+	// SchemaTiered is the target of the v5->v6 tier move: a sandbox directory
+	// stops being flat and becomes exactly three subdirectories — host/, ro/ and
+	// rw/ — so a file's guest-access class is the directory it sits in rather
+	// than a list that can drift (DF136, DF148). It runs LAST, which is what lets
+	// every migrator below it address a flat sandbox (DF164).
+	SchemaTiered = 6
 )
 
 // LaunchPrefixResolver maps a sandbox's stored backend type (the "backend"

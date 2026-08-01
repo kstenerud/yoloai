@@ -1,16 +1,24 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md). The mechanism it designed is built:
+> `internal/orchestrator/migrate_tier.go`, whose docstrings carry the live rules.
+
 > **ABOUTME:** Migrate by duplicating the sandboxes tree into scratch, transforming it there,
 > verifying it, and swapping it in — so a failed migration always leaves a tree the old
 > binary reads.
 
 # Migration by duplication: copy the tree, verify it, promote once
 
-- **Status:** PLANNED — designed with the owner 2026-07-31; no code yet. Every claim about existing
-  machinery below was checked against the source, and the parts that already exist are marked as
-  such so nobody rebuilds them.
+- **Status:** IMPLEMENTED — built 2026-08-01 as `internal/orchestrator/migrate_tier.go`, the
+  v5→v6 `TierLayout` migrator, plus `migrate.TreeSize`/`migrate.FreeBytes` for the free-space
+  precondition. The design held: `Promotion` needed no modification, and verification at the end of
+  `Build` needed no seam. Verified on a real v0.9.0 install. Two things the build learned that the
+  design did not say — see § What the build changed.
 - **Depends on:** —
 - **Rides:** **a migration** — it *is* the migration mechanism change, and
-  [sandbox-share-tiering.md](sandbox-share-tiering.md) cannot finish without it
-  ([DF164](../findings-unresolved.md)).
+  [sandbox-share-tiering.md](../../design/plans/sandbox-share-tiering.md) cannot finish without it
+  ([DF164](../../design/findings-unresolved.md)).
 
 ## Why
 
@@ -31,7 +39,7 @@ versions to downgrade to. The v5→v6 step must append its `{Schema: 6, Tag: …
 per that file's maintenance note — a migration that lands without it silently loses the escape
 route this whole design exists to preserve.
 
-The other half is [DF164](../findings-unresolved.md): every pre-v6 migrator addresses the sandbox
+The other half is [DF164](../../design/findings-unresolved.md): every pre-v6 migrator addresses the sandbox
 through the *live* path builders, so moving a file into a tier silently repoints them at the layout
 they are migrating *to*. That is a separate, mechanical defect (see § Era-pinned addressing) and no
 amount of staging fixes it.
@@ -82,6 +90,24 @@ refuses before touching anything.*
   (`promote.go:204`), so it must be a *subdirectory* under `ScratchPath(home)` — the pattern
   `OverlayFlatten` already uses (`migrate_overlay.go:264`) — not the scratch root.
 
+## What the build changed
+
+Two corrections, both found by building it:
+
+- **An unclassified entry is reported, not confirmed.** The design said the mover "warns with the
+  entry name", and the first implementation made that an `AuthConfirm` op. That is wrong at the
+  product level: a single stray `.DS_Store` would make every macOS upgrade interactive and abort
+  every headless one, and there is no decision for the user to make — the fail-safe direction is
+  already chosen and `host/` is where it goes either way. It is `AuthNone` with the names in the
+  description.
+- **`Build` completeness needs its own test, because `Apply` cannot see it.** The design's
+  observation that a complete `Build` makes `repopulate`'s filter empty is right, and has a
+  consequence it did not draw: `repopulate` will therefore *cover for* an incomplete `Build` by
+  copying the missing entries out of the displaced original. So dropping the tree's non-sandbox
+  siblings from `Build` produces a correct final tree and no test notices — while the tree actually
+  promoted is no longer the tree that was verified. `TestTierLayout_BuildProducesACompleteTree`
+  asserts the staged tree directly for that reason.
+
 ## What the constraints deleted
 
 This file previously described a **staged ladder**: each migration step running view → view inside
@@ -121,7 +147,7 @@ claim is moot rather than load-bearing — but it was wrong, and it was the prem
 | Piece | Where | Note |
 | --- | --- | --- |
 | Atomic promote + crash recovery | `internal/migrate/promote.go` | `U` / `U_^^_orig` / `U_^^_new`, six-state classifier, exhaustive. `^^` is illegal in any sandbox or realm name, so the sentinels can never collide with live data |
-| Same-filesystem precondition | `migrate.SameFilesystem` | Scratch must share a filesystem with the live dir or the move-in fails `EXDEV`. Has a hole ([DF165](../findings-unresolved.md)) and is a no-op on Windows ([DF167](../findings-unresolved.md)) |
+| Same-filesystem precondition | `migrate.SameFilesystem` | Scratch must share a filesystem with the live dir or the move-in fails `EXDEV`. Has a hole ([DF165](../../design/findings-unresolved.md)) and is a no-op on Windows ([DF167](../../design/findings-unresolved.md)) |
 | Well-known scratch, per home | `migrate.ScratchPath(home)`, `.migration-scratch` | Correctly scoped to the **home**, not the machine — an embedder can pass its own `DataDir`, and `AcquireHomeLock` locks per-home |
 | Plan-before-apply over the whole set | `migrate.CollectPlans` + `Authorize` | Collects every migrator's plan first; `ApplyAll` re-derives under the lock and refuses a migrator that became destructive since planning |
 | Approval axis | `migrate.Auth` | `AuthNone` / `AuthConfirm` / `AuthAbandonOverlay` / `AuthBlocked` |
@@ -142,7 +168,7 @@ whether a failure inside it is *deterministic*, and the only place to settle tha
 So the plan phase must be as close to total as it can be made, and this is where the effort goes:
 
 - Every root entry in every sandbox is classifiable (the mover is total: unrecognized entries default
-  to `host/`, loudly — see [sandbox-share-tiering.md](sandbox-share-tiering.md)).
+  to `host/`, loudly — see [sandbox-share-tiering.md](../../design/plans/sandbox-share-tiering.md)).
 - Every sandbox dir is writable by the invoking user (`hostUnmanageableReason` is the precedent —
   `migrate_overlay.go:225`).
 - No sandbox is running: a live instance's mounts point into the tree being replaced. `Apply` stops
@@ -227,7 +253,7 @@ missing" window on the branch, and such sandboxes are recreated rather than migr
 operations — `r.Rename` (`migrate_principal.go:183`) and `rt.Remove` (`:203`) against real
 containers and VMs. For a user coming from v4, a later failure leaves an untouched directory beside
 already-renamed instances, so "the old binary still works" is true only of the disk half. Filed as
-[DF166](../findings-unresolved.md). The tier move itself has no external side effects beyond
+[DF166](../../design/findings-unresolved.md). The tier move itself has no external side effects beyond
 requiring stopped sandboxes, so the guarantee is clean for the v5→v6 path this plan exists to serve.
 
 ## Questions this design answers
@@ -247,12 +273,12 @@ The three open questions the previous version carried are settled, all in the sa
 
 ## Related
 
-- [sandbox-share-tiering.md](sandbox-share-tiering.md) — the consumer; its step 4 is the v5→v6
+- [sandbox-share-tiering.md](../../design/plans/sandbox-share-tiering.md) — the consumer; its step 4 is the v5→v6
   `TierLayout` migration and cannot land without this.
-- [DF164](../findings-unresolved.md) — the defect that forced the design, including why the
+- [DF164](../../design/findings-unresolved.md) — the defect that forced the design, including why the
   migrators' own tests could not catch it.
-- [DF165](../findings-unresolved.md), [DF166](../findings-unresolved.md),
-  [DF167](../findings-unresolved.md) — defects found auditing this plan, all outliving it.
+- [DF165](../../design/findings-unresolved.md), [DF166](../../design/findings-unresolved.md),
+  [DF167](../../design/findings-unresolved.md) — defects found auditing this plan, all outliving it.
 - [standards/go.md § Readers do not mutate](../../standards/go.md) — the invariant the pre-commit
   verification depends on.
-- [release-migration.md](release-migration.md) — the release-time migration story; different scope.
+- [release-migration.md](../../design/plans/release-migration.md) — the release-time migration story; different scope.

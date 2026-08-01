@@ -98,7 +98,7 @@ sandboxes on that profile.
 that Dockerfile to `<data-dir>/defaults/base-image.Dockerfile` (refreshed whenever a
 sandbox is created). It is a reference only — its own header says so — because the
 build reads the embedded copy, never the disk.
-### Host-only sandbox metadata moved into a `host/` subdirectory
+### A sandbox directory is now three tiers: `host/`, `ro/` and `rw/`
 
 **Previous behavior:** a sandbox directory was flat. `environment.json`,
 `sandbox-state.json`, `agent.json`, `netpolicy.json`, `network-diag.txt`,
@@ -116,16 +116,30 @@ physical directory, so a record's guest-access class is determined by where it
 sits rather than by a list that has to be maintained. Nothing in any guest ever
 read these files, so no in-sandbox behavior changes.
 
-**Impact:** the on-disk layout changed, so sandboxes created by an earlier
-version are not readable until they are migrated. The `TierLayout` migrator that
-performs the move is not in this change — until it lands, an existing sandbox
-reports as missing. `Sandbox.EnvironmentPath()` returns the new location;
-embedders that build the path themselves rather than calling it must be updated —
-and note that now includes anything reaching into `backend/`, whose per-backend
-contents (`profile.sb`, `pid`, `instance.json`) moved with it.
-This is the first half of the tiering work (`docs/contributors/design/plans/sandbox-share-tiering.md`);
-`runtime-config.json`, `bin/` and the rest move in the read-only and read-write
-tiers separately.
+**And the other two tiers move with them.** `runtime-config.json`, `bin/`,
+`prompt.txt`, `machine-id`, `home-seed/` and `secrets/` go to `ro/`, which the
+guest reads and must not write; `logs/`, `work/`, `files/`, `cache/`,
+`agent-runtime/`, `agent-status.json`, `tmux/`, `vscode-cli/` and the guest's
+`home/` go to `rw/`. A sandbox root now holds exactly those three directories and
+nothing else, so there is no un-tiered place to put a new file.
+
+**The guest still sees one flat root.** Each backend assembles the flat view the
+in-sandbox scripts already expect, so nothing inside a sandbox changes — no agent
+command, path or script is affected.
+
+**Impact:** the on-disk layout changed, so sandboxes created by an earlier version
+must be migrated. `yoloai system migrate` does it, and it is not a per-file
+shuffle in place: it duplicates the whole `sandboxes/` tree, verifies the copy,
+and swaps it in, so a failure leaves the original untouched. **That needs free
+space equal to twice your sandboxes tree**, which `system migrate --check`
+reports up front, and it leaves the displaced copy in `<dataDir>/trash/` until you
+delete it. An entry nobody has classified is moved to `host/` — the direction that
+can only remove guest access rather than grant it — and named in the plan.
+
+`Sandbox.EnvironmentPath()` returns the new location; embedders that build any
+per-sandbox path themselves rather than calling the accessor must be updated, and
+that now includes anything reaching into `backend/` (`profile.sb`, `pid`,
+`instance.json`), `work/`, or `logs/`.
 
 ## v0.10.0
 

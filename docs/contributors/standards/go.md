@@ -382,7 +382,7 @@ Two consequences worth stating, because both are easy to violate by accident:
 Why it earns a standard rather than a habit: a reader that quietly writes turns "inspect this tree"
 into "modify this tree", and the callers who care most — audits, dry-runs, `--check`, and the
 pre-commit verification in
-[migration-by-duplication.md](../design/plans/migration-by-duplication.md) — are exactly the ones
+[migration-by-duplication.md](../archive/plans/migration-by-duplication.md) — are exactly the ones
 that have no way to notice.
 
 ### A migrator addresses the layout of its own era

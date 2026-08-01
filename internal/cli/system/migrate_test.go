@@ -117,10 +117,16 @@ func TestMigrate_PreV3Record_LadderRunsBeforeThePreflightGuard(t *testing.T) {
 	require.NoError(t, err, "a realm below the frozen ceiling must still migrate")
 	assert.Contains(t, out, "migrated successfully")
 
-	// The ladder ran: the record is relocated and readable, its siblings exist.
+	// The ladder ran end to end: the v2->v3 relocation produced the sibling
+	// records, and the v5->v6 tier move then carried them into host/. Asserted
+	// through the live builders because that is the claim — the current binary
+	// must find these where it now looks for them.
 	box := filepath.Join(top, "library", "sandboxes", "box1")
-	assert.FileExists(t, filepath.Join(box, "agent.json"))
-	assert.FileExists(t, filepath.Join(box, "netpolicy.json"))
+	assert.FileExists(t, config.AgentConfigPath(box))
+	assert.FileExists(t, config.NetpolicyPath(box))
+	assert.FileExists(t, config.EnvironmentPath(box))
+	assert.NoFileExists(t, filepath.Join(box, "environment.json"),
+		"the flat record must not survive beside its tiered copy")
 	libV, ok, err := config.ReadSchemaVersion(config.SchemaVersionPathFor(filepath.Join(top, "library")))
 	require.NoError(t, err)
 	require.True(t, ok)

@@ -69,3 +69,94 @@ func TestSandboxLayout_HostTierIsNotReachableByPrefixConfusion(t *testing.T) {
 		t.Fatalf("environment.json must be inside %q", tier)
 	}
 }
+
+// TestTierOfEntry_AgreesWithTheTieredBuilders is the drift guard between the two
+// representations of one fact. The path builders say where a file goes; the
+// entry table says where the v5->v6 mover puts it. If they disagree, migration
+// files a record somewhere the running binary does not look for it — which is
+// invisible to both of them, since each is self-consistent.
+//
+// Only the host tier is asserted here, because only the host tier has moved:
+// ro/ and rw/ builders still resolve flat until the backends are repointed at
+// them. Extend this to all three the moment they do — a builder that moves
+// without its table row is the whole failure this guards.
+func TestTierOfEntry_AgreesWithTheTieredBuilders(t *testing.T) {
+	const sb = "/sandboxes/box"
+	hostBuilders := map[string]string{
+		EnvironmentFileName:    EnvironmentPath(sb),
+		SandboxStateFileName:   SandboxStatePath(sb),
+		AgentConfigFileName:    AgentConfigPath(sb),
+		NetpolicyFileName:      NetpolicyPath(sb),
+		NetworkDiagFileName:    NetworkDiagPath(sb),
+		BackendDirName:         BackendPath(sb),
+		InjectorRecordFileName: InjectorRecordPath(sb),
+		InjectorLogFileName:    InjectorLogPath(sb),
+		InjectorTokenFileName:  InjectorTokenPath(sb),
+		ContextFileName:        ContextPath(sb),
+	}
+	for name, builder := range hostBuilders {
+		tier, recognized := TierOfEntry(name)
+		if !recognized {
+			t.Errorf("%s has a path builder but no tier — the mover would file it as unclassified", name)
+			continue
+		}
+		if want := filepath.Join(TierDir(sb, tier), name); builder != want {
+			t.Errorf("%s: builder says %q, the entry table says %q — migration and runtime disagree about where this lives",
+				name, builder, want)
+		}
+	}
+}
+
+// Every entry name the layout knows about must classify. A new constant with no
+// row lands in host/ as "unclassified", which for a guest-writable file means it
+// silently stops being reachable — reported at migration time, but only if
+// somebody reads the plan.
+func TestTierOfEntry_ClassifiesEveryNamedEntry(t *testing.T) {
+	// Deliberately literal, like the rest of this file: derived from the same
+	// table under test, it could only ever agree with itself.
+	named := []string{
+		EnvironmentFileName, SandboxStateFileName, AgentConfigFileName, NetpolicyFileName,
+		NetworkDiagFileName, InjectorRecordFileName, InjectorLogFileName, InjectorTokenFileName,
+		ContextFileName, BackendDirName,
+		RuntimeConfigFileName, PromptFileName, ResumePromptFileName, MachineIDFileName,
+		HomeSeedDirName, SecretsDirName, BinDirName,
+		AgentStatusFileName, LogsDirName, FilesDirName, CacheDirName, WorkDirName,
+		VSCodeCLIDirName, TmuxDirName, AgentRuntimeDirName, ContainerLogFileName,
+		CreateDoneMarkerName,
+	}
+	for _, name := range named {
+		if _, recognized := TierOfEntry(name); !recognized {
+			t.Errorf("%q is a named sandbox entry with no tier", name)
+		}
+	}
+}
+
+// The unknown default is host/, and it is a decision rather than a fallback: it
+// can only remove guest access, which surfaces as a missing file, whereas a
+// read-write default would silently grant the agent something nobody classified.
+func TestTierOfEntry_UnknownDefaultsToHostAndSaysSo(t *testing.T) {
+	tier, recognized := TierOfEntry("something-nobody-classified")
+	if recognized {
+		t.Error("an unknown entry must report itself unrecognized")
+	}
+	if tier != TierHost {
+		t.Errorf("unknown entry classified as %q, want %q (the fail-safe direction)", tier, TierHost)
+	}
+}
+
+// A tier directory is not an entry. A sandbox root holding one is already tiered,
+// which the migrator refuses as a distinct case — classifying it as an ordinary
+// unknown would nest host/ inside host/.
+func TestTierOfEntry_TierNamesAreNotEntries(t *testing.T) {
+	for _, name := range []string{HostTierName, ReadOnlyTierName, ReadWriteTierName} {
+		if _, recognized := TierOfEntry(name); recognized {
+			t.Errorf("%q classified as an ordinary entry; it is a tier", name)
+		}
+		if !IsTierName(name) {
+			t.Errorf("IsTierName(%q) = false", name)
+		}
+	}
+	if IsTierName("host-scratch") {
+		t.Error("IsTierName must not match a sibling whose name merely starts with a tier name")
+	}
+}

@@ -175,6 +175,18 @@ installs did not actually work, which is evidence about how much it was exercise
   only reason `system migrate` ever contacts one.
 - **Pointer:** `internal/orchestrator/migrate_overlay.go`
 
+### v5→v6 sandbox directory tiering
+
+- **Incurred:** 2026-08-01 · **Shipped:** v0.11.0 (pending) · **Due:** 2027-02-01 (internal, 6mo)
+- **What:** `TierLayout` converts a flat sandbox directory into `host/` + `ro/` + `rw/`. Unlike the
+  rungs below it, this one migrates by duplication: it rebuilds the whole `sandboxes/` tree in
+  scratch, verifies it, and promotes once, so a failure leaves the original readable by the release
+  the user came from.
+- **Retire by:** the ladder floor, with the rest. Retiring it also retires the 2× free-space
+  precondition and the trash copy, which are this migrator's alone — no other rung duplicates the
+  tree, so the cost is not the ladder's in general.
+- **Pointer:** `internal/orchestrator/migrate_tier.go`, [migration-by-duplication.md](archive/plans/migration-by-duplication.md)
+
 ### `internal/config/pretier` — the frozen pre-tier sandbox layout
 
 - **Incurred:** 2026-07-31 (`7e2efbf3`) · **Shipped:** v0.11.0 (pending) · **Due:** 2027-01-31 (internal, 6mo)
