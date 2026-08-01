@@ -154,24 +154,48 @@ func (f *fakeRenamer) Rename(_ context.Context, oldName, newName string) error {
 	return nil
 }
 
-// seedSandbox writes an unmigrated (empty-principal) environment.json for name.
-// An optional imageRef seeds Environment.ImageRef (pre-v5 bare "yoloai-<X>"
-// shape); omitted, it is left empty.
+// seedSandbox writes an unmigrated (empty-principal) environment.json for name,
+// at the FLAT pre-tier path (flatEnvFile, from migrate_agentcfg_test.go) — the
+// layout a v4 sandbox is actually in. An optional imageRef seeds
+// Environment.ImageRef (pre-v5 bare "yoloai-<X>" shape); omitted, it is left
+// empty.
+//
+// Seeding through store.SaveEnvironment instead would put the fixture wherever
+// the live builders currently point, so it would agree with a migrator that had
+// followed them there while both disagreed with every sandbox on disk. That is
+// how the v6 tier move broke this migrator with the whole suite still green
+// (DF164) — so this file, like the v2->v3 one, spells its paths out. Do not
+// "tidy" these back into store.EnvironmentFilePath.
 func seedSandbox(t *testing.T, layout config.Layout, name string, imageRef ...string) {
 	t.Helper()
 	var ref string
 	if len(imageRef) > 0 {
 		ref = imageRef[0]
 	}
-	sandboxDir := layout.SandboxDir(name)
-	require.NoError(t, os.MkdirAll(sandboxDir, 0o750))
-	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
+	seedSandboxRecord(t, layout.SandboxDir(name), &store.Environment{
 		Version:     3,
 		Name:        name,
 		BackendType: "mock",
 		ImageRef:    ref,
 		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
-	}))
+	})
+}
+
+// seedSandboxRecord writes an arbitrary record flat into a fresh sandbox dir.
+func seedSandboxRecord(t *testing.T, sandboxDir string, env *store.Environment) {
+	t.Helper()
+	require.NoError(t, os.MkdirAll(sandboxDir, 0o750))
+	require.NoError(t, store.SaveEnvironmentTo(filepath.Join(sandboxDir, flatEnvFile), env))
+}
+
+// loadFlatEnv reads a sandbox's record back from the flat pre-tier path. Reading
+// it through store.LoadEnvironment would resolve into host/, where a pre-v6
+// migrator must never have put it.
+func loadFlatEnv(t *testing.T, sandboxDir string) *store.Environment {
+	t.Helper()
+	env, err := store.LoadEnvironmentFrom(filepath.Join(sandboxDir, flatEnvFile))
+	require.NoError(t, err)
+	return env
 }
 
 func newPrincipalRenameWith(layout config.Layout, rt runtime.Backend) *PrincipalRename {
@@ -194,10 +218,9 @@ func TestPrincipalRename_Apply_RenamesRunningAndRestamps(t *testing.T) {
 	require.Equal(t, [][2]string{{"yoloai-box", "yoloai-cli-box"}}, rt.renames)
 	assert.Empty(t, rt.removeCalls, "rename backend must not remove")
 
-	// The stored principal is re-stamped to the target...
-	env, err := store.LoadEnvironment(layout.SandboxDir("box"))
-	require.NoError(t, err)
-	assert.Equal(t, config.CLIPrincipal, env.Principal)
+	// The stored principal is re-stamped to the target, in place and still flat...
+	assert.Equal(t, config.CLIPrincipal, loadFlatEnv(t, layout.SandboxDir("box")).Principal)
+	assertNoHostTier(t, layout.SandboxDir("box"))
 	// ...and the realm advances to v5.
 	v, _, err := config.ReadSchemaVersion(layout.SchemaVersionPath())
 	require.NoError(t, err)
@@ -219,17 +242,14 @@ func TestPrincipalRename_Apply_RecreateOnlyStoppedNeedsYes(t *testing.T) {
 	_, err := m.Apply(context.Background(), migrate.Decision{})
 	require.Error(t, err)
 	assert.Empty(t, rt.removeCalls)
-	env, err := store.LoadEnvironment(layout.SandboxDir("box"))
-	require.NoError(t, err)
-	assert.Equal(t, config.PrincipalSegment(""), env.Principal, "refused migration must not re-stamp")
+	assert.Equal(t, config.PrincipalSegment(""), loadFlatEnv(t, layout.SandboxDir("box")).Principal,
+		"refused migration must not re-stamp")
 
 	// With --yes the old instance is removed (recreate-on-next-start) and re-stamped.
 	_, err = m.Apply(context.Background(), migrate.Decision{Yes: true})
 	require.NoError(t, err)
 	assert.Equal(t, []string{"yoloai-box"}, rt.removeCalls)
-	env, err = store.LoadEnvironment(layout.SandboxDir("box"))
-	require.NoError(t, err)
-	assert.Equal(t, config.CLIPrincipal, env.Principal)
+	assert.Equal(t, config.CLIPrincipal, loadFlatEnv(t, layout.SandboxDir("box")).Principal)
 }
 
 func TestPrincipalRename_Apply_RecreateOnlyRunningRefused(t *testing.T) {
@@ -252,9 +272,8 @@ func TestPrincipalRename_Apply_SeatbeltRestampOnly(t *testing.T) {
 	_, err := m.Apply(context.Background(), migrate.Decision{})
 	require.NoError(t, err)
 	assert.Empty(t, rt.removeCalls, "seatbelt has no backend instance to touch")
-	env, err := store.LoadEnvironment(layout.SandboxDir("box"))
-	require.NoError(t, err)
-	assert.Equal(t, config.CLIPrincipal, env.Principal)
+	assert.Equal(t, config.CLIPrincipal, loadFlatEnv(t, layout.SandboxDir("box")).Principal)
+	assertNoHostTier(t, layout.SandboxDir("box"))
 }
 
 // An environment.json that will not load must abort the run, never be skipped.
@@ -274,7 +293,7 @@ func TestPrincipalRename_Apply_UnreadableRecordAbortsAndDoesNotStamp(t *testing.
 	// got silently skipped, stamping the realm to v5 over an unconverted sandbox.
 	tornDir := layout.SandboxDir("torn")
 	require.NoError(t, os.MkdirAll(tornDir, 0o750))
-	testutil.WriteSandboxRecord(t, store.EnvironmentFilePath(tornDir),
+	testutil.WriteSandboxRecord(t, filepath.Join(tornDir, flatEnvFile),
 		[]byte(`{"version":99,"name":"torn","backend":"docker"}`))
 
 	rt := &fakeBackend{keepAlive: runtime.KeepAliveHostKeepAlive}
@@ -304,9 +323,7 @@ func TestPrincipalRename_Apply_IgnoresDirWithNoEnvironment(t *testing.T) {
 	_, err := newPrincipalRenameWith(layout, rt).Apply(context.Background(), migrate.Decision{})
 	require.NoError(t, err)
 
-	env, err := store.LoadEnvironment(layout.SandboxDir("real"))
-	require.NoError(t, err)
-	assert.Equal(t, config.CLIPrincipal, env.Principal)
+	assert.Equal(t, config.CLIPrincipal, loadFlatEnv(t, layout.SandboxDir("real")).Principal)
 }
 
 func TestPrincipalRename_Apply_RestampsProfileImageRef(t *testing.T) {
@@ -320,14 +337,10 @@ func TestPrincipalRename_Apply_RestampsProfileImageRef(t *testing.T) {
 	require.NoError(t, err)
 
 	// A principal-authored profile image is re-stamped with the target principal.
-	env, err := store.LoadEnvironment(layout.SandboxDir("web"))
-	require.NoError(t, err)
-	assert.Equal(t, "yoloai-cli-web", env.ImageRef)
+	assert.Equal(t, "yoloai-cli-web", loadFlatEnv(t, layout.SandboxDir("web")).ImageRef)
 
 	// The unscoped base image is left untouched.
-	env, err = store.LoadEnvironment(layout.SandboxDir("plain"))
-	require.NoError(t, err)
-	assert.Equal(t, config.BaseImage, env.ImageRef)
+	assert.Equal(t, config.BaseImage, loadFlatEnv(t, layout.SandboxDir("plain")).ImageRef)
 }
 
 // A record that already carries a principal is not this migrator's business, and
@@ -342,28 +355,25 @@ func TestPrincipalRename_Apply_LeavesForeignPrincipalUntouched(t *testing.T) {
 
 	// An integrator's sandbox, already scoped, sharing the same store.
 	foreignDir := layout.SandboxDir("theirs")
-	require.NoError(t, os.MkdirAll(foreignDir, 0o750))
-	require.NoError(t, store.SaveEnvironment(foreignDir, &store.Environment{
+	seedSandboxRecord(t, foreignDir, &store.Environment{
 		Version:     3,
 		Name:        "theirs",
 		Principal:   "acme",
 		BackendType: "mock",
 		ImageRef:    "yoloai-acme-web",
 		Dirs:        []store.DirEnvironment{{HostPath: "/proj", MountPath: "/proj", Mode: store.DirModeCopy}},
-	}))
+	})
 
 	rt := &fakeBackend{keepAlive: runtime.KeepAliveHostKeepAlive}
 	_, err := newPrincipalRenameWith(layout, rt).Apply(context.Background(), migrate.Decision{})
 	require.NoError(t, err)
 
-	foreign, err := store.LoadEnvironment(foreignDir)
-	require.NoError(t, err)
+	foreign := loadFlatEnv(t, foreignDir)
 	assert.Equal(t, config.PrincipalSegment("acme"), foreign.Principal, "a foreign principal must not be adopted")
 	assert.Equal(t, "yoloai-acme-web", foreign.ImageRef, "a foreign principal's image must not be re-stamped")
 
-	mine, err := store.LoadEnvironment(layout.SandboxDir("mine"))
-	require.NoError(t, err)
-	assert.Equal(t, "yoloai-cli-web", mine.ImageRef, "the CLI's own record still migrates")
+	assert.Equal(t, "yoloai-cli-web", loadFlatEnv(t, layout.SandboxDir("mine")).ImageRef,
+		"the CLI's own record still migrates")
 }
 
 func TestPrincipalRename_Plan_RunningRecreateOnlyBlocks(t *testing.T) {
