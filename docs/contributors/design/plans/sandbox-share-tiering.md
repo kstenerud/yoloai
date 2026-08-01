@@ -181,6 +181,54 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    `architecture/host-layout.md`; a rule that lives only in a resolved finding is unreachable
    (D128 (3), DF151).
 
+## Handoff to the macOS side (2026-08-01)
+
+Everything a Linux host can do is done and pushed (`2291f9e0`). What remains is the two backends
+that cannot be exercised here, and they are the two this workstream exists for. **The branch is
+coherent as it stands** — docker/podman/containerd/apple are tiered, migrate, and pass — so this is
+additive work, not a repair.
+
+**Both backends share the sandbox root instead of binding per file, which is exactly why they are
+the hard half.** Every other backend got tiering for free when the builders moved, because only
+each `MountSpec.HostPath` changed. These two hand the guest a directory.
+
+**tart** — `runtime/tart/tart.go:711` passes `--dir yoloai:<sandboxPath>`: one VirtioFS share of the
+whole sandbox directory, which now literally contains `host/`. That is DF136 still open on tart, and
+it is the sharpest remaining hole in the branch. It becomes two shares (`ro`, `rw`), with `host/`
+getting no `--dir` at all. Then `resolveMountVFSPath` (`runtime/tart/mounts.go:149`) needs care: it
+maps `sandboxPath/<rel>` to `vmSharedDir/<rel>`, and `<rel>` now begins with `ro/` or `rw/` — the
+guest view must stay flat, so the symlink tree has to strip the tier segment rather than pass it
+through. A mount that resolves to `.../yoloai/rw/logs` inside the VM is the failure mode to watch
+for; the guest scripts join from one root and will not find it.
+
+**seatbelt** — `writeProfileSandboxDir` (`runtime/seatbelt/profile.go:262`) grants read+write over
+the entire sandbox directory, with the `host/` deny (`:99`) appended afterwards as the backstop that
+currently closes DF136. That grant becomes per tier: read+write on `rw/`, read on `ro/` **plus an
+explicit `(deny file-write* (subpath …/ro))`** for the reason § Per-backend realization gives — a
+seatbelt read-only region is the *absence* of a write grant, so it holds only until something
+broader grants write, which is measured behaviour (DF161), not caution. `yoloai_dir` becomes the
+view dir. Keep the `host/` deny; it is a permanent backstop, not a stopgap.
+
+**What to verify on hardware, beyond `make releasetest`:**
+
+- From inside a tart guest and a seatbelt sandbox: `host/` is unreachable, `ro/` is readable and
+  **not** writable, `rw/` is writable. That is step 5's conformance case (`runtimetest` mount
+  section, all six backends) and it is where the invariant should end up living.
+- An upgrade, which is the merge blocker and has never run on macOS: build a `v0.9.0` binary from
+  the tag, create a seatbelt sandbox with it, then run this branch's `system migrate`. Seatbelt
+  needs no container runtime, so it is the cheapest place to test it. Expect three tiers, records
+  readable, the displaced tree in `trash/`. The recipe and its Linux results are in
+  [DF168](../findings-resolved.md).
+- The migrator refuses a **running** sandbox. Confirm that on a live tart VM: a rename out from
+  under a running guest is precisely the data-loss case the refusal exists for, and tart is the
+  backend where a VM keeps writing hardest.
+
+**One trap already paid for.** Test fixtures that hand-roll a sandbox directory must write through
+`testutil.WriteSandboxRecord`, which creates the tier the file lands in; a bare `os.WriteFile` to a
+tier path fails with ENOENT because nothing created `ro/`. And fixtures for anything **pre-v6** stay
+spelled with flat literals — `internal/config/schema_test.go` is the worked example, and its comment
+says why (DF164).
+
 ## Problem
 
 On tart and seatbelt the **entire** sandbox directory is exposed to the in-sandbox agent as one
