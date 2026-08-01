@@ -106,3 +106,24 @@ func TestSeatbelt_StopNotRunningIsNoOp(t *testing.T) {
 	// to kill but the contract is "best-effort idempotent."
 	assert.NoError(t, rt.Stop(ctx, cfg.Name))
 }
+
+// TestResolveCopyMount_ResolvesIntoTheReadWriteTier pins where seatbelt's
+// copy-mode work copy lives. Seatbelt is host-side: this path is what the agent
+// edits and what `yoloai diff` reads, so it is the same directory seen from both
+// ends, and it is read-write tier state.
+//
+// It needs pinning because the failure is quiet in the direction that matters —
+// a work copy that is not where diff looks produces an empty diff, not an error,
+// so an agent's work would look like no work at all. This was built from a
+// "work" literal and went stale the moment the tiers moved; nothing tested it.
+func TestResolveCopyMount_ResolvesIntoTheReadWriteTier(t *testing.T) {
+	r := &Runtime{layout: config.Layout{DataDir: "/data"}}
+
+	got := r.ResolveCopyMount("mybox", "/Users/karl/project")
+
+	sandboxDir := filepath.Join(r.layout.SandboxesDir(), "mybox")
+	assert.Equal(t, filepath.Join(config.WorkBasePath(sandboxDir), config.EncodePath("/Users/karl/project")), got)
+	// Spelled literally too: the assertion above would follow a wrong builder.
+	assert.Contains(t, got, filepath.Join("mybox", "rw", "work"),
+		"the work copy is read-write tier state")
+}

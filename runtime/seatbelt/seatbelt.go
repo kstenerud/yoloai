@@ -125,8 +125,14 @@ func (r *Runtime) sandboxDirForName(name string) string {
 // ResolveCopyMount returns the sandbox copy directory path. Seatbelt runs the
 // agent directly on the host, so it must read :copy files from their actual
 // sandbox location rather than from a container bind-mount at the original path.
+//
+// Built through the path builder, not from a "work" literal: the work copy is
+// read-write tier state, and a literal here resolved to a directory that stopped
+// existing the moment the tiers moved — silently, because a work copy that is
+// not there reads as an empty diff rather than an error at the layer that cares.
 func (r *Runtime) ResolveCopyMount(sbName, hostPath string) string {
-	return filepath.Join(r.layout.SandboxesDir(), sbName, "work", config.EncodePath(hostPath))
+	return filepath.Join(config.WorkBasePath(filepath.Join(r.layout.SandboxesDir(), sbName)),
+		config.EncodePath(hostPath))
 }
 
 // New creates a Runtime after verifying that we're on macOS and
