@@ -683,7 +683,8 @@ earlier signal and records nothing else.
 ### DF169 — a legal sandbox name can exceed the seatbelt tmux socket's 104-byte path limit, and tiering narrowed the margin by three characters
 
 - **Discovered:** 2026-08-01, rehearsing the v0.9.0 → tiered upgrade on macOS · **Workstream:** sandbox-share-tiering
-- **Severity:** MEDIUM. Not data loss: the sandbox is created, then fails at `start` with an error naming tmux rather than the name that caused it. Pre-existing — tiering made an existing cliff three characters closer, it did not build it.
+- **Severity:** HIGH, and no longer latent — **it fails the release gate on this branch.** `make smoketest` on macOS reports `*** FAIL [tag_transfer/seatbelt]` with `error connecting to …/rw/tmux/tmux.sock (File name too long)`. The harness generates run-scoped names like `ysmk-1wqEi5qg91-tag-transfer-seatbelt-010` (41 chars), whose socket path is **102 bytes flat and 105 tiered** — so the three bytes `/rw` are the whole difference between the gate passing and failing. The cliff is pre-existing; landing on it is not. Not data loss: the sandbox is created, then fails at `start` with an error naming tmux rather than the name that caused it.
+- **This is the finding's own point, demonstrated.** It was filed as an arithmetic narrowing (42 → 39) with three candidate fixes and no urgency. The next tier of the same gate run then produced a 41-character name from yoloAI's own test harness — i.e. the population that trips it is not "users who pick long names", it is anything that generates one, and this repo does.
 - **Rides:** any. It is a fix, not a break.
 - **Reproduced, not reasoned**, on both binaries, with a data dir the same length as this host's default (`$HOME/.yoloai`, 27 chars):
 
