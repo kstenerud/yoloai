@@ -20,6 +20,7 @@ import (
 
 	"github.com/kstenerud/yoloai/copyflow"
 	"github.com/kstenerud/yoloai/internal/agent"
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
@@ -635,7 +636,7 @@ func TestIntegration_Prompt(t *testing.T) {
 	assert.True(t, meta.HasPrompt)
 
 	// Verify prompt.txt was written
-	prompt, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // test path
+	prompt, err := os.ReadFile(store.PromptFilePath(sandboxDir))
 	require.NoError(t, err)
 	assert.Equal(t, "echo hello world", string(prompt))
 }
@@ -760,7 +761,7 @@ func TestIntegration_NetworkIsolation(t *testing.T) {
 
 	// Verify runtime-config.json has network_isolated: true so the test
 	// can't pass vacuously (e.g., if the config field were never written).
-	rcData, err := os.ReadFile(filepath.Join(mgr.Layout().SandboxDir("netisolated"), store.RuntimeConfigFile))
+	rcData, err := os.ReadFile(config.RuntimeConfigPath(mgr.Layout().SandboxDir("netisolated")))
 	require.NoError(t, err)
 	var rc map[string]any
 	require.NoError(t, json.Unmarshal(rcData, &rc))

@@ -145,7 +145,7 @@ func TestCLI_NewWithPrompt(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-prompt") })
 
 	sandboxDir := cliutil.Layout().SandboxDir("cli-prompt")
-	prompt, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // test path
+	prompt, err := os.ReadFile(store.PromptFilePath(sandboxDir))
 	require.NoError(t, err)
 	assert.Equal(t, "echo hi", string(prompt))
 }

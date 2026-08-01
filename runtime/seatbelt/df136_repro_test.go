@@ -113,10 +113,14 @@ func TestDF136_ConfinedAgentCannotRedirectApplyTarget(t *testing.T) {
 
 	// Control 2: the deny is scoped to the tier, not to the sandbox dir. Without
 	// this, a profile that denied everything would satisfy the assertion above.
-	allowed := filepath.Join(sandboxDir, "agent-status.json")
+	// The read-write tier, not the sandbox root: since tiering, the root is
+	// granted nothing and only the tiers carry access, so a control that wrote
+	// to the root would be asserting a property the profile no longer states.
+	allowed := config.AgentStatusPath(sandboxDir)
+	require.NoError(t, os.MkdirAll(filepath.Dir(allowed), 0o750))
 	err = sysexec.Command(sandboxExecEnv, sbExec,
 		"-f", profilePath, "/bin/cp", tamperedSrc, allowed).Run()
-	require.NoError(t, err, "the rest of the sandbox dir must stay writable — the deny covers host/ only")
+	require.NoError(t, err, "the read-write tier must stay writable — the deny covers host/ only")
 
 	// --- Link B: the host still trusts the record verbatim, which is WHY link A
 	// has to hold. LoadEnvironment has no integrity check; it simply reads what

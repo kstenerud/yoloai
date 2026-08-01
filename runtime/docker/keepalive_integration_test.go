@@ -9,6 +9,7 @@ import (
 	"context"
 	"encoding/json"
 	"os"
+	"path/filepath"
 	"testing"
 	"time"
 
@@ -39,7 +40,10 @@ func TestKeepaliveOnly_AgentFreeStartup(t *testing.T) {
 	require.NoError(t, os.MkdirAll(logsDir, 0750))
 
 	// Write runtime-config.json with keepalive_only: true.
+	// MkdirAll first: the path is inside the read-only tier, and a hand-rolled
+	// sandbox dir has no tier directories until something makes them.
 	rcPath := config.RuntimeConfigPath(sandboxDir)
+	require.NoError(t, os.MkdirAll(filepath.Dir(rcPath), 0o750))
 	rc := map[string]any{
 		"schema_version": 1,
 		"keepalive_only": true,
