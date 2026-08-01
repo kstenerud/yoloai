@@ -1,12 +1,20 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md). The live statement of the layout and
+> the invariant it argues for is [`../../architecture/host-layout.md`](../../architecture/host-layout.md);
+> the tier table is `internal/config/sandbox_tier.go`, which is also the migration's specification.
+
 > **ABOUTME:** Design for closing DF136/DF148 at the root by tiering the sandbox directory into
 > host-only / guest-read-only / guest-read-write regions, so host-only metadata is never in a
 > guest-writable share — converging tart and seatbelt on the invariant Docker already upholds.
 
 # Sandbox directory share tiering (host-only / read-only / read-write)
 
-- **Status:** IN-PROGRESS — design confirmed with the owner 2026-07-20; being built on branch
-  `sandbox-share-tiering`. The concrete design is in § Confirmed design below; the earlier prose
-  stands as the reasoning that led there. Empirical facts are marked confirmed-on-hardware.
+- **Status:** IMPLEMENTED — design confirmed with the owner 2026-07-20, built on branch
+  `sandbox-share-tiering`, completed on macOS 2026-08-01 (tart + seatbelt, the two backends that
+  share a directory). The concrete design is in § Confirmed design below; the earlier prose stands
+  as the reasoning that led there. Empirical facts are marked confirmed-on-hardware.
 - **Depends on:** —
 - **Note:** step 4 was the migration, and it needed the mechanism designed in
   [migration-by-duplication.md](../../archive/plans/migration-by-duplication.md) ([DF164](../findings-unresolved.md)).
@@ -160,9 +168,9 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    fresh sandbox now has exactly three tier directories, and docker/podman/containerd/apple follow
    for free because each already binds per file and only its `HostPath` moved. Verified on real
    docker: the guest sees the same flat `/yoloai` it always did, `host/` is absent from it, and an
-   agent write still reaches `diff`. **tart and seatbelt are NOT done** — they share the sandbox
-   root rather than binding per file, so they need the two-share + view and the per-tier grants +
-   view respectively, and neither can be exercised on a Linux host. **Seatbelt's `ro/` grant carries a `(deny file-write* (subpath …/ro))`
+   agent write still reaches `diff`. **tart and seatbelt landed 2026-08-01 on macOS** — two VirtioFS
+   tier shares and per-tier SBPL grants respectively, both assembling the flat guest view over
+   `rw/` (§ The macOS half, as built). **Seatbelt's `ro/` grant carries a `(deny file-write* (subpath …/ro))`
    backstop on the same pattern** (owner, 2026-07-30). This is not belt-and-braces for its own sake:
    seatbelt expresses read-only as the *absence* of a write grant, so it holds only while nothing
    else grants write over that path — measured, DF161, where the profile's own broad temp grant
@@ -171,7 +179,10 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    different mechanisms, and only one of them is self-enforcing.
 4. **The v6 `TierLayout` migrator — landed 2026-08-01**, verified on a real v0.9.0 install
    (flat v5 → three tiers, records readable, displaced tree in `trash/`). **And it now precedes 3c's `rw/` move, not follows it** ([DF164](../findings-unresolved.md), 2026-07-31). Attempting 3c surfaced that every pre-v6 migrator addresses the sandbox through the *live* path builders, so each tier move silently repoints them at a layout their input does not have. It cannot be fixed inside step 3 because the fix *is* the migration design: either era-pin the paths (a frozen pre-tier module, plus `SaveAt` variants — a migrator that reads flat and writes tiered never updates the record it re-reads, so it re-migrates forever), or run the tier move as a pre-pass ahead of the numbered ladder so every other migrator keeps working unchanged. **Settled 2026-07-31 in favour of era-pinning**, against the pre-pass that this line previously preferred: a version-independent pre-pass has to answer "is this already tiered?" by sniffing the directory shape, and a plain-int stamp with no artifact-sniffing is the rule this project already runs on (D61). So `SchemaTiered = 6` runs **last**, every migrator below it is pinned to literal flat paths, and the mechanism is [migration-by-duplication.md](../../archive/plans/migration-by-duplication.md).
-5. **The guarantee is a conformance case, not per-backend tests.** The `runtimetest` mount section
+5. **The guarantee is a conformance case, not per-backend tests. Landed 2026-08-01** as the
+   `SandboxTiers` section, gated so the four bind-per-file backends declare why they skip rather
+   than reporting a vacuous green — the intersection check below came back "tart and seatbelt only",
+   which is the honest answer and not the one this step assumed. The `runtimetest` mount section
    now runs on all six backends (DF161, landed 2026-07-30), so the tier invariant has a home no
    fake can satisfy: assert *from inside the guest* that `host/` is unreachable and that `ro/` is
    readable and not writable. Before writing it, name the backends that reach the assertion and
@@ -181,53 +192,86 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    `architecture/host-layout.md`; a rule that lives only in a resolved finding is unreachable
    (D128 (3), DF151).
 
-## Handoff to the macOS side (2026-08-01)
+## The macOS half, as built (2026-08-01)
 
-Everything a Linux host can do is done and pushed (`2291f9e0`). What remains is the two backends
-that cannot be exercised here, and they are the two this workstream exists for. **The branch is
-coherent as it stands** — docker/podman/containerd/apple are tiered, migrate, and pass — so this is
-additive work, not a repair.
+The handoff that stood here has been carried out; what follows is what was actually built and
+measured, which differs from the handoff in one design choice and three defects it did not know
+about.
 
-**Both backends share the sandbox root instead of binding per file, which is exactly why they are
-the hard half.** Every other backend got tiering for free when the builders moved, because only
-each `MountSpec.HostPath` changed. These two hand the guest a directory.
+**The flat guest view is the `rw/` tier itself**, not a separate view directory. Each `ro/` entry
+is surfaced inside it as a *relative* symlink (`rw/bin -> ../ro/bin`), assembled by
+`config.AssembleGuestView` from whatever `ro/` actually holds — enumerated, never listed, for the
+same reason the tier is a directory. The alternative (a fourth directory, or a guest-local one on
+tart) was rejected on a mechanism the handoff did not account for: **a view must be writable**,
+because the guest creates root entries in it — including `lifecycle-on-create-done`, which the host
+`os.Stat`s to decide whether on-create commands re-run. A view outside the tiers would therefore be
+an un-tiered place for new files to land, which is the one thing this layout exists to prevent, and
+on tart a guest-local view would have swallowed that marker silently. Using `rw/` means an entry
+nobody classified lands in the fail-safe tier and stays visible to the host.
 
-**tart** — `runtime/tart/tart.go:711` passes `--dir yoloai:<sandboxPath>`: one VirtioFS share of the
-whole sandbox directory, which now literally contains `host/`. That is DF136 still open on tart, and
-it is the sharpest remaining hole in the branch. It becomes two shares (`ro`, `rw`), with `host/`
-getting no `--dir` at all. Then `resolveMountVFSPath` (`runtime/tart/mounts.go:149`) needs care: it
-maps `sandboxPath/<rel>` to `vmSharedDir/<rel>`, and `<rel>` now begins with `ro/` or `rw/` — the
-guest view must stay flat, so the symlink tree has to strip the tier segment rather than pass it
-through. A mount that resolves to `.../yoloai/rw/logs` inside the VM is the failure mode to watch
-for; the guest scripts join from one root and will not find it.
+**Owner's call, 2026-08-01**, on the recommendation that a separate view reintroduces the drift the
+tiering removes.
 
-**seatbelt** — `writeProfileSandboxDir` (`runtime/seatbelt/profile.go:262`) grants read+write over
-the entire sandbox directory, with the `host/` deny (`:99`) appended afterwards as the backstop that
-currently closes DF136. That grant becomes per tier: read+write on `rw/`, read on `ro/` **plus an
-explicit `(deny file-write* (subpath …/ro))`** for the reason § Per-backend realization gives — a
-seatbelt read-only region is the *absence* of a write grant, so it holds only until something
-broader grants write, which is measured behaviour (DF161), not caution. `yoloai_dir` becomes the
-view dir. Keep the `host/` deny; it is a permanent backstop, not a stopgap.
+**Verified on hardware before the design was written** (the rule that a design resting on unverified
+backend behaviour gets the real test first). A probe VM with two shares established what tart's
+VirtioFS actually does: multiple `--dir` shares appear as **siblings under one mount**, so `..`
+traversal between them works; a host-created relative symlink inside one share resolves into the
+other from the guest; a write *through* that link into the `:ro` share is refused, i.e. enforcement
+is at the target's tier, matching the seatbelt result of 2026-07-20; a new file created by the guest
+at the `rw` root lands on the host; and `host/` is absent from the guest namespace. Naming the shares
+`ro` and `rw` is what makes the relative link resolve identically on both sides, so the share names
+are load-bearing, not cosmetic.
 
-**What to verify on hardware, beyond `make releasetest`:**
+**tart.** `--dir ro:<sandbox>/ro:ro` and `--dir rw:<sandbox>/rw`, and no share for the root — the
+host tier is simply the part with no `--dir`. `resolveMountVFSPath` needed no tier-stripping in the
+end: a mount source's path relative to the sandbox dir now *begins* with the tier name, which is also
+the share name, so the mapping stays a plain join with the shares root as its base. The guest's
+`yoloai_dir` is the `rw` share.
 
-- From inside a tart guest and a seatbelt sandbox: `host/` is unreachable, `ro/` is readable and
-  **not** writable, `rw/` is writable. That is step 5's conformance case (`runtimetest` mount
-  section, all six backends) and it is where the invariant should end up living.
-- An upgrade, which is the merge blocker and has never run on macOS: build a `v0.9.0` binary from
-  the tag, create a seatbelt sandbox with it, then run this branch's `system migrate`. Seatbelt
-  needs no container runtime, so it is the cheapest place to test it. Expect three tiers, records
-  readable, the displaced tree in `trash/`. The recipe and its Linux results are in
-  [DF168](../findings-resolved.md).
-- The migrator refuses a **running** sandbox. Confirm that on a live tart VM: a rename out from
-  under a running guest is precisely the data-loss case the refusal exists for, and tart is the
-  backend where a VM keeps writing hardest.
+**seatbelt.** Per-tier grants replace the broad sandbox-dir grant (which *was* DF136, so it had to
+go rather than be supplemented), and both non-writable tiers carry an explicit trailing deny.
 
-**One trap already paid for.** Test fixtures that hand-roll a sandbox directory must write through
-`testutil.WriteSandboxRecord`, which creates the tier the file lands in; a bare `os.WriteFile` to a
-tier path fails with ENOENT because nothing created `ro/`. And fixtures for anything **pre-v6** stay
-spelled with flat literals — `internal/config/schema_test.go` is the worked example, and its comment
-says why (DF164).
+**Three defects found while finishing, all silent, none of them in the handoff:**
+
+- **The host tier was readable from a seatbelt sandbox** — the deny covered `file-write*` only. This
+  is DF161's lesson one axis over: absence of a *read* grant is not a read denial either, and one
+  `--dir ~:ro` grants read over every sandbox dir at once. `host/` holds `injector-token`, whose
+  security property is that no guest ever sees the file. [DF170](../findings-unresolved.md).
+- **`ExecuteVMWorkDirSetup` built the guest staging path from a literal**
+  (`"/Volumes/My Shared Files/yoloai/work/…"`) — tart's share layout written into the orchestrator,
+  correct until the share moved. The backend now answers where its own staging is
+  (`runtime.WorkDirSetup.WorkDirStagingPath`).
+- **Seatbelt's `ResolveCopyMount` built the work-copy path from a `"work"` literal**, so copy mode
+  resolved to a directory that stopped existing when the tiers moved. It fails in the quiet
+  direction: a work copy that is not where `diff` looks produces an *empty diff*, not an error.
+  Nothing tested it; there is a test now.
+
+The last two are the same shape and it is the shape the funnel was built to catch: an ad-hoc join
+that keeps compiling and starts pointing at nothing. Both were outside the backends, which is where
+the funnel's original sweep did not look.
+
+**What was verified on hardware, beyond `make check` and `make releasetest`:**
+
+- **The tier invariant from inside a guest**, as a conformance section (`SandboxTiers`) that asks the
+  guest rather than the profile: `host/` unreachable, `ro/` readable and not writable *through the
+  view*, `rw/` writable and landing on the host. Green against a real tart VM and real
+  `sandbox-exec`. The four bind-per-file backends declare why they skip it — they never share the
+  sandbox dir, so the section would assert nothing, and six greens would have hidden exactly the
+  difference this workstream is about. Both denies were confirmed red-on-revert, not merely green.
+- **The upgrade, which was the merge blocker and had never run on macOS.** A `v0.9.0` binary created
+  seatbelt and tart sandboxes in a scratch data dir; this branch's `system migrate` tiered them (16
+  and 20 entries), records stayed readable, the displaced tree landed in `trash/`, and **both
+  sandboxes then started and ran** — the tart one reaching `idle` with its agent alive, reading
+  `runtime-config.json` through the view and refused when writing to it. The tart sandbox also
+  exercised all four guest-created root entries that no Go constant names (`setup.log`, the two
+  `xcodebuild-firstlaunch` artifacts, `secrets/`), which the mover classified correctly.
+- **The migrator's refusal of a running sandbox, against a live tart VM.** Both `--check` and apply
+  refuse, by name and with the reason; the layout is untouched and the VM keeps running.
+
+**One defect filed, not fixed:** tiering spends three more bytes of the 104-byte `sun_path` budget,
+so on seatbelt the longest workable sandbox name dropped from 42 to 39 while `MaxNameLength` stays
+56 — a legal name fails at `start` with an opaque tmux error. Measured on both binaries, pre-existing,
+three candidate fixes with different trade-offs. [DF169](../findings-unresolved.md).
 
 ## Problem
 
@@ -377,10 +421,12 @@ wiring.
 
 ## What this closes
 
-- **DF136** — `environment.json` moves to the host-only tier; the redirect primitive is removed on
-  all backends.
-- **DF148** — `runtime-config.json` moves to the read-only tier (matching Docker); the guest can no
-  longer rewrite a file the host reads back.
+- **DF136** — *closed on every backend 2026-08-01.* `environment.json` lives in the host-only tier,
+  which no backend shares; the redirect primitive is gone. Verified from inside a real tart guest and
+  a real seatbelt sandbox, not from the profile text.
+- **DF148** — *closed on every backend 2026-08-01.* `runtime-config.json` lives in the read-only tier
+  (matching Docker), and on the two directory-sharing backends a write to it **through the guest's
+  flat view** is refused as well — the path the guest actually uses, which is the one that matters.
 **Not a third thing it closes, and the plan said otherwise until 2026-07-30.** An earlier bullet
 here claimed "latent hardening: the `bin/` scripts the guest execs become read-only, so they cannot
 be rewritten from inside the sandbox." **That is not a security benefit and must not be cited as
@@ -399,14 +445,16 @@ tier assignment follows access, not threat model. Just do not bank a security cl
 
 ## Open questions
 
-- **Upgrade coverage** — what remains of the migration question, and still the gate on merging.
-  The *shape* is settled ([migration-by-duplication.md](../../archive/plans/migration-by-duplication.md), and the
-  deprecation register entry it owes under rule 9), but since step 2 an existing sandbox reads as
-  missing and no test anywhere covers an upgrade: `scripts/smoke_test.py` has no schema, migration
-  or pre-existing-sandbox case, and `releasetest` creates fresh sandboxes, so a green release gate
-  says nothing about it.
-- **The seven late-classified entries** (§ Confirmed design) are still classified from what the code
-  says about them, and still not reviewed against the design. Cheap, and it feeds step 3.
+- ~~**Upgrade coverage** — the gate on merging.~~ **Rehearsed on both hosts; the branch is no longer
+  blocked on it.** A `v0.9.0` install migrates and then runs, on docker (Linux, 2026-08-01) and on
+  seatbelt *and* tart (macOS, 2026-08-01) — § The macOS half, as built. Rehearsed is not the same as
+  *covered*: `scripts/smoke_test.py` still has no migration case and `releasetest` still creates only
+  fresh sandboxes, so the next layout change gets no warning from the release gate either. That gap
+  outlives this plan and deserves its own; DF168 is the record of what it already cost.
+- ~~**The seven late-classified entries** (§ Confirmed design).~~ Reviewed against the code
+  2026-07-30 (two were wrong, both corrected above) and exercised on real data 2026-08-01: the
+  migrated tart sandbox carried all four guest-created root entries and the mover classified each
+  correctly.
 
 **Answered, kept because the reasoning is the transferable part:**
 

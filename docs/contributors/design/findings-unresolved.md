@@ -513,20 +513,6 @@ earlier signal and records nothing else.
 - **The class, not the instance.** Checked all six backends: **docker** converts ports (`ConvertPorts`, `docker.go:504`); **podman** embeds `*docker.Runtime` and inherits it; **apple** consumes `cfg.Ports` (`apple.go:214`). **tart** (DF53) and **containerd** (this) drop them. **seatbelt** has no port code either, but its sandbox is a host process with no NAT layer, so a host port is already the port — `-p` there is meaningless rather than broken, and needs a decision rather than a fix. Nothing declares any of this: `runtime.BackendCaps` has `NetworkIsolation`, `CapAdd`, `HostFilesystem`, `ContainerAttach` and others, and **no port-forwarding capability at all**, which is why two backends can silently not implement it.
 - **Pointer:** `runtime/containerd/cni.go:81` (the plugin config), `:222` (`setupCNI`, no ports parameter); `runtime/runtime.go:246-256` (`BackendCaps`, no port capability); `runtime/docker/docker.go:504,1058` (the working path); `runtime/podman/podman.go:87` (embeds docker); `runtime/apple/apple.go:214`. Related: DF53.
 
-### DF136 — on tart/seatbelt the whole sandbox dir is agent-writable, so an agent can redirect `apply` to any host path
-
-- **Discovered:** 2026-07-17 · **Workstream:** pre-release data-destruction audit (copy/diff/apply host surface)
-- **Severity:** HIGH (security — defeats the review gate that is the product's core safety property), **macOS-only** (tart, seatbelt). Latent: needs a compromised/prompt-injected agent.
-- **Disposition:** FILED, not fixed — needs a design decision, deferred to a macOS agent (owner's call, 2026-07-17). NOT a v0.9.0 blocker.
-- **Reproduced end-to-end (macOS, 2026-07-20):** the chain is now *executed*, not just read. `runtime/seatbelt/df136_repro_test.go` drives the real `GenerateProfile` + `sandbox-exec` — a confined process overwrites `environment.json` with an attacker-chosen `HostPath` — then the real `store.LoadEnvironment` + `git.NewHost().ApplyPatch`, and the patch lands in the redirected dir. A control assertion confirms the *same* profile **denies** a direct write to that dir, so the record's home inside the writable grant is the sole lever. The tart half was reproduced on a booted `yoloai-base` guest during verification and is pinned deterministically by `runtime/tart/df136_repro_test.go` (the `yoloai` VirtioFS share carries no `:ro`, contrasted with a read-only mount that does).
-- **Verified (by me):** the two mount facts. `runtime/tart/tart.go:703` shares the entire sandbox dir into the guest **read-write** (`--dir sharedDir:sandboxPath`, no `:ro`); `sandboxPath` is `SandboxesDir()/name`, the directory `environment.json` lives in. `runtime/seatbelt/profile.go:193` grants `(allow file-read* file-write* (subpath sandboxDir))` over that same directory, at the invoking user's uid. Docker/containerd/apple mount only specific subpaths — not exposed.
-- **The chain (traced by reading, not executed):** `store.LoadEnvironment` (`store/environment.go`) does a bare read+unmarshal with **no integrity check**. `copyflow.ApplyAll`/`ApplySeries` use the record's `Dirs[0].HostPath` **verbatim** as the target of a host-side `git apply` (`git.NewHost`). So an agent inside the confinement can rewrite `environment.json`'s `HostPath` to any path the invoking user can write (`~/.ssh`, another project), stage a matching fake work copy + `BaselineSHA`, and the next `yoloai apply` writes the agent's patch there. It defeats the gate via **raw file I/O, not git**, which is why DF35's hermetic-git-seal verification (git ops only) does not cover it.
-- **Seatbelt half FIXED 2026-07-30; tart half still open.** `writeProfileHostTierDeny` emits one `(deny file-write* (subpath <sandboxDir>/host))`, last, so it beats the broad sandbox-dir allow under last-match-wins. The reproduction above is now the regression guard — same chain, same real `GenerateProfile` + `sandbox-exec` + `store.LoadEnvironment` + `git.ApplyPatch`, and link A now fails with `Operation not permitted` while the record stays byte-identical and the apply lands in the legit dir. Two controls keep it honest (a write outside the sandbox dir still denied; a write elsewhere *inside* it still allowed), because "deny everything" would otherwise satisfy it. **Note the earlier plan rejected this approach as a denylist needing one line per file — true when the records were scattered through a flat dir, false once `host/` is a directory, which is what changed.** `store.LoadEnvironment` still has no integrity check and that is deliberate: the defence is that the record is unreachable, not that tampering is detected. **Tart is untouched** — no file-granular exclusion, so its whole-root VirtioFS share waits for the step-3 reorg, and DF136 stays open until it lands.
-- **Corrects a stale claim:** DF67 asserts *"`.meta` lives outside the sandbox, so the agent can't corrupt it"* — false for this metadata; `environment.json` sits inside the seatbelt grant and the tart share.
-- **Shape of a fix (for the mac agent, not prescriptive):** mount the record read-only / keep it outside the writable share; or sign/verify it; or confirm the resolved apply target against the path recorded at create time before writing. `apply` also only prints its target *after* applying (`internal/cli/workflow/apply.go:364`) — showing it first would surface a redirect.
-- **The reproduction narrows the fix (2026-07-20):** `environment.json` is host-only metadata — **no in-guest code reads or writes it** (traced across every reader/writer; the only guest-side consumers of the sandbox dir are the log/work/files subtrees and `runtime-config.json`). Docker already withholds it by bind-mounting individual `/yoloai/*` subdirs, never the sandbox root — so tart and seatbelt are the two outliers, and the target state is "converge on what Docker already does." That kills the third fix option above: *"confirm the resolved apply target against the recorded path"* is **unsound**, because every in-tree anchor for that comparison (`environment.json` itself, the caret-encoded `work/<EncodePath(hostPath)>` dir name) is *also* inside the agent-writable tree and can be forged in lockstep. The two sound directions are **isolate the metadata** (stop sharing the sandbox root: tart shares only the subtrees the guest needs; seatbelt adds a `(deny file-write* (literal <environment.json>))` to the existing grant) or **sign/verify it** with a host-only key kept outside the share.
-- **Pointer:** `runtime/tart/tart.go:703`; `runtime/seatbelt/profile.go:193`; `store/environment.go` (`LoadEnvironment`, no integrity check); `copyflow/apply.go`; `internal/git/ops.go` (host apply). Related: DF35, DF67.
-
 ### DF137 — plain `yoloai system prune` reclaims non-yoloai content on a shared daemon
 
 - **Discovered:** 2026-07-17 · **Workstream:** pre-release deletion-verb audit
@@ -599,44 +585,6 @@ earlier signal and records nothing else.
 - **Pointer:** `runtime/runtimetest/conformance_iface.go` (`parallelize`, the non-sharing branch);
   `runtime/apple/integration_test.go` (`appleSetup`); `internal/testutil/home.go:33`.
 
-### DF148 — `runtime-config.json` is guest-writable on tart/seatbelt and the host reads it back post-launch
-
-- **Discovered:** 2026-07-20 · **Workstream:** DF136 solution audit (sandbox-metadata host surface)
-- **Severity:** LOW (security, latent — needs a compromised agent; **same class as DF136** — a host
-  action driven by a guest-writable file — but the concretely-reachable consequences on the two
-  affected backends are low-impact, see the bound below). **tart + seatbelt only.**
-- **Disposition:** PARKED — deferred to [sandbox-share-tiering.md](plans/sandbox-share-tiering.md),
-  which closes it by parking `runtime-config.json` in the read-only tier. Sibling of DF136; not a
-  release blocker. Filed rather than fixed to avoid scope-creeping the DF136 audit (D119).
-- **Verified (by me):** `runtime-config.json` sits at the sandbox-dir root, inside the *same* coarse
-  guest-writable share as `environment.json` (the DF136 root cause), so a confined agent can rewrite
-  it. Docker mounts it **read-only** as a single-file bind (`internal/orchestrator/mounts/mounts.go:215-219`);
-  tart and seatbelt expose it read-write — the same tart/seatbelt-vs-Docker asymmetry as DF136. The
-  host reads it back **after the guest is up** in three places: `Engine.sandboxIsolation`
-  (`internal/orchestrator/engine_network.go:84`) parses the `isolation` field to choose the
-  firewall-patch strategy (`UsesSidecarFirewall`, `engine_network.go:62`); seatbelt
-  `buildExecCommand` (`runtime/seatbelt/seatbelt.go:827-831`) reads `working_dir` on **every Exec**
-  to set the host command's cwd; and restart pulls `TmuxConf` from it (`internal/orchestrator/lifecycle/restart.go:163`).
-- **The bound that makes it LOW (verified):** restart is **defensively written** — it re-derives the
-  security-critical fields (`workdir`, network policy via `netpolicycfg.Load`, `Isolation`, `Setup`)
-  from the trusted `Environment` record and the separate netpolicy file, **not** from
-  `runtime-config.json` (`restart.go:180-208`). So the dangerous schema fields (`AllowedDomains`,
-  `SetupCommands`, `AgentCommand`) are **not** re-read from the guest-writable file on the host.
-  Further, the highest-impact residual consumer — `sandboxIsolation` → sidecar-firewall selection —
-  is a network-isolation mechanism whose macOS applicability is itself deferred
-  (see [tamper-resistant-network-isolation.md](plans/tamper-resistant-network-isolation.md) Scope),
-  i.e. it matters mainly on backends where this file is *already read-only*. On tart/seatbelt the
-  concretely-reachable residual is `working_dir`→host cwd (still inside the profile confinement) and
-  `TmuxConf` (tmux config injection) — both low.
-- **The check that would settle worst-case severity:** trace whether **any** high-impact consumer of
-  `runtime-config.json` (isolation-mode selection, or any field feeding a host privilege/network
-  decision) actually runs on tart or seatbelt *after* the guest could have tampered. If none does,
-  LOW is right; if `sandboxIsolation`'s strategy pick can weaken a tart/seatbelt sandbox's own
-  egress, this rises to MEDIUM. Not run — deferred with the finding.
-- **Pointer:** `internal/orchestrator/mounts/mounts.go:215-219` (Docker ro bind); `runtime/tart/tart.go:708`
-  + `runtime/seatbelt/profile.go:193-199` (the rw share/grant); `internal/orchestrator/engine_network.go:62,84`;
-  `runtime/seatbelt/seatbelt.go:827-831`; `internal/orchestrator/lifecycle/restart.go:163,180-208`. Related: DF136.
-
 ### DF159 — `exec start: ttrpc: closed` on containerd-vmenhanced during `apply`, once in 38 runs
 
 - **Discovered:** 2026-07-30, Linux release smoke matrix · **Workstream:** smoke reliability
@@ -680,7 +628,7 @@ earlier signal and records nothing else.
 - **What is wrong.** `config.ContainerLogPath` (`<sandboxDir>/log.txt`) has exactly one consumer in the tree: `runtime/containerd/logs.go:23`, a **read**. There is no writer — none in Go, none in the guest Python — and the path appears in **no `MountSpec`**, so no guest can write it either; containerd's own task is created with null IO. `Runtime.Logs()` therefore reads a file nothing creates and returns `""` on every call, which its "returns empty string if the log file does not exist" contract makes indistinguishable from an empty log.
 - **The comments say otherwise, in three places.** `logs.go:6` and `:19` call it a "bind-mounted file"; `lifecycle.go:467` says "agent logs go to bind-mounted log.txt"; and `sandbox_layout.go:78` calls it "the guest-written container log". None of that is currently true. It reads as settled fact and was believed during the tiering classification, which is how it ended up assigned a tier (`rw/`) rather than being questioned.
 - **Two possible fixes, and the choice is a product question rather than a cleanup one.** Either **wire it** — bind `log.txt` into the guest and have the agent's output reach it, making `containerd.Logs()` do what its callers assume — or **delete it** and have `Logs()` say plainly that containerd has no log tail, the way seatbelt's absent cache reporting is handled. Which one depends on whether a log tail is wanted for containerd at all; `logs.go:48` already suggests `cat <sandbox>/log.txt` to users as a diagnostic, so today that advice points at a file that never exists.
-- **Not fixed here, and not a tiering blocker.** A file with no writer and no mount has no guest-access class, so it simply leaves the tier table (see [sandbox-share-tiering.md](plans/sandbox-share-tiering.md)) rather than moving within it. Filed under rule 7 rather than fixed in scope, because the fix is a decision about containerd's diagnostics.
+- **Not fixed here, and not a tiering blocker.** A file with no writer and no mount has no guest-access class, so it simply leaves the tier table (see [sandbox-share-tiering.md](../archive/plans/sandbox-share-tiering.md)) rather than moving within it. Filed under rule 7 rather than fixed in scope, because the fix is a decision about containerd's diagnostics.
 - **Pointer:** `runtime/containerd/logs.go`, `runtime/containerd/lifecycle.go:467`, `internal/config/sandbox_layout.go:78-80,237-239`.
 
 ### DF164 — the pre-v6 migrators address the sandbox layout through the live path builders, so tiering silently breaks them and their tests hide it
@@ -697,7 +645,7 @@ earlier signal and records nothing else.
 - **Why it blocks 3c rather than being fixable inside it.** Making the migrators era-correct means deciding *how* migrators address the layout, and there are two coherent answers with different blast radii: (a) **era-pinned paths** — a frozen pre-tier path module each migrator uses, so every migration reads and writes the layout of its own version (tried; it works for reads, and for writes it needs `SaveAt`-style variants of `SaveEnvironment`/`agentcfg.Save`/`netpolicycfg.Save`, because a migrator that reads flat and writes tiered leaves the flat record stale and re-migrates forever); or (b) **run the tier move first**, as a pre-pass ahead of the numbered ladder, so every other migrator can keep using the live builders unchanged. (b) is materially simpler and makes the pre-tier module unnecessary; it costs making one migration step version-independent, which is a real departure from how the ladder works. **This is the plan's "migration shape" open question, arrived at from the other end.**
 - **Interim state on the branch:** `work/` is deliberately left flat while the rest of `rw/` waits, because `work/` is the one tier member a pre-v6 migrator walks. `host/` has already moved and the migrators reading it are already wrong — that is inside the branch's known "an existing sandbox reads as missing" window, but it is a *different* defect from the missing `TierLayout` migrator and would survive it if not fixed.
 - **Design settled 2026-07-31: [migration-by-duplication.md](../archive/plans/migration-by-duplication.md)**, and the answer to *this* finding is the smaller half of it. The mechanism duplicates the sandboxes tree into scratch, verifies it there, and promotes once — but that is about a failed migration leaving a tree the *old* binary still reads, and it does nothing for DF164. The fix here is **era-pinning**, chosen over the pre-pass this entry called "materially simpler": a pre-pass has to recognize an already-tiered sandbox by sniffing its shape, against the plain-int-stamp rule (D61). So every pre-v6 migrator gets literal flat paths for reads and writes, `SchemaTiered = 6` runs last, and the durable output is the rule — *a migrator never addresses through the live path builders* — not the pin. An earlier draft of that plan carried a resumable staged ladder; it was retracted (see its § What the constraints deleted).
-- **Pointer:** `internal/orchestrator/migrate_agentcfg.go`, `migrate_principal.go`, `migrate_overlay.go` (incl. the `"work"` literal at :236); their tests; [sandbox-share-tiering.md](plans/sandbox-share-tiering.md) step 4.
+- **Pointer:** `internal/orchestrator/migrate_agentcfg.go`, `migrate_principal.go`, `migrate_overlay.go` (incl. the `"work"` literal at :236); their tests; [sandbox-share-tiering.md](../archive/plans/sandbox-share-tiering.md) step 4.
 
 ### DF165 — `SameFilesystem` detects only straddling, so a home entirely on one network filesystem passes the check its comment says it subsumes
 
@@ -731,6 +679,36 @@ earlier signal and records nothing else.
 - **Why this is worth a finding rather than a shrug.** The stub compiles, so nothing fails; the fsync would return an error at runtime rather than at build time. A port that starts from "it builds on Windows" inherits a migration with no same-filesystem check and a durability guarantee that no longer holds, and neither is visible in a diff. The relevant Windows facts are also a real design input, not just an implementation detail: a directory holding open files cannot be renamed at all, which is an independent argument for keeping the commit sequence to two renames.
 - **Not fixed here.** Filed under rule 7 as the record that the gap is known and deliberate, so the constraint reaches whoever ports rather than being rediscovered.
 - **Pointer:** `internal/fileutil/durable.go:79-93`, `internal/migrate/preflight_windows.go`, `internal/migrate/promote.go`.
+
+### DF169 — a legal sandbox name can exceed the seatbelt tmux socket's 104-byte path limit, and tiering narrowed the margin by three characters
+
+- **Discovered:** 2026-08-01, rehearsing the v0.9.0 → tiered upgrade on macOS · **Workstream:** sandbox-share-tiering
+- **Severity:** MEDIUM. Not data loss: the sandbox is created, then fails at `start` with an error naming tmux rather than the name that caused it. Pre-existing — tiering made an existing cliff three characters closer, it did not build it.
+- **Rides:** any. It is a fix, not a break.
+- **Reproduced, not reasoned**, on both binaries, with a data dir the same length as this host's default (`$HOME/.yoloai`, 27 chars):
+
+  | binary | longest working name | first failing name |
+  | --- | --- | --- |
+  | `v0.9.0` (flat) | 42 | 43 |
+  | branch (tiered) | 39 | 40 |
+
+  The boundary is the socket path crossing 104 bytes exactly (103 starts, 104 fails), i.e. macOS's `sun_path`. `config.MaxNameLength` is **56**, so every name from 40 to 56 is accepted by validation and then fails to start.
+- **The mechanism.** Seatbelt's tmux socket lives inside the sandbox dir — `store.TmuxSocket` → `config.TmuxPath(sandboxDir)/tmux.sock` — so its length is `<dataDir>/library/sandboxes/<name>/rw/tmux/tmux.sock`. Tiering inserted `/rw`, spending 3 of a fixed 104-byte budget that nothing checks. The failure surfaces from inside `sandbox-setup.py` as `error connecting to …/tmux.sock (File name too long)`, which names neither the sandbox name nor the limit.
+- **Why it is filed rather than fixed.** Three candidate fixes and the choice is a real one, not a detail: (a) validate the resolved socket path at create time and reject with a message naming the limit — cheapest, keeps the socket where it is, still rejects a name the user may care about; (b) relocate the seatbelt socket outside the sandbox dir, which is what **tart already does** (`/private/tmp/tmux-501/default`, backend-idiosyncrasies.md) — removes the cliff entirely but puts sandbox state outside the sandbox dir, against this workstream's grain; (c) shorten the name in the socket path only (a hash), which decouples the two but makes the socket unnameable by a human debugging it. Picking one is the owner's call and is not tiering work.
+- **Only seatbelt.** The same grep on the sibling backends comes back empty: tart's tmux runs *inside* the guest, where the path is `/Volumes/My Shared Files/rw/tmux/tmux.sock` (42 bytes, and three bytes *shorter* than before tiering), and the container backends keep the socket inside the container.
+- **Pointer:** `runtime/seatbelt/seatbelt.go:617` (`TmuxSocket`), `internal/config/sandbox_layout.go` (`TmuxPath`), `internal/config/names.go:20` (`MaxNameLength = 56`).
+
+### DF170 — the seatbelt host tier was readable from inside the sandbox, because the deny covered writes only
+
+- **Discovered:** 2026-08-01, writing the conformance suite's tier section · **Workstream:** sandbox-share-tiering
+- **Severity:** MEDIUM, and **fixed in place** — recorded because the reasoning error is the reusable part, not the patch.
+- **Disposition:** ADDRESSED-IN-PLACE (`runtime/seatbelt/profile.go`, `writeProfileTrailingRules`).
+- **Rides:** any (it lands with the tiering work).
+- **What was wrong.** The host tier's SBPL rule was `(deny file-write* (subpath …/host))`. Writes were denied; reads were never mentioned. The tier's definition is *never shared to any guest*, and it holds `injector-token`, whose docstring rests on the guest never seeing the file ("lives host-side (0600, never bind-mounted), so a co-resident container cannot learn another sandbox's token"), plus `environment.json`, which describes host paths.
+- **Why absence of a read grant was not enough**, which is the whole point: it is the identical mistake [DF161](findings-resolved.md) established on the *write* axis, made again one axis over. Seatbelt has no default-deny that survives a broader grant, and read grants abound — `--dir ~:ro` grants read over every sandbox dir under the data directory at once, and in the test tree the per-user temp grant did it. The tier was readable in exactly the configurations a user would call reasonable.
+- **How it was found, and how it was not.** Not by review of the profile, which had been read several times: by the conformance section asking the **guest** to `cat` a host-tier record and expecting an error. The profile text and the kernel's answer are different objects, and only one of them is the invariant.
+- **Tart never had this.** Its host tier gets no `--dir` at all, so there is no path to read — the recurring asymmetry that seatbelt states its tiers as rules while tart states them as structure.
+- **Pointer:** `runtime/seatbelt/profile.go` (`writeProfileTrailingRules`), `runtime/runtimetest/conformance_iface.go` (`assertSandboxTiers`), `runtime/seatbelt/seatbelt_test.go` (`TestGenerateProfile_HostTierDenyIsLastAndCoversEverySpelling`).
 
 ## Policy origin
 

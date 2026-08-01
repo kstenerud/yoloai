@@ -17,7 +17,7 @@
   design did not say — see § What the build changed.
 - **Depends on:** —
 - **Rides:** **a migration** — it *is* the migration mechanism change, and
-  [sandbox-share-tiering.md](../../design/plans/sandbox-share-tiering.md) cannot finish without it
+  [sandbox-share-tiering.md](sandbox-share-tiering.md) cannot finish without it
   ([DF164](../../design/findings-unresolved.md)).
 
 ## Why
@@ -168,7 +168,7 @@ whether a failure inside it is *deterministic*, and the only place to settle tha
 So the plan phase must be as close to total as it can be made, and this is where the effort goes:
 
 - Every root entry in every sandbox is classifiable (the mover is total: unrecognized entries default
-  to `host/`, loudly — see [sandbox-share-tiering.md](../../design/plans/sandbox-share-tiering.md)).
+  to `host/`, loudly — see [sandbox-share-tiering.md](sandbox-share-tiering.md)).
 - Every sandbox dir is writable by the invoking user (`hostUnmanageableReason` is the precedent —
   `migrate_overlay.go:225`).
 - No sandbox is running: a live instance's mounts point into the tree being replaced. `Apply` stops
@@ -273,7 +273,7 @@ The three open questions the previous version carried are settled, all in the sa
 
 ## Related
 
-- [sandbox-share-tiering.md](../../design/plans/sandbox-share-tiering.md) — the consumer; its step 4 is the v5→v6
+- [sandbox-share-tiering.md](sandbox-share-tiering.md) — the consumer; its step 4 is the v5→v6
   `TierLayout` migration and cannot land without this.
 - [DF164](../../design/findings-unresolved.md) — the defect that forced the design, including why the
   migrators' own tests could not catch it.
