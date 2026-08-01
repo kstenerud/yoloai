@@ -211,14 +211,18 @@ def test_baseline_save_and_diff_reports_stall(
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.setattr(smoke_test, "_BASELINE_ROOT", tmp_path / "baselines")
 
-    # A live, passing sandbox that got all the way to agent.ready.
+    # A live, passing sandbox that got all the way to agent.ready. Spelled with
+    # the v6 tiers, because this drives the *live* readers: logs are guest-written
+    # (rw/) and environment.json is host-only (host/). A flat fixture here passed
+    # while the reader looked at a directory that no longer exists.
     sb_dir = tmp_path / ".yoloai" / "library" / "sandboxes" / "sb-good"
-    _write_jsonl(sb_dir / "logs" / "monitor.jsonl", [
+    _write_jsonl(sb_dir / "rw" / "logs" / "monitor.jsonl", [
         ("2026-05-29T03:19:50", "tmux.start", "x"),
         ("2026-05-29T03:19:52", "sandbox.tmux_new_session", "x"),
         ("2026-05-29T03:19:55", "agent.ready", "x"),
     ])
-    (sb_dir / "environment.json").write_text("{}")
+    (sb_dir / "host").mkdir(parents=True, exist_ok=True)
+    (sb_dir / "host" / "environment.json").write_text("{}")
 
     ctx = _make_ctx(tmp_path)
     smoke_test.save_baseline(ctx, "full_workflow/tart", ["sb-good"])

@@ -82,6 +82,27 @@ def sandbox_state_dir(name: str) -> Path:
     return library_dir() / "sandboxes" / name
 
 
+# Since schema v6 a sandbox dir holds exactly three tier directories and nothing
+# else at its root: host/ (never shared to a guest), ro/ (guest-read) and rw/
+# (guest-read-write). Every path below therefore names its tier. Reaching in
+# with a bare entry name silently reads nothing — which is how this harness lost
+# its failure diagnostics and started pointing agents at a directory that does
+# not exist.
+def sandbox_host_tier(name: str) -> Path:
+    """Host-only tier: records the guest must never reach."""
+    return sandbox_state_dir(name) / "host"
+
+
+def sandbox_rw_tier(name: str) -> Path:
+    """Guest read-write tier, which is also the guest's flat view."""
+    return sandbox_state_dir(name) / "rw"
+
+
+def sandbox_logs_dir(name: str) -> Path:
+    """Host path to a sandbox's logs (guest-written, so read-write tier)."""
+    return sandbox_rw_tier(name) / "logs"
+
+
 # ---------------------------------------------------------------------------
 # Data structures
 # ---------------------------------------------------------------------------
@@ -109,7 +130,9 @@ class BackendSpec:
     def exchange_dir(self, sandbox_name: str) -> str:
         """Return the exchange dir path as seen from inside the sandbox."""
         if self.is_seatbelt:
-            return str(sandbox_state_dir(sandbox_name) / "files")
+            # Seatbelt's guest is a host process, so this is the real host path —
+            # in the read-write tier, which is also the flat root the guest sees.
+            return str(sandbox_rw_tier(sandbox_name) / "files")
         if self.is_vm and self.os == "mac":  # Tart VMs
             # Tart setup creates /Users/admin/.yoloai → /Volumes/My Shared Files/yoloai
             # (virtiofs path has spaces; the symlink is space-free).
@@ -818,26 +841,31 @@ class Test:
 # did the agent launch, what status did it land in, what files did it touch"
 # without dragging in credentials (agent-state/) or build caches (cache/).
 # work/ is included so the user can inspect the agent's actual diff.
+# Each entry names the tier it lives in, because since schema v6 nothing sits at
+# a sandbox root. They were bare names until 2026-08-01, at which point a failed
+# test preserved *nothing* — every source path had moved one level down and the
+# copier's "if it exists" guard turned that into silence. The destination stays
+# flat so an autopsy still reads <attempt>/<sandbox>/logs/*.jsonl.
 _PRESERVE_FILES = (
-    "environment.json",  # was "meta.json" pre-Q-W rename
-    "sandbox-state.json",
-    "agent-status.json",
-    "prompt.txt",
-    "resume-prompt.txt",
-    "runtime-config.json",
-    "lifecycle-on-create-done",
-    "setup.log",
-    "xcodebuild-firstlaunch.log",
+    ("host", "environment.json"),  # was "meta.json" pre-Q-W rename
+    ("host", "sandbox-state.json"),
+    ("rw", "agent-status.json"),
+    ("ro", "prompt.txt"),
+    ("ro", "resume-prompt.txt"),
+    ("ro", "runtime-config.json"),
+    ("rw", "lifecycle-on-create-done"),
+    ("rw", "setup.log"),
+    ("rw", "xcodebuild-firstlaunch.log"),
     # DF9 root-cause-investigation diagnostic: in-VM + host-side
     # network state captured when waitForNetworkReady's probe budget
     # exhausts (containerd backend only, ~30s into Start). Tells us
     # exactly which network stage failed without re-running.
-    "network-diag.txt",
+    ("host", "network-diag.txt"),
 )
 _PRESERVE_DIRS = (
-    "logs",
-    "files",
-    "work",
+    ("rw", "logs"),
+    ("rw", "files"),
+    ("rw", "work"),
 )
 
 
@@ -1004,7 +1032,7 @@ def _probe_network(sandbox_name: str) -> Optional[str]:
         "unreachable [tcp failed | dns=ok route=ok tcp=fail https=exit 28]"
         "unreachable [https failed | dns=ok route=ok tcp=ok https=exit 35]"
     """
-    env_path = sandbox_state_dir(sandbox_name) / "environment.json"
+    env_path = sandbox_host_tier(sandbox_name) / "environment.json"
     if not env_path.is_file():
         return None
     try:
@@ -1056,7 +1084,7 @@ def _write_monitor_tail(sandbox_name: str, dest_dir: Path) -> bool:
     Best-effort — returns False if monitor.jsonl is missing/empty/malformed,
     True if anything was written.
     """
-    src = sandbox_state_dir(sandbox_name) / "logs" / "monitor.jsonl"
+    src = sandbox_logs_dir(sandbox_name) / "monitor.jsonl"
     if not src.is_file():
         return False
     try:
@@ -1164,7 +1192,7 @@ def _summarize_network_probe_events(sandbox_name: str) -> Optional[str]:
     warm-up race. Silent absence means the probe didn't fire at all (e.g.
     non-containerd backends).
     """
-    cli_jsonl = sandbox_state_dir(sandbox_name) / "logs" / "cli.jsonl"
+    cli_jsonl = sandbox_logs_dir(sandbox_name) / "cli.jsonl"
     if not cli_jsonl.is_file():
         return None
     try:
@@ -1202,15 +1230,15 @@ def _preserve_sandbox(yoloai_bin: str, sandbox_name: str, dest_parent: Path) -> 
         return None
     target = dest_parent / sandbox_name
     target.mkdir(parents=True, exist_ok=True)
-    for f in _PRESERVE_FILES:
-        src_f = src / f
+    for tier, f in _PRESERVE_FILES:
+        src_f = src / tier / f
         if src_f.is_file():
             try:
                 shutil.copy2(src_f, target / f)
             except OSError:
                 pass
-    for d in _PRESERVE_DIRS:
-        src_d = src / d
+    for tier, d in _PRESERVE_DIRS:
+        src_d = src / tier / d
         if src_d.is_dir():
             try:
                 shutil.copytree(src_d, target / d, dirs_exist_ok=True)
@@ -1618,7 +1646,7 @@ def save_baseline(ctx: RunContext, test_name: str, sandbox_names: list[str]) -> 
     just skips the snapshot — a missing baseline only means no diff later."""
     if not sandbox_names:
         return
-    logs_dirs = [sandbox_state_dir(n) / "logs" for n in sandbox_names]
+    logs_dirs = [sandbox_logs_dir(n) for n in sandbox_names]
     events = _collect_log_events(logs_dirs)
     if not events:
         return
