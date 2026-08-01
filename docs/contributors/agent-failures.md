@@ -833,3 +833,42 @@ as scarce as the failures and twice as useful.
   ask for both before recommending, not after.** The tell is a design comparison where one option
   wins on effort and another wins on what happens when it breaks. That is not a technical tie to be
   broken by judgement; it is a question with an owner.
+
+### A22 — wrote the guard for a security invariant, and it passed on a shell parse error (2026-08-01)
+
+- **Claimed:** that the new `SandboxTiers` conformance section verified the tier invariant. It ran
+  green on seatbelt — `host/` unreadable and unwritable, `ro/` not writable through the view — and I
+  moved on to run it against tart.
+- **True:** on seatbelt every one of those denial assertions passed *without anything being denied*.
+  The section built its write commands as `sh -c "echo x > " + path`, unquoted. A tart guest reaches
+  the tiers under `/Volumes/My Shared Files`, so the shell split the path on the space and failed
+  with `sh: /Volumes/My: Permission denied` — and `assert.Error` accepts a shell parse failure
+  exactly as happily as a kernel denial. The seatbelt paths have no spaces, so *there* the commands
+  parsed and the assertions were real; the bug was invisible on the backend I checked first.
+- **Source of the false belief:** a green test I had just written, on the backend where the defect
+  does not manifest. Nothing was read second-hand here — this is the failure mode of `assert.Error`
+  itself, which asserts that *something* went wrong and never that the thing I care about did.
+  AGENTS.md rule 10 states this exact trap one case over ("asserting only *that* an error was
+  wrapped tests the wrapping, not the fix"); I had read it that morning and still wrote the
+  negative-space version of it.
+- **Caught by:** running it on the second backend, where the path has a space in it. Pure luck of
+  the platform — had tart's share been at a space-free path, or had I taken the seatbelt green as
+  sufficient for a "backend-agnostic" section, the branch would carry a security guard that passes
+  on any machine where the command cannot run at all. The fix was to quote the paths and route reads
+  through argv with no shell, and the thing that makes the section trustworthy now is not the
+  quoting but the **positive control**: a write to `rw/` that must *succeed*. That one assertion
+  fails loudly whenever the mechanism is broken rather than the permission — which is the only
+  reason a future regression of this shape gets noticed.
+- **Cost:** none shipped; caught within the hour, before the commit. Filed because it would have:
+  the green was on the backend I would have called representative, and the artifact is a guard for
+  DF136, where a vacuous pass is worth less than no test at all — it converts an open question into
+  a settled one.
+- **Class:** the A15 family (a test that certifies nothing while looking exactly like one that
+  certifies something), but by a different mechanism. A15's tests could not reach the code; these
+  reached it and mistook the *transport* failing for the *policy* holding. Generalised: **a negative
+  assertion is only as good as the proof that the action was attempted.** Any test whose pass
+  condition is "this failed" needs a sibling whose pass condition is "the same machinery succeeded",
+  or it is asserting that the test harness works.
+- **Gated now?** No, and it is not obvious what would gate it — a linter cannot tell an intended
+  denial from an accidental one. The transferable defence is the positive control, which is a review
+  question, not a check: *for every assert-it-fails, what asserts it was even tried?*
