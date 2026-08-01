@@ -62,17 +62,19 @@ func TestBuildRunArgs(t *testing.T) {
 	mounts := []runtime.MountSpec{
 		// External dir — should get its own --dir share
 		{HostPath: extDir, ContainerPath: "/Users/karl/project"},
-		// Sandbox-internal dir — should be skipped (already in yoloai share)
-		{HostPath: sandboxPath + "/agent-runtime", ContainerPath: "/home/yoloai/.claude/"},
+		// Sandbox-internal dir — should be skipped (already in a tier share)
+		{HostPath: sandboxPath + "/rw/agent-runtime", ContainerPath: "/home/yoloai/.claude/"},
 		// File mount — should be skipped (VirtioFS only supports dirs)
-		{HostPath: sandboxPath + "/runtime-config.json", ContainerPath: "/yoloai/runtime-config.json"},
+		{HostPath: sandboxPath + "/ro/runtime-config.json", ContainerPath: "/yoloai/runtime-config.json"},
 	}
 	args := r.buildRunArgs("yoloai-test", sandboxPath, mounts)
 
 	assert.Contains(t, args, "run")
 	assert.Contains(t, args, "--no-graphics")
 	assert.Contains(t, args, "--dir")
-	assert.Contains(t, args, "yoloai:"+sandboxPath)
+	// One share per guest-facing tier, the read-only one mounted read-only.
+	assert.Contains(t, args, "ro:"+filepath.Join(sandboxPath, "ro")+":ro")
+	assert.Contains(t, args, "rw:"+filepath.Join(sandboxPath, "rw"))
 	// External dir should have its own share
 	assert.Contains(t, args, "m-"+filepath.Base(extDir)+":"+extDir)
 	// Sandbox-internal and file mounts should NOT appear
@@ -82,6 +84,55 @@ func TestBuildRunArgs(t *testing.T) {
 	}
 	// VM name must be last argument
 	assert.Equal(t, "yoloai-test", args[len(args)-1])
+}
+
+// TestBuildRunArgs_NeverSharesTheSandboxRootOrHostTier is DF136 on tart, stated
+// as an assertion. VirtioFS shares a whole subtree and cannot exclude a file, so
+// while the sandbox root was the share, host/ was inside it and the agent could
+// rewrite environment.json to redirect a host-side apply. Prevention here is
+// structural: the host tier is the part of the sandbox dir that no --dir names.
+//
+// It checks every argument rather than the tier shares alone, because the way
+// this regresses is a *new* share being added for some other reason — a
+// diagnostics dir, a future tier — that happens to enclose host/.
+//
+// It replaces df136_repro_test.go, which pinned the defect: that the sandbox
+// dir was shared with no ":ro", so the guest could rewrite environment.json.
+// The primitive that test described no longer exists, so it could only be kept
+// by inverting it, and an inverted reproduction is just this assertion in a file
+// named for a finding. Retained from it: the full chain — a booted guest
+// rewriting the shared record, then the host applying to the redirected path —
+// was reproduced end-to-end on a real yoloai-base VM during the DF136 macOS
+// verification, and is not committed because it clones and boots a multi-GB VM.
+// The kernel-level truth is now the runtimetest mount conformance case, which
+// asserts from inside the guest; this one is the always-on argv guard.
+func TestBuildRunArgs_NeverSharesTheSandboxRootOrHostTier(t *testing.T) {
+	r := &Runtime{tartBin: "/usr/local/bin/tart", execEnv: []string{"PATH=/usr/bin:/bin"}}
+	sandboxPath := t.TempDir()
+	require.NoError(t, os.MkdirAll(filepath.Join(sandboxPath, "host"), 0o750))
+	require.NoError(t, os.WriteFile(
+		filepath.Join(sandboxPath, "host", "environment.json"), []byte("{}"), 0o600))
+
+	args := r.buildRunArgs("yoloai-test", sandboxPath, nil)
+
+	for i, a := range args {
+		if i == 0 || args[i-1] != "--dir" {
+			continue
+		}
+		// A --dir is "<name>:<hostPath>[:ro]" and the host path is what matters.
+		parts := strings.SplitN(a, ":", 2)
+		require.Len(t, parts, 2, "malformed --dir argument %q", a)
+		shared := strings.TrimSuffix(parts[1], ":ro")
+
+		assert.NotEqual(t, sandboxPath, shared,
+			"the sandbox root must never be shared — it contains the host tier (DF136)")
+		assert.NotEqual(t, filepath.Join(sandboxPath, "host"), shared,
+			"the host tier must never be shared (DF136)")
+		if shared != sandboxPath {
+			assert.False(t, strings.HasPrefix(filepath.Join(sandboxPath, "host"), shared+"/"),
+				"share %q encloses the host tier (DF136)", shared)
+		}
+	}
 }
 
 func TestMapTartError_NotFound(t *testing.T) {
@@ -443,6 +494,23 @@ func TestMountDirName(t *testing.T) {
 			assert.Equal(t, tt.expect, got)
 		})
 	}
+}
+
+// TestWorkDirStagingPath_ResolvesThroughTheFlatView pins where the guest finds
+// a host-staged work copy. work/ is in the read-write tier, and the guest
+// reaches it through the flat view — so the path runs through the rw share, not
+// the old whole-sandbox "yoloai" share.
+//
+// The orchestrator used to build this from a literal, which is why it needs
+// pinning somewhere: an rsync source that does not exist fails inside the guest
+// during Create, far from anything that would point at the layout.
+func TestWorkDirStagingPath_ResolvesThroughTheFlatView(t *testing.T) {
+	r := &Runtime{}
+
+	got := r.WorkDirStagingPath("/Users/karl/project")
+
+	assert.Equal(t, "/Volumes/My Shared Files/rw/work/"+config.EncodePath("/Users/karl/project"), got)
+	assert.NotContains(t, got, "/yoloai/", "the single whole-sandbox share is gone")
 }
 
 // TestSetupWorkDirInVM tests the command generation for VM work directory setup.

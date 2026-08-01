@@ -16,6 +16,15 @@ import (
 	"github.com/kstenerud/yoloai/runtime/monitor"
 )
 
+// vmGuestViewDir returns the single flat sandbox root as the guest sees it: the
+// read-write tier's share. Read-only entries are reachable inside it through
+// the relative links config.AssembleGuestView writes, so the guest scripts keep
+// joining every path from one directory and never learn that the sandbox dir is
+// tiered.
+func vmGuestViewDir() string {
+	return filepath.Join(sharedDirVMPath, config.ReadWriteTierName)
+}
+
 // remapTargetPath translates Docker/Linux-style mount targets to macOS VM paths.
 // - /home/yoloai/... → /Users/admin/...
 // - /yoloai/... → /Users/admin/.yoloai/... (sandbox control files)
@@ -40,13 +49,13 @@ func remapTargetPath(target string) string {
 // runSetupScript creates mount symlinks, writes the embedded setup script
 // to the shared directory, and executes it inside the VM.
 func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath, hostname string, mounts []runtime.MountSpec) error {
-	vmSharedDir := filepath.Join(sharedDirVMPath, sharedDirName)
+	vmSharedDir := vmGuestViewDir()
 
 	// P1: name the guest, then wire its mounts. Always — a bare runtime instance
 	// still needs its hostname set and its mounts reachable at the expected paths.
 	r.setVMHostname(ctx, vmName, hostname)
 
-	if err := r.createVMMountSymlinks(ctx, vmName, sandboxPath, vmSharedDir, mounts); err != nil {
+	if err := r.createVMMountSymlinks(ctx, vmName, sandboxPath, mounts); err != nil {
 		return err
 	}
 
@@ -68,14 +77,34 @@ func (r *Runtime) runSetupScript(ctx context.Context, vmName, sandboxPath, hostn
 		return err
 	}
 
-	setupCmd := fmt.Sprintf("nohup python3 '%s/bin/sandbox-setup.py' tart '%s' </dev/null >'%s/setup.log' 2>&1 &",
-		vmSharedDir, vmSharedDir, vmSharedDir)
-	args := execArgs(vmName, "bash", "-c", setupCmd)
+	// Re-assemble after the scripts land: writeVMSetupScripts is what creates
+	// bin/ on a sandbox that did not have it, and the setup command below runs
+	// out of the view's copy of it.
+	if err := config.AssembleGuestView(sandboxPath); err != nil {
+		return fmt.Errorf("assemble guest view: %w", err)
+	}
+
+	args := execArgs(vmName, "bash", "-c", setupScriptCommand(vmSharedDir))
 	if _, err := r.runTart(ctx, args...); err != nil {
 		return fmt.Errorf("exec setup script: %w", err)
 	}
 
 	return nil
+}
+
+// setupScriptCommand builds the in-guest command that launches the sandbox
+// monitor. Split out from runSetupScript so the path the guest is handed is
+// unit-testable without a booted VM — which matters more than it looks: every
+// path in the guest scripts is joined from this one directory, so handing over
+// the wrong root does not fail here, it fails ~20 path-joins later as a file
+// the guest cannot find.
+//
+// viewDir is the flat guest view, so bin/ resolves through it into the
+// read-only tier while setup.log lands in the read-write tier where the guest
+// may write it.
+func setupScriptCommand(viewDir string) string {
+	return fmt.Sprintf("nohup python3 '%s/bin/sandbox-setup.py' tart '%s' </dev/null >'%s/setup.log' 2>&1 &",
+		viewDir, viewDir, viewDir)
 }
 
 // setVMHostname sets the guest's OS hostname to the sandbox name so tools
@@ -113,7 +142,7 @@ func hostnameSetCommand(hostname string) string {
 }
 
 // createVMMountSymlinks creates symlinks in the VM from expected mount targets to VirtioFS paths.
-func (r *Runtime) createVMMountSymlinks(ctx context.Context, vmName, sandboxPath, vmSharedDir string, mounts []runtime.MountSpec) error {
+func (r *Runtime) createVMMountSymlinks(ctx context.Context, vmName, sandboxPath string, mounts []runtime.MountSpec) error {
 	for _, m := range mounts {
 		if m.ContainerPath == "/run/secrets" || strings.HasPrefix(m.ContainerPath, "/run/secrets/") {
 			continue
@@ -127,7 +156,7 @@ func (r *Runtime) createVMMountSymlinks(ctx context.Context, vmName, sandboxPath
 			continue
 		}
 
-		vfsPath, ok := resolveMountVFSPath(m.HostPath, sandboxPath, vmSharedDir)
+		vfsPath, ok := resolveMountVFSPath(m.HostPath, sandboxPath)
 		if !ok {
 			continue
 		}
@@ -146,10 +175,26 @@ func (r *Runtime) createVMMountSymlinks(ctx context.Context, vmName, sandboxPath
 
 // resolveMountVFSPath resolves the VirtioFS path for a mount source.
 // Returns the vfsPath and true if the mount should be symlinked, or ("", false) to skip.
-func resolveMountVFSPath(source, sandboxPath, vmSharedDir string) (string, bool) {
+//
+// A source under the sandbox dir is now tiered, and its path relative to the
+// sandbox dir therefore begins with the tier name — which is also the name of
+// the share that tier is published as. So the mapping stays a plain join, with
+// sharedDirVMPath (the shares root) as the base rather than any one share:
+// <sandbox>/rw/logs becomes <shares>/rw/logs. Getting the base wrong is not a
+// build error, it is a guest that silently cannot find its own logs directory.
+//
+// A source in the host tier resolves to nothing, because that tier has no
+// share. It should never reach here — no MountSpec names a host-tier path — so
+// the case is reported rather than passed through as a path that would dangle.
+func resolveMountVFSPath(source, sandboxPath string) (string, bool) {
 	if after, ok := strings.CutPrefix(source, sandboxPath+"/"); ok {
 		relPath := after
-		vfsPath := filepath.Join(vmSharedDir, relPath)
+		if tier, _, _ := strings.Cut(relPath, "/"); tier == config.HostTierName {
+			slog.Warn("tart setup: refusing to share a host-tier path into the guest",
+				"source", source)
+			return "", false
+		}
+		vfsPath := filepath.Join(sharedDirVMPath, relPath)
 		if stat, err := os.Stat(source); err != nil {
 			slog.Debug("tart setup: mount source does not exist on host!", "source", source, "err", err)
 			return "", false
@@ -159,7 +204,7 @@ func resolveMountVFSPath(source, sandboxPath, vmSharedDir string) (string, bool)
 		return vfsPath, true
 	}
 	if source == sandboxPath {
-		return vmSharedDir, true
+		return vmGuestViewDir(), true
 	}
 	if info, err := os.Stat(source); err == nil && info.IsDir() {
 		return filepath.Join(sharedDirVMPath, mountDirName(source)), true

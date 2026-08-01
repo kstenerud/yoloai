@@ -23,9 +23,11 @@ import (
 // test proves the setup path touches only Exec.
 type recordingVMBackend struct {
 	runtime.Backend
-	setupCmds []string // what SetupWorkDirInVM was asked to run
-	execCmds  [][]string
-	baseline  string
+	setupCmds    []string // what SetupWorkDirInVM was asked to run
+	execCmds     [][]string
+	baseline     string
+	stagingAsked string // the host path WorkDirStagingPath was asked about
+	stagingUsed  string // the staging path handed to SetupWorkDirInVM
 }
 
 func (r *recordingVMBackend) Descriptor() runtime.BackendDescriptor {
@@ -36,7 +38,17 @@ func (r *recordingVMBackend) Descriptor() runtime.BackendDescriptor {
 	}
 }
 
-func (r *recordingVMBackend) SetupWorkDirInVM(_, vmLocalPath string) []string {
+// WorkDirStagingPath mirrors a real backend's: the guest-visible path of the
+// host-staged work copy. The fake spells it as its own share root so the test
+// can tell that ExecuteVMWorkDirSetup asks the *backend* where staging is
+// rather than building the path itself, which is what it used to do.
+func (r *recordingVMBackend) WorkDirStagingPath(hostPath string) string {
+	r.stagingAsked = hostPath
+	return "/fake-share/rw/work/" + config.EncodePath(hostPath)
+}
+
+func (r *recordingVMBackend) SetupWorkDirInVM(stagingPath, vmLocalPath string) []string {
+	r.stagingUsed = stagingPath
 	// Shape mirrors tart's: rsync from staging, then git init/add/commit.
 	r.setupCmds = []string{
 		"mkdir -p " + filepath.Dir(vmLocalPath),
@@ -78,6 +90,15 @@ func TestExecuteVMWorkDirSetup_RunsSetupAndRecordsBaseline(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NotEmpty(t, rt.setupCmds, "the backend's setup commands must have been requested")
+
+	// Staging comes from the backend, for the dir being set up. This used to be
+	// a literal here ("/Volumes/My Shared Files/yoloai/work/…"), i.e. tart's
+	// share layout written into the orchestrator — which went silently wrong the
+	// moment the sandbox dir became tiered and the share moved.
+	assert.Equal(t, "/home/user/project", rt.stagingAsked,
+		"the backend must be asked where the staged copy of *this* dir is")
+	assert.Equal(t, rt.WorkDirStagingPath("/home/user/project"), rt.stagingUsed,
+		"the path handed to SetupWorkDirInVM must be the one the backend supplied")
 	assert.GreaterOrEqual(t, len(rt.execCmds), len(rt.setupCmds)+1,
 		"every setup command plus the rev-parse readback must be exec'd into the VM")
 

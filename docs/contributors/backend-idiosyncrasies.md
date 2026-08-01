@@ -1610,8 +1610,11 @@ safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI
 by `tart run`, the file simply does not appear inside the VM.
 
 Workaround: copy file contents into a sandbox directory and share the directory
-via VirtioFS. For secrets, copy all secret files into `sandboxDir/secrets/` and
-share `sandboxDir` as the `yoloai` VirtioFS share. See `tart.go::Create`.
+via VirtioFS. For secrets, copy all secret files into the sandbox's `ro/secrets/`
+tier, which is shared as the `ro` VirtioFS share. See `tart.go::Create`.
+
+The sandbox dir itself is never shared: it is three tiers, and only `ro` and `rw`
+get a `--dir`, which is what keeps `host/` out of the guest (DF136).
 
 ---
 
@@ -1620,7 +1623,8 @@ share `sandboxDir` as the `yoloai` VirtioFS share. See `tart.go::Create`.
 Tart mounts VirtioFS shares at `/Volumes/My Shared Files/<share-name>` inside
 the macOS VM. The path contains a space. Any shell command constructing this
 path must quote it. The setup script uses: `'%s/bin/sandbox-setup.py'` with
-`%s = /Volumes/My Shared Files/yoloai`. See `tart.go::runSetupScript`.
+`%s = /Volumes/My Shared Files/rw` — the read-write tier's share, which is also
+the flat view the guest works from. See `tart.go::setupScriptCommand`.
 
 ---
 

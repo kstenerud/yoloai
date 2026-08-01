@@ -61,10 +61,11 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalitySandboxSide,
 		KeepAliveModel:     runtime.KeepAliveGuestOSInit,
-		// Tart VMs use a VirtioFS share at "/Volumes/My Shared Files/yoloai"
-		// (path contains spaces). The setup script creates a symlink
-		// /Users/admin/.yoloai → /Volumes/My Shared Files/yoloai so that
-		// shell commands inside the VM can reference state without quoting.
+		// Tart VMs reach yoloai state through two VirtioFS shares, one per
+		// guest-facing tier, under "/Volumes/My Shared Files" (a path with
+		// spaces). The setup script symlinks each mount under
+		// /Users/admin/.yoloai so shell commands inside the VM can reference
+		// state without quoting.
 		VMRuntimeDir: "/Users/admin/.yoloai",
 	},
 	// Tart VMs boot in ~60s+, then sandbox-setup.py runs xcode-select and
@@ -122,10 +123,9 @@ const (
 	// tartConfigFileName stores the instance config for Start to use.
 	tartConfigFileName = "instance.json"
 
-	// sharedDirName is the VirtioFS share name used for yoloai state.
-	sharedDirName = "yoloai"
-
 	// sharedDirVMPath is where VirtioFS shares appear inside the macOS VM.
+	// Every --dir lands as a sibling directory under this one path, which is
+	// what lets a relative symlink in one share resolve into another.
 	sharedDirVMPath = "/Volumes/My Shared Files"
 
 	// tartVMLimitSubstr is the fixed prefix Tart writes to stderr when Apple's
@@ -205,6 +205,14 @@ func (r *Runtime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []st
 		fmt.Sprintf("rsync -a '%s/' '%s/'", virtiofsStagingPath, vmLocalPath),
 		fmt.Sprintf("cd '%s' && git init && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit --allow-empty -m 'baseline'", vmLocalPath),
 	}
+}
+
+// WorkDirStagingPath returns where the guest sees a host-staged work copy: under
+// work/ in the flat view, which resolves into the read-write tier's share. The
+// work copy is staged by the host and then rsync'd to VM-local storage, so it
+// has to be reachable and it has to be the same file the host wrote.
+func (r *Runtime) WorkDirStagingPath(hostPath string) string {
+	return filepath.Join(vmGuestViewDir(), config.WorkDirName, config.EncodePath(hostPath))
 }
 
 // New creates a Runtime after verifying that tart is installed and the
@@ -334,6 +342,14 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	}
 	if err := json.Unmarshal(cfgData, &cfg); err != nil {
 		return fmt.Errorf("parse instance config: %w", err)
+	}
+
+	// Assemble the flat guest view before the shares are named on the command
+	// line. Both tiers have to exist by then — `tart run --dir` on a path that
+	// does not exist fails the boot — and a bare runtime instance has no sandbox
+	// layer to have created them.
+	if err := config.AssembleGuestView(sandboxPath); err != nil {
+		return fmt.Errorf("assemble guest view: %w", err)
 	}
 
 	// Build tart run arguments. When resuming from a suspended state, the VM
@@ -702,13 +718,25 @@ func (r *Runtime) instanceName(name string) string {
 
 // buildRunArgs constructs the arguments for tart run.
 // Only directories outside the sandbox path get their own VirtioFS share;
-// everything under sandboxPath is already accessible via the yoloai share.
+// everything under sandboxPath is already accessible via the tier shares.
 // System paths (Xcode, iOS Simulators) are auto-detected at every start.
 func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.MountSpec) []string {
 	args := []string{"run", "--no-graphics"}
 
-	// Share the sandbox directory into the VM
-	args = append(args, "--dir", fmt.Sprintf("%s:%s", sharedDirName, sandboxPath))
+	// Share the guest-facing tiers, one share each, and the sandbox root not at
+	// all. VirtioFS shares a whole subtree with no way to exclude a file, so the
+	// single root share this replaces handed the guest host/ — an agent could
+	// rewrite environment.json and redirect a host-side apply (DF136). The
+	// host-only tier is now simply the part with no --dir.
+	//
+	// The share names are the tier directory names, deliberately: the guest sees
+	// them as siblings under sharedDirVMPath, so the relative links that
+	// assemble the flat view (rw/x -> ../ro/x) resolve to the same file on the
+	// host and in the guest. Renaming a share here breaks the view silently.
+	args = append(args,
+		"--dir", fmt.Sprintf("%s:%s:ro", config.ReadOnlyTierName, config.ReadOnlyTierDir(sandboxPath)),
+		"--dir", fmt.Sprintf("%s:%s", config.ReadWriteTierName, config.ReadWriteTierDir(sandboxPath)),
+	)
 
 	// Build merged mount list: Xcode system paths + user-specified mounts
 	// Deduplication: user-specified mounts take precedence over system paths

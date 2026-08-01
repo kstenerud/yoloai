@@ -125,6 +125,41 @@ func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 	}
 }
 
+// TestGenerateContext_SeatbeltNamesTheGuestView pins the paths a
+// host-filesystem backend's context text hands the agent. The text is
+// instructions the agent follows literally, and since tiering the sandbox dir
+// has no logs/ or bin/ of its own — those live under the read-write tier, which
+// is also the flat view the guest works from. Naming the sandbox dir would send
+// the agent to paths that no longer exist, and nothing else would notice,
+// because prose is not typechecked and the agent just finds nothing there.
+func TestGenerateContext_SeatbeltNamesTheGuestView(t *testing.T) {
+	meta := &store.Environment{
+		Name:           "test-sb",
+		BackendType:    "seatbelt",
+		HostFilesystem: true,
+		// The runtime-dir paths are written only in the --debug section, which is
+		// also the section that tells the agent where to look when idle detection
+		// misbehaves — i.e. exactly when a wrong path costs the most.
+		Debug: true,
+		Dirs: []store.DirEnvironment{{
+			HostPath:  "/home/user/project",
+			MountPath: "/home/user/project",
+			Mode:      "copy",
+		}},
+	}
+	sandboxDir := "/tmp/yoloai-test-sb/test-sb"
+
+	result := GenerateContext(sandboxDir, meta)
+
+	view := config.GuestViewDir(sandboxDir)
+	if !strings.Contains(result, view+"/"+store.RuntimeConfigFile) {
+		t.Errorf("expected the runtime config named under the guest view %q, got:\n%s", view, result)
+	}
+	if strings.Contains(result, sandboxDir+"/"+store.RuntimeConfigFile) {
+		t.Errorf("the untiered sandbox-dir path must not be named — nothing is there:\n%s", result)
+	}
+}
+
 func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 	meta := &store.Environment{
 		Name:           "test-sb",

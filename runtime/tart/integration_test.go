@@ -119,6 +119,15 @@ func TestTartConformance(t *testing.T) {
 			// have passwordless sudo, so sudo was never the obstacle). The suite now
 			// mounts under /tmp and resolves the guest path through
 			// ResolveGuestMountPath, which is what tart's re-rooting needs (DF161).
+			//
+			// The tier section runs: tart is one of the two backends that shares
+			// the sandbox directory rather than binding per file, and it is where
+			// the tiers are enforced by the strongest mechanism available — the
+			// host tier simply has no --dir, so it is not in the guest's
+			// namespace at all. The guest's view is the read-write share.
+			SandboxTiers: func(name string) (string, string) {
+				return rt.sandboxDirForName(name), vmGuestViewDir()
+			},
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 				if cfg.ImageRef == "" {
 					cfg.ImageRef = "yoloai-base"

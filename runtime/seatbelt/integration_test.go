@@ -61,10 +61,62 @@ func TestSeatbelt_HostTierIsUnwritableFromInside(t *testing.T) {
 	require.NoError(t, readErr)
 	assert.NotContains(t, string(onDisk), "tampered", "the record must be byte-identical after the denied write")
 
-	// Scoping: the deny covers the tier, not the sandbox dir it sits in.
-	canary := filepath.Join(sandboxPath, "canary.txt")
+	// Scoping: the deny covers the tier, not the sandbox dir it sits in. The
+	// canary is in the read-write tier, which is where everything the guest
+	// writes now lives — the sandbox root itself is granted nothing.
+	canary := filepath.Join(config.ReadWriteTierDir(sandboxPath), "canary.txt")
 	_, err = rt.Exec(ctx, name, []string{"sh", "-c", "echo ok > " + canary}, "")
-	assert.NoError(t, err, "the deny must not extend past the host tier — the rest of the sandbox dir stays writable")
+	assert.NoError(t, err, "the deny must not extend past the host tier — the read-write tier stays writable")
+}
+
+// TestSeatbelt_ReadOnlyTierIsUnwritableFromInside is DF148's guard, and it has
+// to be a kernel test for the reason DF161 established: on seatbelt a read-only
+// region is the *absence* of a write grant, so it holds only while nothing
+// broader grants write — and in these tests the sandbox dir sits inside the
+// per-user temp tree, which the profile grants read+write wholesale. A profile
+// that merely omits the write grant reads correct and enforces nothing.
+//
+// The write through the *view* is the load-bearing case. The guest reaches
+// runtime-config.json at <view>/runtime-config.json, a symlink into the
+// read-only tier, and macOS checks access after symlink resolution — so the
+// question this answers is whether the tier's deny applies to the path the guest
+// actually uses, rather than only to the one the host does.
+func TestSeatbelt_ReadOnlyTierIsUnwritableFromInside(t *testing.T) {
+	rt, ctx := seatbeltSetup(t)
+
+	name := "yoloai-test-ro-tier-deny"
+	_ = rt.Remove(ctx, name) // evict any stale leftover from a failed run
+	require.NoError(t, rt.Create(ctx, runtime.InstanceConfig{Name: name}))
+	t.Cleanup(func() { _ = rt.Remove(context.Background(), name) })
+	require.NoError(t, rt.Start(ctx, name))
+
+	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), rt.sandboxName(name))
+	prompt := config.PromptPath(sandboxPath)
+	require.NoError(t, os.MkdirAll(filepath.Dir(prompt), 0o750))
+	require.NoError(t, os.WriteFile(prompt, []byte("original"), 0o600))
+	// Surface it in the view the way a launch does.
+	require.NoError(t, config.AssembleGuestView(sandboxPath))
+	viaView := filepath.Join(config.GuestViewDir(sandboxPath), config.PromptFileName)
+
+	// Readable — a deny that also blocked reads would pass every write
+	// assertion below while making the tier useless.
+	out, err := rt.Exec(ctx, name, []string{"sh", "-c", "cat " + viaView}, "")
+	require.NoError(t, err, "the guest must be able to read the read-only tier through the view")
+	assert.Contains(t, out.Stdout, "original")
+
+	for _, path := range []string{prompt, viaView} {
+		_, err := rt.Exec(ctx, name, []string{"sh", "-c", "echo tampered > " + path}, "")
+		assert.Error(t, err, "a sandboxed process must not be able to write the read-only tier via %s (DF148)", path)
+	}
+
+	onDisk, readErr := os.ReadFile(prompt) //nolint:gosec // G304: path built from the test's own sandbox dir
+	require.NoError(t, readErr)
+	assert.Equal(t, "original", string(onDisk), "the read-only tier's contents must be unchanged")
+
+	// Scoping, same as the host tier: the neighbouring tier stays writable.
+	canary := filepath.Join(config.ReadWriteTierDir(sandboxPath), "canary.txt")
+	_, err = rt.Exec(ctx, name, []string{"sh", "-c", "echo ok > " + canary}, "")
+	assert.NoError(t, err, "the deny must not extend past the read-only tier")
 }
 
 // TestSeatbelt_ReadOnlyMountHoldsUnderABroaderGrant drives the user-facing
@@ -145,6 +197,15 @@ func TestSeatbeltConformance(t *testing.T) {
 			// /mnt/test assumption — seatbelt is host-side and /mnt is not writable
 			// without root, so the container→host symlink was never created. The
 			// suite now mounts under /tmp, which the host can create (DF161).
+			//
+			// The tier section runs: seatbelt is one of the two backends that
+			// exposes the sandbox directory itself, here as SBPL grants rather
+			// than a mount, so the tiers are reachable and the invariant is real.
+			// The guest is a host process, so its view path is the host's.
+			SandboxTiers: func(name string) (string, string) {
+				sandboxDir := filepath.Join(rt.layout.SandboxesDir(), rt.sandboxName(name))
+				return sandboxDir, config.GuestViewDir(sandboxDir)
+			},
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 				_ = rt.Remove(ctx, cfg.Name) // evict any stale leftover from a failed run
 				require.NoError(t, rt.Create(ctx, cfg))

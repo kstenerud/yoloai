@@ -77,9 +77,17 @@ func writeProfileTrailingRules(b *strings.Builder, sandboxDir string, mounts []r
 		}
 		add(m.HostPath, !m.ReadOnly)
 	}
-	// The sandbox dir participates in the same ordering: a `--dir ~:ro` encloses
-	// it, and yoloAI's own state must stay writable through that.
-	add(sandboxDir, true)
+	// The read-write tier participates in the same ordering: a `--dir ~:ro`
+	// encloses it, and yoloAI's own state must stay writable through that. Only
+	// that tier — the other two are denied below, unconditionally.
+	//
+	// Spelled as the sandbox dir's variants with the tier name appended, not
+	// resolved directly: resolvePathVariants calls EvalSymlinks, which fails on a
+	// path that does not exist yet, and a bare runtime instance has no tiers
+	// until it starts. Same reasoning as the tier denies below.
+	for _, p := range resolvePathVariants(sandboxDir) {
+		rules = append(rules, profileRule{path: filepath.Join(p, config.ReadWriteTierName), allow: true})
+	}
 
 	slices.SortStableFunc(rules, func(x, y profileRule) int {
 		return strings.Count(x.path, string(filepath.Separator)) - strings.Count(y.path, string(filepath.Separator))
@@ -94,9 +102,35 @@ func writeProfileTrailingRules(b *strings.Builder, sandboxDir string, mounts []r
 		}
 	}
 
-	b.WriteString("; Host-only tier: never writable from inside the sandbox (DF136)\n")
+	// Both non-writable tiers, after the sorted block and unconditional: nothing
+	// inside the sandbox legitimately writes to either, so they outrank every
+	// grant above, including the read-write tier's own and any mount enclosing
+	// the sandbox dir.
+	//
+	// The read-only tier needs this stated as much as the host tier does, and
+	// that is the part that reads like belt-and-braces and is not. Seatbelt
+	// expresses read-only as the *absence* of a write grant, which holds only
+	// while nothing else grants write over the path — and this profile grants
+	// write broadly (the temp tree, the Xcode and SwiftPM caches, any enclosing
+	// read-write mount). A `:ro` mount under one of those was silently writable
+	// until it was measured (DF161). Tart needs no equivalent because its `:ro`
+	// VirtioFS share is a real read-only mount: the two backends reach one
+	// invariant by different mechanisms, and only tart's is self-enforcing.
+	// The host tier is denied *reads* as well, and that is not symmetry for its
+	// own sake. Its whole definition is "never shared to any guest": it holds
+	// injector-token, whose docstring rests on the guest never seeing the file,
+	// and environment.json, which describes the host's paths. Tart gets this
+	// free by giving the tier no share; seatbelt has to state it, for the same
+	// reason it has to state the write denies — absence of a *read* grant is not
+	// a read denial either, and one `--dir ~:ro` grants read over every sandbox
+	// dir under the data directory at once.
+	b.WriteString("; Host-only tier: never readable or writable from inside (DF136)\n")
 	for _, p := range resolvePathVariants(sandboxDir) {
-		fmt.Fprintf(b, "(deny file-write* (subpath %q))\n", filepath.Join(p, config.HostTierName))
+		fmt.Fprintf(b, "(deny file-read* file-write* (subpath %q))\n", filepath.Join(p, config.HostTierName))
+	}
+	b.WriteString("; Read-only tier: readable, never writable from inside (DF148)\n")
+	for _, p := range resolvePathVariants(sandboxDir) {
+		fmt.Fprintf(b, "(deny file-write* (subpath %q))\n", filepath.Join(p, config.ReadOnlyTierName))
 	}
 	b.WriteString("\n")
 }
@@ -258,11 +292,25 @@ func writeProfileSystemPaths(b *strings.Builder) {
 	b.WriteString("\n")
 }
 
-// writeProfileSandboxDir writes read-write rules for the sandbox directory.
+// writeProfileSandboxDir writes the per-tier rules for the sandbox directory.
+//
+// The broad `(allow file-read* file-write* (subpath sandboxDir))` this replaces
+// *was* DF136: it handed the confined agent write access to host/, and with it
+// environment.json, whose HostPath redirects a host-side apply anywhere the user
+// can write. Supplementing it was not an option — the read-only tier cannot mean
+// anything while a rule above it grants write over the whole tree — so the grant
+// is stated per tier, and the host tier gets no grant at all.
+//
+// Absence of a grant is not a denial on seatbelt, so neither ro/ nor host/ is
+// secured by this function alone; writeProfileTrailingRules states both denies
+// last, where they outrank the broader grants this profile makes elsewhere.
 func writeProfileSandboxDir(b *strings.Builder, sandboxDir string) {
-	b.WriteString("; Sandbox directory\n")
+	b.WriteString("; Sandbox directory, per guest-access tier (host/ gets nothing)\n")
 	for _, p := range resolvePathVariants(sandboxDir) {
-		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n", p)
+		fmt.Fprintf(b, "(allow file-read* file-write* (subpath %q))\n",
+			filepath.Join(p, config.ReadWriteTierName))
+		fmt.Fprintf(b, "(allow file-read* (subpath %q))\n",
+			filepath.Join(p, config.ReadOnlyTierName))
 	}
 	b.WriteString("\n")
 }

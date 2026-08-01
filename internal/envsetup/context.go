@@ -127,11 +127,18 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 
 // runtimeDir returns the base path where runtime files live for this sandbox.
 // Container backends use /yoloai; host-filesystem backends (seatbelt) use the
-// host sandbox dir; VM backends that declare VMRuntimeDir use that path
-// (e.g. Tart uses /Users/admin/.yoloai, the symlinked path with no spaces).
+// flat guest view over the sandbox dir's tiers; VM backends that declare
+// VMRuntimeDir use that path (e.g. Tart uses /Users/admin/.yoloai, the symlinked
+// path with no spaces).
+//
+// This is agent-facing prose — the paths it names are what the agent is told to
+// read — so it has to name the paths the agent can actually reach. A
+// host-filesystem backend sees the real directory rather than a mount namespace,
+// and since tiering that directory is three tiers, not the flat layout the text
+// used to promise.
 func runtimeDir(sandboxDir string, meta *store.Environment) string {
 	if meta.HostFilesystem {
-		return sandboxDir
+		return config.GuestViewDir(sandboxDir)
 	}
 	if desc, ok := runtime.Descriptor(meta.BackendType); ok && desc.Capabilities.VMRuntimeDir != "" {
 		return desc.Capabilities.VMRuntimeDir

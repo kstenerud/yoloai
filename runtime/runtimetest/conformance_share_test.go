@@ -53,6 +53,7 @@ func (f *fakeConfBackend) fixture(ctx context.Context) InterfaceBackend {
 		Ctx:                    ctx,
 		SharesReadOnlyInstance: f.shares,
 		SkipMounts:             "fake backend has no filesystem to mount",
+		SkipSandboxTiers:       "fake backend has no filesystem, so it has no sandbox dir to tier",
 		SkipStdio:              "fake backend does not exercise stdio",
 		NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 			require.NoError(t, f.Create(ctx, cfg))

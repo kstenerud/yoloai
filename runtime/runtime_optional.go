@@ -80,6 +80,17 @@ type WorkDirSetup interface {
 	// SetupWorkDirInVM returns shell commands to copy from VirtioFS staging
 	// to local VM storage and create git baseline. Called during Create/Reset.
 	SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []string
+
+	// WorkDirStagingPath returns the guest-visible path of the host-staged work
+	// copy for hostPath — the source SetupWorkDirInVM copies from.
+	//
+	// The backend answers this because only the backend knows how the sandbox
+	// directory reaches its guest. The caller used to build the path from a
+	// literal ("/Volumes/My Shared Files/yoloai/work/…"), which is tart's share
+	// layout spelled out in the orchestrator: correct until the layout moved,
+	// then silently wrong — a copy-mode workdir would stage from a path that no
+	// longer exists, in a package no backend change would ever make you re-read.
+	WorkDirStagingPath(hostPath string) string
 }
 
 // GitExecer is an optional interface for backends that run the copy-mode

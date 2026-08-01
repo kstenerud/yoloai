@@ -313,6 +313,12 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 		return fmt.Errorf("regenerate sandbox scripts: %w", err)
 	}
 
+	// Assemble the flat guest view over the tiers, after the scripts that
+	// populate the read-only tier and before anything runs against it.
+	if err := config.AssembleGuestView(sandboxPath); err != nil {
+		return fmt.Errorf("assemble guest view: %w", err)
+	}
+
 	// Open log file for stderr capture
 	logPath := filepath.Join(config.BackendPath(sandboxPath), processLogFileName)
 	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
@@ -336,7 +342,10 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	if bareInstance {
 		sandboxArgs = append(sandboxArgs, "tail", "-f", "/dev/null")
 	} else {
-		sandboxArgs = append(sandboxArgs, "python3", setupScriptPath, "seatbelt", sandboxPath)
+		// The guest is handed the flat view, not the sandbox dir: it joins every
+		// path from this one root, and the tiered sandbox dir has no logs/ or
+		// bin/ of its own any more.
+		sandboxArgs = append(sandboxArgs, "python3", setupScriptPath, "seatbelt", config.GuestViewDir(sandboxPath))
 	}
 	cmd := sysexec.Command(r.sandboxEnv(), r.sandboxExecBin, sandboxArgs...)
 	cmd.Stderr = logFile
