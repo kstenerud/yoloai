@@ -143,6 +143,12 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 	// on an un-relocated flat v0 install the sandboxes are still at TOP/sandboxes,
 	// not the namespaced location opts.sys is rooted at. (The apply path relocates
 	// first, so its plan read via opts.sys is already correct.)
+	// A realm below the frozen ceiling has no framework plan yet — see
+	// config.FrameworkPlanDerivable. Reporting that is the audit's honest answer;
+	// deriving it anyway is what made --check fail on the oldest installs (DF168).
+	if !config.FrameworkPlanDerivable(cliutil.CurrentLibrarySchema()) {
+		return previewDeferredPlan(opts, cliSt, libSt)
+	}
 	planSys, err := cliutil.MigratePreviewSystem()
 	if err != nil {
 		return err
@@ -175,6 +181,32 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 		}
 	}
 	return nil
+}
+
+// deferredPlanNote explains why --check has no framework plan to show. It is a
+// statement about ordering, not a warning: the migration itself runs both halves
+// in one command, so nothing is asked of the reader.
+const deferredPlanNote = "not yet derivable — the sealed v0->v3 ladder runs first, and the " +
+	"framework migrators plan against the records it produces. `yoloai system migrate` runs both, " +
+	"in that order."
+
+// previewDeferredPlan renders the --check/--dry-run audit for a realm below the
+// frozen ceiling: realm status, and the reason the framework half of the plan is
+// absent rather than empty. An empty plan would read as "nothing to do", which is
+// the one thing it does not mean here.
+func previewDeferredPlan(opts planApplyOpts, cliSt, libSt config.LayoutStatus) error {
+	if opts.json {
+		return cliutil.WriteJSON(opts.out, map[string]any{
+			"cli_realm":              statusString(cliSt),
+			"library_realm":          statusString(libSt),
+			"framework_plan":         nil,
+			"framework_plan_pending": deferredPlanNote,
+		})
+	}
+	_, err := fmt.Fprintf(opts.out,
+		"CLI realm:     %s\nLibrary realm: %s\nFramework plan: %s\n",
+		statusString(cliSt), statusString(libSt), deferredPlanNote)
+	return err
 }
 
 func statusString(s config.LayoutStatus) string {

@@ -278,3 +278,20 @@ func TestMigrateLibrary_V1ToV2_BackfillsLaunchPrefix(t *testing.T) {
 	assert.Empty(t, readLaunchPrefix(t, dockerBox), "container sandbox must stay empty")
 	assert.Equal(t, `PATH="/wrap/bin:$PATH" `, readLaunchPrefix(t, tartHave), "already-correct value rewritten identically")
 }
+
+// The frozen ceiling is the boundary at which the framework migrators' plan
+// becomes defined. Below it their inputs are records the sealed ladder has not
+// raised yet, so planning is not a slow operation but an undefined one — asking
+// anyway is DF168.
+func TestFrameworkPlanDerivable(t *testing.T) {
+	// Every realm from an install predating the v2->v3 record relocation.
+	for _, v := range []int{0, 1, 2} {
+		assert.False(t, FrameworkPlanDerivable(v),
+			"a realm at v%d still holds records no reader will return", v)
+	}
+	// The ceiling itself is derivable — the ladder is done at exactly v3.
+	assert.True(t, FrameworkPlanDerivable(libraryFrozenVersion))
+	for _, v := range []int{4, 5, LibrarySchemaVersion} {
+		assert.True(t, FrameworkPlanDerivable(v))
+	}
+}

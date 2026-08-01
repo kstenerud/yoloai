@@ -35,6 +35,26 @@ const LibrarySchemaVersion = SchemaPrincipalRenamed
 // migrations take the realm from here to LibrarySchemaVersion.
 const libraryFrozenVersion = 3
 
+// FrameworkPlanDerivable reports whether the framework migrators can be planned
+// against a realm currently stamped onDiskSchema.
+//
+// They cannot, below the frozen ceiling. A framework migrator plans by reading
+// per-sandbox records, and a realm below the ceiling still holds records the
+// sealed ladder has not raised to the current record version — which every
+// reader correctly refuses (D61: no write on read). So the plan is not merely
+// inconvenient to derive there, it is not yet defined: the ladder has to run
+// first, and only then does "what would the framework migrators do" have an
+// answer.
+//
+// The caller this exists for is `system migrate`'s pre-flight refusal, which
+// wants to reject a blocked sandbox BEFORE mutating anything. Above the ceiling
+// it still can, and does. Below it, that guarantee is unavailable, and asking
+// for it anyway is DF168: the guard refused every pre-v3 install by planning
+// against records that only the migration it was guarding could fix.
+func FrameworkPlanDerivable(onDiskSchema int) bool {
+	return onDiskSchema >= libraryFrozenVersion
+}
+
 // Framework-migration target versions past libraryFrozenVersion. Each framework
 // migrator advances the realm one step and stamps its OWN target LAST — after
 // its per-sandbox pass is durable — guarded so a re-run never lowers a higher

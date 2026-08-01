@@ -74,6 +74,9 @@ finding or decision first, and lands here only if it should block the release.
   tiering (host-only / read-only / read-write), closing DF136 and DF148
 - [DF161](design/findings-resolved.md) — mount conformance was skipped on the only two backends
   whose mounts are unusual, over one hardcoded path
+- [DF168](design/findings-resolved.md) — `system migrate` plans the framework migrators before the
+  sealed ladder runs, so an install with pre-v3 records cannot be upgraded by any release since
+  v0.6.0
 - [DF162](design/findings-resolved.md) — seatbelt's `:ro` mounts were not read-only whenever a
   broader rule granted write **(the second breaking change: `:ro` is now enforced)**
 

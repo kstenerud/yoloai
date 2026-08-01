@@ -62,6 +62,24 @@ not a clock; an unreleased entry says `(pending)`.
 **Review status (2026-07-17): nothing is due.** The oldest entries come due 2026-09-12 through
 2026-09-22. Sorted oldest-first — the top of this list is always what to look at.
 
+### Standing consideration: the oldest rungs serve a population under 100
+
+**Owner input, 2026-08-01.** yoloAI had fewer than 100 users in the pre-v0.6.0 era, so the ladder's
+oldest rungs — the sealed v0→v3 ladder and everything that exists to read the layouts it converts —
+are candidates for retirement rather than indefinite carriage. The grace-period table above prices
+compatibility by *how long until the population has moved on*; here the population was small enough
+at the time that the answer may already be "it has".
+
+This is a consideration, not a decision, and nothing below is due early because of it. **The owner
+decides if and when an actual retirement happens**, entry by entry, as the Lifecycle section says.
+It is recorded here so the question is asked at the next review with the relevant fact attached,
+instead of each review re-deriving from scratch that these rungs feel old.
+
+Weight for that review: [DF168](design/findings-resolved.md) found that this exact population — an
+install with pre-v3 records — could not be migrated by *any* release from v0.6.0 through v0.9.0.
+That is now fixed, but for the whole of that window the compatibility being carried for these
+installs did not actually work, which is evidence about how much it was exercised.
+
 ## Register
 
 ### Library schema ladder — upgrading a data dir from before `.schema-version` existed
