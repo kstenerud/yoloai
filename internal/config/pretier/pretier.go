@@ -63,3 +63,24 @@ func RuntimeConfigPath(sandboxDir string) string {
 func WorkDir(sandboxDir string) string {
 	return filepath.Join(sandboxDir, WorkDirName)
 }
+
+// WorkDirFor returns the pre-tier work directory of a single mount, given its
+// caret-encoded path segment (store.EncodePath). The encoding is passed in
+// rather than computed here for two reasons: it keeps this package on the
+// standard library alone, and an encoding is not a layout — it did not move
+// with the tiers and has no pre-tier form to freeze.
+func WorkDirFor(sandboxDir, encodedPath string) string {
+	return filepath.Join(WorkDir(sandboxDir), encodedPath)
+}
+
+// OverlayLowerName is the subdirectory, under one mount's work directory, where
+// a pre-v4 :overlay sandbox bind-mounted the user's original workdir read-only.
+const OverlayLowerName = "lower"
+
+// OverlayLowerFor returns that pristine lower, which the v3->v4 flatten migrator
+// rebuilds an abandoned overlay sandbox from. Doubly frozen: the tier move put
+// work/ somewhere else, and :overlay itself was retired at v4 (D109), so no live
+// layout has anywhere to point.
+func OverlayLowerFor(sandboxDir, encodedPath string) string {
+	return filepath.Join(WorkDirFor(sandboxDir, encodedPath), OverlayLowerName)
+}

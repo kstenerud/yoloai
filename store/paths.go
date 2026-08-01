@@ -365,8 +365,13 @@ func WorkDir(sandboxDir string, hostPath string) string {
 // OverlayLowerDir returns the mount-point directory, under a retired overlay
 // sandbox's work base (<sandboxDir>/work/<caret-encoded-path>/), where the
 // user's original workdir was bind-mounted read-only. :overlay is retired
-// (D109); this is the one overlay path the v3->v4 flatten migrator still reads
-// to rebuild an abandoned overlay sandbox from its pristine lower.
+// (D109).
+//
+// Nothing in-tree calls this any more. Its one caller was the v3->v4 flatten
+// migrator, which now takes the frozen pre-tier form (pretier.OverlayLowerFor):
+// an overlay path is pre-v4 and pre-tier both, so it must not follow the live
+// layout anywhere (DF164, standards/go.md "A migrator addresses the layout of
+// its own era"). Retained as published API; do not reach for it in new code.
 //
 //	<sandboxDir>/work/<caret-encoded-path>/lower/
 func OverlayLowerDir(sandboxDir string, hostPath string) string {

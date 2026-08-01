@@ -385,6 +385,33 @@ pre-commit verification in
 [migration-by-duplication.md](../design/plans/migration-by-duplication.md) — are exactly the ones
 that have no way to notice.
 
+### A migrator addresses the layout of its own era
+
+A migrator never builds a path with the live path builders (`store.EnvironmentFilePath`,
+`store.WorkDir`, `config.*Path`). It reads and writes the layout of the version it is migrating
+*from*, which by definition is not the layout the current build uses. The frozen forms live in
+[`internal/config/pretier`](../../../internal/config/pretier/pretier.go) — literal paths, deliberately
+not expressed in terms of the live builders, because their whole job is to keep pointing where the
+current layout no longer does.
+
+Reads and writes are pinned **together**. A migrator that reads the old location and writes the new
+one leaves the record its own version check re-reads untouched, so the sandbox re-migrates on every
+run, forever — and a migrator with an external side effect (`PrincipalRename` renames containers)
+repeats that side effect every time.
+
+The failure this prevents is silent in both directions. A migrator pointed at the wrong layout does
+not error: it finds nothing, reports "nothing to migrate", and lets the realm stamp the new schema
+over sandboxes it never converted — after which the gate reads the realm as current and never routes
+back to `system migrate`, which is the only thing that could have fixed it.
+
+**And the tests are half the rule: a migrator's fixtures are literals too.** A fixture built with the
+same builder the migrator reads with cannot fail, whatever the layout does — the two agree with each
+other while both disagree with every sandbox on disk. That is not hypothetical: the v5→v6 tier move
+broke all three pre-v6 migrators with the entire suite green, because a well-meaning commit had
+updated the fixtures to follow the move (DF164). Fixtures do not use `pretier` either; pinning them
+to the module the code reads with re-closes the same loop, and the literals are what would catch
+`pretier` itself being "helpfully" rewritten in terms of the live builders.
+
 ## Code Organization Patterns
 
 - **Accept interfaces, return structs** — define interfaces at the point of consumption, not alongside the implementation
