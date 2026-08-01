@@ -23,6 +23,28 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `store.OverlayLowerDir` is removed (Go embedding surface)
+
+**Previous behavior:** the `store` package exported `OverlayLowerDir(sandboxDir, hostPath)`,
+returning `<sandboxDir>/work/<caret-encoded-path>/lower/` — where an `:overlay` sandbox
+bind-mounted the user's original workdir read-only.
+
+**New behavior:** the function is gone. `:overlay` was removed as a mount mode in v0.6.0, and
+this helper survived only because `yoloai system migrate`'s v3→v4 flatten still read that
+directory to rebuild an abandoned overlay sandbox from its pristine lower. The migrator now
+resolves it through `internal/config/pretier`, which freezes the pre-tier on-disk layout, so
+nothing addresses an overlay path through the live layout builders any more — the point being
+that an overlay path is frozen twice over (pre-`:overlay`-retirement *and* pre-tiering) and must
+never follow a layout that has since moved.
+
+**Who this affects:** embedders that called it directly. Nothing else in the public surface
+changes, and no on-disk data is touched — the directory it named still exists inside any
+un-migrated overlay sandbox, and `yoloai system migrate` still reads it.
+
+**If you need it:** it is one `filepath.Join`, and it addresses a layout no supported sandbox
+has been written in since v0.6.0. Spell it literally rather than deriving it from a current
+path builder, for the reason above.
+
 ### On Seatbelt, a `:ro` directory is now genuinely read-only
 
 **Previous behavior:** `--dir <path>:ro` on the Seatbelt backend granted the agent

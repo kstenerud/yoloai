@@ -157,6 +157,21 @@ not a clock; an unreleased entry says `(pending)`.
   only reason `system migrate` ever contacts one.
 - **Pointer:** `internal/orchestrator/migrate_overlay.go`
 
+### `internal/config/pretier` — the frozen pre-tier sandbox layout
+
+- **Incurred:** 2026-07-31 (`7e2efbf3`) · **Shipped:** v0.11.0 (pending) · **Due:** 2027-01-31 (internal, 6mo)
+- **What:** literal, deliberately un-abstracted paths for the flat sandbox layout every schema
+  below v6 was written in — `environment.json` and its siblings at the sandbox root, `work/`, and
+  an `:overlay` sandbox's `lower/`. It exists because a migrator must address the layout of the
+  era it migrates *from*, which is never the one the live builders resolve (DF164,
+  standards/go.md "A migrator addresses the layout of its own era"). Registered late: the package
+  landed with the first migrator pinned to it and no entry, which is the exact omission this
+  register was created to catch.
+- **Retire by:** the ladder floor, with the last pre-v6 migrator. It has no independent life —
+  nothing outside `internal/orchestrator/migrate_*.go` may import it, and if something does, that
+  is the defect, not a reason to keep it.
+- **Pointer:** `internal/config/pretier/pretier.go`
+
 ### v4→v5 principal rename, and `store.LegacyCLIInstanceName`
 
 - **Incurred:** 2026-07-16 (`3ca2828e`) · **Shipped:** v0.9.0 (pending) · **Due:** 2027-01-16 (internal, 6mo)
