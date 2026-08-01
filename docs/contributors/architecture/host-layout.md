@@ -83,9 +83,11 @@ library/
 │           ├── cache/             # Agent cache (HTTP responses, cloned repos)
 │           ├── home/              # Sandbox HOME directory (seatbelt, tart)
 │           ├── vscode-cli/        # VS Code CLI state
+│           ├── tmux.sock          # Per-sandbox tmux socket (seatbelt) — at the
+│           │                       # tier root, not under tmux/: a Unix socket
+│           │                       # path is capped at 104 bytes (DF169)
 │           ├── tmux/              # Tmux runtime
-│           │   ├── tmux.conf      # Tmux configuration
-│           │   └── tmux.sock      # Per-sandbox tmux socket (seatbelt)
+│           │   └── tmux.conf      # Tmux configuration
 │           ├── work/
 │           │   └── <caret-encoded-path>/  # Copy of workdir with internal git repo
 │           └── <name> -> ../ro/<name>     # Links surfacing the read-only tier flat

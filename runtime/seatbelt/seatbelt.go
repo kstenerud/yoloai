@@ -86,9 +86,6 @@ const (
 	// profileFileName is the generated SBPL profile.
 	profileFileName = "profile.sb"
 
-	// tmuxSocketName is the per-sandbox tmux socket filename.
-	tmuxSocketName = "tmux.sock"
-
 	// symlinkManifestName tracks mount symlinks for cleanup.
 	symlinkManifestName = "mount-symlinks.txt"
 )
@@ -348,6 +345,12 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	if bareInstance {
 		sandboxArgs = append(sandboxArgs, "tail", "-f", "/dev/null")
 	} else {
+		// Only the monitor path binds the tmux socket, so only it is subject to
+		// the path cap — a bare instance never creates one and must not be
+		// refused for a limit it cannot reach.
+		if err := checkTmuxSocketPathFits(sandboxPath); err != nil {
+			return err
+		}
 		// The guest is handed the flat view, not the sandbox dir: it joins every
 		// path from this one root, and the tiered sandbox dir has no logs/ or
 		// bin/ of its own any more.
@@ -428,7 +431,7 @@ func (r *Runtime) Stop(_ context.Context, name string) error {
 	sandboxPath := r.sandboxDirForName(name)
 
 	// Kill tmux server via socket
-	tmuxSock := filepath.Join(config.TmuxPath(sandboxPath), tmuxSocketName)
+	tmuxSock := config.TmuxSocketPath(sandboxPath)
 	if _, err := os.Stat(tmuxSock); err == nil {
 		killCmd := sysexec.Command(r.execEnv, "tmux", "-S", tmuxSock, "kill-server")
 		_ = killCmd.Run()
@@ -623,6 +626,37 @@ func (r *Runtime) DiagHint(instanceName string) string {
 	return fmt.Sprintf("check log at %s", logPath)
 }
 
+// maxUnixSocketPath is the byte cap on a Unix-domain socket path: macOS's
+// sun_path is 104 bytes including the terminator, and seatbelt is macOS-only.
+// Nothing in the kernel error names the limit — a path one byte over fails with
+// ENAMETOOLONG, which tmux reports as "File name too long" against a socket
+// nobody chose the length of.
+const maxUnixSocketPath = 104
+
+// checkTmuxSocketPathFits rejects a sandbox whose tmux socket path would exceed
+// the kernel's limit, before the socket is bound and with a message that names
+// the limit.
+//
+// The limit is spent by the whole path — the data directory, "library/sandboxes",
+// the sandbox name and the tier — so it is not a property of the name alone and
+// config.ValidateName cannot see it: the same name fits under one data dir and
+// not another. Without this check the sandbox is created, reports success, and
+// then fails deeper in `start` with a tmux error naming neither the limit nor
+// the cause, which is exactly how it shipped (DF169) and how the release gate's
+// own generated names hit it. `yoloai new` is create+start, so a user still sees
+// this at the point they named the sandbox.
+func checkTmuxSocketPathFits(sandboxDir string) error {
+	sock := config.TmuxSocketPath(sandboxDir)
+	if len(sock) < maxUnixSocketPath {
+		return nil
+	}
+	overBy := len(sock) - maxUnixSocketPath + 1
+	return yoerrors.NewUsageError(
+		"sandbox name is too long for this data directory: the tmux socket path would be %d bytes and macOS allows %d (%s).\n"+
+			"Shorten the sandbox name by at least %d character(s), or use a shorter --data-dir",
+		len(sock), maxUnixSocketPath-1, sock, overBy)
+}
+
 // TmuxSocket returns the per-sandbox tmux socket path for seatbelt. Each
 // seatbelt sandbox has its own socket under its sandbox directory, so the
 // socket path is derived from sandboxDir. Host consumers must call this live
@@ -630,7 +664,7 @@ func (r *Runtime) DiagHint(instanceName string) string {
 // `yoloai system migrate`, so a frozen host-absolute socket path goes stale —
 // freeze only target-internal paths, recompute host paths from the live layout.
 func (r *Runtime) TmuxSocket(sandboxDir string) string {
-	return filepath.Join(config.TmuxPath(sandboxDir), tmuxSocketName)
+	return config.TmuxSocketPath(sandboxDir)
 }
 
 // AttachCommand returns the command to attach to the tmux session for seatbelt.
@@ -789,7 +823,7 @@ func (r *Runtime) sandboxEnv() []string {
 
 // waitForTmux polls until the tmux session appears via the per-sandbox socket.
 func (r *Runtime) waitForTmux(ctx context.Context, sandboxPath string, procDone <-chan error) error {
-	tmuxSock := filepath.Join(config.TmuxPath(sandboxPath), tmuxSocketName)
+	tmuxSock := config.TmuxSocketPath(sandboxPath)
 	deadline := time.Now().Add(30 * time.Second)
 
 	for {
@@ -863,7 +897,7 @@ func (r *Runtime) buildExecCommand(sandboxPath string, cmd []string) *exec.Cmd {
 
 // buildTmuxCommand injects the per-sandbox socket into a tmux command.
 func (r *Runtime) buildTmuxCommand(sandboxPath string, cmd []string) *exec.Cmd {
-	tmuxSock := filepath.Join(config.TmuxPath(sandboxPath), tmuxSocketName)
+	tmuxSock := config.TmuxSocketPath(sandboxPath)
 
 	// cmd[0] is "tmux", inject -S <socket> after it
 	args := []string{"-S", tmuxSock}

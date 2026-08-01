@@ -493,7 +493,10 @@ func TestBuildTmuxCommand(t *testing.T) {
 	if args[1] != "-S" {
 		t.Errorf("second arg should be -S, got %q", args[1])
 	}
-	expectedSocket := filepath.Join(config.TmuxPath(sandboxPath), "tmux.sock")
+	// Spelled literally, not composed from the builder: the socket's *depth* is
+	// what the 104-byte sun_path cap is spent on (DF169), so a test that follows
+	// the builder would stay green through a move that re-breaks long names.
+	expectedSocket := sandboxPath + "/rw/tmux.sock"
 	if args[2] != expectedSocket {
 		t.Errorf("third arg should be socket path %q, got %q", expectedSocket, args[2])
 	}

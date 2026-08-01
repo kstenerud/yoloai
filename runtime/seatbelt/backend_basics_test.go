@@ -8,6 +8,7 @@ package seatbelt
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -126,4 +127,43 @@ func TestResolveCopyMount_ResolvesIntoTheReadWriteTier(t *testing.T) {
 	// Spelled literally too: the assertion above would follow a wrong builder.
 	assert.Contains(t, got, filepath.Join("mybox", "rw", "work"),
 		"the work copy is read-write tier state")
+}
+
+// TestCheckTmuxSocketPathFits_RefusesBeforeTheSocketIsBound pins the boundary
+// and, more importantly, which side of it errors.
+//
+// The limit belongs to the whole path, so the same sandbox name is fine under a
+// short data dir and impossible under a long one — which is why it cannot be a
+// name-validation rule and has to be checked where the resolved path is known.
+// Before this check the sandbox was created, reported success, and then failed
+// deeper in `start` with tmux's "File name too long" against a path nobody chose
+// the length of; the release gate's own generated names hit it (DF169).
+func TestCheckTmuxSocketPathFits_RefusesBeforeTheSocketIsBound(t *testing.T) {
+	// Work backwards from the cap so the case cannot drift with the layout: the
+	// longest sandbox dir whose socket path still fits, and one byte more. The
+	// suffix is measured, not spelled, so it stays right if the tier moves.
+	suffix := len(config.TmuxSocketPath("x")) - len("x")
+	fits := strings.Repeat("a", maxUnixSocketPath-1-suffix)
+	require.NoError(t, checkTmuxSocketPathFits(fits),
+		"a socket path of exactly the maximum length must be accepted")
+	require.Len(t, config.TmuxSocketPath(fits), maxUnixSocketPath-1)
+
+	err := checkTmuxSocketPathFits(fits + "a")
+	require.Error(t, err, "one byte over the cap must be refused")
+	// The message has to name the limit and the remedy: the kernel's does not,
+	// and it surfaces from inside tmux where the sandbox name is not in scope.
+	assert.Contains(t, err.Error(), "too long for this data directory")
+	assert.Contains(t, err.Error(), "Shorten the sandbox name")
+	assert.Contains(t, err.Error(), "--data-dir")
+}
+
+// TestTmuxSocketPath_SitsAtTheTierRoot pins the depth, which is the part that is
+// load-bearing rather than cosmetic: every path component between the sandbox
+// dir and the socket is spent from the same 104-byte budget, so moving the
+// socket back under tmux/ would silently re-narrow the usable name length.
+func TestTmuxSocketPath_SitsAtTheTierRoot(t *testing.T) {
+	got := config.TmuxSocketPath("/data/sandboxes/mybox")
+
+	assert.Equal(t, "/data/sandboxes/mybox/rw/tmux.sock", got)
+	assert.NotContains(t, got, "/tmux/", "the socket must not sit inside tmux/ — that costs five bytes of sun_path")
 }

@@ -268,10 +268,14 @@ the funnel's original sweep did not look.
 - **The migrator's refusal of a running sandbox, against a live tart VM.** Both `--check` and apply
   refuse, by name and with the reason; the layout is untouched and the VM keeps running.
 
-**One defect filed, not fixed:** tiering spends three more bytes of the 104-byte `sun_path` budget,
-so on seatbelt the longest workable sandbox name dropped from 42 to 39 while `MaxNameLength` stays
-56 — a legal name fails at `start` with an opaque tmux error. Measured on both binaries, pre-existing,
-three candidate fixes with different trade-offs. [DF169](../findings-unresolved.md).
+**One defect found, filed, and then fixed when it turned out not to be latent.** Tiering spends three
+more bytes of the 104-byte `sun_path` budget, so on seatbelt the longest workable sandbox name
+dropped from 42 to 39 while `MaxNameLength` stays 56. Filed as an arithmetic narrowing — and the
+next tier of the same gate run failed on it, because the smoke harness generates 41-character names
+of its own. The fix (owner's call): the socket moves up one level to `rw/tmux.sock`, taking the
+ceiling to **44** — more headroom than the flat layout had — and what remains is refused by name
+before the socket is bound, rather than surfacing as tmux's `File name too long`.
+[DF169](../findings-resolved.md).
 
 ## Problem
 

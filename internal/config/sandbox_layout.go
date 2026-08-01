@@ -74,7 +74,10 @@ const (
 	CacheDirName        = "cache"
 	WorkDirName         = "work"
 	VSCodeCLIDirName    = "vscode-cli"
-	ContextFileName     = "context.md"
+	// TmuxSocketFileName is the per-sandbox tmux socket, at the read-write tier
+	// root rather than under tmux/ — see TmuxSocketPath for why the depth matters.
+	TmuxSocketFileName = "tmux.sock"
+	ContextFileName    = "context.md"
 	// SecretsDirName holds credentials staged for the guest to read once at
 	// startup, then removed. It was a bare literal at three call sites until
 	// 2026-07-30; naming it is what lets its tier be changed in one place.
@@ -228,9 +231,23 @@ func WorkBasePath(sandboxDir string) string {
 	return filepath.Join(ReadWriteTierDir(sandboxDir), WorkDirName)
 }
 
-// TmuxPath returns the tmux config/socket directory within a sandbox.
+// TmuxPath returns the tmux config directory within a sandbox.
 func TmuxPath(sandboxDir string) string {
 	return filepath.Join(ReadWriteTierDir(sandboxDir), TmuxDirName)
+}
+
+// TmuxSocketPath returns the per-sandbox tmux socket path for a backend whose
+// tmux runs on the host (seatbelt). It sits at the tier root rather than inside
+// tmux/ beside the config, and the five bytes that saves are the entire reason.
+//
+// A Unix socket path is capped at 104 bytes on macOS (sun_path) — a limit on the
+// *path*, not on any name yoloAI validates — and the sandbox name is spent
+// against it along with the whole data-directory path. Tiering added "/rw" to
+// that path, which was enough to push the release gate's own generated sandbox
+// names over the edge (DF169). This keeps the socket in the tier that owns it
+// while giving back more headroom than the flat layout had.
+func TmuxSocketPath(sandboxDir string) string {
+	return filepath.Join(ReadWriteTierDir(sandboxDir), TmuxSocketFileName)
 }
 
 // SecretsPath returns the ephemeral credential staging directory within a

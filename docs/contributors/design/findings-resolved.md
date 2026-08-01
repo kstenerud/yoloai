@@ -1807,3 +1807,30 @@ sound — what was wrong was the path tested.
   or replaces its own view link cannot make the host read a file of its choosing.
 - **Guard:** the `SandboxTiers` conformance section (read succeeds, write fails, contents unchanged)
   plus `TestSeatbelt_ReadOnlyTierIsUnwritableFromInside`, both kernel-level; verified red on revert.
+
+### DF169 — a legal sandbox name can exceed the seatbelt tmux socket's 104-byte path limit, and tiering narrowed the margin by three characters
+
+- **Discovered:** 2026-08-01, rehearsing the v0.9.0 → tiered upgrade on macOS · **Workstream:** sandbox-share-tiering
+- **Severity:** HIGH, and no longer latent — **it fails the release gate on this branch.** `make smoketest` on macOS reports `*** FAIL [tag_transfer/seatbelt]` with `error connecting to …/rw/tmux/tmux.sock (File name too long)`. The harness generates run-scoped names like `ysmk-1wqEi5qg91-tag-transfer-seatbelt-010` (41 chars), whose socket path is **102 bytes flat and 105 tiered** — so the three bytes `/rw` are the whole difference between the gate passing and failing. The cliff is pre-existing; landing on it is not. Not data loss: the sandbox is created, then fails at `start` with an error naming tmux rather than the name that caused it.
+- **This is the finding's own point, demonstrated.** It was filed as an arithmetic narrowing (42 → 39) with three candidate fixes and no urgency. The next tier of the same gate run then produced a 41-character name from yoloAI's own test harness — i.e. the population that trips it is not "users who pick long names", it is anything that generates one, and this repo does.
+- **Rides:** any. It is a fix, not a break.
+- **Reproduced, not reasoned**, on both binaries, with a data dir the same length as this host's default (`$HOME/.yoloai`, 27 chars):
+
+  | binary | longest working name | first failing name |
+  | --- | --- | --- |
+  | `v0.9.0` (flat) | 42 | 43 |
+  | branch (tiered) | 39 | 40 |
+
+  The boundary is the socket path crossing 104 bytes exactly (103 starts, 104 fails), i.e. macOS's `sun_path`. `config.MaxNameLength` is **56**, so every name from 40 to 56 is accepted by validation and then fails to start.
+- **The mechanism.** Seatbelt's tmux socket lives inside the sandbox dir — `store.TmuxSocket` → `config.TmuxPath(sandboxDir)/tmux.sock` — so its length is `<dataDir>/library/sandboxes/<name>/rw/tmux/tmux.sock`. Tiering inserted `/rw`, spending 3 of a fixed 104-byte budget that nothing checks. The failure surfaces from inside `sandbox-setup.py` as `error connecting to …/tmux.sock (File name too long)`, which names neither the sandbox name nor the limit.
+- **Why it is filed rather than fixed.** Three candidate fixes and the choice is a real one, not a detail: (a) validate the resolved socket path at create time and reject with a message naming the limit — cheapest, keeps the socket where it is, still rejects a name the user may care about; (b) relocate the seatbelt socket outside the sandbox dir, which is what **tart already does** (`/private/tmp/tmux-501/default`, backend-idiosyncrasies.md) — removes the cliff entirely but puts sandbox state outside the sandbox dir, against this workstream's grain; (c) shorten the name in the socket path only (a hash), which decouples the two but makes the socket unnameable by a human debugging it. Picking one is the owner's call and is not tiering work.
+- **Only seatbelt.** The same grep on the sibling backends comes back empty: tart's tmux runs *inside* the guest, where the path is `/Volumes/My Shared Files/rw/tmux/tmux.sock` (42 bytes, and three bytes *shorter* than before tiering), and the container backends keep the socket inside the container.
+- **Pointer:** `runtime/seatbelt/seatbelt.go:617` (`TmuxSocket`), `internal/config/sandbox_layout.go` (`TmuxPath`), `internal/config/names.go:20` (`MaxNameLength = 56`).
+
+- **RESOLVED 2026-08-01 — owner's call between three candidate fixes: shave the path and validate what is left.**
+  - The socket moved from `<sandbox>/rw/tmux/tmux.sock` to `<sandbox>/rw/tmux.sock`. Five bytes, and they are the whole fix: the cap is on the *path*, and every component between the sandbox dir and the socket is spent from it. `tmux.conf` stays under `tmux/` — only the socket, whose length is load-bearing, comes up a level. The usable name ceiling on a default data dir goes **42 (v0.9.0) → 39 (broken) → 44**, so the branch now leaves more headroom than the flat layout it replaced.
+  - `checkTmuxSocketPathFits` refuses the remaining cases by name, before the socket is bound, with a message naming the byte count, the cap, the resolved path and the remedy. It runs on the monitor path only: a bare runtime instance never binds a socket and must not be refused for a limit it cannot reach — which is exactly what a first attempt at create-time validation did, failing every unit test that scaffolds a sandbox under `t.TempDir()`.
+  - **The cliff is moved, not removed, and that is the accepted trade.** `MaxNameLength` is still 56 and a deep enough data directory still runs out of budget; what changed is that running out is now a refusal that says so rather than tmux reporting `File name too long` from inside the guest setup script. Eliminating it entirely means moving the socket out of the sandbox directory (tart's approach), which was the option the owner did not take.
+- **Verified with the real binary, on the name that failed the gate.** `ysmk-1wqEi5qg91-tag-transfer-seatbelt-010` now creates *and starts*; a 44-character name starts; a 45-character one is refused with the message above. `tag_transfer/seatbelt` passes.
+- **Pins:** `TestCheckTmuxSocketPathFits_RefusesBeforeTheSocketIsBound` (boundary, derived from the cap rather than spelled, so it cannot drift with the layout) and `TestTmuxSocketPath_SitsAtTheTierRoot` (the depth itself, which is what a well-meaning tidy-up would undo).
+- **No breaking-change entry.** Nothing that worked before is rejected now: the ceiling rose from 42 to 44, and the names in between fail with a better error than they used to.
