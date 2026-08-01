@@ -419,7 +419,7 @@ func TestBuildTmuxCommand(t *testing.T) {
 	if args[1] != "-S" {
 		t.Errorf("second arg should be -S, got %q", args[1])
 	}
-	expectedSocket := sandboxPath + "/tmux/tmux.sock"
+	expectedSocket := filepath.Join(config.TmuxPath(sandboxPath), "tmux.sock")
 	if args[2] != expectedSocket {
 		t.Errorf("third arg should be socket path %q, got %q", expectedSocket, args[2])
 	}
@@ -596,17 +596,20 @@ func TestMountSymlinks_SkipUnreachableParent(t *testing.T) {
 
 func TestPatchConfigWorkingDir_CopyMode(t *testing.T) {
 	sandboxPath := t.TempDir()
-	workDir := filepath.Join(sandboxPath, "work", "encoded-dir")
+	workDir := filepath.Join(config.WorkBasePath(sandboxPath), "encoded-dir")
 	if err := os.MkdirAll(workDir, 0750); err != nil {
 		t.Fatal(err)
 	}
 
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
 	cfgData, err := json.Marshal(map[string]any{
 		"working_dir": "/original/path",
 		"other_key":   "other_value",
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(cfgPath, cfgData, 0600); err != nil {
@@ -642,7 +645,10 @@ func TestPatchConfigWorkingDir_NotCopyMode(t *testing.T) {
 	sandboxPath := t.TempDir()
 
 	originalConfig := `{"working_dir": "/original/path"}`
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(cfgPath, []byte(originalConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -670,7 +676,10 @@ func TestPatchConfigWorkingDir_NoMounts(t *testing.T) {
 	sandboxPath := t.TempDir()
 
 	originalConfig := `{"working_dir": "/original/path"}`
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(cfgPath, []byte(originalConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -691,7 +700,7 @@ func TestPatchConfigWorkingDir_NoMounts(t *testing.T) {
 
 func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	sandboxPath := t.TempDir()
-	workDir := filepath.Join(sandboxPath, "work", "encoded-dir")
+	workDir := filepath.Join(config.WorkBasePath(sandboxPath), "encoded-dir")
 	if err := os.MkdirAll(workDir, 0750); err != nil {
 		t.Fatal(err)
 	}
@@ -703,7 +712,10 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(cfgPath, cfgData, 0600); err != nil {
 		t.Fatal(err)
 	}

@@ -220,7 +220,7 @@ func TestApplyPatch_DeleteFile(t *testing.T) {
 	name := "test-apply-del"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	hostPath := "/tmp/project"
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	initGitRepo(t, workDir)

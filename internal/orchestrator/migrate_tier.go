@@ -18,7 +18,9 @@ import (
 	"github.com/kstenerud/yoloai/internal/migrate"
 	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
+	"github.com/kstenerud/yoloai/internal/orchestrator/status"
 	"github.com/kstenerud/yoloai/internal/workspace"
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
 )
 
@@ -42,13 +44,66 @@ type TierLayout struct {
 	layout        config.Layout
 	home          string // realm DataDir; scratch, lock and trash live here
 	sandboxesRoot string
+
+	// runtimeFor builds a runtime for one backend, to answer "is this sandbox
+	// running" — the one question this migrator cannot answer from the disk.
+	// Called only while planning, once per distinct backend.
+	runtimeFor func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error)
+	rts        map[runtime.BackendType]runtime.Backend
 }
 
-// NewTierLayout constructs the v5->v6 migrator. It opens no runtime, ever: a
-// Linux host legitimately migrates the tart and seatbelt sandboxes it cannot
-// itself run, so every check here is host-side file inspection.
-func NewTierLayout(layout config.Layout, home, sandboxesRoot string) *TierLayout {
-	return &TierLayout{layout: layout, home: home, sandboxesRoot: sandboxesRoot}
+// NewTierLayout constructs the v5->v6 migrator. runtimeFor is invoked lazily,
+// once per distinct backend, and ONLY to detect a running instance — never to
+// build or verify the staged tree, which stays strictly host-side file
+// inspection so a Linux host can migrate the tart and seatbelt sandboxes it
+// cannot itself run.
+func NewTierLayout(layout config.Layout, home, sandboxesRoot string, runtimeFor func(ctx context.Context, backend runtime.BackendType) (runtime.Backend, error)) *TierLayout {
+	return &TierLayout{
+		layout: layout, home: home, sandboxesRoot: sandboxesRoot,
+		runtimeFor: runtimeFor,
+		rts:        map[runtime.BackendType]runtime.Backend{},
+	}
+}
+
+// Cleanup closes every runtime opened while planning.
+func (t *TierLayout) Cleanup() {
+	for k, rt := range t.rts {
+		_ = rt.Close()
+		delete(t.rts, k)
+	}
+}
+
+// runningReason returns a refusal when the sandbox has a live backend instance,
+// or "" when it does not.
+//
+// This is the one question the disk cannot answer, and it has to be asked: the
+// promotion renames sandboxes/ out from under a running container, whose bind
+// mounts keep pointing at the displaced inodes. The agent would go on writing
+// into trash/ and lose everything the moment it was cleared — silently, because
+// every host-side check still passes.
+//
+// A backend that cannot be constructed on this host is treated as not running,
+// which is sound rather than lenient: a tart VM or a seatbelt process group
+// cannot be live on a machine that cannot run tart or seatbelt. That is also
+// what keeps a Linux host able to migrate those sandboxes at all.
+func (t *TierLayout) runningReason(ctx context.Context, name string) string {
+	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(t.layout.SandboxDir(name)))
+	if err != nil || env.BackendType == "" {
+		return ""
+	}
+	rt, ok := t.rts[env.BackendType]
+	if !ok {
+		rt, err = t.runtimeFor(ctx, env.BackendType)
+		if err != nil {
+			return "" // backend absent here, so nothing of its kind is running here
+		}
+		t.rts[env.BackendType] = rt
+	}
+	st, err := status.DetectStatus(ctx, rt, store.InstanceName(env.Principal, name), t.layout.SandboxDir(name))
+	if err != nil || !isInstanceUp(st) {
+		return ""
+	}
+	return fmt.Sprintf("sandbox %q is running (%s) — stop it and re-run migrate; tiering replaces the sandboxes directory, and a running instance would keep writing into the displaced copy", name, st)
 }
 
 func (t *TierLayout) Describe() string { return "v5->v6 sandbox directory tiering" }
@@ -69,7 +124,7 @@ const treeMarkerName = ".tier-version"
 // a window in which the tree is in a shape no released binary understands, and
 // the only defence against a user getting stuck inside it is that nothing
 // deterministic is left to go wrong by then.
-func (t *TierLayout) Plan(_ context.Context) (migrate.Plan, error) {
+func (t *TierLayout) Plan(ctx context.Context) (migrate.Plan, error) {
 	current, _, err := config.ReadSchemaVersion(t.layout.SchemaVersionPath())
 	if err != nil {
 		return migrate.Plan{}, fmt.Errorf("read schema stamp: %w", err)
@@ -91,6 +146,11 @@ func (t *TierLayout) Plan(_ context.Context) (migrate.Plan, error) {
 		op, err := t.classifySandbox(name)
 		if err != nil {
 			return migrate.Plan{}, err
+		}
+		if op.Auth != migrate.AuthBlocked {
+			if reason := t.runningReason(ctx, name); reason != "" {
+				op = migrate.Op{Description: reason, Auth: migrate.AuthBlocked, Sandbox: name}
+			}
 		}
 		ops = append(ops, op)
 	}

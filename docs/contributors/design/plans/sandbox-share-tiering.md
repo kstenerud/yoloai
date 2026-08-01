@@ -156,7 +156,13 @@ stamp written **last** per D110). Register the migration in [deprecations.md](..
    emitted last, kernel-verified. Closes the seatbelt half of DF136 now rather than at step 3, and
    is a permanent backstop rather than a stopgap; see § The seatbelt host-tier deny.
 3. `create.go` dir creation + the backend wiring (`mounts.Build`, tart two-share + view, seatbelt
-   per-tier grants + view). **Seatbelt's `ro/` grant carries a `(deny file-write* (subpath …/ro))`
+   per-tier grants + view). **The `ro/`+`rw/` builder move landed 2026-08-01, after step 4** — a
+   fresh sandbox now has exactly three tier directories, and docker/podman/containerd/apple follow
+   for free because each already binds per file and only its `HostPath` moved. Verified on real
+   docker: the guest sees the same flat `/yoloai` it always did, `host/` is absent from it, and an
+   agent write still reaches `diff`. **tart and seatbelt are NOT done** — they share the sandbox
+   root rather than binding per file, so they need the two-share + view and the per-tier grants +
+   view respectively, and neither can be exercised on a Linux host. **Seatbelt's `ro/` grant carries a `(deny file-write* (subpath …/ro))`
    backstop on the same pattern** (owner, 2026-07-30). This is not belt-and-braces for its own sake:
    seatbelt expresses read-only as the *absence* of a write grant, so it holds only while nothing
    else grants write over that path — measured, DF161, where the profile's own broad temp grant

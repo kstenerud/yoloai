@@ -9,7 +9,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 	"testing"
 	"time"
 
@@ -36,11 +35,11 @@ func TestKeepaliveOnly_AgentFreeStartup(t *testing.T) {
 
 	// Build a minimal sandbox dir that entrypoint.py can use.
 	sandboxDir := t.TempDir()
-	logsDir := filepath.Join(sandboxDir, "logs")
+	logsDir := config.LogsPath(sandboxDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0750))
 
 	// Write runtime-config.json with keepalive_only: true.
-	rcPath := filepath.Join(sandboxDir, "runtime-config.json")
+	rcPath := config.RuntimeConfigPath(sandboxDir)
 	rc := map[string]any{
 		"schema_version": 1,
 		"keepalive_only": true,

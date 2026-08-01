@@ -154,7 +154,7 @@ func TestSetupAuxDir_CopyMode_CreatesBaselineAndCopy(t *testing.T) {
 	sandboxDir := filepath.Join(tempDir, "sandbox")
 	auxPath := filepath.Join(tempDir, "aux")
 
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0755))                        //nolint:gosec // G301: test directory
+	require.NoError(t, os.MkdirAll(store.WorkBasePath(sandboxDir), 0755))                           //nolint:gosec // G301: test directory
 	require.NoError(t, os.MkdirAll(auxPath, 0755))                                                  //nolint:gosec // G301: test directory
 	require.NoError(t, os.WriteFile(filepath.Join(auxPath, "lib.go"), []byte("package lib"), 0644)) //nolint:gosec // G306: test file
 
@@ -898,7 +898,7 @@ func TestPrepareSandboxState_UnreadableMetadataRefusesAndPreserves(t *testing.T)
 	// ErrNeedsMigration — a real sandbox, not an interrupted creation.
 	testutil.WriteSandboxRecord(t, store.EnvironmentFilePath(sandboxDir),
 		[]byte(`{"version":1,"name":"old"}`))
-	workMarker := filepath.Join(sandboxDir, "work", "proj", "agent-wrote-this.txt")
+	workMarker := filepath.Join(store.WorkBasePath(sandboxDir), "proj", "agent-wrote-this.txt")
 	require.NoError(t, os.MkdirAll(filepath.Dir(workMarker), 0750))
 	require.NoError(t, os.WriteFile(workMarker, []byte("unapplied"), 0600))
 

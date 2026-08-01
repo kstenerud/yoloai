@@ -33,7 +33,7 @@ func TestCopyAgentFiles_StringForm_Normal(t *testing.T) {
 
 	// Create sandbox directory
 	sandboxDir := t.TempDir()
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
 	af := &config.AgentFilesConfig{BaseDir: baseDir}
@@ -55,7 +55,7 @@ func TestCopyAgentFiles_StringForm_MissingSrc(t *testing.T) {
 	spec := agentSpec(agent.GetAgent("claude"))
 
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	// Base dir exists but has no .claude/ subdir
 	af := &config.AgentFilesConfig{BaseDir: t.TempDir()}
@@ -81,12 +81,12 @@ func TestCopyAgentFiles_StringForm_Exclusions(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "todos", "list.json"), []byte("todos"), 0600))
 
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	af := &config.AgentFilesConfig{BaseDir: baseDir}
 	require.NoError(t, CopyAgentFiles(spec, sandboxDir, af, "", nil))
 
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 
 	// settings.json should be copied
 	assert.FileExists(t, filepath.Join(agentStateDir, "settings.json"))
@@ -108,7 +108,7 @@ func TestCopyAgentFiles_StringForm_NoOverwrite(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("from-agent-files"), 0600))
 
 	sandboxDir := t.TempDir()
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 	// Pre-existing file (from SeedFiles) should not be overwritten
 	require.NoError(t, os.WriteFile(filepath.Join(agentStateDir, "settings.json"), []byte("from-seed"), 0600))
@@ -126,7 +126,7 @@ func TestCopyAgentFiles_StringForm_NoStateDirAgent(t *testing.T) {
 	spec := EnvSpec{StateRelPath: "", AgentFilesExclude: nil}
 
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	af := &config.AgentFilesConfig{BaseDir: t.TempDir()}
 	require.NoError(t, CopyAgentFiles(spec, sandboxDir, af, "", nil))
@@ -139,7 +139,7 @@ func TestCopyAgentFiles_ListForm_Files(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "other.txt"), []byte("other"), 0600))
 
 	sandboxDir := t.TempDir()
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
 	spec := agentSpec(agent.GetAgent("claude"))
@@ -169,7 +169,7 @@ func TestCopyAgentFiles_ListForm_Directory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(subDir, "file.txt"), []byte("in-dir"), 0600))
 
 	sandboxDir := t.TempDir()
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
 	spec := agentSpec(agent.GetAgent("claude"))
@@ -186,7 +186,7 @@ func TestCopyAgentFiles_ListForm_Directory(t *testing.T) {
 
 func TestCopyAgentFiles_ListForm_MissingEntry(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	spec := agentSpec(agent.GetAgent("claude"))
 	af := &config.AgentFilesConfig{
@@ -200,7 +200,7 @@ func TestCopyAgentFiles_ListForm_NoOverwrite(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "settings.json"), []byte("from-list"), 0600))
 
 	sandboxDir := t.TempDir()
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 	require.NoError(t, os.WriteFile(filepath.Join(agentStateDir, "settings.json"), []byte("from-seed"), 0600))
 

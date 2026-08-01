@@ -76,10 +76,9 @@ func TestSandboxLayout_HostTierIsNotReachableByPrefixConfusion(t *testing.T) {
 // files a record somewhere the running binary does not look for it — which is
 // invisible to both of them, since each is self-consistent.
 //
-// Only the host tier is asserted here, because only the host tier has moved:
-// ro/ and rw/ builders still resolve flat until the backends are repointed at
-// them. Extend this to all three the moment they do — a builder that moves
-// without its table row is the whole failure this guards.
+// All three tiers are covered. Every per-sandbox builder that resolves into a
+// tier appears below; a builder that moves without its table row, or a row that
+// moves without its builder, fails here and nowhere else.
 func TestTierOfEntry_AgreesWithTheTieredBuilders(t *testing.T) {
 	const sb = "/sandboxes/box"
 	hostBuilders := map[string]string{
@@ -94,7 +93,34 @@ func TestTierOfEntry_AgreesWithTheTieredBuilders(t *testing.T) {
 		InjectorTokenFileName:  InjectorTokenPath(sb),
 		ContextFileName:        ContextPath(sb),
 	}
-	for name, builder := range hostBuilders {
+	readOnly := map[string]string{
+		RuntimeConfigFileName: RuntimeConfigPath(sb),
+		BinDirName:            BinPath(sb),
+		PromptFileName:        PromptPath(sb),
+		ResumePromptFileName:  ResumePromptPath(sb),
+		MachineIDFileName:     MachineIDPath(sb),
+		HomeSeedDirName:       HomeSeedPath(sb),
+		SecretsDirName:        SecretsPath(sb),
+	}
+	readWrite := map[string]string{
+		LogsDirName:          LogsPath(sb),
+		AgentStatusFileName:  AgentStatusPath(sb),
+		AgentRuntimeDirName:  AgentRuntimePath(sb),
+		FilesDirName:         FilesPath(sb),
+		CacheDirName:         CachePath(sb),
+		WorkDirName:          WorkBasePath(sb),
+		TmuxDirName:          TmuxPath(sb),
+		VSCodeCLIDirName:     VSCodeCLIPath(sb),
+		ContainerLogFileName: ContainerLogPath(sb),
+		CreateDoneMarkerName: CreateDoneMarkerPath(sb),
+	}
+	all := map[string]string{}
+	for _, m := range []map[string]string{hostBuilders, readOnly, readWrite} {
+		for k, v := range m {
+			all[k] = v
+		}
+	}
+	for name, builder := range all {
 		tier, recognized := TierOfEntry(name)
 		if !recognized {
 			t.Errorf("%s has a path builder but no tier — the mover would file it as unclassified", name)

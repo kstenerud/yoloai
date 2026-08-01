@@ -243,7 +243,7 @@ func TestReset_InPlace_DoesNotImportIgnoredSecrets(t *testing.T) {
 
 	name := "test-reset-secrets"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(src))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(src))
 	require.NoError(t, os.MkdirAll(workDir, 0o750))
 
 	// The work copy as create leaves it for :copy — the secret is not here.
@@ -397,8 +397,8 @@ func TestReset_InPlace_ResetsAuxCopyDir(t *testing.T) {
 
 	name := "df123-fixed"
 	sandboxDir := filepath.Join(tmp, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(workSrc))
-	auxWorkDir := filepath.Join(sandboxDir, "work", store.EncodePath(auxSrc))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(workSrc))
+	auxWorkDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(auxSrc))
 	for _, d := range []struct{ dir, f, c string }{{workDir, "app.js", "v1\n"}, {auxWorkDir, "aux.txt", "aux-v1\n"}} {
 		require.NoError(t, os.MkdirAll(d.dir, 0o750))
 		testutil.WriteFile(t, d.dir, d.f, d.c)

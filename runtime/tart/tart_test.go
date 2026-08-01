@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"os"
 	"path/filepath"
 	"strings"
@@ -351,12 +352,12 @@ func TestPatchConfigWorkingDir_RemapsDockerPath(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "runtime-config.json"), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, config.RuntimeConfigPath(sandboxDir), cfgData)
 
 	r := &Runtime{}
 	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(config.RuntimeConfigPath(sandboxDir))
 	require.NoError(t, err)
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -371,12 +372,12 @@ func TestPatchConfigWorkingDir_NoopWhenNoRemap(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "runtime-config.json"), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, config.RuntimeConfigPath(sandboxDir), cfgData)
 
 	r := &Runtime{}
 	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(config.RuntimeConfigPath(sandboxDir))
 	require.NoError(t, err)
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -400,13 +401,13 @@ func TestPatchConfigWorkingDir_NoWorkingDirKey(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "runtime-config.json"), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, config.RuntimeConfigPath(sandboxDir), cfgData)
 
 	r := &Runtime{}
 	require.NoError(t, r.patchConfigWorkingDir(sandboxDir))
 
 	// File should remain unchanged
-	data, err := os.ReadFile(filepath.Join(sandboxDir, "runtime-config.json")) //nolint:gosec // test
+	data, err := os.ReadFile(config.RuntimeConfigPath(sandboxDir))
 	require.NoError(t, err)
 	var result map[string]any
 	require.NoError(t, json.Unmarshal(data, &result))

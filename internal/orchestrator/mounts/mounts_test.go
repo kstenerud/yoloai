@@ -76,7 +76,7 @@ func TestBuild_IncludesAgentState(t *testing.T) {
 	for _, m := range mounts {
 		if m.ContainerPath == agentDef.StateDir {
 			found = true
-			assert.Equal(t, "/sandbox/"+store.AgentRuntimeDir, m.HostPath)
+			assert.Equal(t, store.AgentRuntimePath("/sandbox"), m.HostPath)
 		}
 	}
 	assert.True(t, found, "should include agent runtime mount")

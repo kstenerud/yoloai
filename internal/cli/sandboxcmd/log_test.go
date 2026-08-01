@@ -23,7 +23,7 @@ func setupLogTest(t *testing.T, name string) string {
 	tmpDir := clitest.Home(t)
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "logs"), 0750))
+	require.NoError(t, os.MkdirAll(store.LogsPath(sandboxDir), 0750))
 
 	meta := &store.Environment{
 		Name:      name,
@@ -48,7 +48,7 @@ func TestRunLog_NoLogFiles(t *testing.T) {
 
 func TestRunLog_AgentFlag(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-agent")
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte("hello world\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "agent.log"), []byte("hello world\n"), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -74,7 +74,7 @@ func TestRunLog_AgentMissing(t *testing.T) {
 func TestRunLog_AgentRawPreservesANSI(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-agent-raw")
 	ansiContent := "\x1b[31mred text\x1b[0m\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte(ansiContent), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "agent.log"), []byte(ansiContent), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -88,7 +88,7 @@ func TestRunLog_AgentRawPreservesANSI(t *testing.T) {
 func TestRunLog_AgentStripsANSI(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-agent-strip")
 	ansiContent := "\x1b[31mred text\x1b[0m\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent.log"), []byte(ansiContent), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "agent.log"), []byte(ansiContent), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -103,7 +103,7 @@ func TestRunLog_AgentStripsANSI(t *testing.T) {
 func TestRunLog_StructuredJSONL(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-jsonl")
 	entry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"sandbox.attach","msg":"attaching to session"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(entry), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -119,7 +119,7 @@ func TestRunLog_StructuredJSONL(t *testing.T) {
 func TestRunLog_RawEmitsJSONL(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-raw-jsonl")
 	line := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"test.event","msg":"hello"}`
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(line+"\n"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(line+"\n"), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -134,7 +134,7 @@ func TestRunLog_LevelFilter(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-level")
 	entries := `{"ts":"2026-03-15T14:23:01.000Z","level":"debug","event":"a","msg":"debug msg"}` + "\n" +
 		`{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"b","msg":"info msg"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entries), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(entries), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -150,7 +150,7 @@ func TestRunLog_DebugLevel(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-debug")
 	entries := `{"ts":"2026-03-15T14:23:01.000Z","level":"debug","event":"a","msg":"debug msg"}` + "\n" +
 		`{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"b","msg":"info msg"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entries), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(entries), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -166,8 +166,8 @@ func TestRunLog_SourceFilter(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-source")
 	cliEntry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"cli.event","msg":"cli message"}` + "\n"
 	sandboxEntry := `{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"sb.event","msg":"sandbox message"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(cliEntry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "sandbox.jsonl"), []byte(sandboxEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(cliEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "sandbox.jsonl"), []byte(sandboxEntry), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -184,7 +184,7 @@ func TestRunLog_SinceFilter(t *testing.T) {
 	// Two entries: one old (2020), one recent (2026).
 	entries := `{"ts":"2020-01-01T00:00:00.000Z","level":"info","event":"old","msg":"old message"}` + "\n" +
 		`{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"new","msg":"new message"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entries), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(entries), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -202,9 +202,9 @@ func TestRunLog_MultipleSourcesFilter(t *testing.T) {
 	cliEntry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"cli.event","msg":"cli msg"}` + "\n"
 	sbEntry := `{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"sb.event","msg":"sandbox msg"}` + "\n"
 	hooksEntry := `{"ts":"2026-03-15T14:23:03.000Z","level":"info","event":"hooks.event","msg":"hooks msg"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(cliEntry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "sandbox.jsonl"), []byte(sbEntry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "agent-hooks.jsonl"), []byte(hooksEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(cliEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "sandbox.jsonl"), []byte(sbEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "agent-hooks.jsonl"), []byte(hooksEntry), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -220,7 +220,7 @@ func TestRunLog_MultipleSourcesFilter(t *testing.T) {
 func TestRunLog_ExtraFieldsDisplayed(t *testing.T) {
 	sandboxDir := setupLogTest(t, "logtest-extra")
 	entry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"sandbox.create","msg":"creating","sandbox":"my-box","agent":"claude"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(entry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(entry), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -238,7 +238,7 @@ func TestRunLog_MalformedLinesSkipped(t *testing.T) {
 	content := "not json\n" +
 		`{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"e","msg":"valid msg"}` + "\n" +
 		"{incomplete\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(content), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(content), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)
@@ -256,8 +256,8 @@ func TestRunLog_MergeSort(t *testing.T) {
 	cliEntry := `{"ts":"2026-03-15T14:23:03.000Z","level":"info","event":"a","msg":"third"}` + "\n"
 	sandboxEntry := `{"ts":"2026-03-15T14:23:01.000Z","level":"info","event":"b","msg":"first"}` + "\n" +
 		`{"ts":"2026-03-15T14:23:02.000Z","level":"info","event":"c","msg":"second"}` + "\n"
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "cli.jsonl"), []byte(cliEntry), 0600))
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "logs", "sandbox.jsonl"), []byte(sandboxEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "cli.jsonl"), []byte(cliEntry), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(store.LogsPath(sandboxDir), "sandbox.jsonl"), []byte(sandboxEntry), 0600))
 
 	cmd := NewLogAliasCmd()
 	buf := new(bytes.Buffer)

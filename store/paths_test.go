@@ -262,7 +262,7 @@ func TestValidateName(t *testing.T) {
 
 func TestWorkDir(t *testing.T) {
 	sandboxDir := "/data/sandboxes/my-sandbox"
-	expected := filepath.Join(sandboxDir, "work", "^shome^suser^sproject")
+	expected := filepath.Join(config.WorkBasePath(sandboxDir), "^shome^suser^sproject")
 	assert.Equal(t, expected, WorkDir(sandboxDir, "/home/user/project"))
 }
 
@@ -279,6 +279,6 @@ func TestLegacyCLIInstanceName(t *testing.T) {
 
 func TestFilesDir(t *testing.T) {
 	sandboxDir := "/data/sandboxes/my-sandbox"
-	expected := filepath.Join(sandboxDir, "files")
+	expected := config.FilesPath(sandboxDir)
 	assert.Equal(t, expected, FilesDir(sandboxDir))
 }

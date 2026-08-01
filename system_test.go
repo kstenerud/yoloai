@@ -186,8 +186,8 @@ func TestPrune_ClassifiesSandboxDirs(t *testing.T) {
 
 	// data-bearing: overlay upper/ with content (host-side, no container needed).
 	dirty := mkSandboxDir(t, c, "dirty")
-	require.NoError(t, os.MkdirAll(filepath.Join(dirty, "work", "proj", "upper"), 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(dirty, "work", "proj", "upper", "f"), []byte("x"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(config.WorkBasePath(dirty), "proj", "upper"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(config.WorkBasePath(dirty), "proj", "upper", "f"), []byte("x"), 0o600))
 
 	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: true})
 	require.NoError(t, err)
@@ -217,8 +217,8 @@ func TestPrune_ExecutesClassifications(t *testing.T) {
 	corrupt := mkSandboxDir(t, c, "corrupt")
 	writeEnv(t, corrupt, `{bad`)
 	dirty := mkSandboxDir(t, c, "dirty")
-	require.NoError(t, os.MkdirAll(filepath.Join(dirty, "work", "proj", "upper"), 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(dirty, "work", "proj", "upper", "f"), []byte("x"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(config.WorkBasePath(dirty), "proj", "upper"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(config.WorkBasePath(dirty), "proj", "upper", "f"), []byte("x"), 0o600))
 
 	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: false})
 	require.NoError(t, err)

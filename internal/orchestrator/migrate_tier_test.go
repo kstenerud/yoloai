@@ -5,6 +5,8 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
+	"github.com/kstenerud/yoloai/runtime"
 	"os"
 	"path/filepath"
 	"testing"
@@ -53,7 +55,12 @@ func seedRealm(t *testing.T, layout config.Layout) {
 }
 
 func newTierLayoutFor(layout config.Layout) *TierLayout {
-	return NewTierLayout(layout, layout.DataDir, layout.SandboxesDir())
+	return NewTierLayout(layout, layout.DataDir, layout.SandboxesDir(),
+		func(context.Context, runtime.BackendType) (runtime.Backend, error) {
+			// No backend of type "mock" exists here, which is the same answer a
+			// Linux host gives for a tart sandbox: nothing of that kind is running.
+			return nil, errors.New("no such backend on this host")
+		})
 }
 
 func TestTierLayout_Apply_TiersAFlatSandbox(t *testing.T) {
@@ -240,4 +247,46 @@ func TestTierLayout_BuildProducesACompleteTree(t *testing.T) {
 func existsInStaged(staged, name string) bool {
 	_, err := os.Lstat(filepath.Join(staged, name))
 	return err == nil
+}
+
+// A running sandbox must be refused, and this is the one precondition the disk
+// cannot answer. The promotion renames sandboxes/ out from under a live
+// container whose bind mounts keep pointing at the displaced inodes: the agent
+// goes on writing into trash/ and loses everything the moment it is cleared —
+// silently, because every host-side check still passes.
+func TestTierLayout_Plan_RunningSandboxIsBlocked(t *testing.T) {
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
+	seedRealm(t, layout)
+	seedFlatSandbox(t, layout, "box")
+
+	m := NewTierLayout(layout, layout.DataDir, layout.SandboxesDir(),
+		func(context.Context, runtime.BackendType) (runtime.Backend, error) {
+			return &fakeBackend{keepAlive: runtime.KeepAliveGuestOSInit, running: true}, nil
+		})
+	plan, err := m.Plan(context.Background())
+	require.NoError(t, err)
+	require.NotEmpty(t, plan.Ops)
+	assert.Equal(t, migrate.AuthBlocked, plan.Ops[0].Auth)
+	assert.Contains(t, plan.Ops[0].Description, "stop it and re-run migrate")
+}
+
+// A backend that cannot be constructed on this host reports nothing running,
+// which is sound rather than lenient: a tart VM cannot be live on a machine that
+// cannot run tart. It is also what keeps a Linux host able to migrate the
+// macOS-only sandboxes it is holding — get this wrong and those become
+// permanently unmigratable on the host they live on.
+func TestTierLayout_Plan_AbsentBackendIsNotRunning(t *testing.T) {
+	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
+	seedRealm(t, layout)
+	seedFlatSandbox(t, layout, "box")
+
+	m := NewTierLayout(layout, layout.DataDir, layout.SandboxesDir(),
+		func(context.Context, runtime.BackendType) (runtime.Backend, error) {
+			return nil, errors.New("tart is not installed on this host")
+		})
+	plan, err := m.Plan(context.Background())
+	require.NoError(t, err)
+	require.NotEmpty(t, plan.Ops)
+	assert.Equal(t, migrate.AuthNone, plan.Ops[0].Auth,
+		"a sandbox whose backend is absent here cannot be running here")
 }

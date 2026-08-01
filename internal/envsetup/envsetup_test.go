@@ -324,8 +324,8 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 
 	// Create sandbox dir structure
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	spec := agentSpec(agent.GetAgent("claude"))
 	copied, err := CopySeedFiles(spec, sandboxDir, true, tmpDir, config.Layout{})
@@ -333,14 +333,14 @@ func TestCopySeedFiles_CopiesExistingFiles(t *testing.T) {
 	assert.False(t, copied) // copied only tracks auth-only files; settings.json is not auth-only
 
 	// settings.json should be in agent-runtime (not auth-only)
-	assert.FileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
+	assert.FileExists(t, filepath.Join(store.AgentRuntimePath(sandboxDir), "settings.json"))
 }
 
 func TestCopySeedFiles_ContentFallbackWhenHostAbsent(t *testing.T) {
 	tmpDir := t.TempDir()
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	// Host file does not exist → the Content fallback is written (aider's case).
 	spec := EnvSpec{SeedFiles: []SeedFile{
@@ -348,7 +348,7 @@ func TestCopySeedFiles_ContentFallbackWhenHostAbsent(t *testing.T) {
 	}}
 	_, err := CopySeedFiles(spec, sandboxDir, false, tmpDir, config.Layout{})
 	require.NoError(t, err)
-	got, err := os.ReadFile(filepath.Join(sandboxDir, "home-seed", ".aider.conf.yml")) //nolint:gosec // G304: test-controlled temp path
+	got, err := os.ReadFile(filepath.Join(store.HomeSeedPath(sandboxDir), ".aider.conf.yml"))
 	require.NoError(t, err)
 	assert.Equal(t, "{}\n", string(got))
 }
@@ -358,8 +358,8 @@ func TestCopySeedFiles_HostFileWinsOverContent(t *testing.T) {
 	hostConf := filepath.Join(tmpDir, "host.yml")
 	require.NoError(t, os.WriteFile(hostConf, []byte("model: x\n"), 0600))
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	// A present host file wins over the Content fallback.
 	spec := EnvSpec{SeedFiles: []SeedFile{
@@ -367,7 +367,7 @@ func TestCopySeedFiles_HostFileWinsOverContent(t *testing.T) {
 	}}
 	_, err := CopySeedFiles(spec, sandboxDir, false, tmpDir, config.Layout{})
 	require.NoError(t, err)
-	got, err := os.ReadFile(filepath.Join(sandboxDir, "home-seed", ".aider.conf.yml")) //nolint:gosec // G304: test-controlled temp path
+	got, err := os.ReadFile(filepath.Join(store.HomeSeedPath(sandboxDir), ".aider.conf.yml"))
 	require.NoError(t, err)
 	assert.Equal(t, "model: x\n", string(got))
 }
@@ -383,13 +383,13 @@ func TestCopySeedFiles_StatusLineScriptIsExecutable(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "statusline.sh"), []byte("#!/bin/sh\necho hi\n"), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	_, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 
-	dst := filepath.Join(sandboxDir, store.AgentRuntimeDir, "statusline.sh")
+	dst := filepath.Join(store.AgentRuntimePath(sandboxDir), "statusline.sh")
 	info, err := os.Stat(dst)
 	require.NoError(t, err)
 	assert.NotZero(t, info.Mode().Perm()&0100, "owner-exec bit must be set on the seeded statusLine script (got %o)", info.Mode().Perm())
@@ -404,14 +404,14 @@ func TestCopySeedFiles_SkipsAuthWhenAPIKeySet(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{}`), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	_, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, true, tmpDir, config.Layout{}) // hasAPIKey=true
 	require.NoError(t, err)
 
 	// Auth-only file should NOT be copied when API key is set
-	assert.NoFileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, ".credentials.json"))
+	assert.NoFileExists(t, filepath.Join(store.AgentRuntimePath(sandboxDir), ".credentials.json"))
 }
 
 func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
@@ -423,14 +423,14 @@ func TestCopySeedFiles_CopiesAuthWhenNoAPIKey(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"x"}`), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	copied, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, false, tmpDir, config.Layout{}) // hasAPIKey=false
 	require.NoError(t, err)
 	assert.True(t, copied)
 
-	assert.FileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, ".credentials.json"))
+	assert.FileExists(t, filepath.Join(store.AgentRuntimePath(sandboxDir), ".credentials.json"))
 }
 
 func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
@@ -440,22 +440,22 @@ func TestCopySeedFiles_HomeDirFiles(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(tmpDir, ".claude.json"), []byte(`{"install":"native"}`), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	_, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
 
 	// HomeDir=true file should go to home-seed/
-	assert.FileExists(t, filepath.Join(sandboxDir, "home-seed", ".claude.json"))
+	assert.FileExists(t, filepath.Join(store.HomeSeedPath(sandboxDir), ".claude.json"))
 }
 
 func TestCopySeedFiles_SkipsMissingFiles(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	copied, err := CopySeedFiles(agentSpec(agent.GetAgent("claude")), sandboxDir, true, tmpDir, config.Layout{})
 	require.NoError(t, err)
@@ -466,8 +466,8 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	tmpDir := t.TempDir()
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	// Override KeychainReader to return credentials
 	origReader := KeychainReader
@@ -484,7 +484,7 @@ func TestCopySeedFiles_KeychainFallback(t *testing.T) {
 	assert.True(t, copied)
 
 	// Credentials from keychain should be written to agent-runtime
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, ".credentials.json")) //nolint:gosec // test path
+	data, err := os.ReadFile(filepath.Join(store.AgentRuntimePath(sandboxDir), ".credentials.json"))
 	require.NoError(t, err)
 	assert.Equal(t, `{"token":"from-keychain"}`, string(data))
 }
@@ -498,8 +498,8 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"from-file"}`), 0600))
 
 	sandboxDir := filepath.Join(tmpDir, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
 
 	// Override KeychainReader — should NOT be called since file exists
 	origReader := KeychainReader
@@ -516,7 +516,7 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 	assert.False(t, keychainCalled, "KeychainReader should not be called when file exists")
 
 	// Should have the file contents, not keychain
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, ".credentials.json")) //nolint:gosec // test path
+	data, err := os.ReadFile(filepath.Join(store.AgentRuntimePath(sandboxDir), ".credentials.json"))
 	require.NoError(t, err)
 	assert.Equal(t, `{"token":"from-file"}`, string(data))
 }
@@ -525,33 +525,33 @@ func TestCopySeedFiles_KeychainSkippedWhenFileExists(t *testing.T) {
 
 func TestEnsureContainerSettings_SetsSkipPermissions(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	agentDef := agent.GetAgent("claude")
 	require.NoError(t, EnsureContainerSettings(sandboxDir, agentSpec(agentDef).SettingsPatches))
 
-	settings, err := fileutil.ReadJSONMap(filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
+	settings, err := fileutil.ReadJSONMap(filepath.Join(store.AgentRuntimePath(sandboxDir), "settings.json"))
 	require.NoError(t, err)
 	assert.Equal(t, true, settings["skipDangerousModePermissionPrompt"])
 }
 
 func TestEnsureContainerSettings_NoopForTestAgent(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	agentDef := agent.GetAgent("test")
 	require.NoError(t, EnsureContainerSettings(sandboxDir, agentSpec(agentDef).SettingsPatches))
 
 	// No settings file should be created for test agent
-	assert.NoFileExists(t, filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
+	assert.NoFileExists(t, filepath.Join(store.AgentRuntimePath(sandboxDir), "settings.json"))
 }
 
 func TestEnsureContainerSettings_PreservesExisting(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	// Pre-populate settings
-	settingsPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json")
+	settingsPath := filepath.Join(store.AgentRuntimePath(sandboxDir), "settings.json")
 	require.NoError(t, fileutil.WriteJSONMap(settingsPath, map[string]any{"customKey": "customValue"}))
 
 	agentDef := agent.GetAgent("claude")
@@ -565,12 +565,12 @@ func TestEnsureContainerSettings_PreservesExisting(t *testing.T) {
 
 func TestEnsureContainerSettings_GeminiDisablesFolderTrust(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	agentDef := agent.GetAgent("gemini")
 	require.NoError(t, EnsureContainerSettings(sandboxDir, agentSpec(agentDef).SettingsPatches))
 
-	settings, err := fileutil.ReadJSONMap(filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json"))
+	settings, err := fileutil.ReadJSONMap(filepath.Join(store.AgentRuntimePath(sandboxDir), "settings.json"))
 	require.NoError(t, err)
 
 	security, ok := settings["security"].(map[string]any)
@@ -582,10 +582,10 @@ func TestEnsureContainerSettings_GeminiDisablesFolderTrust(t *testing.T) {
 
 func TestEnsureContainerSettings_GeminiPreservesAuthSettings(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	// Pre-populate settings with auth config (as would come from seed file)
-	settingsPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, "settings.json")
+	settingsPath := filepath.Join(store.AgentRuntimePath(sandboxDir), "settings.json")
 	require.NoError(t, fileutil.WriteJSONMap(settingsPath, map[string]any{
 		"security": map[string]any{
 			"auth": map[string]any{"selectedType": "oauth-personal"},
@@ -615,7 +615,7 @@ func TestEnsureContainerSettings_GeminiPreservesAuthSettings(t *testing.T) {
 // Other keys must be left intact (the rest of the host config is still useful).
 func TestEnsureHomeSeedConfig_StripsStaleInstallMethod(t *testing.T) {
 	sandboxDir := t.TempDir()
-	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
+	homeSeedDir := store.HomeSeedPath(sandboxDir)
 	require.NoError(t, os.MkdirAll(homeSeedDir, 0750))
 
 	// Seed a .claude.json as the host would produce it
@@ -647,7 +647,7 @@ func TestEnsureHomeSeedConfig_NoopForTestAgent(t *testing.T) {
 // Code's per-directory folder-trust dialog never blocks the sandbox at launch.
 func TestEnsureHomeSeedConfig_PreAcceptsFolderTrust(t *testing.T) {
 	sandboxDir := t.TempDir()
-	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
+	homeSeedDir := store.HomeSeedPath(sandboxDir)
 	require.NoError(t, os.MkdirAll(homeSeedDir, 0750))
 	require.NoError(t, fileutil.WriteJSONMap(filepath.Join(homeSeedDir, ".claude.json"), map[string]any{
 		"hasCompletedOnboarding": true,
@@ -674,11 +674,11 @@ func TestEnsureHomeSeedConfig_PreAcceptsFolderTrust(t *testing.T) {
 // canonical RefreshHomeSeed must re-inject folder trust after every re-copy.
 func TestRefreshHomeSeed_TrustSurvivesReseed(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "home-seed"), 0750))
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
 
 	spec := agentSpec(agent.GetAgent("claude"))
-	configPath := filepath.Join(sandboxDir, "home-seed", ".claude.json")
+	configPath := filepath.Join(store.HomeSeedPath(sandboxDir), ".claude.json")
 
 	// First seed (create).
 	_, err := RefreshHomeSeed(spec, sandboxDir, true, t.TempDir(), config.Layout{}, []string{"/work/proj"})

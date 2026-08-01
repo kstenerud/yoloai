@@ -4,6 +4,7 @@ package workflow
 
 import (
 	"bytes"
+	"github.com/kstenerud/yoloai/internal/config"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,7 +23,7 @@ func setupFilesTest(t *testing.T) (string, string) {
 
 	name := "testbox"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "library", "sandboxes", name)
-	filesDir := filepath.Join(sandboxDir, "files")
+	filesDir := config.FilesPath(sandboxDir)
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
 
 	return name, filesDir
@@ -48,7 +49,7 @@ func TestFilesPut_CreatesFilesDirIfMissing(t *testing.T) {
 	cmd.SetArgs([]string{name, "put", src})
 	require.NoError(t, cmd.Execute())
 
-	filesDir := filepath.Join(sandboxDir, "files")
+	filesDir := config.FilesPath(sandboxDir)
 	require.DirExists(t, filesDir, "files/ directory should have been created")
 	got, err := os.ReadFile(filepath.Join(filesDir, "hello.txt")) //nolint:gosec // test helper
 	require.NoError(t, err)
