@@ -62,6 +62,24 @@ not a clock; an unreleased entry says `(pending)`.
 **Review status (2026-07-17): nothing is due.** The oldest entries come due 2026-09-12 through
 2026-09-22. Sorted oldest-first — the top of this list is always what to look at.
 
+### Standing consideration: the oldest rungs serve a population under 100
+
+**Owner input, 2026-08-01.** yoloAI had fewer than 100 users in the pre-v0.6.0 era, so the ladder's
+oldest rungs — the sealed v0→v3 ladder and everything that exists to read the layouts it converts —
+are candidates for retirement rather than indefinite carriage. The grace-period table above prices
+compatibility by *how long until the population has moved on*; here the population was small enough
+at the time that the answer may already be "it has".
+
+This is a consideration, not a decision, and nothing below is due early because of it. **The owner
+decides if and when an actual retirement happens**, entry by entry, as the Lifecycle section says.
+It is recorded here so the question is asked at the next review with the relevant fact attached,
+instead of each review re-deriving from scratch that these rungs feel old.
+
+Weight for that review: [DF168](design/findings-resolved.md) found that this exact population — an
+install with pre-v3 records — could not be migrated by *any* release from v0.6.0 through v0.9.0.
+That is now fixed, but for the whole of that window the compatibility being carried for these
+installs did not actually work, which is evidence about how much it was exercised.
+
 ## Register
 
 ### Library schema ladder — upgrading a data dir from before `.schema-version` existed
@@ -156,6 +174,33 @@ not a clock; an unreleased entry says `(pending)`.
 - **Retire by:** the ladder floor. Its Apply also opens a backend, so retiring it removes the
   only reason `system migrate` ever contacts one.
 - **Pointer:** `internal/orchestrator/migrate_overlay.go`
+
+### v5→v6 sandbox directory tiering
+
+- **Incurred:** 2026-08-01 · **Shipped:** v0.11.0 (pending) · **Due:** 2027-02-01 (internal, 6mo)
+- **What:** `TierLayout` converts a flat sandbox directory into `host/` + `ro/` + `rw/`. Unlike the
+  rungs below it, this one migrates by duplication: it rebuilds the whole `sandboxes/` tree in
+  scratch, verifies it, and promotes once, so a failure leaves the original readable by the release
+  the user came from.
+- **Retire by:** the ladder floor, with the rest. Retiring it also retires the 2× free-space
+  precondition and the trash copy, which are this migrator's alone — no other rung duplicates the
+  tree, so the cost is not the ladder's in general.
+- **Pointer:** `internal/orchestrator/migrate_tier.go`, [migration-by-duplication.md](archive/plans/migration-by-duplication.md)
+
+### `internal/config/pretier` — the frozen pre-tier sandbox layout
+
+- **Incurred:** 2026-07-31 (`7e2efbf3`) · **Shipped:** v0.11.0 (pending) · **Due:** 2027-01-31 (internal, 6mo)
+- **What:** literal, deliberately un-abstracted paths for the flat sandbox layout every schema
+  below v6 was written in — `environment.json` and its siblings at the sandbox root, `work/`, and
+  an `:overlay` sandbox's `lower/`. It exists because a migrator must address the layout of the
+  era it migrates *from*, which is never the one the live builders resolve (DF164,
+  standards/go.md "A migrator addresses the layout of its own era"). Registered late: the package
+  landed with the first migrator pinned to it and no entry, which is the exact omission this
+  register was created to catch.
+- **Retire by:** the ladder floor, with the last pre-v6 migrator. It has no independent life —
+  nothing outside `internal/orchestrator/migrate_*.go` may import it, and if something does, that
+  is the defect, not a reason to keep it.
+- **Pointer:** `internal/config/pretier/pretier.go`
 
 ### v4→v5 principal rename, and `store.LegacyCLIInstanceName`
 

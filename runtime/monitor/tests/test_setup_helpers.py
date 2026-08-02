@@ -269,13 +269,13 @@ def test_build_agent_launch_command_wrapper_no_workdir() -> None:
 
 def test_build_agent_launch_command_quotes_wrapper_with_spaces() -> None:
     # On Tart the wrapper lives under the VirtioFS mount at
-    # "/Volumes/My Shared Files/yoloai/bin", so the path must be single-quoted or
+    # "/Volumes/My Shared Files/rw/bin", so the path must be single-quoted or
     # exec would split it on the spaces.
     out = setup_helpers.build_agent_launch_command(
         "claude", "/w", None,
-        wrapper="/Volumes/My Shared Files/yoloai/bin/agent-run.sh")
+        wrapper="/Volumes/My Shared Files/rw/bin/agent-run.sh")
     assert out == (
-        "cd '/w' && exec '/Volumes/My Shared Files/yoloai/bin/agent-run.sh' claude")
+        "cd '/w' && exec '/Volumes/My Shared Files/rw/bin/agent-run.sh' claude")
 
 
 def test_build_agent_launch_command_applies_launch_prefix() -> None:

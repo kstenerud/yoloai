@@ -43,8 +43,85 @@ func TestGenerateProfile_ReadOnlyMount(t *testing.T) {
 	if !strings.Contains(profile, `(allow file-read* (subpath "/path/to/src"))`) {
 		t.Error("read-only mount should produce file-read* rule")
 	}
-	if strings.Contains(profile, `file-write* (subpath "/path/to/src")`) {
-		t.Error("read-only mount should NOT produce file-write* rule")
+	// Distinguishes allow from deny on purpose: a bare `file-write* (subpath …)`
+	// substring check matched both, and since the deny landed it would report a
+	// read-only mount as writable. The contract is "no write GRANT".
+	if strings.Contains(profile, `(allow file-read* file-write* (subpath "/path/to/src"))`) {
+		t.Error("read-only mount must not produce a write grant")
+	}
+	// And the deny has to be there, or a broader grant elsewhere silently makes
+	// the mount writable — which is what it did until 2026-07-30 (DF161).
+	if !strings.Contains(profile, `(deny file-write* (subpath "/path/to/src"))`) {
+		t.Error("read-only mount must produce an explicit write deny")
+	}
+}
+
+// TestGenerateProfile_NestedMountsResolveMostSpecificLast pins the ordering rule
+// that makes nesting work in both directions under last-match-wins. Emitting all
+// denies then all allows would leave a read-only dir inside a read-write one
+// writable; the reverse grouping would leave a read-write dir inside a read-only
+// one unwritable. Only ordering by depth gets both right.
+func TestGenerateProfile_NestedMountsResolveMostSpecificLast(t *testing.T) {
+	cfg := runtime.InstanceConfig{
+		Name: "test",
+		Mounts: []runtime.MountSpec{
+			{HostPath: "/outer", ContainerPath: "/outer", ReadOnly: true},
+			{HostPath: "/outer/inner", ContainerPath: "/outer/inner"},
+			{HostPath: "/rwroot", ContainerPath: "/rwroot"},
+			{HostPath: "/rwroot/locked", ContainerPath: "/rwroot/locked", ReadOnly: true},
+		},
+	}
+	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
+
+	idx := func(rule string) int {
+		i := strings.LastIndex(profile, rule)
+		if i < 0 {
+			t.Fatalf("profile is missing %s\n%s", rule, profile)
+		}
+		return i
+	}
+
+	if idx(`(allow file-read* file-write* (subpath "/outer/inner"))`) < idx(`(deny file-write* (subpath "/outer"))`) {
+		t.Error("a read-write dir nested in a read-only one must be granted AFTER the enclosing deny")
+	}
+	if idx(`(deny file-write* (subpath "/rwroot/locked"))`) < idx(`(allow file-read* file-write* (subpath "/rwroot"))`) {
+		t.Error("a read-only dir nested in a read-write one must be denied AFTER the enclosing grant")
+	}
+}
+
+// TestGenerateProfile_HostTierDenyIsLastAndCoversEverySpelling pins the three
+// properties that make the host-tier deny actually deny anything. Position:
+// SBPL is last-match-wins, so a write grant emitted after it silently reinstates
+// the write — and the profile grants write over the read-write tier, and over
+// the temp tree that every test's sandbox dir lives in. Spelling: the deny has to
+// name the same path variants the allows do, or a write through the unresolved
+// /var/… spelling walks past a deny written only for /private/var/….
+//
+// And reads: the tier's definition is that no guest ever sees it — it holds
+// injector-token, whose security property is that the guest cannot read the
+// file. Denying only writes left it readable under any broader read grant, which
+// one `--dir ~:ro` supplies for every sandbox dir at once. Found by the
+// conformance suite's tier section, which asks the guest rather than the profile.
+func TestGenerateProfile_HostTierDenyIsLastAndCoversEverySpelling(t *testing.T) {
+	sandboxDir := t.TempDir()
+	profile := GenerateProfile(runtime.InstanceConfig{Name: "test"}, sandboxDir, "/Users/testuser")
+
+	for _, variant := range resolvePathVariants(sandboxDir) {
+		want := fmt.Sprintf("(deny file-read* file-write* (subpath %q))", filepath.Join(variant, config.HostTierName))
+		if !strings.Contains(profile, want) {
+			t.Errorf("profile must deny reads and writes to the host tier spelled %q\nprofile:\n%s", variant, profile)
+		}
+	}
+
+	firstDeny := strings.Index(profile, "(deny file-read* file-write* (subpath")
+	if firstDeny < 0 {
+		t.Fatalf("no host-tier deny in profile:\n%s", profile)
+	}
+	if lastGrant := strings.LastIndex(profile, "(allow file-read* file-write*"); lastGrant > firstDeny {
+		t.Error("a write grant is emitted after the host-tier deny; SBPL is last-match-wins, so the deny is dead text")
+	}
+	if lastRead := strings.LastIndex(profile, "(allow file-read* (subpath"); lastRead > firstDeny {
+		t.Error("a read grant is emitted after the host-tier deny; SBPL is last-match-wins, so the deny is dead text")
 	}
 }
 
@@ -102,13 +179,78 @@ func TestGenerateProfile_NetworkNone(t *testing.T) {
 	}
 }
 
-func TestGenerateProfile_SandboxDirAlwaysWritable(t *testing.T) {
+// TestGenerateProfile_SandboxDirIsGrantedPerTier replaces a test that asserted
+// the whole sandbox dir was writable. That grant was DF136 itself — it included
+// host/, so the confined agent could rewrite environment.json and redirect a
+// host-side apply — and the read-only tier could not mean anything underneath
+// it. So the property inverts: the sandbox dir as a whole is granted nothing,
+// and each tier is granted what its guest-access class says.
+func TestGenerateProfile_SandboxDirIsGrantedPerTier(t *testing.T) {
 	cfg := runtime.InstanceConfig{Name: "test"}
 	sandboxDir := "/Users/test/.yoloai/sandboxes/mybox"
 	profile := GenerateProfile(cfg, sandboxDir, "/Users/test")
 
-	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* file-write* (subpath %q))`, sandboxDir)) {
-		t.Errorf("sandbox dir should be writable, profile:\n%s", profile)
+	// The read-write tier is writable — yoloAI's own state has to work.
+	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* file-write* (subpath %q))`,
+		filepath.Join(sandboxDir, "rw"))) {
+		t.Errorf("the read-write tier should be writable, profile:\n%s", profile)
+	}
+	// The read-only tier is readable...
+	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`,
+		filepath.Join(sandboxDir, "ro"))) {
+		t.Errorf("the read-only tier should be readable, profile:\n%s", profile)
+	}
+	// ...and nothing may grant write over it or the host tier, at any point in
+	// the profile. Checked as "no such rule anywhere" rather than "a deny comes
+	// later", because a grant that is currently outranked is a grant that stops
+	// being outranked the next time a rule is appended.
+	for _, tier := range []string{"ro", "host"} {
+		grant := fmt.Sprintf(`(allow file-read* file-write* (subpath %q))`,
+			filepath.Join(sandboxDir, tier))
+		if strings.Contains(profile, grant) {
+			t.Errorf("the %s tier must never be granted write, profile:\n%s", tier, profile)
+		}
+	}
+	// The whole-dir grant that was DF136 must be gone, not merely superseded.
+	if strings.Contains(profile, fmt.Sprintf(`(allow file-read* file-write* (subpath %q))`, sandboxDir)) {
+		t.Errorf("the sandbox dir must not be granted write as a whole (DF136), profile:\n%s", profile)
+	}
+}
+
+// TestGenerateProfile_NonWritableTiersAreDeniedLast is the half that actually
+// enforces the tiers on this backend. Seatbelt expresses read-only as the
+// absence of a write grant, which holds only while nothing *else* grants write
+// over the path — and this profile grants write broadly (the temp tree, the
+// caches, any enclosing read-write mount). A `:ro` mount under one of those was
+// silently writable until it was measured (DF161), so both non-writable tiers
+// carry an explicit deny, and it has to be last: SBPL is last-match-wins, and a
+// deny written before the grants it must beat is dead text.
+func TestGenerateProfile_NonWritableTiersAreDeniedLast(t *testing.T) {
+	// A mount enclosing the sandbox dir is the case that needs the deny: it
+	// grants write over everything beneath it, tiers included.
+	sandboxDir := "/Users/test/.yoloai/sandboxes/mybox"
+	cfg := runtime.InstanceConfig{
+		Name:   "test",
+		Mounts: []runtime.MountSpec{{HostPath: "/Users/test", ContainerPath: "/host"}},
+	}
+	profile := GenerateProfile(cfg, sandboxDir, "/Users/test")
+
+	denies := map[string]string{
+		// The host tier is denied reads too — nothing in a guest may see it.
+		"host": fmt.Sprintf(`(deny file-read* file-write* (subpath %q))`, filepath.Join(sandboxDir, "host")),
+		"ro":   fmt.Sprintf(`(deny file-write* (subpath %q))`, filepath.Join(sandboxDir, "ro")),
+	}
+	for _, tier := range []string{"host", "ro"} {
+		deny := denies[tier]
+		denyAt := strings.LastIndex(profile, deny)
+		if denyAt < 0 {
+			t.Fatalf("the %s tier has no write deny, profile:\n%s", tier, profile)
+		}
+		// Nothing may grant write after it.
+		if rest := profile[denyAt:]; strings.Contains(rest, "file-write*") &&
+			strings.Contains(rest, "(allow ") {
+			t.Errorf("a write grant follows the %s tier deny, so the deny is defeated:\n%s", tier, rest)
+		}
 	}
 }
 
@@ -351,7 +493,10 @@ func TestBuildTmuxCommand(t *testing.T) {
 	if args[1] != "-S" {
 		t.Errorf("second arg should be -S, got %q", args[1])
 	}
-	expectedSocket := sandboxPath + "/tmux/tmux.sock"
+	// Spelled literally, not composed from the builder: the socket's *depth* is
+	// what the 104-byte sun_path cap is spent on (DF169), so a test that follows
+	// the builder would stay green through a move that re-breaks long names.
+	expectedSocket := sandboxPath + "/rw/tmux.sock"
 	if args[2] != expectedSocket {
 		t.Errorf("third arg should be socket path %q, got %q", expectedSocket, args[2])
 	}
@@ -528,17 +673,20 @@ func TestMountSymlinks_SkipUnreachableParent(t *testing.T) {
 
 func TestPatchConfigWorkingDir_CopyMode(t *testing.T) {
 	sandboxPath := t.TempDir()
-	workDir := filepath.Join(sandboxPath, "work", "encoded-dir")
+	workDir := filepath.Join(config.WorkBasePath(sandboxPath), "encoded-dir")
 	if err := os.MkdirAll(workDir, 0750); err != nil {
 		t.Fatal(err)
 	}
 
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
 	cfgData, err := json.Marshal(map[string]any{
 		"working_dir": "/original/path",
 		"other_key":   "other_value",
 	})
 	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
 		t.Fatal(err)
 	}
 	if err := os.WriteFile(cfgPath, cfgData, 0600); err != nil {
@@ -574,7 +722,10 @@ func TestPatchConfigWorkingDir_NotCopyMode(t *testing.T) {
 	sandboxPath := t.TempDir()
 
 	originalConfig := `{"working_dir": "/original/path"}`
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(cfgPath, []byte(originalConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -602,7 +753,10 @@ func TestPatchConfigWorkingDir_NoMounts(t *testing.T) {
 	sandboxPath := t.TempDir()
 
 	originalConfig := `{"working_dir": "/original/path"}`
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(cfgPath, []byte(originalConfig), 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -623,7 +777,7 @@ func TestPatchConfigWorkingDir_NoMounts(t *testing.T) {
 
 func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	sandboxPath := t.TempDir()
-	workDir := filepath.Join(sandboxPath, "work", "encoded-dir")
+	workDir := filepath.Join(config.WorkBasePath(sandboxPath), "encoded-dir")
 	if err := os.MkdirAll(workDir, 0750); err != nil {
 		t.Fatal(err)
 	}
@@ -635,7 +789,10 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
+	if err := os.MkdirAll(filepath.Dir(cfgPath), 0o750); err != nil {
+		t.Fatal(err)
+	}
 	if err := os.WriteFile(cfgPath, cfgData, 0600); err != nil {
 		t.Fatal(err)
 	}
@@ -681,7 +838,7 @@ func TestPatchConfigWorkingDir_AlreadyCorrect(t *testing.T) {
 func TestKillByPID_WaitsForExit(t *testing.T) {
 	// Set up a sandbox directory with a PID file
 	sandboxPath := t.TempDir()
-	backendPath := filepath.Join(sandboxPath, backendDir)
+	backendPath := config.BackendPath(sandboxPath)
 	if err := os.MkdirAll(backendPath, 0750); err != nil {
 		t.Fatal(err)
 	}

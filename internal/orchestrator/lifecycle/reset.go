@@ -8,7 +8,6 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
@@ -63,7 +62,7 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 	}
 
 	if opts.Prompt != "" {
-		promptPath := filepath.Join(sandboxDir, "prompt.txt")
+		promptPath := store.PromptFilePath(sandboxDir)
 		if err := fileutil.WriteFile(promptPath, []byte(opts.Prompt), 0600); err != nil {
 			return nil, fmt.Errorf("write prompt.txt: %w", err)
 		}
@@ -229,7 +228,7 @@ func resetAuxDirs(ctx context.Context, g *git.Git, sandboxDir string, meta *stor
 func clearAgentState(sandboxDir string, perms store.IsolationPerms) error {
 	// Bind-mounted into a live sandbox on the --clear-state path, so empty it
 	// in place rather than replacing it (DF149).
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 	if err := fileutil.ClearDirContents(agentStateDir, perms.Dir); err != nil {
 		return fmt.Errorf("clear %s: %w", store.AgentRuntimeDir, err)
 	}
@@ -248,9 +247,9 @@ func clearAgentState(sandboxDir string, perms store.IsolationPerms) error {
 // not strand a live mount today; it is emptied in place anyway so the safety
 // does not rest on that caller-side fact (DF149).
 func reinitLogs(sandboxDir string, perms store.IsolationPerms) {
-	_ = fileutil.ClearDirContents(filepath.Join(sandboxDir, store.LogsDir), perms.Dir)
-	for _, logFile := range []string{store.SandboxJSONLFile, store.MonitorJSONLFile, store.HooksJSONLFile} {
-		_ = fileutil.WriteFilePerm(filepath.Join(sandboxDir, logFile), nil, perms.File)
+	_ = fileutil.ClearDirContents(store.LogsPath(sandboxDir), perms.Dir)
+	for _, logPath := range store.GuestLogFilePaths(sandboxDir) {
+		_ = fileutil.WriteFilePerm(logPath, nil, perms.File)
 	}
 }
 
@@ -279,7 +278,7 @@ func applyPostResetOptions(d state.Deps, opts ResetOptions, sandboxDir string, p
 
 	// Handle --no-prompt by temporarily hiding prompt.txt.
 	// Return a cleanup function that restores it after container start.
-	promptPath := filepath.Join(sandboxDir, "prompt.txt")
+	promptPath := store.PromptFilePath(sandboxDir)
 	promptBackup := promptPath + ".bak"
 	if opts.NoPrompt {
 		if _, err := os.Stat(promptPath); err == nil {

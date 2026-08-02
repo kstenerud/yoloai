@@ -63,8 +63,13 @@ type SeedFile struct {
 // SettingsPatch is one resolved JSON-config mutation (e.g. settings.json, or
 // codex's hooks.json).
 type SettingsPatch struct {
-	RelDir   string               // dir under sandboxDir holding the config file
-	DirPerm  os.FileMode          // perms for MkdirAllPerm of RelDir
+	// Dir resolves the directory holding the config file, given a sandboxDir.
+	// It carries the path builder rather than a sandbox-relative string because
+	// the two producers target different access tiers (home-seed/ and
+	// agent-runtime/), so no single relative prefix stays correct once those
+	// directories move into their tiers.
+	Dir      func(sandboxDir string) string
+	DirPerm  os.FileMode          // perms for MkdirAllPerm of the resolved dir
 	FileName string               // config filename; "" defaults to "settings.json"
 	Apply    func(map[string]any) // mutate the parsed config map in place
 }

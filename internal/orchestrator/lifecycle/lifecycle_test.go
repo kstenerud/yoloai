@@ -368,7 +368,7 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Write prompt.txt
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
+	testutil.WriteSandboxRecord(t, store.PromptFilePath(sandboxDir), []byte("Write hello world"))
 
 	// Write runtime-config.json
 	cfg := runtimeconfig.ContainerConfig{
@@ -378,11 +378,11 @@ func TestStart_Resume_DoneStatus(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), cfgData)
 
 	// Write agent-status.json indicating done (exit code 0)
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":0,"timestamp":%d}`, time.Now().Unix())
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.AgentStatusFile), []byte(statusData), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(sandboxDir), []byte(statusData))
 
 	// Track exec calls
 	var execCalls [][]string
@@ -443,7 +443,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	require.NoError(t, agentcfg.Save(sandboxDir, &agentcfg.AgentConfig{AgentType: "claude"}))
 
 	// Write prompt.txt
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("Write hello world"), 0600))
+	testutil.WriteSandboxRecord(t, store.PromptFilePath(sandboxDir), []byte("Write hello world"))
 
 	// Write runtime-config.json with headless command
 	cfg := runtimeconfig.ContainerConfig{
@@ -453,7 +453,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), cfgData)
 
 	mock := &lifecycleMockRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -473,7 +473,7 @@ func TestStart_Resume_StoppedStatus(t *testing.T) {
 	_, _ = Start(context.Background(), d, name, StartOptions{Resume: true})
 
 	// Verify runtime-config.json was patched to interactive command
-	updatedCfgData, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test file in controlled temp dir
+	updatedCfgData, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	require.NoError(t, err)
 	var updatedCfg runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(updatedCfgData, &updatedCfg))
@@ -498,7 +498,7 @@ func TestNeedsConfirmation_RunningButClean(t *testing.T) {
 	name := "test-confirm-running"
 	hostPath := "/tmp/project"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	testutil.InitGitRepo(t, workDir)
@@ -540,7 +540,7 @@ func TestNeedsConfirmation_StoppedVMFailsafe(t *testing.T) {
 	name := "test-confirm-stopped"
 	hostPath := "/tmp/project"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Host seed is a clean repo (what the host can see) — but the agent's real
@@ -583,7 +583,7 @@ func TestNeedsConfirmation_ChangesExist(t *testing.T) {
 	name := "test-confirm-changes"
 	hostPath := "/tmp/project"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	testutil.InitGitRepo(t, workDir)
@@ -627,7 +627,7 @@ func TestNeedsConfirmation_NoChanges(t *testing.T) {
 	name := "test-confirm-clean"
 	hostPath := "/tmp/project"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	testutil.InitGitRepo(t, workDir)
@@ -715,12 +715,12 @@ func TestReset_RecopiesWorkdir(t *testing.T) {
 	// Create sandbox with work copy
 	name := "test-reset"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Create cache and files dirs with content (should be cleared by default)
-	cacheDir := filepath.Join(sandboxDir, "cache")
-	filesDir := filepath.Join(sandboxDir, "files")
+	cacheDir := store.CacheDir(sandboxDir)
+	filesDir := store.FilesDir(sandboxDir)
 	require.NoError(t, os.MkdirAll(cacheDir, 0750))
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
 	testutil.WriteFile(t, cacheDir, "cached.txt", "cached data\n")
@@ -797,7 +797,7 @@ func TestReset_PromptOverwrite(t *testing.T) {
 	name := "test-reset-prompt"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte("old prompt"), 0600))
+	testutil.WriteSandboxRecord(t, store.PromptFilePath(sandboxDir), []byte("old prompt"))
 
 	meta := &store.Environment{
 		Name:      name,
@@ -825,7 +825,7 @@ func TestReset_PromptOverwrite(t *testing.T) {
 	_, resetErr := Reset(context.Background(), d, ResetOptions{Name: name, Prompt: "new prompt"})
 	require.Error(t, resetErr, "Reset must surface the restart failure, not swallow it")
 
-	got, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // test path
+	got, err := os.ReadFile(store.PromptFilePath(sandboxDir))
 	require.NoError(t, err)
 	assert.Equal(t, "new prompt", string(got))
 }
@@ -839,8 +839,8 @@ func TestReset_State(t *testing.T) {
 
 	name := "test-reset-state"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(origDir))
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 
@@ -926,7 +926,7 @@ func TestReset_OriginalMissing(t *testing.T) {
 
 	name := "test-reset-missing"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	testutil.WriteFile(t, workDir, "file.txt", "content\n")
@@ -981,12 +981,12 @@ func TestReset_InPlace_SyncsWorkdir(t *testing.T) {
 	// Create sandbox with work copy
 	name := "test-reset-inplace"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Create cache and files dirs with content
-	cacheDir := filepath.Join(sandboxDir, "cache")
-	filesDir := filepath.Join(sandboxDir, "files")
+	cacheDir := store.CacheDir(sandboxDir)
+	filesDir := store.FilesDir(sandboxDir)
 	require.NoError(t, os.MkdirAll(cacheDir, 0750))
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
 	testutil.WriteFile(t, cacheDir, "cached.txt", "cached data\n")
@@ -1073,12 +1073,12 @@ func TestReset_InPlace_KeepCache(t *testing.T) {
 
 	name := "test-reset-keep-cache"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Create cache and files dirs with content
-	cacheDir := filepath.Join(sandboxDir, "cache")
-	filesDir := filepath.Join(sandboxDir, "files")
+	cacheDir := store.CacheDir(sandboxDir)
+	filesDir := store.FilesDir(sandboxDir)
 	require.NoError(t, os.MkdirAll(cacheDir, 0750))
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
 	testutil.WriteFile(t, cacheDir, "cached.txt", "cached data\n")
@@ -1132,12 +1132,12 @@ func TestReset_InPlace_KeepFiles(t *testing.T) {
 
 	name := "test-reset-keep-files"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Create cache and files dirs with content
-	cacheDir := filepath.Join(sandboxDir, "cache")
-	filesDir := filepath.Join(sandboxDir, "files")
+	cacheDir := store.CacheDir(sandboxDir)
+	filesDir := store.FilesDir(sandboxDir)
 	require.NoError(t, os.MkdirAll(cacheDir, 0750))
 	require.NoError(t, os.MkdirAll(filesDir, 0750))
 	testutil.WriteFile(t, cacheDir, "cached.txt", "cached data\n")
@@ -1193,7 +1193,7 @@ func TestReset_UpgradesToRestartWhenNotRunning(t *testing.T) {
 	// Create sandbox with work copy
 	name := "test-reset-upgrade-restart"
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	testutil.WriteFile(t, workDir, "file.txt", "original content\n")
@@ -1259,11 +1259,11 @@ func TestPatchConfigDebug_SetTrue(t *testing.T) {
 	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude", WorkingDir: "/project"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), cfgData)
 
 	require.NoError(t, patchConfigDebug(sandboxDir, true))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	require.NoError(t, err)
 	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1275,11 +1275,11 @@ func TestPatchConfigDebug_SetFalse(t *testing.T) {
 	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude", Debug: true}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), cfgData)
 
 	require.NoError(t, patchConfigDebug(sandboxDir, false))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	require.NoError(t, err)
 	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1298,11 +1298,11 @@ func TestPatchConfigDebug_PreservesOtherFields(t *testing.T) {
 	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude --print", WorkingDir: "/home/user/project"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), cfgData)
 
 	require.NoError(t, patchConfigDebug(sandboxDir, true))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	require.NoError(t, err)
 	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1318,11 +1318,11 @@ func TestPatchConfigAllowedDomains_SetDomains(t *testing.T) {
 	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude"}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), cfgData)
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{"api.anthropic.com", "sentry.io"}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	require.NoError(t, err)
 	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1334,11 +1334,11 @@ func TestPatchConfigAllowedDomains_ReplacesExisting(t *testing.T) {
 	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude", AllowedDomains: []string{"old.com"}}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), cfgData)
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{"new.com"}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	require.NoError(t, err)
 	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1350,11 +1350,11 @@ func TestPatchConfigAllowedDomains_EmptyListClears(t *testing.T) {
 	cfg := runtimeconfig.ContainerConfig{AgentCommand: "claude", AllowedDomains: []string{"api.com"}}
 	cfgData, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), cfgData, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), cfgData)
 
 	require.NoError(t, PatchConfigAllowedDomains(sandboxDir, []string{}))
 
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // test
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	require.NoError(t, err)
 	var result runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &result))
@@ -1391,7 +1391,7 @@ func TestDestroy_ReadOnlyFiles(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750))
 
 	// Create read-only nested structure (like Go module cache)
-	readonlyDir := filepath.Join(sandboxDir, "work", "modcache", "pkg")
+	readonlyDir := filepath.Join(store.WorkBasePath(sandboxDir), "modcache", "pkg")
 	require.NoError(t, os.MkdirAll(readonlyDir, 0750))
 	testutil.WriteFile(t, readonlyDir, "mod.go", "package mod")
 	// Make directory read-only
@@ -1590,7 +1590,7 @@ func TestStart_Done_WarnsOnStaleLineage(t *testing.T) {
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":0,"timestamp":%d}`, time.Now().Unix())
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.AgentStatusFile), []byte(statusData), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(sandboxDir), []byte(statusData))
 
 	// Running container, holding an image built on a base this binary has moved past.
 	mock := &lifecycleMockRuntime{
@@ -1627,7 +1627,7 @@ func TestStart_Done_SilentOnCurrentLineage(t *testing.T) {
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":0,"timestamp":%d}`, time.Now().Unix())
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.AgentStatusFile), []byte(statusData), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(sandboxDir), []byte(statusData))
 
 	const current = "base-this-binary-expects"
 	mock := &lifecycleMockRuntime{

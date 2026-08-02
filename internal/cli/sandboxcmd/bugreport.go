@@ -11,7 +11,6 @@ import (
 	"io"
 	"os"
 	"os/exec"
-	"path/filepath"
 	"strings"
 	"time"
 
@@ -20,6 +19,7 @@ import (
 
 	yoloai "github.com/kstenerud/yoloai"
 	"github.com/kstenerud/yoloai/internal/buildinfo"
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -113,7 +113,7 @@ func writeSandboxSections(ctx context.Context, w io.Writer, c *yoloai.Client, na
 	// 30s budget — captures in-VM and host-side network state at the
 	// moment of failure. Present only on probe-timeout; the section
 	// header is suppressed when the file doesn't exist (typical).
-	writePlainFileSection(w, "network-diag.txt", filepath.Join(sandboxDir, "network-diag.txt"))
+	writePlainFileSection(w, "network-diag.txt", config.NetworkDiagPath(sandboxDir))
 
 	if reportType == "unsafe" {
 		// Section 11: Agent output (unsafe only)
@@ -201,7 +201,7 @@ func writeBugReportSandboxDetail(ctx context.Context, w io.Writer, c *yoloai.Cli
 		// prompt.txt (unsafe only; omitted in safe mode — may contain sensitive task descriptions)
 		if reportType == "unsafe" {
 			writePlainFileSection(w, "prompt.txt",
-				fmt.Sprintf("%s/prompt.txt", sandboxDir))
+				config.PromptPath(sandboxDir))
 		}
 	}
 

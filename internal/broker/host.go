@@ -11,10 +11,10 @@ import (
 	"fmt"
 	"net"
 	"os"
-	"path/filepath"
 	"syscall"
 	"time"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 )
@@ -63,8 +63,8 @@ type InjectorRecord struct {
 }
 
 const (
-	injectorRecordFile = "injector.json"
-	injectorLogFile    = "injector.log"
+	injectorRecordFile = config.InjectorRecordFileName
+	injectorLogFile    = config.InjectorLogFileName
 	handshakeTimeout   = 5 * time.Second
 	termGrace          = 1 * time.Second
 )
@@ -176,7 +176,8 @@ func (h *SidecarHost) spawn(spec InjectorSpec, bindPort string) (string, error) 
 	}
 	cmd.Stdin = inR
 	cmd.Stdout = outW
-	if logf, lerr := fileutil.OpenFile(filepath.Join(spec.SandboxDir, injectorLogFile), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); lerr == nil {
+	_ = config.EnsureHostTier(spec.SandboxDir) // best-effort: the log is a diagnostic, not a dependency
+	if logf, lerr := fileutil.OpenFile(config.InjectorLogPath(spec.SandboxDir), os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0600); lerr == nil {
 		cmd.Stderr = logf
 		defer func() { _ = logf.Close() }()
 	}
@@ -252,10 +253,10 @@ func closeAll(files ...*os.File) {
 // --- record persistence (injector.json) --------------------------------------
 
 func recordPath(sandboxDir string) string {
-	return filepath.Join(sandboxDir, injectorRecordFile)
+	return config.InjectorRecordPath(sandboxDir)
 }
 
-const placeholderTokenFile = "injector-token"
+const placeholderTokenFile = config.InjectorTokenFileName
 
 // PlaceholderToken returns the sandbox's per-sandbox injector placeholder token,
 // generating and persisting a fresh random one on first call (get-or-create).
@@ -266,7 +267,7 @@ const placeholderTokenFile = "injector-token"
 // co-resident container cannot learn another sandbox's token. It is not a real
 // credential — only a per-sandbox capability secret — so persisting it is safe.
 func PlaceholderToken(sandboxDir string) (string, error) {
-	path := filepath.Join(sandboxDir, placeholderTokenFile)
+	path := config.InjectorTokenPath(sandboxDir)
 	if data, err := os.ReadFile(path); err == nil { //nolint:gosec // path from sandbox dir
 		if tok := string(data); tok != "" {
 			return tok, nil
@@ -279,6 +280,9 @@ func PlaceholderToken(sandboxDir string) (string, error) {
 		return "", fmt.Errorf("broker: generate placeholder token: %w", err)
 	}
 	tok := hex.EncodeToString(buf)
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return "", fmt.Errorf("broker: ensure host tier: %w", err)
+	}
 	if err := fileutil.WriteFile(path, []byte(tok), 0600); err != nil {
 		return "", fmt.Errorf("broker: persist %s: %w", placeholderTokenFile, err)
 	}
@@ -311,6 +315,9 @@ func saveRecord(sandboxDir string, rec *InjectorRecord) error {
 	data, err := json.MarshalIndent(rec, "", "  ")
 	if err != nil {
 		return fmt.Errorf("broker: marshal %s: %w", injectorRecordFile, err)
+	}
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("broker: ensure host tier: %w", err)
 	}
 	if err := fileutil.WriteFile(recordPath(sandboxDir), data, 0600); err != nil {
 		return fmt.Errorf("broker: write %s: %w", injectorRecordFile, err)

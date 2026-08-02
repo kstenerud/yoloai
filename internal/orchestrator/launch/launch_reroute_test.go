@@ -6,6 +6,7 @@ package launch
 import (
 	"context"
 	"encoding/json"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"io"
 	"log/slog"
 	"os"
@@ -172,7 +173,7 @@ func writeMinimalRuntimeConfig(t *testing.T, sandboxDir string) {
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), data, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), data)
 }
 
 // makeTestState builds a minimal *state.State for launch tests. sandboxDir must
@@ -196,7 +197,7 @@ func makeTestState(sandboxDir string) *state.State {
 // in sandboxDir.
 func readRuntimeConfigKeepalive(t *testing.T, sandboxDir string) bool {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // G304: path is test-controlled temp dir
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	require.NoError(t, err)
 	var cfg runtimeconfig.ContainerConfig
 	require.NoError(t, json.Unmarshal(data, &cfg))
@@ -214,7 +215,7 @@ func readRuntimeConfigKeepalive(t *testing.T, sandboxDir string) bool {
 //   - verifyInstanceRunning succeeds (Inspect returns Running=true)
 func TestBuildAndStart_LaunchPath(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "logs"), 0750))
+	require.NoError(t, os.MkdirAll(store.LogsPath(dir), 0750))
 
 	writeMinimalRuntimeConfig(t, dir)
 	markerPath := filepath.Join(dir, store.SecretsConsumedMarker)
@@ -286,7 +287,7 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 // instead: no keepalive_only patch and no Launch call.
 func TestBuildAndStart_ContainerEnhancedTakesLegacyPath(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "logs"), 0750))
+	require.NoError(t, os.MkdirAll(store.LogsPath(dir), 0750))
 	writeMinimalRuntimeConfig(t, dir)
 
 	rt := &rerouteLaunchRuntime{}
@@ -320,7 +321,7 @@ func TestBuildAndStart_ContainerEnhancedTakesLegacyPath(t *testing.T) {
 //   - Create → Start happen in order; Inspect returns Running=true
 func TestBuildAndStart_LegacyPath(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "logs"), 0750))
+	require.NoError(t, os.MkdirAll(store.LogsPath(dir), 0750))
 
 	writeMinimalRuntimeConfig(t, dir)
 
@@ -363,7 +364,7 @@ func TestBuildAndStart_LegacyPath(t *testing.T) {
 // patched, Launch is called, no marker wait is attempted.
 func TestBuildAndStart_LaunchPath_NoSecrets(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.MkdirAll(filepath.Join(dir, "logs"), 0750))
+	require.NoError(t, os.MkdirAll(store.LogsPath(dir), 0750))
 
 	writeMinimalRuntimeConfig(t, dir)
 

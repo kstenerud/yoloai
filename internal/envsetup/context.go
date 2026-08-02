@@ -6,9 +6,9 @@ package envsetup
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/runtime"
@@ -61,8 +61,8 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 	filesPath := rtDir + "/files/"
 	cachePath := rtDir + "/cache/"
 	if meta.HostFilesystem {
-		filesPath = filepath.Join(sandboxDir, "files") + "/"
-		cachePath = filepath.Join(sandboxDir, "cache") + "/"
+		filesPath = store.FilesDir(sandboxDir) + "/"
+		cachePath = store.CacheDir(sandboxDir) + "/"
 	}
 	fmt.Fprintf(&b, "The **shared files directory** is at `%s`.\n", filesPath)
 	fmt.Fprintf(&b, "Files shared via `yoloai files put` appear here, and anything you write here can be retrieved by the user with `yoloai files get`.\n")
@@ -127,11 +127,18 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 
 // runtimeDir returns the base path where runtime files live for this sandbox.
 // Container backends use /yoloai; host-filesystem backends (seatbelt) use the
-// host sandbox dir; VM backends that declare VMRuntimeDir use that path
-// (e.g. Tart uses /Users/admin/.yoloai, the symlinked path with no spaces).
+// flat guest view over the sandbox dir's tiers; VM backends that declare
+// VMRuntimeDir use that path (e.g. Tart uses /Users/admin/.yoloai, the symlinked
+// path with no spaces).
+//
+// This is agent-facing prose — the paths it names are what the agent is told to
+// read — so it has to name the paths the agent can actually reach. A
+// host-filesystem backend sees the real directory rather than a mount namespace,
+// and since tiering that directory is three tiers, not the flat layout the text
+// used to promise.
 func runtimeDir(sandboxDir string, meta *store.Environment) string {
 	if meta.HostFilesystem {
-		return sandboxDir
+		return config.GuestViewDir(sandboxDir)
 	}
 	if desc, ok := runtime.Descriptor(meta.BackendType); ok && desc.Capabilities.VMRuntimeDir != "" {
 		return desc.Capabilities.VMRuntimeDir
@@ -167,14 +174,17 @@ func WriteContextFiles(sandboxDir string, meta *store.Environment, spec EnvSpec)
 	content := GenerateContext(sandboxDir, meta)
 
 	// Write context.md at sandbox root (reference copy)
-	contextPath := filepath.Join(sandboxDir, "context.md")
+	contextPath := store.ContextFilePath(sandboxDir)
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("ensure host tier: %w", err)
+	}
 	if err := fileutil.WriteFile(contextPath, []byte(content), 0600); err != nil {
 		return fmt.Errorf("write context.md: %w", err)
 	}
 
 	// Write full context inline into the agent's native instruction file.
 	if spec.ContextFile != "" && spec.HasStateDir {
-		refPath := filepath.Join(sandboxDir, store.AgentRuntimeDir, spec.ContextFile)
+		refPath := store.AgentRuntimeFilePath(sandboxDir, spec.ContextFile)
 
 		// Append, don't clobber (D92): the seed/agent_files stage runs BEFORE this
 		// in the create flow, so the user's own context file (e.g. a seeded

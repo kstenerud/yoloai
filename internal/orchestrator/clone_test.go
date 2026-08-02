@@ -31,7 +31,7 @@ func newCloneMgr(tmpDir string) *Engine {
 func createCloneSource(t *testing.T, tmpDir, name string) {
 	t.Helper()
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0750))
+	require.NoError(t, os.MkdirAll(store.WorkBasePath(sandboxDir), 0750))
 
 	meta := &store.Environment{
 		Name:        name,

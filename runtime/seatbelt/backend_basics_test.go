@@ -8,8 +8,10 @@ package seatbelt
 import (
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -58,11 +60,11 @@ func TestSeatbelt_CreateInspectRemove(t *testing.T) {
 	// The sandbox directory layout should now exist.
 	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), rt.sandboxName(cfg.Name))
 	require.DirExists(t, sandboxPath, "sandbox directory should be created")
-	require.DirExists(t, filepath.Join(sandboxPath, backendDir),
+	require.DirExists(t, config.BackendPath(sandboxPath),
 		"backend dir should be created")
-	require.FileExists(t, filepath.Join(sandboxPath, backendDir, profileFileName),
+	require.FileExists(t, filepath.Join(config.BackendPath(sandboxPath), profileFileName),
 		"SBPL profile should be written")
-	require.FileExists(t, filepath.Join(sandboxPath, backendDir, seatbeltConfigFileName),
+	require.FileExists(t, filepath.Join(config.BackendPath(sandboxPath), seatbeltConfigFileName),
 		"instance config should be persisted")
 
 	// Inspect before Start — process is not running, but Inspect must succeed.
@@ -104,4 +106,64 @@ func TestSeatbelt_StopNotRunningIsNoOp(t *testing.T) {
 	// Stop on a never-started sandbox should not error — there is nothing
 	// to kill but the contract is "best-effort idempotent."
 	assert.NoError(t, rt.Stop(ctx, cfg.Name))
+}
+
+// TestResolveCopyMount_ResolvesIntoTheReadWriteTier pins where seatbelt's
+// copy-mode work copy lives. Seatbelt is host-side: this path is what the agent
+// edits and what `yoloai diff` reads, so it is the same directory seen from both
+// ends, and it is read-write tier state.
+//
+// It needs pinning because the failure is quiet in the direction that matters —
+// a work copy that is not where diff looks produces an empty diff, not an error,
+// so an agent's work would look like no work at all. This was built from a
+// "work" literal and went stale the moment the tiers moved; nothing tested it.
+func TestResolveCopyMount_ResolvesIntoTheReadWriteTier(t *testing.T) {
+	r := &Runtime{layout: config.Layout{DataDir: "/data"}}
+
+	got := r.ResolveCopyMount("mybox", "/Users/karl/project")
+
+	sandboxDir := filepath.Join(r.layout.SandboxesDir(), "mybox")
+	assert.Equal(t, filepath.Join(config.WorkBasePath(sandboxDir), config.EncodePath("/Users/karl/project")), got)
+	// Spelled literally too: the assertion above would follow a wrong builder.
+	assert.Contains(t, got, filepath.Join("mybox", "rw", "work"),
+		"the work copy is read-write tier state")
+}
+
+// TestCheckTmuxSocketPathFits_RefusesBeforeTheSocketIsBound pins the boundary
+// and, more importantly, which side of it errors.
+//
+// The limit belongs to the whole path, so the same sandbox name is fine under a
+// short data dir and impossible under a long one — which is why it cannot be a
+// name-validation rule and has to be checked where the resolved path is known.
+// Before this check the sandbox was created, reported success, and then failed
+// deeper in `start` with tmux's "File name too long" against a path nobody chose
+// the length of; the release gate's own generated names hit it (DF169).
+func TestCheckTmuxSocketPathFits_RefusesBeforeTheSocketIsBound(t *testing.T) {
+	// Work backwards from the cap so the case cannot drift with the layout: the
+	// longest sandbox dir whose socket path still fits, and one byte more. The
+	// suffix is measured, not spelled, so it stays right if the tier moves.
+	suffix := len(config.TmuxSocketPath("x")) - len("x")
+	fits := strings.Repeat("a", maxUnixSocketPath-1-suffix)
+	require.NoError(t, checkTmuxSocketPathFits(fits),
+		"a socket path of exactly the maximum length must be accepted")
+	require.Len(t, config.TmuxSocketPath(fits), maxUnixSocketPath-1)
+
+	err := checkTmuxSocketPathFits(fits + "a")
+	require.Error(t, err, "one byte over the cap must be refused")
+	// The message has to name the limit and the remedy: the kernel's does not,
+	// and it surfaces from inside tmux where the sandbox name is not in scope.
+	assert.Contains(t, err.Error(), "too long for this data directory")
+	assert.Contains(t, err.Error(), "Shorten the sandbox name")
+	assert.Contains(t, err.Error(), "--data-dir")
+}
+
+// TestTmuxSocketPath_SitsAtTheTierRoot pins the depth, which is the part that is
+// load-bearing rather than cosmetic: every path component between the sandbox
+// dir and the socket is spent from the same 104-byte budget, so moving the
+// socket back under tmux/ would silently re-narrow the usable name length.
+func TestTmuxSocketPath_SitsAtTheTierRoot(t *testing.T) {
+	got := config.TmuxSocketPath("/data/sandboxes/mybox")
+
+	assert.Equal(t, "/data/sandboxes/mybox/rw/tmux.sock", got)
+	assert.NotContains(t, got, "/tmux/", "the socket must not sit inside tmux/ — that costs five bytes of sun_path")
 }

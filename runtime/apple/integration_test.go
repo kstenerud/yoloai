@@ -85,8 +85,9 @@ func TestAppleConformance(t *testing.T) {
 		rt, ctx := appleSetup(t)
 		require.NoError(t, ensureSleepImage(rt, ctx))
 		return runtimetest.InterfaceBackend{
-			Runtime: rt,
-			Ctx:     ctx,
+			Runtime:          rt,
+			Ctx:              ctx,
+			SkipSandboxTiers: "binds each needed file individually and never shares the sandbox dir, so no tier is reachable from the guest",
 			// Each apple container is its own lightweight VM; share one across the
 			// read-only subtests to skip its per-subtest boots (speedup plan, lever 1).
 			SharesReadOnlyInstance: true,

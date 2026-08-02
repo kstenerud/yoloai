@@ -121,8 +121,9 @@ func RunConformance(t *testing.T, setup SetupFunc) {
 	RunInterfaceConformance(t, func(t *testing.T) InterfaceBackend {
 		rt, ctx := setup(t)
 		return InterfaceBackend{
-			Runtime: rt,
-			Ctx:     ctx,
+			Runtime:          rt,
+			Ctx:              ctx,
+			SkipSandboxTiers: "binds each needed file individually and never shares the sandbox dir, so no tier is reachable from the guest",
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 				// docker/podman reap the `sleep infinity` PID 1 via tini.
 				cfg.UseInit = true

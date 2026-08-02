@@ -120,7 +120,7 @@ func registerGitDispatchMock(t *testing.T) {
 func seedCopySandbox(t *testing.T, layout config.Layout, name string) {
 	t.Helper()
 	sandboxDir := layout.SandboxDir(name)
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, "work"), 0750))
+	require.NoError(t, os.MkdirAll(store.WorkBasePath(sandboxDir), 0750))
 	meta := &store.Environment{
 		Name:        name,
 		Principal:   config.CLIPrincipal,

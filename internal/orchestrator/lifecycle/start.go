@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -177,7 +176,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Env
 	}
 
 	// Overwrite prompt.txt with new prompt; save old content for rollback.
-	promptPath := filepath.Join(sandboxDir, "prompt.txt")
+	promptPath := store.PromptFilePath(sandboxDir)
 	oldPrompt, _ := os.ReadFile(promptPath) //nolint:gosec // G304: promptPath is constructed from a validated sandbox name
 	if writeErr := fileutil.WriteFile(promptPath, []byte(promptText), 0600); writeErr != nil {
 		return "", false, fmt.Errorf("write prompt.txt: %w", writeErr)

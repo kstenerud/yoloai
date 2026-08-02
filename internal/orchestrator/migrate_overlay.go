@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/config/pretier"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/migrate"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
@@ -26,6 +27,12 @@ import (
 // (Phase 4). It reads overlay sandboxes straight off disk, so a no-overlay
 // install never opens a runtime — the common path (and every unit test) needs no
 // backend. It stamps v4 LAST, only after the per-sandbox pass is durable.
+//
+// Every sandbox path it touches is addressed through internal/config/pretier,
+// on both sides: the v3 sandbox it reads is flat, and the v4 sandbox it builds
+// is flat too, because the tier move is v5->v6 and runs after this. The live
+// builders resolve into host/ (and, once the rest of the tiering lands, rw/),
+// which is neither of those layouts — see DF164.
 type OverlayFlatten struct {
 	// runtimeFor builds a runtime for a specific backend on demand — called only
 	// when overlay sandboxes are actually present, and once per distinct backend,
@@ -80,7 +87,7 @@ func (o *OverlayFlatten) backendFor(ctx context.Context, name string) (runtime.B
 // LoadEnvironment defaults a legacy empty backend to docker, so this is never
 // empty for a real sandbox.
 func (o *OverlayFlatten) sandboxBackend(name string) (runtime.BackendType, error) {
-	env, err := store.LoadEnvironment(o.layout.SandboxDir(name))
+	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(o.layout.SandboxDir(name)))
 	if err != nil {
 		return "", fmt.Errorf("load environment for %q: %w", name, err)
 	}
@@ -233,8 +240,12 @@ func (o *OverlayFlatten) hostUnmanageableReason(name string) string {
 		return "" // an unreadable sandbox dir surfaces elsewhere; don't block on a stat hiccup
 	}
 	for _, e := range entries {
-		if e.Name() == "work" {
-			continue // overlay layers under work/ are reclaimed to the host user during capture
+		if e.Name() == pretier.WorkDirName {
+			// Overlay layers under work/ are reclaimed to the host user during
+			// capture. The name is spelled from pretier rather than as a bare
+			// literal because this walks a *flat* root: a v3 sandbox's entries sit
+			// directly under it, and only the pre-tier work/ is among them.
+			continue
 		}
 		info, err := e.Info()
 		if err != nil {
@@ -302,11 +313,14 @@ func (o *OverlayFlatten) flattenRunning(ctx context.Context, name string) (migra
 // capture and abandon paths; the enumerate/mkdir/copy scaffolding is shared.
 func (o *OverlayFlatten) buildWork(name, dst string, srcFor func(sandboxDir string, dir store.DirEnvironment) (string, error)) error {
 	sandboxDir := o.layout.SandboxDir(name)
-	env, err := store.LoadEnvironment(sandboxDir)
+	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(sandboxDir))
 	if err != nil {
 		return fmt.Errorf("load environment for %q: %w", name, err)
 	}
-	dstWork := filepath.Join(dst, "work")
+	// dst is pre-tier too: this migrator's output is a v4 sandbox, and the tier
+	// move is v5->v6. Building it tiered would hand the next migrator in the
+	// ladder a shape from two versions ahead of the one it reads.
+	dstWork := pretier.WorkDir(dst)
 	if err := fileutil.MkdirAll(dstWork, 0o750); err != nil {
 		return err
 	}
@@ -328,7 +342,7 @@ func (o *OverlayFlatten) buildWork(name, dst string, srcFor func(sandboxDir stri
 func (o *OverlayFlatten) buildFlattened(ctx context.Context, name, dst string) error {
 	return o.buildWork(name, dst, func(sandboxDir string, dir store.DirEnvironment) (string, error) {
 		if dir.Mode != store.DirModeOverlay {
-			return store.WorkDir(sandboxDir, dir.HostPath), nil
+			return pretier.WorkDirFor(sandboxDir, store.EncodePath(dir.HostPath)), nil
 		}
 		return o.captureMerged(ctx, name, dir.HostPath)
 	})
@@ -366,7 +380,7 @@ func (o *OverlayFlatten) captureMerged(ctx context.Context, name, hostPath strin
 	if res.ExitCode != 0 {
 		return "", fmt.Errorf("capture merged tree for %q: exit %d: %s", name, res.ExitCode, res.Stdout)
 	}
-	hostStage := filepath.Join(store.WorkDir(o.layout.SandboxDir(name), hostPath), captureStageName)
+	hostStage := filepath.Join(pretier.WorkDirFor(o.layout.SandboxDir(name), store.EncodePath(hostPath)), captureStageName)
 	if _, err := os.Stat(hostStage); err != nil {
 		return "", fmt.Errorf("captured tree not visible host-side at %s: %w", hostStage, err)
 	}
@@ -430,10 +444,11 @@ func (o *OverlayFlatten) flattenAbandon(name string) (migrate.Report, error) {
 // resolver. Non-overlay dirs carry verbatim.
 func (o *OverlayFlatten) buildFromLower(name, dst string) error {
 	return o.buildWork(name, dst, func(sandboxDir string, dir store.DirEnvironment) (string, error) {
+		enc := store.EncodePath(dir.HostPath)
 		if dir.Mode == store.DirModeOverlay {
-			return store.OverlayLowerDir(sandboxDir, dir.HostPath), nil
+			return pretier.OverlayLowerFor(sandboxDir, enc), nil
 		}
-		return store.WorkDir(sandboxDir, dir.HostPath), nil
+		return pretier.WorkDirFor(sandboxDir, enc), nil
 	})
 }
 
@@ -450,8 +465,17 @@ func (o *OverlayFlatten) quarantine(name string) (migrate.Report, error) {
 // rewrites the (repopulated) environment.json in newDir with every overlay dir
 // flipped to :copy, its overlay baseline cleared. Written durably and last, so
 // its presence (no overlay dirs) authorizes promotion.
+//
+// Read and written at the same flat path, and here that is load-bearing beyond
+// the usual reason. repopulate carries the original's top-level entries into
+// newDir verbatim, so the record this rewrites arrives flat. Writing it through
+// the live builders would leave that flat record saying :overlay and add a
+// second one under host/ saying :copy — a promoted sandbox holding both
+// answers, with isCopyMode reading the new one and the whole rest of the ladder
+// reading the old.
 func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
-	env, err := store.LoadEnvironment(newDir)
+	envPath := pretier.EnvironmentPath(newDir)
+	env, err := store.LoadEnvironmentFrom(envPath)
 	if err != nil {
 		return fmt.Errorf("load staged environment: %w", err)
 	}
@@ -469,7 +493,7 @@ func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
 			env.Dirs[i].InceptionSHA = ""
 		}
 	}
-	if err := store.SaveEnvironment(newDir, env); err != nil {
+	if err := store.SaveEnvironmentTo(envPath, env); err != nil {
 		return fmt.Errorf("write copy-mode environment: %w", err)
 	}
 	return nil
@@ -479,7 +503,7 @@ func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
 // the durable "flattened" form the promotion recovery reads. A missing
 // environment.json (the new dir before repopulate copies it in) is "not ready".
 func (o *OverlayFlatten) isCopyMode(dir string) (bool, error) {
-	env, err := store.LoadEnvironment(dir)
+	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(dir))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
@@ -510,10 +534,10 @@ func (o *OverlayFlatten) overlaySandboxNames() ([]string, error) {
 			continue
 		}
 		sandboxDir := filepath.Join(o.sandboxesRoot, e.Name())
-		if _, err := os.Stat(filepath.Join(sandboxDir, store.EnvironmentFile)); errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Stat(pretier.EnvironmentPath(sandboxDir)); errors.Is(err, fs.ErrNotExist) {
 			continue // not a sandbox dir at all — nothing here claims to be one
 		}
-		env, err := store.LoadEnvironment(sandboxDir)
+		env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(sandboxDir))
 		if err != nil {
 			// Same reasoning as PrincipalRename.unmigratedSandboxNames: a dir
 			// holding an environment.json we cannot read must stop the run, not
@@ -529,6 +553,14 @@ func (o *OverlayFlatten) overlaySandboxNames() ([]string, error) {
 }
 
 // status reports name's current container status via its own backend runtime.
+//
+// DetectStatus reads agent-status.json through the LIVE builders, which is
+// DF164's shape and is left standing here for the same reason as in
+// PrincipalRename: it is consulted only for an instance already known to be
+// running, and classifyOverlay maps every status it can yield — active, idle,
+// done, failed — to one op, the same one StatusActive gets when the file is
+// missing. The distinctions this migrator actually acts on (stopped, removed,
+// unauditable) are all decided before that read.
 func (o *OverlayFlatten) status(ctx context.Context, name string) (status.Status, error) {
 	rt, err := o.backendFor(ctx, name)
 	if err != nil {

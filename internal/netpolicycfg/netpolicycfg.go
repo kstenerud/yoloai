@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // NetpolicyFile is the filename for the per-sandbox network-policy record.
-const NetpolicyFile = "netpolicy.json"
+const NetpolicyFile = config.NetpolicyFileName
 
 const schemaVersion = 1
 
@@ -29,18 +29,27 @@ type Netpolicy struct {
 
 // Save writes netpolicy.json to the given sandbox directory.
 func Save(sandboxDir string, np *Netpolicy) error {
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
+	}
+	return SaveTo(config.NetpolicyPath(sandboxDir), np)
+}
+
+// SaveTo writes the record to an explicit path, stamping and serializing it
+// exactly as Save does but resolving nothing: the caller supplies the path and
+// owns the directory's existence. It exists for migrators, which must address
+// the layout of the era they are migrating FROM (internal/config/pretier,
+// DF164). Everything else calls Save.
+func SaveTo(path string, np *Netpolicy) error {
 	np.Version = schemaVersion
 
 	data, err := json.MarshalIndent(np, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", NetpolicyFile, err)
 	}
-
-	path := filepath.Join(sandboxDir, NetpolicyFile)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", NetpolicyFile, err)
 	}
-
 	return nil
 }
 
@@ -48,7 +57,7 @@ func Save(sandboxDir string, np *Netpolicy) error {
 // zero-value Netpolicy if the file does not exist (a sandbox with default,
 // non-isolated networking writes no record — omitempty drops empty fields).
 func Load(sandboxDir string) (*Netpolicy, error) {
-	path := filepath.Join(sandboxDir, NetpolicyFile)
+	path := config.NetpolicyPath(sandboxDir)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir
 	if err != nil {

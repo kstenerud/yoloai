@@ -6,8 +6,9 @@ package launch
 
 import (
 	"context"
+	"github.com/kstenerud/yoloai/internal/testutil"
+	"github.com/kstenerud/yoloai/store"
 	"os"
-	"path/filepath"
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -54,7 +55,7 @@ func TestDeliverRuntimeScripts_MountsTheBinaryOwnCopy(t *testing.T) {
 	mounts, err := deliverRuntimeScripts(state.Deps{Runtime: rt}, &state.State{SandboxDir: sandboxDir})
 	require.NoError(t, err)
 
-	wantDir := filepath.Join(sandboxDir, "bin")
+	wantDir := store.BinPath(sandboxDir)
 	assert.Equal(t, wantDir, rt.writtenTo,
 		"scripts must be materialised into the sandbox's own bin/, the directory tart already uses")
 	require.Len(t, mounts, 1, "a baking backend must be given the mount, or it keeps reading the image's copies")
@@ -83,9 +84,8 @@ func TestDeliverRuntimeScripts_SkipsBackendsThatAlreadyDeliver(t *testing.T) {
 // scripts in the agent container) while the hard-failure path stays broken.
 func TestInstallFirewallSidecar_CarriesTheScriptMount(t *testing.T) {
 	sandboxDir := t.TempDir()
-	require.NoError(t, os.WriteFile(
-		filepath.Join(sandboxDir, "runtime-config.json"),
-		[]byte(`{"allowed_domains":["api.anthropic.com"]}`), 0o600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir),
+		[]byte(`{"allowed_domains":["api.anthropic.com"]}`))
 
 	rt := &scriptProviderBackend{}
 	st := &state.State{Name: "box", SandboxDir: sandboxDir, ImageRef: "yoloai-base:latest"}
@@ -95,7 +95,7 @@ func TestInstallFirewallSidecar_CarriesTheScriptMount(t *testing.T) {
 	require.NotNil(t, rt.gotSpec)
 	require.Len(t, rt.gotSpec.Mounts, 1,
 		"the sidecar reads install-firewall.py from the image unless the script mount is repeated for it")
-	assert.Equal(t, filepath.Join(sandboxDir, "bin"), rt.gotSpec.Mounts[0].HostPath)
+	assert.Equal(t, store.BinPath(sandboxDir), rt.gotSpec.Mounts[0].HostPath)
 	assert.Equal(t, "/yoloai/bin", rt.gotSpec.Mounts[0].ContainerPath)
 	assert.True(t, rt.gotSpec.Mounts[0].ReadOnly)
 	assert.Equal(t, []string{"python3", "/yoloai/bin/install-firewall.py"}, rt.gotSpec.Argv,

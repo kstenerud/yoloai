@@ -8,7 +8,6 @@ import (
 	"context"
 	"encoding/json"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/netpolicycfg"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
@@ -82,7 +81,7 @@ func (e *Engine) LivePatchNetwork(ctx context.Context, name, script string, scri
 // Returns the empty (default) mode if the config can't be read, which keeps the
 // caller on the in-container live-patch path rather than guessing a sidecar.
 func (e *Engine) sandboxIsolation(name string) runtime.IsolationMode {
-	data, err := os.ReadFile(filepath.Join(e.layout.SandboxDir(name), store.RuntimeConfigFile))
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(e.layout.SandboxDir(name)))
 	if err != nil {
 		return ""
 	}

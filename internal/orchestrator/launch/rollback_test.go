@@ -6,7 +6,6 @@ package launch
 import (
 	"context"
 	"fmt"
-	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -51,7 +50,8 @@ func TestRollbackPartialLaunch_ReapsContainerAndInjectorOnCancelledCtx(t *testin
 	pid := cmd.Process.Pid
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
 	rec := fmt.Sprintf(`{"pid":%d,"addr":"127.0.0.1:1"}`, pid)
-	require.NoError(t, fileutil.WriteFile(filepath.Join(dir, "injector.json"), []byte(rec), 0o600))
+	require.NoError(t, config.EnsureHostTier(dir))
+	require.NoError(t, fileutil.WriteFile(config.InjectorRecordPath(dir), []byte(rec), 0o600))
 
 	st := &state.State{Name: "box", SandboxDir: dir, Layout: config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)}
 	rt := &recordingRuntime{}

@@ -7,7 +7,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
@@ -20,7 +19,7 @@ import (
 // the file directly instead.
 func loadContainerConfig(sandboxDir string) (runtimeconfig.ContainerConfig, error) {
 	var cfg runtimeconfig.ContainerConfig
-	data, err := os.ReadFile(filepath.Join(sandboxDir, store.RuntimeConfigFile)) //nolint:gosec // path is sandbox-controlled
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
 	if err != nil {
 		return cfg, fmt.Errorf("read runtime-config.json: %w", err)
 	}
@@ -31,7 +30,7 @@ func loadContainerConfig(sandboxDir string) (runtimeconfig.ContainerConfig, erro
 }
 
 func patchRuntimeConfig(sandboxDir string, mutate func(*runtimeconfig.ContainerConfig)) error {
-	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
+	configPath := store.RuntimeConfigFilePath(sandboxDir)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)

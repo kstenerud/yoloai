@@ -60,7 +60,7 @@ func copyAgentFilesFromBaseDir(spec EnvSpec, sandboxDir, baseDir string) error {
 		return nil // source doesn't exist, skip silently
 	}
 
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 
 	return filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -105,7 +105,7 @@ func copyAgentFilesFromBaseDir(spec EnvSpec, sandboxDir, baseDir string) error {
 // Each entry is copied to agent-runtime/basename. Missing entries are skipped.
 // Existing files are not overwritten.
 func copyAgentFilesList(sandboxDir string, files []string) error {
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 
 	for _, src := range files {
 		info, err := os.Stat(src)

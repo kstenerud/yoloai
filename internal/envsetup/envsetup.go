@@ -175,8 +175,8 @@ func DescribeSeedAuthFiles(spec EnvSpec) string {
 // homeDir is used for ~ expansion in seed file host paths.
 func CopySeedFiles(spec EnvSpec, sandboxDir string, hasAPIKey bool, homeDir string, hostEnv config.Layout) (bool, error) {
 	copiedAuth := false
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
-	homeSeedDir := filepath.Join(sandboxDir, "home-seed")
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
+	homeSeedDir := store.HomeSeedPath(sandboxDir)
 
 	for _, sf := range spec.SeedFiles {
 		if shouldSkipSeedFile(sf, hasAPIKey, hostEnv) {
@@ -267,9 +267,9 @@ func loadSeedFileData(sf SeedFile, homeDir string) ([]byte, bool, error) {
 // upstream (envspec.BuildEnvSpec); an empty list is a no-op.
 func EnsureContainerSettings(sandboxDir string, patches []SettingsPatch) error {
 	for _, p := range patches {
-		dir := filepath.Join(sandboxDir, p.RelDir)
+		dir := p.Dir(sandboxDir)
 		if err := fileutil.MkdirAllPerm(dir, p.DirPerm); err != nil {
-			return fmt.Errorf("create settings dir %s: %w", p.RelDir, err)
+			return fmt.Errorf("create settings dir %s: %w", dir, err)
 		}
 		fileName := p.FileName
 		if fileName == "" {
@@ -326,7 +326,7 @@ func ensureHomeSeedConfig(spec EnvSpec, sandboxDir string, trustPaths []string) 
 		return nil
 	}
 
-	configPath := filepath.Join(sandboxDir, "home-seed", ".claude.json")
+	configPath := filepath.Join(store.HomeSeedPath(sandboxDir), ".claude.json")
 
 	cfg, err := fileutil.ReadJSONMap(configPath)
 	if err != nil {

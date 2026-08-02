@@ -145,7 +145,7 @@ func TestCLI_NewWithPrompt(t *testing.T) {
 	t.Cleanup(func() { destroySandbox(t, "cli-prompt") })
 
 	sandboxDir := cliutil.Layout().SandboxDir("cli-prompt")
-	prompt, err := os.ReadFile(filepath.Join(sandboxDir, "prompt.txt")) //nolint:gosec // test path
+	prompt, err := os.ReadFile(store.PromptFilePath(sandboxDir))
 	require.NoError(t, err)
 	assert.Equal(t, "echo hi", string(prompt))
 }
@@ -229,10 +229,10 @@ func TestCLI_Log(t *testing.T) {
 
 	// Write a fake JSONL log entry for testing
 	sandboxDir := cliutil.Layout().SandboxDir("cli-log")
-	logsDir := filepath.Join(sandboxDir, store.LogsDir)
+	logsDir := store.LogsPath(sandboxDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log output"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-log")), []byte(entry), 0600))
+	testutil.WriteSandboxRecord(t, store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-log")), []byte(entry))
 
 	stdout, _, err := runCLI(t, "log", "cli-log")
 	require.NoError(t, err)
@@ -347,14 +347,14 @@ func TestCLI_BugreportCommand_Unsafe(t *testing.T) {
 
 	// Write fake JSONL to all 4 log files and agent.log in the sandbox
 	sandboxDir := cliutil.Layout().SandboxDir("cli-br-unsafe")
-	logsDir := filepath.Join(sandboxDir, store.LogsDir)
+	logsDir := store.LogsPath(sandboxDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log message"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.SandboxJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.MonitorJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.HooksJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.AgentLogPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte("agent output line\n"), 0600))
+	testutil.WriteSandboxRecord(t, store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry))
+	testutil.WriteSandboxRecord(t, store.SandboxJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry))
+	testutil.WriteSandboxRecord(t, store.MonitorJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry))
+	testutil.WriteSandboxRecord(t, store.HooksJSONLPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte(entry))
+	testutil.WriteSandboxRecord(t, store.AgentLogPath(cliutil.Layout().SandboxDir("cli-br-unsafe")), []byte("agent output line\n"))
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)
@@ -395,13 +395,13 @@ func TestCLI_BugreportCommand_Safe(t *testing.T) {
 
 	// Write fake JSONL to all 4 log files
 	sandboxDir := cliutil.Layout().SandboxDir("cli-br-safe")
-	logsDir := filepath.Join(sandboxDir, store.LogsDir)
+	logsDir := store.LogsPath(sandboxDir)
 	require.NoError(t, os.MkdirAll(logsDir, 0700))
 	entry := `{"ts":"2026-03-16T10:00:00.000Z","level":"info","event":"test.event","msg":"test log message"}` + "\n"
-	require.NoError(t, os.WriteFile(store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.SandboxJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.MonitorJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
-	require.NoError(t, os.WriteFile(store.HooksJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry), 0600))
+	testutil.WriteSandboxRecord(t, store.CLIJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry))
+	testutil.WriteSandboxRecord(t, store.SandboxJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry))
+	testutil.WriteSandboxRecord(t, store.MonitorJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry))
+	testutil.WriteSandboxRecord(t, store.HooksJSONLPath(cliutil.Layout().SandboxDir("cli-br-safe")), []byte(entry))
 
 	origDir, err := os.Getwd()
 	require.NoError(t, err)

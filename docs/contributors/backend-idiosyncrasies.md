@@ -152,6 +152,7 @@ inclusion test first, then add a row to the index.
 | `system disk` shows tart `IMAGES: ?` / `CACHE: 0 B` despite GBs in `~/.tart`; `prune --images` reports 0 reclaimed | [Tart: list double-counts OCI tag+digest; sizing/prune must dedup](#tart-list-reports-a-pulled-oci-image-twice-tag--digest-over-one-on-disk-copy-sizing-and-prune-must-dedup-and-remove-both-rows) |
 | macOS `docker` numbers don't match Docker Desktop assumptions (overlay2/btrfs, classic store) | [Docker on macOS may be OrbStack, not Docker Desktop](#docker-on-macos-may-be-orbstack-not-docker-desktop--docker-info-clientinfocontext-tells-you-which) |
 | Podman macOS reports image bytes correctly even though the Linux `LayersSize: 0` workaround exists | [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0) (macOS/version caveat) |
+| `--dir <path>:ro` is writable anyway, on Seatbelt only | [Seatbelt: SBPL has no read-only mount](#sbpl-has-no-read-only-mount--read-only-is-the-absence-of-a-write-grant-so-it-must-be-said-with-an-explicit-deny) |
 | `system disk` shows seatbelt `IMAGES: ?` / `CACHE: 0 B` — is it a gap? | [Seatbelt has no backend image/cache store](#seatbelt-has-no-backend-imagecache-store--cacheusageprunecache-are-correctly-absent) |
 | Apple `container create … --mount …` fails: `path '…' is not a directory` | [Apple: `--mount type=virtiofs` rejects file sources; use `-v`](#apple-mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts) |
 | Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build-silently-drops-a-relative--context-pass-an-absolute-dir) |
@@ -299,6 +300,28 @@ All bind mount targets must pre-exist in the container image:
 - Home seed file placeholders: `.claude.json`, `.opencode.json`, etc.
 
 See commit fc3be64.
+
+**Measured 2026-07-30, and the stated mechanism did not reproduce.** On the current Linux
+box the guest rootfs is mounted **read-write**:
+
+```
+# findmnt -no SOURCE,FSTYPE,OPTIONS /
+kataShared[/passthrough/yoloai-cli-probe/rootfs] virtiofs rw,nodev,relatime
+```
+
+With a writable rootfs, kata-agent *can* create a missing target — and does. The
+conformance mount section binds at `/tmp/yoloai-conformance-mnt-*`, which pre-exists in no
+image, and it passes on containerd/Kata (DF161). `/tmp` is not a separate mount in the
+guest, so this is a rootfs target, i.e. exactly the case the rule above says fails silently.
+
+**Do not act on this by removing the pre-created paths.** Three readings fit and they are not
+distinguished: the rootfs may have been read-only when the rule was written and changed
+since; the original failure may have had a different cause that the read-only-rootfs
+explanation was fitted to; or the behaviour may vary by Kata version, VMM (QEMU vs
+Firecracker) or config. The rule is cheap to keep and the failure it describes is silent,
+which is the worst kind to re-acquire. What is established is narrow: **on this
+configuration, a non-pre-existing rootfs target is created rather than silently skipped.**
+Anyone who knows the original failure's conditions should reconcile this.
 
 ---
 
@@ -1587,8 +1610,11 @@ safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI
 by `tart run`, the file simply does not appear inside the VM.
 
 Workaround: copy file contents into a sandbox directory and share the directory
-via VirtioFS. For secrets, copy all secret files into `sandboxDir/secrets/` and
-share `sandboxDir` as the `yoloai` VirtioFS share. See `tart.go::Create`.
+via VirtioFS. For secrets, copy all secret files into the sandbox's `ro/secrets/`
+tier, which is shared as the `ro` VirtioFS share. See `tart.go::Create`.
+
+The sandbox dir itself is never shared: it is three tiers, and only `ro` and `rw`
+get a `--dir`, which is what keeps `host/` out of the guest (DF136).
 
 ---
 
@@ -1597,7 +1623,8 @@ share `sandboxDir` as the `yoloai` VirtioFS share. See `tart.go::Create`.
 Tart mounts VirtioFS shares at `/Volumes/My Shared Files/<share-name>` inside
 the macOS VM. The path contains a space. Any shell command constructing this
 path must quote it. The setup script uses: `'%s/bin/sandbox-setup.py'` with
-`%s = /Volumes/My Shared Files/yoloai`. See `tart.go::runSetupScript`.
+`%s = /Volumes/My Shared Files/rw` — the read-write tier's share, which is also
+the flat view the guest works from. See `tart.go::setupScriptCommand`.
 
 ---
 
@@ -2104,6 +2131,22 @@ instead of burning sentinel timeouts. Full design:
 [`archive/plans/tart-network-liveness.md`](archive/plans/tart-network-liveness.md).
 
 ## Seatbelt (macOS sandboxing)
+
+### SBPL has no read-only mount — "read-only" is the *absence* of a write grant, so it must be said with an explicit `deny`
+
+**Symptom / question:** a `--dir <path>:ro` sandbox lets the agent write to that path anyway, on seatbelt only. Every other backend refuses.
+
+**Explanation (measured 2026-07-30, macOS 26):** SBPL has no "mount this read-only" primitive, because seatbelt does not mount anything — it grants access to host paths in place. A read-only mount is therefore expressed as *"emit an allow-read and no allow-write"*, and an allow-read **does not revoke** a write permitted by some other rule. SBPL is last-match-wins among rules that *match the operation*, and a rule that only names `file-read*` never matches a write at all, so it cannot override anything.
+
+That makes read-only conditional on nothing else granting write over the same path — and the agent profile grants write broadly in several places: `/tmp`, `/private/tmp` and `/private/var/folders` (`tempPaths`), `~/Library/Caches/org.swift.swiftpm` and `~/Library/Developer/Xcode` (`writeProfileHomeDir`), the sandbox dir, and any enclosing read-write mount. A `:ro` dir under any of them was silently read-write. Reproduced end-to-end through the real `--dir` path: the file came back reading `tampered`.
+
+**The fix, and the rule it generalises to:** `writeProfileTrailingRules` emits an explicit `(deny file-write* (subpath …))` per read-only mount, in a trailing block after every allow. **Any negative permission on seatbelt has to be stated, positioned last, and ordered by specificity** — the trailing block sorts by path depth so the most specific rule matches last, which is what makes a read-write dir nested in a read-only one stay writable and vice versa. Verified against the kernel in both nesting directions, not just in the profile text.
+
+**Contrast with the other backends**, because the asymmetry is the thing to remember: docker/podman/containerd/apple get a real read-only bind, and tart a `:ro` VirtioFS share. Those are unconditional — they hold regardless of what else the config says. Seatbelt's is a statement that can be contradicted. So "grant read on X" means something materially weaker here than the identical sentence means anywhere else, and a design that says it once for several backends is not saying the same thing to each.
+
+**Code:** `runtime/seatbelt/profile.go::writeProfileTrailingRules`; tests `TestSeatbelt_ReadOnlyMountHoldsUnderABroaderGrant`, `TestSeatbelt_NestedMountsEnforceMostSpecific` (kernel), `TestGenerateProfile_NestedMountsResolveMostSpecificLast` (ordering). Origin: DF161, DF162.
+
+---
 
 ### Seatbelt has no backend image/cache store — `CacheUsage`/`PruneCache` are correctly absent
 

@@ -23,6 +23,51 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `store.OverlayLowerDir` is removed (Go embedding surface)
+
+**Previous behavior:** the `store` package exported `OverlayLowerDir(sandboxDir, hostPath)`,
+returning `<sandboxDir>/work/<caret-encoded-path>/lower/` — where an `:overlay` sandbox
+bind-mounted the user's original workdir read-only.
+
+**New behavior:** the function is gone. `:overlay` was removed as a mount mode in v0.6.0, and
+this helper survived only because `yoloai system migrate`'s v3→v4 flatten still read that
+directory to rebuild an abandoned overlay sandbox from its pristine lower. The migrator now
+resolves it through `internal/config/pretier`, which freezes the pre-tier on-disk layout, so
+nothing addresses an overlay path through the live layout builders any more — the point being
+that an overlay path is frozen twice over (pre-`:overlay`-retirement *and* pre-tiering) and must
+never follow a layout that has since moved.
+
+**Who this affects:** embedders that called it directly. Nothing else in the public surface
+changes, and no on-disk data is touched — the directory it named still exists inside any
+un-migrated overlay sandbox, and `yoloai system migrate` still reads it.
+
+**If you need it:** it is one `filepath.Join`, and it addresses a layout no supported sandbox
+has been written in since v0.6.0. Spell it literally rather than deriving it from a current
+path builder, for the reason above.
+
+### On Seatbelt, a `:ro` directory is now genuinely read-only
+
+**Previous behavior:** `--dir <path>:ro` on the Seatbelt backend granted the agent
+read *and write* whenever `<path>` fell inside a broader rule that granted write —
+`/tmp`, `/private/tmp`, the per-user temp tree (`/private/var/folders`),
+`~/Library/Caches/org.swift.swiftpm`, `~/Library/Developer/Xcode`, the sandbox
+directory, or any enclosing `:rw` directory. Elsewhere `:ro` behaved correctly, so
+the difference was invisible unless you tested it on one of those paths. Every other
+backend was, and is, unaffected.
+
+**New behavior:** the generated SBPL profile emits an explicit write deny for each
+read-only directory, so `:ro` is enforced regardless of what else the profile grants.
+Nesting still resolves most-specific-first: a `:rw` directory inside a `:ro` one stays
+writable, and a `:ro` directory inside a `:rw` one is now genuinely read-only.
+
+**Why this is listed as a break:** writes that previously succeeded now fail. If a
+workflow depended — knowingly or not — on writing into a `:ro` directory on one of the
+paths above, it stops working. The old behavior was a defect (DF162), but it was
+observable, so the change is called out rather than filed silently as a fix.
+
+**If you need write access:** declare the directory `:rw`, which is what the previous
+behavior was silently giving you.
+
 ### The sandbox image ships Node.js 22 LTS instead of Node.js 20
 
 **Previous behavior:** the base image installed Node.js 20 LTS, so every sandbox ran
@@ -53,6 +98,48 @@ sandboxes on that profile.
 that Dockerfile to `<data-dir>/defaults/base-image.Dockerfile` (refreshed whenever a
 sandbox is created). It is a reference only — its own header says so — because the
 build reads the embedded copy, never the disk.
+### A sandbox directory is now three tiers: `host/`, `ro/` and `rw/`
+
+**Previous behavior:** a sandbox directory was flat. `environment.json`,
+`sandbox-state.json`, `agent.json`, `netpolicy.json`, `network-diag.txt`,
+`context.md`, the injector's `injector.json` / `injector.log` / `injector-token`,
+and the `backend/` directory (SBPL profile, pid files, VM and CNI state) all sat
+at `<dataDir>/sandboxes/<name>/`, alongside everything the in-sandbox agent needs.
+On tart and Seatbelt the whole sandbox directory is shared into the guest
+read-write, so those four records were agent-writable — the root of DF136
+(rewrite `environment.json`'s `HostPath` and a host-side `apply` writes wherever
+that path points) and DF148.
+
+**New behavior:** they all live under `<dataDir>/sandboxes/<name>/host/`, the
+host-only access tier, which is never shared into a guest on any backend. The tier is a
+physical directory, so a record's guest-access class is determined by where it
+sits rather than by a list that has to be maintained. Nothing in any guest ever
+read these files, so no in-sandbox behavior changes.
+
+**And the other two tiers move with them.** `runtime-config.json`, `bin/`,
+`prompt.txt`, `machine-id`, `home-seed/` and `secrets/` go to `ro/`, which the
+guest reads and must not write; `logs/`, `work/`, `files/`, `cache/`,
+`agent-runtime/`, `agent-status.json`, `tmux/`, `vscode-cli/` and the guest's
+`home/` go to `rw/`. A sandbox root now holds exactly those three directories and
+nothing else, so there is no un-tiered place to put a new file.
+
+**The guest still sees one flat root.** Each backend assembles the flat view the
+in-sandbox scripts already expect, so nothing inside a sandbox changes — no agent
+command, path or script is affected.
+
+**Impact:** the on-disk layout changed, so sandboxes created by an earlier version
+must be migrated. `yoloai system migrate` does it, and it is not a per-file
+shuffle in place: it duplicates the whole `sandboxes/` tree, verifies the copy,
+and swaps it in, so a failure leaves the original untouched. **That needs free
+space equal to twice your sandboxes tree**, which `system migrate --check`
+reports up front, and it leaves the displaced copy in `<dataDir>/trash/` until you
+delete it. An entry nobody has classified is moved to `host/` — the direction that
+can only remove guest access rather than grant it — and named in the plan.
+
+`Sandbox.EnvironmentPath()` returns the new location; embedders that build any
+per-sandbox path themselves rather than calling the accessor must be updated, and
+that now includes anything reaching into `backend/` (`profile.sb`, `pid`,
+`instance.json`), `work/`, or `logs/`.
 
 ## v0.10.0
 

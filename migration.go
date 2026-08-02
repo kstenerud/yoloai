@@ -156,9 +156,17 @@ func (s *System) frameworkMigrators() ([]migrate.Migrator, func()) {
 	// (v4->v5), so the realm advances one step at a time and each migrator sees
 	// the prior one's result.
 	rename := orchestrator.NewPrincipalRename(s.layout, s.layout.SandboxesDir(), runtimeFor)
+	// The tier move (v5->v6) runs LAST, and that ordering is load-bearing rather
+	// than incidental: it is what lets every migrator above address a flat
+	// sandbox directory, which is the layout all of their inputs are written in
+	// (DF164). It uses runtimeFor for exactly one question — is this sandbox
+	// running — and degrades to "not running" when the backend cannot be built
+	// here, which is what lets a Linux host migrate tart and seatbelt sandboxes.
+	tier := orchestrator.NewTierLayout(s.layout, s.layout.DataDir, s.layout.SandboxesDir(), runtimeFor)
 	cleanup := func() {
 		flatten.Cleanup()
 		rename.Cleanup()
+		tier.Cleanup()
 	}
-	return []migrate.Migrator{flatten, rename}, cleanup
+	return []migrate.Migrator{flatten, rename, tier}, cleanup
 }

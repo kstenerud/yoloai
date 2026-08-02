@@ -32,7 +32,7 @@ func resetInodeSandbox(t *testing.T, tmpDir, name string) string {
 	testutil.WriteFile(t, origDir, "file.txt", "original content\n")
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(origDir))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(origDir))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 	testutil.WriteFile(t, workDir, "file.txt", "original content\n")
 	testutil.InitGitRepo(t, workDir)
@@ -118,7 +118,7 @@ func TestReset_ClearState_PreservesAgentRuntimeInode(t *testing.T) {
 	name := "test-reset-agentstate"
 	sandboxDir := resetInodeSandbox(t, tmpDir, name)
 
-	agentStateDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	agentStateDir := store.AgentRuntimePath(sandboxDir)
 	require.NoError(t, os.MkdirAll(agentStateDir, 0750))
 	testutil.WriteFile(t, agentStateDir, "state.json", "{}\n")
 

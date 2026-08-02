@@ -311,8 +311,9 @@ func TestContainerdConformance(t *testing.T) {
 		}
 
 		return runtimetest.InterfaceBackend{
-			Runtime: rt,
-			Ctx:     ctx,
+			Runtime:          rt,
+			Ctx:              ctx,
+			SkipSandboxTiers: "binds each needed file individually and never shares the sandbox dir, so no tier is reachable from the guest",
 			NewSleeper: func(t *testing.T, cfg runtime.InstanceConfig) string {
 				if cfg.ImageRef == "" {
 					cfg.ImageRef = "yoloai-base"

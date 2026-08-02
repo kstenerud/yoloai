@@ -262,7 +262,7 @@ func TestValidateName(t *testing.T) {
 
 func TestWorkDir(t *testing.T) {
 	sandboxDir := "/data/sandboxes/my-sandbox"
-	expected := filepath.Join(sandboxDir, "work", "^shome^suser^sproject")
+	expected := filepath.Join(config.WorkBasePath(sandboxDir), "^shome^suser^sproject")
 	assert.Equal(t, expected, WorkDir(sandboxDir, "/home/user/project"))
 }
 
@@ -277,14 +277,8 @@ func TestLegacyCLIInstanceName(t *testing.T) {
 	assert.Equal(t, "yoloai-mybox", LegacyCLIInstanceName("mybox"))
 }
 
-func TestOverlayLowerDir(t *testing.T) {
-	sandboxDir := "/data/sandboxes/my-sandbox"
-	expected := filepath.Join(sandboxDir, "work", EncodePath("/home/user/project"), "lower")
-	assert.Equal(t, expected, OverlayLowerDir(sandboxDir, "/home/user/project"))
-}
-
 func TestFilesDir(t *testing.T) {
 	sandboxDir := "/data/sandboxes/my-sandbox"
-	expected := filepath.Join(sandboxDir, "files")
+	expected := config.FilesPath(sandboxDir)
 	assert.Equal(t, expected, FilesDir(sandboxDir))
 }

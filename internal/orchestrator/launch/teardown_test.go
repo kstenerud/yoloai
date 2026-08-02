@@ -42,7 +42,8 @@ func TestTeardown_ReapsInjectorBeforeDeletingDir(t *testing.T) {
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
 
 	rec := fmt.Sprintf(`{"pid":%d,"addr":"127.0.0.1:1"}`, pid)
-	require.NoError(t, fileutil.WriteFile(filepath.Join(dir, "injector.json"), []byte(rec), 0o600))
+	require.NoError(t, config.EnsureHostTier(dir))
+	require.NoError(t, fileutil.WriteFile(config.InjectorRecordPath(dir), []byte(rec), 0o600))
 
 	_, err := Teardown(context.Background(), d, "box")
 	require.NoError(t, err)

@@ -787,6 +787,41 @@ is known, is probably not the *writing* of an entry but the **format** — a "Ca
 cannot be omitted, so pattern 4 stays computable. Revisit at ~20 specimens, or when an entry appears
 whose class already has three siblings.
 
+### A20 — accepted a skip reason as a constraint, then engineered around the defect it was hiding (2026-07-30)
+
+- **Claimed:** that the conformance mount section could not run on seatbelt or tart, because it binds
+  at `/mnt/test` and neither macOS-family backend can create `/mnt`. Reported it as a fixed cost and
+  designed around it — a new `TierIsolation` conformance section with a new fixture field, so the
+  tiering invariant would have somewhere to live that did not need the skipped section.
+- **True:** `/mnt/test` was an arbitrary literal in two subtests. Moving it under `/tmp` un-skips both
+  backends, and all four other backends are unaffected. The skip had concealed a **second** and worse
+  fact: seatbelt's read-only mounts were not read-only whenever a broader rule granted write over the
+  same path ([DF162](design/findings-resolved.md)), which is user-reachable via `--dir <path>:ro` and
+  needed no compromised agent. Neither skip was hiding a capability gap; one was hiding a security
+  defect.
+- **Source of the false belief:** both skip strings are *well-written*. They name a real mechanism
+  (SIP-sealed root volume; `/mnt` unwritable without root), cite the unit tests that cover the gap,
+  and one explicitly says it is "the conformance's container-path assumption, not a capability gap".
+  I read them as a diagnosis and inherited it. They are a diagnosis — of the symptom. Nothing in
+  either says "and this literal is arbitrary", because the person writing a skip is explaining why
+  the test cannot run, not auditing whether the test had to ask for that path.
+- **Caught by:** the owner, in one line — *"why do we need /mnt/test? Isn't there another way?"* Note
+  what it is not: it is not a correction of a fact. Every fact I had reported was true. It questions
+  whether the constraint was a constraint, which is the one move that was unavailable from inside a
+  frame where the skip reason was the premise.
+- **The second half is the sharper one.** After un-skipping, seatbelt's `ReadOnly` subtest failed. I
+  diagnosed it correctly — the profile's broad temp grant covers `t.TempDir()` — and then wrote a
+  plan to give the suite a fixture root outside that grant, and filed the constraint as "a trap for
+  whoever fixes this". That is engineering *around* a defect, having already found it. The failing
+  test was not telling me its fixture was in the wrong place; it was telling me `:ro` did not work.
+  One is a test problem and one is a product bug, and I picked the reading that kept the scope small.
+- **Cost:** none shipped — both were caught inside the session, the second by the owner's standing
+  "do it properly" rather than a specific correction. But the workaround was fully designed, written
+  into a finding as advice to the next person, and would have shipped a permanent fixture-placement
+  rule enshrining a security bug as an environment property.
+- **Class:** new, and it is the inverse of [A14](#a14--reimplemented-an-approach-the-repo-had-already-rejected-2026-07-29). There I re-derived a decision the repo had already made because I read the code and not the record. Here I read the record — the skip strings — and treated it as settled *because* it was well-argued. **A written rationale is evidence about what someone concluded, never about what they checked.** The tell is specific: a skip, a `nolint`, a `t.Skip`, a "known limitation" comment is a place where someone stopped, and the reason they stopped is the part least likely to have been re-examined since.
+- **Gated now?** No, and the useful habit is narrow enough to state: **when a test is disabled, check what it would assert if enabled, before accepting why it is disabled.** Two questions, in this order — *is the obstacle essential or incidental?* and, if you get past it and the test fails, *is this a test problem or a product problem?* The second is the one that pays: a newly-enabled test that fails is reporting on the product by default, and treating its failure as a fixture problem needs positive evidence, not convenience. Both skips here were years-cheap to keep and one of them was hiding a HIGH-severity defect the whole time.
+
 **One thing is ready ahead of that, though** (pattern 4b): the repo-relative-citation rule for
 findings. It has two specimens (A1, A8), needs no new mechanism, and turns an existing hook's known
 hole into coverage. That is a lower bar than "gate this file" and should not wait for it.
@@ -794,3 +829,83 @@ hole into coverage. That is a lower bar than "gate this file" and should not wai
 **When in doubt about whether something belongs: does it have a Caught-by that is not "the owner"?**
 If yes, it is evidence a mechanism worked and belongs here for that reason alone — the successes are
 as scarce as the failures and twice as useful.
+
+### A21 — audited a design correctly, then recommended against it on a criterion I had invented (2026-07-31)
+
+- **Claimed:** that the v5→v6 tier move should be built as an in-place rename shuffle rather than the
+  staged copy-and-promote the plan described. The supporting audit was sound and every fact in it
+  checked out — `repopulate` deep-copies (`promote.go:356`) so tree-level promotion costs 2× the
+  sandboxes dir; the migrators are not "parameterised on the root"; scratch resumability contradicts
+  `scratch.go`'s own invariant. From those I concluded that staging was "much larger than the
+  disease" and proposed the cheap alternative.
+- **True:** the cheap alternative is the one design that cannot satisfy the requirement. The owner,
+  in one sentence — *"If the migration fails, then the user will be stuck halfway, unable to
+  downgrade and unable to run the current version"* — named the criterion: what matters is the state
+  a **failed** migration leaves the user in. Under it, an in-place shuffle is strictly worst (a
+  deterministic failure bricks both directions), and the duplication I had costed as the objection
+  is the entire point. My follow-up was no better: I proposed hardlinks to recover the cost, and got
+  *"hardlinks are fine until you encounter a fs that doesn't support it"*.
+- **Source of the error, and it is not a factual one.** I evaluated the designs on the axis I could
+  measure — resource cost on the success path — and treated the failure state as a residual
+  probability to minimize. The owner's axis was the failure state itself, with cost as the free
+  variable: *migration is rare, therefore it can be heavy*. Both axes are defensible; only one was
+  the owner's, and I never asked which. Every fact in the audit stayed true when the axis flipped;
+  the recommendation inverted completely.
+- **Caught by:** the owner, in one line, twice. Note what neither line was: a correction of a fact.
+  The audit was not wrong, which is exactly why nothing internal to it could have flagged the
+  problem — a fact-check on my own analysis returns clean.
+- **The cost, and the shape of it.** Nothing shipped; it was a design conversation and the plan was
+  rewritten afterwards to the corrected design. But the correction also *deleted* most of what I had
+  been elaborating — the staged ladder, the `Requires` axis, the `repopulate` opt-out, the
+  hardlink/reflink tier — because once "heavy is fine" is on the table the machinery collapses.
+  Roughly: I had been optimizing a constraint the owner would have relaxed for free if asked.
+- **Class:** new, and the inverse of the A14/A20 pair. Those are failures to check a *premise* I
+  inherited from the repo. This is a failure to check a premise I supplied myself — an evaluation
+  criterion, which is the least visible kind because it never appears as a claim, only as the shape
+  of the recommendation. **A20's lesson was that a written rationale is evidence about what someone
+  concluded, never about what they checked. This one's is narrower: an audit is evidence about the
+  facts, never about which of them matter.**
+- **Gated now?** No, but the habit is cheap and states in one line: **when a recommendation trades
+  safety against cost, the acceptable failure state and the resource budget are the owner's to set —
+  ask for both before recommending, not after.** The tell is a design comparison where one option
+  wins on effort and another wins on what happens when it breaks. That is not a technical tie to be
+  broken by judgement; it is a question with an owner.
+
+### A22 — wrote the guard for a security invariant, and it passed on a shell parse error (2026-08-01)
+
+- **Claimed:** that the new `SandboxTiers` conformance section verified the tier invariant. It ran
+  green on seatbelt — `host/` unreadable and unwritable, `ro/` not writable through the view — and I
+  moved on to run it against tart.
+- **True:** on seatbelt every one of those denial assertions passed *without anything being denied*.
+  The section built its write commands as `sh -c "echo x > " + path`, unquoted. A tart guest reaches
+  the tiers under `/Volumes/My Shared Files`, so the shell split the path on the space and failed
+  with `sh: /Volumes/My: Permission denied` — and `assert.Error` accepts a shell parse failure
+  exactly as happily as a kernel denial. The seatbelt paths have no spaces, so *there* the commands
+  parsed and the assertions were real; the bug was invisible on the backend I checked first.
+- **Source of the false belief:** a green test I had just written, on the backend where the defect
+  does not manifest. Nothing was read second-hand here — this is the failure mode of `assert.Error`
+  itself, which asserts that *something* went wrong and never that the thing I care about did.
+  AGENTS.md rule 10 states this exact trap one case over ("asserting only *that* an error was
+  wrapped tests the wrapping, not the fix"); I had read it that morning and still wrote the
+  negative-space version of it.
+- **Caught by:** running it on the second backend, where the path has a space in it. Pure luck of
+  the platform — had tart's share been at a space-free path, or had I taken the seatbelt green as
+  sufficient for a "backend-agnostic" section, the branch would carry a security guard that passes
+  on any machine where the command cannot run at all. The fix was to quote the paths and route reads
+  through argv with no shell, and the thing that makes the section trustworthy now is not the
+  quoting but the **positive control**: a write to `rw/` that must *succeed*. That one assertion
+  fails loudly whenever the mechanism is broken rather than the permission — which is the only
+  reason a future regression of this shape gets noticed.
+- **Cost:** none shipped; caught within the hour, before the commit. Filed because it would have:
+  the green was on the backend I would have called representative, and the artifact is a guard for
+  DF136, where a vacuous pass is worth less than no test at all — it converts an open question into
+  a settled one.
+- **Class:** the A15 family (a test that certifies nothing while looking exactly like one that
+  certifies something), but by a different mechanism. A15's tests could not reach the code; these
+  reached it and mistook the *transport* failing for the *policy* holding. Generalised: **a negative
+  assertion is only as good as the proof that the action was attempted.** Any test whose pass
+  condition is "this failed" needs a sibling whose pass condition is "the same machinery succeeded",
+  or it is asserting that the test harness works.
+- **Gated now?** No, and it is not obvious what would gate it — a linter cannot tell an intended
+  denial from an accidental one. The transferable defence is the positive control, which is a review
+  question, not a check: *for every assert-it-fails, what asserts it was even tried?*

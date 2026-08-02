@@ -17,7 +17,7 @@ import (
 )
 
 func sock(root, name string) string {
-	return filepath.Join(root, name, config.TmuxDirName, tmuxSocketName)
+	return config.TmuxSocketPath(filepath.Join(root, name))
 }
 
 func TestParseSandboxProcLine(t *testing.T) {
@@ -32,15 +32,15 @@ func TestParseSandboxProcLine(t *testing.T) {
 	}{
 		{
 			name:       "tmux server (has -S socket)",
-			line:       "74415 /opt/homebrew/bin/tmux -S /data/sandboxes/x/tmux/tmux.sock -f /data/sandboxes/x/tmux/tmux.conf new-session -d -s main",
+			line:       "74415 /opt/homebrew/bin/tmux -S /data/sandboxes/x/rw/tmux.sock -f /data/sandboxes/x/rw/tmux/tmux.conf new-session -d -s main",
 			wantOK:     true,
 			wantPID:    74415,
 			wantName:   "x",
-			wantSocket: "/data/sandboxes/x/tmux/tmux.sock",
+			wantSocket: "/data/sandboxes/x/rw/tmux.sock",
 		},
 		{
 			name:     "status-monitor.py (no socket, but sandbox-dir args)",
-			line:     "10202 python3 /data/sandboxes/sbcheck/bin/status-monitor.py /data/sandboxes/sbcheck/runtime-config.json /data/sandboxes/sbcheck/agent-status.json /data/sandboxes/sbcheck/tmux/tmux.sock",
+			line:     "10202 python3 /data/sandboxes/sbcheck/ro/bin/status-monitor.py /data/sandboxes/sbcheck/ro/runtime-config.json /data/sandboxes/sbcheck/rw/agent-status.json /data/sandboxes/sbcheck/rw/tmux.sock",
 			wantOK:   true,
 			wantPID:  10202,
 			wantName: "sbcheck",
@@ -61,7 +61,7 @@ func TestParseSandboxProcLine(t *testing.T) {
 		},
 		{
 			name:     "wait-for client (tmux, no new-session → not a server)",
-			line:     "74691 /opt/homebrew/bin/tmux -S /data/sandboxes/x/tmux/tmux.sock wait-for yoloai-exit",
+			line:     "74691 /opt/homebrew/bin/tmux -S /data/sandboxes/x/rw/tmux.sock wait-for yoloai-exit",
 			wantOK:   true,
 			wantPID:  74691,
 			wantName: "x",
