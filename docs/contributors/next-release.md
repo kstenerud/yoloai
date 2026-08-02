@@ -84,6 +84,13 @@ finding or decision first, and lands here only if it should block the release.
 
 - [upgrade-coverage.md](design/plans/upgrade-coverage.md) — automated coverage for upgrading an
   existing install
+- [agent-free-launch-everywhere.md](design/plans/agent-free-launch-everywhere.md) — agent-free
+  launch on every backend, or evidence why not
+- [tamper-resistant-network-isolation.md](design/plans/tamper-resistant-network-isolation.md) —
+  the network allowlist enforced outside the agent's reach, on every backend or with evidence why
+  not
+- [DF171](design/findings-unresolved.md) — gVisor is excluded from agent-free launch by a
+  username-resolution bug the codebase already fixed elsewhere
 
 ## In flight — started, not finished
 
