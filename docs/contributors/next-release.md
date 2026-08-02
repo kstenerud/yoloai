@@ -91,15 +91,17 @@ finding or decision first, and lands here only if it should block the release.
 green on both platforms, and deliberately still off `main`, because the migration it carries lands
 last in the release and stays revisable until then.
 
-**Unmerged branches, surveyed 2026-08-02.** None of these is tracked anywhere else, which is the
-reason for the survey rather than the reason to act on them:
+**Unmerged branches, surveyed 2026-08-02 — all six resolved.** Five are absorbed or archaeology and
+can be deleted; one (`testing/backend-conformance`) held a finding nobody had filed, now recovered.
+Verified by *content* on the release branch, not by whether the commit was merged, because four of
+the six landed their work through a different path than the branch that started it:
 
 | Branch | Ahead | What it is |
 | --- | --- | --- |
 | `sandbox-share-tiering` | — | **Merged into this branch.** |
-| `microvm-backend` | 16 | The QEMU-microvm spike, **superseded by D104** (retired: custom-kernel-only, no isolation gain over Kata). Archaeology; delete or leave, but it is not pending work. |
+| `microvm-backend` | 16 | The QEMU-microvm spike, **superseded by D104** (retired: custom-kernel-only, no isolation gain over Kata). Archaeology, and the only branch not verified line-by-line — D104 is the decision that covers it. Delete or leave; not pending work. |
 | `base-trixie` | 2 | **Absorbed — verified 2026-08-02.** Both halves are on `main`: the Dockerfile carries `debian:trixie-slim` and `binutils-gold`, and both idiosyncrasies sections are present. Safe to delete. |
-| `broker-podman-rootless` | 2 | One `wip(broker):` commit plus rootless-podman injector research. Genuinely unfinished. |
+| `broker-podman-rootless` | 2 | **Absorbed — verified 2026-08-02, and it was the one I expected to hold real work.** The research shipped *fuller* than the branch (main names the implemented `runtime/podman/reach.go`; the branch predates it), DF56 is filed and resolved, and the `wip(broker)` `AgentFreeLaunch` flip is explicitly declared moot by [egress-proxy-build.md](design/plans/egress-proxy-build.md) — "podman just needs its slirp `InjectorReach`", which is what shipped. Safe to delete. |
 | `sandbox-hostname` | 2 | **Absorbed — verified 2026-08-02.** `runtime.InstanceConfig.Hostname` and its backends are on `main`, and DF142 is filed *and resolved*. Safe to delete. |
 | `testing/backend-conformance` | 1 | **Content recovered 2026-08-02**, not cherry-picked: DF28 was unfiled anywhere, and its pointers named the pre-D99 `internal/runtime/…` paths. Re-filed with paths corrected and its relationship to DF159/DF160 named. Branch safe to delete. |
 
