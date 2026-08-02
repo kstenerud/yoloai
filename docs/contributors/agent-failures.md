@@ -720,6 +720,43 @@ itself worth knowing when reading pattern 4.
   targets compile for `darwin/arm64` but do not run tests. The real gate is the owner's Mac and CI,
   which worked.
 
+### A23 — declared a release had never shipped, from a listing my own command could not show it in (2026-08-02)
+
+- **Claimed:** that `v0.10.0` was prepared but never cut — no tag locally, none on the remote, the
+  newest being `v0.9.0`. Written into `next-release.md` as a section with two resolutions and a
+  ruled-out third, committed, pushed, and reported to the owner as the first thing to decide.
+- **True:** `v0.10.0` is tagged, at exactly the `chore(release): prepare v0.10.0` commit, with 82
+  commits since — an ordinary release followed by ordinary work. Every downstream fact I called
+  wrong was right: the changelog's frozen `## v0.10.0` heading, and "escalated from `v0.10.1`". I
+  corrected a correct file.
+- **Source of the false belief:** `git tag -l | tail -5`. Git sorts refs **lexicographically**, so
+  `v0.10.0` lands directly after `v0.1.1` — near the *start* of that list. `tail` shows the end of an
+  ordering, and I read it as "the newest releases". That reading held for this repo's whole history
+  and stopped holding the moment the minor version crossed from 9 to 10, which is the first release
+  where the two orderings disagree. `git tag -l --sort=v:refname` is the version-ordered view, and
+  `git tag -l 'v0.10*'` was one command away.
+- **What made it feel checked:** I ran it twice — once on local tags, once on `git ls-remote --tags
+  origin` — and treated the agreement as corroboration. Both were `| tail -5` on the same
+  lexicographic sort, so the second check could only ever repeat the first. **Two lookups that share
+  a defect read exactly like two independent confirmations**, and the more careful I was being, the
+  more convincing the wrong answer got.
+- **The shape, which is the reusable part:** this was a **negative existence claim** — "no such tag"
+  — drawn from a *truncated* listing. A truncation can only ever support a positive claim about what
+  it shows; it is silent on what it omits, and it does not say that it omitted anything. The rule is
+  narrow enough to act on: never assert absence from a `head`/`tail`/`grep -m` view. Ask for the
+  thing by name, and let the empty result be the evidence.
+- **Caught by:** the owner opening the GitHub releases page and saying he saw 0.10.0. Nothing in the
+  repo would have caught it — `make check` has no opinion about tags, and the write-up was internally
+  consistent, cited real commits, and proposed sensible remedies for a problem that did not exist. It
+  is DF88's lesson one turn later (*the primary source for a claim about the past is the artifact,
+  not the index of it*), in a session that had read DF88 that same day while reviewing DF160.
+- **Cost:** a wrong section in the release-staging file, a commit and a push carrying it, a memory
+  entry asserting it, and a report to the owner naming it as the release's first decision. Reverted
+  in `next-release.md`; the branch survey in the same commit was independently verified and stands.
+- **Gated now?** No, and a gate looks unpromising: the failure was a shell idiom, not a rule anyone
+  could have restated. What would have caught it is asking `git tag -l 'v0.10*'` — i.e. querying for
+  the specific thing whose absence was the whole claim.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of
