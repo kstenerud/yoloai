@@ -82,7 +82,8 @@ finding or decision first, and lands here only if it should block the release.
 
 ## Candidates — undecided
 
-*Nothing yet.*
+- [upgrade-coverage.md](design/plans/upgrade-coverage.md) — automated coverage for upgrading an
+  existing install
 
 ## In flight — started, not finished
 
