@@ -275,8 +275,8 @@ manifests as "agent idle 9s+" from real ENOSPC.
 explicit guest-readiness signal rather than trusting `task.Start` returned.
 Until then: run a flaky Kata subtest in isolation to confirm its contract is
 green, and re-run the full suite on a transient failure. Tracked as **DF28**,
-whose entry also records that this is the earliest of three findings on the same
-backend with the same root assumption.
+whose entry also records which of the other Kata flakes share this mechanism
+(DF8, fixed) and which only share its symptom profile (DF160 — it does not).
 
 **Code pointer:** `runtime/containerd/lifecycle.go` (`waitForNetworkReady`).
 

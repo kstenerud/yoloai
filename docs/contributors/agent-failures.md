@@ -757,6 +757,40 @@ itself worth knowing when reading pattern 4.
   could have restated. What would have caught it is asking `git tag -l 'v0.10*'` — i.e. querying for
   the specific thing whose absence was the whole claim.
 
+### A24 — grouped four findings into a "family" on their symptom profile, and committed the grouping (2026-08-02)
+
+- **Claimed:** that DF8, DF28, DF159 and DF160 were one problem — four findings on one backend
+  sharing the assumption that `task.Start` returning means the guest is ready, "each patched on its
+  own symptom rather than on the shared cause". Written into DF28 and DF160 as reciprocal
+  cross-links, committed, pushed, and offered to the owner as the case for building one readiness
+  gate instead of a fourth patch.
+- **True:** DF8 and DF28 do share that mechanism. DF160 does not, and its own entry says so. Its
+  recorded evidence is `sandbox.ready` at 16–26s on all three cells, then a ~110s gap with no
+  events and `hook.active` never reached — with the explicit sentence *"the boot was never the
+  problem"* sitting in the bullet directly above where I added my cross-link. A mechanism that
+  fires before readiness cannot explain a stall that starts after it. DF159's relationship is
+  plausible but unproven, and I asserted it flatly.
+- **Source of the false belief:** I grouped on **symptom profile** — heaviest virtualised cells,
+  flaky under churn, green on retry — which all four genuinely share, and then described that
+  grouping in the language of mechanism. The four-way pattern was more satisfying than the true
+  two-way one, and it made a better argument for the work I was already proposing.
+- **What makes this specific rather than "be careful":** AGENTS.md rule 7 asks you to grep for a
+  defect's *shape* and says three of a kind means the architecture is generating them. Following
+  that instruction is what produced the error — I found a shape, and a shape is a symptom. The rule
+  needs a companion: **a family claim has to name the mechanism and a discriminator that would
+  separate its members if they were not related.** Here the discriminator was one field —
+  `sandbox.ready`, present in every autopsy — and checking it takes seconds.
+- **Caught by:** the owner asking to look deeper and "make sure we're not chasing ghosts", which
+  sent me back to DF160's own text. Nothing else would have: the grouping was internally coherent,
+  cited real findings, and the gate it argued for is still worth building for DF8+DF28.
+- **Cost:** two wrong cross-links in the findings file and a commit carrying them; a proposal to the
+  owner that overstated its own evidence by a factor of two. Retracted in place, with DF160
+  repointed at the agent-stall family (DF13) as a **hypothesis**, with the log events that would
+  confirm it named.
+- **Gated now?** No. What would have caught it is asking, of each member, *what would have to be
+  true for this to be the same bug* — and for a timing family that question has a mechanical answer:
+  do the failures fall on the same side of a known checkpoint.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of
