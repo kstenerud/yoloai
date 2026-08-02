@@ -6,12 +6,12 @@
 
 - **Status:** IN-PROGRESS — implemented 2026-06-28 for docker + the agent-free launch path.
   **Per-backend audit added 2026-08-02** (§ Where every backend actually stands); the remaining
-  work is gated on [agent-free-launch-everywhere.md](agent-free-launch-everywhere.md)
+  work is gated on [host-controlled-agent-launch.md](host-controlled-agent-launch.md)
   (§§1–6 below), validated on real Docker (agent can't flush; non-allowlisted stays blocked;
   injector stays reachable; live `network allow` patches the per-netns ipset from the sidecar).
   Deferred: containerd/Kata, the legacy launch path, macOS (see Scope). One boundary worth
   noting — see "Provisioning egress" below.
-- **Depends on:** agent-free-launch-everywhere.md
+- **Depends on:** host-controlled-agent-launch.md
 
 ## The problem (confirmed)
 
@@ -63,6 +63,29 @@ plain isolated sandbox also lacks.
   step 2 (the domain-native SNI-splicing forwarder). Step 1.5 is "the same allowlist, enforced
   outside the agent's reach" — the enforcement-point primitive step 2 builds on.
 
+## The property, stated before any mechanism
+
+**The sandboxed agent cannot disable or evade its own network allowlist.** That is the requirement.
+A netns sidecar holding `CAP_NET_ADMIN` the agent lacks is *one* way to get it, and the one that
+shipped; backends may satisfy it differently as long as they satisfy it observably.
+
+The realizations available, by where the enforcement point sits relative to the agent:
+
+- **Shared netns, privileged installer** (docker, podman): rules live in the netns the agent's
+  container shares, installed by a sidecar with `NET_ADMIN` the agent does not have.
+- **Host netns the guest cannot reach at all** (containerd/Kata, gVisor): the guest is a VM or a
+  userspace netstack; the enforcement point is on the far side of that boundary by construction.
+  This is *stronger* than the sidecar, not weaker.
+- **Host packet filter** (macOS backends, if it works): `pf` rules on the host, outside every guest.
+  Undesigned — see the research brief below.
+
+**The interface that keeps this safe is the conformance assertion, not the Go type**, exactly as for
+[host-controlled-agent-launch.md](host-controlled-agent-launch.md): from inside the guest, attempt to
+defeat the allowlist (flush rules, add a permissive one), then verify egress to a non-allowlisted
+destination is *still* refused. One assertion, mechanism-blind, with a mandatory stated reason for
+any backend that skips it. And it needs a positive control beside it — a permitted destination that
+must still succeed — or a sandbox with no network at all passes ([A22](../../agent-failures.md)).
+
 ## Where every backend actually stands (researched 2026-08-02)
 
 The first increment shipped for docker. This is the audit the owner asked for — for each backend,
@@ -88,7 +111,7 @@ correct today and is also the *strongest argument for this plan*: a sidecar inst
 isolation available on gVisor at all. `runtime/isolation.go` already says so — "the redesign moves
 enforcement to the host netns, which removes the dependency on the in-sandbox kernel". The blocker
 is the agent-free exclusion, which [DF171](../findings-unresolved.md) shows is unnecessary and
-which [agent-free-launch-everywhere.md](agent-free-launch-everywhere.md) removes.
+which [host-controlled-agent-launch.md](host-controlled-agent-launch.md) removes.
 
 **podman was listed in this plan's first-increment scope and did not ship.** The scope line above
 says "docker + podman"; only docker did. Podman inherits `Launch` and `RunNetnsSidecar` by embedding
@@ -121,6 +144,31 @@ DF171; podman pending one experiment). One is favourable but needs a prerequisit
 are macOS or genuine-mechanism work. A release that claims "outside the environment everywhere"
 cannot be honest without the macOS half, so the honest v0.11.0 claim is narrower — see the enabler
 plan's "What done means".
+
+
+## The macOS half — a research brief
+
+tart, apple and seatbelt cannot be evaluated from a Linux host. These are the questions, with the
+evidence that would settle them; none should be costed before they are answered on hardware.
+
+1. **apple: is there any enforcement point outside the guest?** Each sandbox is a real VM with its
+   own kernel, and there is no host network namespace to share, so the sidecar mechanism does not
+   apply. The open question is what the `container` framework exposes at the vmnet layer — whether
+   host-side filtering of a specific VM's traffic is possible at all. A negative answer here is a
+   legitimate "cannot", and is worth writing down as one.
+2. **tart and seatbelt: is `pf` viable, and at what granularity?** `network-isolation.md` § Out of
+   Scope has said "need a `pf`-based equivalent design" since the original design and nobody has
+   written it. The specific unknowns: can `pf` rules be scoped to one VM's vmnet interface (tart),
+   and to one process group rather than the whole host (seatbelt)? Seatbelt is the harder case — the
+   sandbox shares the host's network stack, so per-sandbox filtering means per-process filtering.
+3. **Does the guest keep the ability to defeat it?** For any mechanism proposed, run the conformance
+   assertion above: from inside, try to break out; require the block to hold. That is the only
+   evidence that distinguishes "enforced outside" from "enforced somewhere the agent happens not to
+   have looked".
+4. **If a backend cannot, does it currently claim it can?** tart and seatbelt declare
+   `NetworkIsolation: false`, so they refuse honestly today. apple declares `true` and enforces
+   in-guest — so if apple turns out to have no out-of-guest option, the honest outcome is a
+   documented limitation, not silence.
 
 ## Design
 
