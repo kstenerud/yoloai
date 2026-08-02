@@ -98,10 +98,10 @@ reason for the survey rather than the reason to act on them:
 | --- | --- | --- |
 | `sandbox-share-tiering` | — | **Merged into this branch.** |
 | `microvm-backend` | 16 | The QEMU-microvm spike, **superseded by D104** (retired: custom-kernel-only, no isolation gain over Kata). Archaeology; delete or leave, but it is not pending work. |
-| `base-trixie` | 2 | Debian trixie base image. The trixie move already shipped via other commits — these two look like leftovers and need one look before assuming so. |
+| `base-trixie` | 2 | **Absorbed — verified 2026-08-02.** Both halves are on `main`: the Dockerfile carries `debian:trixie-slim` and `binutils-gold`, and both idiosyncrasies sections are present. Safe to delete. |
 | `broker-podman-rootless` | 2 | One `wip(broker):` commit plus rootless-podman injector research. Genuinely unfinished. |
-| `sandbox-hostname` | 2 | The hostname work is **on `main`** already; these are the DF142 finding plus a duplicate. Probably absorbed. |
-| `testing/backend-conformance` | 1 | A single backend-idiosyncrasies note (DF28 Kata readiness race). Cherry-pick or drop. |
+| `sandbox-hostname` | 2 | **Absorbed — verified 2026-08-02.** `runtime.InstanceConfig.Hostname` and its backends are on `main`, and DF142 is filed *and resolved*. Safe to delete. |
+| `testing/backend-conformance` | 1 | **Content recovered 2026-08-02**, not cherry-picked: DF28 was unfiled anywhere, and its pointers named the pre-D99 `internal/runtime/…` paths. Re-filed with paths corrected and its relationship to DF159/DF160 named. Branch safe to delete. |
 
 **And one piece of debris:** a `release-prep` branch still exists from the v0.6.0 era — 0 ahead of
 `main`, 408 behind. It is why this branch is named for its version instead.

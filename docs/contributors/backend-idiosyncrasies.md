@@ -47,6 +47,7 @@ inclusion test first, then add a row to the index.
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
+| Conformance/integration flaky under load; probe `task <name> not found` → 30s timeout → `instance not running`; or TTY exec `ENOENT` (DF28) | [Kata: guest-readiness race under churn](#kata-guest-readiness-race-under-back-to-back-vm-churn-task-not-found--exec-enoent) |
 | Agent "Not logged in"/idle after `restart` on containerd-vm; guest log `secrets.skip` | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) |
 | Tart: "secrets-consumed marker not observed before timeout" on every run (incl. passing) | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) (Tart variant) |
 | `EADDRINUSE` on shim start or `NewTask()` retry | [Kata: /run/kata persists on exit](#runkataname-persists-on-abnormal-exit), [EADDRINUSE on retry](#eaddrinuse-on-newtask-retry), [shim 500ms wait](#after-killing-orphaned-shim-processes-wait-500ms-before-proceeding) |
@@ -243,6 +244,41 @@ probe will loop 30s and warn — acceptable for that edge case, but
 worth revisiting at that point.
 
 ---
+
+### Kata: guest-readiness race under back-to-back VM churn (`task not found` / exec `ENOENT`)
+
+DF8 above is the *network* slice of a broader truth: **`task.Start()` returns
+before the Kata guest is ready.** Each yoloai Kata instance boots a full systemd
+guest, and create→start→exec fires as soon as `task.Start` returns. Two further
+readiness windows open during heavy back-to-back VM churn — a full
+conformance run creates and tears down ~15 VMs on a contended host:
+
+- **Task not queryable yet.** The network probe's in-task exec-create races the
+  task becoming addressable and gets `probe exec create: task <name> not found`.
+  The probe then burns its full 30s budget and warns; a follow-on `Exec` against
+  the same instance sees `instance not running`.
+- **Guest process tree not up yet.** `InteractiveExec` reaches the kata-agent
+  before the guest rootfs and PATH are mounted, and exec-process start returns
+  `rpc status: … INTERNAL … ENOENT: No such file or directory` — a Rust
+  kata-agent backtrace, *not* the benign hotplug ENOENT elsewhere in this file.
+
+**Symptom:** the conformance and integration suites **pass in isolation** but the
+full suite is flaky — a random 2–4 subtests fail per run and the failing set
+shifts, so it is not a contract bug in any one subtest.
+
+**Not resource exhaustion:** measured at failure time — 6.8 GB RAM free, 25 GB
+disk free, zero leftover tasks. The trigger is *concurrency of VM boot and
+teardown*, not memory or disk. Contrast the smoke disk-pressure case, which
+manifests as "agent idle 9s+" from real ENOSPC.
+
+**Status:** not fixed. The durable fix is to gate the first probe/exec on an
+explicit guest-readiness signal rather than trusting `task.Start` returned.
+Until then: run a flaky Kata subtest in isolation to confirm its contract is
+green, and re-run the full suite on a transient failure. Tracked as **DF28**,
+whose entry also records that this is the earliest of three findings on the same
+backend with the same root assumption.
+
+**Code pointer:** `runtime/containerd/lifecycle.go` (`waitForNetworkReady`).
 
 ### `/run/kata/<name>/` persists on abnormal exit
 
