@@ -5,9 +5,9 @@
 # Next release
 
 **Next release version: `v0.11.0`** — escalated from `v0.10.1`: the sandbox image moved from
-Node.js 20 to Node.js 22 LTS, and the sandbox-dir tiering moved host-only metadata into a `host/`
-subdirectory, changing the on-disk layout. Both are user-visible (see `BREAKING-CHANGES.md`,
-Unreleased).
+Node.js 20 to Node.js 22 LTS, and the sandbox directory became three access tiers (`host/`, `ro/`,
+`rw/`), changing the on-disk layout and requiring a migration. Both are user-visible (see
+`BREAKING-CHANGES.md`, Unreleased).
 
 ## How this works
 
@@ -87,19 +87,16 @@ finding or decision first, and lands here only if it should block the release.
 
 ## In flight — started, not finished
 
-- **`sandbox-share-tiering`** — 47 commits, complete and green on both platforms (Linux
-  `make check`; macOS `make releasetest` 19/19). Deliberately **not merged to `main`**: it carries
-  the v5→v6 migration, and the owner's rule is that a migration lands last in its release, so it
-  stays revisable while the rest of the release is assembled. It should merge into **this branch**,
-  which is what this branch is for. Everything it needs is recorded — plan archived, deprecation
-  registered, BREAKING-CHANGES entries filed, DF170 addressed in place.
+*Nothing.* `sandbox-share-tiering` **merged into this branch 2026-08-02** (`026c7650`) — complete,
+green on both platforms, and deliberately still off `main`, because the migration it carries lands
+last in the release and stays revisable until then.
 
 **Unmerged branches, surveyed 2026-08-02.** None of these is tracked anywhere else, which is the
 reason for the survey rather than the reason to act on them:
 
 | Branch | Ahead | What it is |
 | --- | --- | --- |
-| `sandbox-share-tiering` | 47 | Above. Belongs in this release. |
+| `sandbox-share-tiering` | — | **Merged into this branch.** |
 | `microvm-backend` | 16 | The QEMU-microvm spike, **superseded by D104** (retired: custom-kernel-only, no isolation gain over Kata). Archaeology; delete or leave, but it is not pending work. |
 | `base-trixie` | 2 | Debian trixie base image. The trixie move already shipped via other commits — these two look like leftovers and need one look before assuming so. |
 | `broker-podman-rootless` | 2 | One `wip(broker):` commit plus rootless-podman injector research. Genuinely unfinished. |
