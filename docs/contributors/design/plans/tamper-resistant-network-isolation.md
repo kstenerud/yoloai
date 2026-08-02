@@ -86,6 +86,44 @@ destination is *still* refused. One assertion, mechanism-blind, with a mandatory
 any backend that skips it. And it needs a positive control beside it — a permitted destination that
 must still succeed — or a sandbox with no network at all passes ([A22](../../agent-failures.md)).
 
+## Where the enforcement point actually has to sit (measured 2026-08-02)
+
+The shipped mechanism installs the allowlist **in the sandbox's own network namespace**, from a
+sidecar holding `CAP_NET_ADMIN` the agent lacks. That is correct for a normal runc container and
+**silently ineffective for two of the isolation modes yoloAI offers**. Measured on this host, not
+reasoned:
+
+| Where the rule is installed | runc container | gVisor (`runsc`) | Kata VM |
+| --- | --- | --- | --- |
+| Sandbox's own netns (**the shipped sidecar**) | **enforces** | **bypassed** | **bypassed** |
+| Host root netns, keyed on the sandbox IP | enforces | **enforces** | **enforces** |
+
+- **gVisor.** A container's netns carrying `-A OUTPUT -p tcp --dport 80 -j DROP` *and* the same rule
+  in `FORWARD` still reached `http://example.com`. The Sentry runs its own userspace netstack and
+  injects frames on the veth at L2, below netfilter's IP hooks, so rules in that netns never see the
+  traffic. A `DOCKER-USER` rule in the **host root netns** matching the container IP blocked it
+  immediately.
+- **Kata.** Same result by a different mechanism, and one this repo already documented without
+  drawing the consequence: `tap0_kata` ↔ `eth0` is bridged by a **TC mirred filter** (DF8), which is
+  also L2 and also below netfilter. A `FORWARD` DROP inside the CNI netns did not stop the guest; a
+  `FORWARD` DROP in the host root netns keyed on `10.89.0.2` did.
+- **Rootless podman.** The sidecar mechanism works exactly as designed, which was the open question:
+  a sidecar joined via `--network container:<id>` with `--cap-add NET_ADMIN` installed the rule, the
+  target container was **blocked**, and the target **could not flush it** (`iptables -F` refused —
+  no `NET_ADMIN`). Rootless is not an obstacle.
+
+**Two consequences worth stating plainly.**
+
+1. **The host-root-netns enforcement point is the stronger mechanism, not a fallback.** The sidecar
+   depends on the agent lacking a capability inside a namespace it shares; the host netns is
+   somewhere the guest has no route to at all — a different kernel (Kata) or outside the sandbox
+   boundary (gVisor). It also needs no sidecar container, which is the machinery this plan built.
+2. **It costs what the sidecar was designed to avoid.** Rules in the host's own tables are global
+   state keyed on a sandbox IP: they must be reaped when the sandbox dies (including after a crash),
+   and an IP reused by a later sandbox inherits whatever was left behind. The sidecar's rules die
+   with the netns. That trade — per-sandbox lifetime versus actually working on VM-ish modes — is
+   the design decision this plan now has to make, and it may well be "both, chosen per backend".
+
 ## Where every backend actually stands (researched 2026-08-02)
 
 The first increment shipped for docker. This is the audit the owner asked for — for each backend,
@@ -96,9 +134,9 @@ wrong.
 | Backend / mode | `--network=isolated` | Enforced where | Gap |
 | --- | --- | --- | --- |
 | docker, runc | supported | **sidecar, host netns** | none — shipped |
-| docker, gVisor | **refused at creation** | n/a | see below — the interesting one |
-| podman | supported | **in-guest** `entrypoint.py` | agent-free opt-in + rootless `NET_ADMIN` |
-| containerd / Kata | supported | **in-guest** (guest kernel iptables) | needs its own sidecar shape |
+| docker, gVisor | **refused at creation** | n/a | needs the host-netns point, **not** the sidecar (measured) |
+| podman | supported | **in-guest** `entrypoint.py` | agent-free opt-in only — **rootless sidecar verified working** |
+| containerd / Kata | supported | **in-guest** (guest kernel iptables) | needs the host-netns point; **its CNI netns is bypassed too** (measured) |
 | apple | supported | **in-guest** (per-VM kernel) | no shareable host netns |
 | tart | **not supported** | n/a | needs a `pf` design |
 | seatbelt | **not supported** | n/a | needs a `pf` design |
@@ -151,6 +189,12 @@ plan's "What done means".
 tart, apple and seatbelt cannot be evaluated from a Linux host. These are the questions, with the
 evidence that would settle them; none should be costed before they are answered on hardware.
 
+0. **Start from the Linux result, because it reframes every question below.** Measured here: the
+   sidecar's in-netns rules are *bypassed* by both gVisor and Kata, and the mechanism that works for
+   them is filtering in the **host's own** network stack, keyed on the sandbox's address. Every macOS
+   backend is VM-or-host-process — i.e. structurally closer to Kata than to a runc container — so the
+   question to ask first is **"where does this backend's traffic become visible to the host stack, and
+   can `pf` match it there?"** rather than "can we run a sidecar".
 1. **apple: is there any enforcement point outside the guest?** Each sandbox is a real VM with its
    own kernel, and there is no host network namespace to share, so the sidecar mechanism does not
    apply. The open question is what the `container` framework exposes at the vmnet layer — whether

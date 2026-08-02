@@ -81,7 +81,7 @@ start.
 | --- | --- | --- | --- |
 | docker, runc | **shipped** | available | done |
 | docker, gVisor | **exclusion unnecessary — verified** | available | [DF171](../findings-unresolved.md) |
-| podman | inherited, untested | available | one experiment |
+| podman | **verified working** | available | opt-in is one field |
 | containerd / Kata | needs design (systemd guest) | **available — shared sandbox dir** | B is the cheap path |
 | apple | needs design | **likely** | macOS research |
 | tart | needs design | **likely** | macOS research |
@@ -102,12 +102,14 @@ an agent write reached `yoloai diff`. Route the launch user through `ContainerUs
 than adding a third spelling; it also handles `UsernsMode == "keep-id"`, which the launch path
 ignores today.
 
-**podman: determine, do not assume.** It embeds `*docker.Runtime`, so `Launch` is promoted and the
-opt-in is one field — but an earlier attempt at this exact flip was parked, and the plan that
-superseded it called the flip "moot" *for brokering*, which says nothing about launch. Two testable
-unknowns: does the promoted `Launch` work through podman's docker-compat exec API, and does the uid
-mapping land under **rootless** podman, where the container user is a host subuid rather than a
-remap.
+**podman: verified 2026-08-02, and it is one field.** The concern was that an earlier attempt at this
+exact flip was parked and later called "moot" — but that was about *brokering*, which says nothing
+about launch. Tested directly: a throwaway binary with `AgentFreeLaunch: true` on podman's descriptor
+brought up a **rootless** podman sandbox that took the agent-free path
+(`entrypoint.keepalive_only`, "no agent launched"), launched the session-runner, and ran the agent to
+`active`. The promoted `Launch` works through the docker-compat exec API and the uid mapping lands.
+The separate question of whether a rootless *sidecar* can enforce is also answered — yes, see the
+consumer plan.
 
 **containerd/Kata: take B, design A later.** A needs a holder defined against a full systemd guest
 rather than borrowed from docker's `sleep infinity`, and a readiness signal that means something in a
