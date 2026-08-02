@@ -4,8 +4,44 @@
 
 # Next release
 
-**Next release version: `v0.11.0`** — escalated from `v0.10.1`: the sandbox image moved from
-Node.js 20 to Node.js 22 LTS, which is user-visible (see `BREAKING-CHANGES.md`, Unreleased).
+**Next release version: `v0.11.0`, and that number is in question — see § The v0.10.0 that never
+shipped.** Escalated from `v0.10.1` on the assumption that v0.10.0 was cut; it was not. The
+escalation itself is sound — the sandbox image moved from Node.js 20 to Node.js 22 LTS, which is
+user-visible (see `BREAKING-CHANGES.md`, Unreleased). Only the *starting point* is wrong.
+
+## The v0.10.0 that never shipped
+
+**Found 2026-08-02, opening this file to stage the release.** `docs/BREAKING-CHANGES.md` carries a
+frozen `## v0.10.0` heading, and `0d9295ce chore(release): prepare v0.10.0` is on `main` — but **no
+`v0.10.0` tag exists**, locally or on the remote. The newest tag is `v0.9.0`. The release was
+prepared and never cut, and **82 commits have landed on `main` since**, so the preparation was not
+paused, it was passed.
+
+Everything downstream inherited the assumption. This file's version field says "escalated from
+`v0.10.1`". The changelog has a frozen section — and the format's own rule is that a `## vX.Y.Z`
+heading *means shipped* — describing a release nobody can install. The hostname change it documents
+is on `main`, correctly, and has been for 82 commits; it is just filed under a version that does
+not exist.
+
+**Two coherent resolutions, and the choice is the owner's:**
+
+- **Cut the next release as `v0.10.0`.** The number is unclaimed, so nothing is lost, and the
+  changelog stops naming a phantom. It means merging the frozen `## v0.10.0` section into
+  `## Unreleased`, which the preamble forbids for a *shipped* section — the point being that this
+  one is not shipped, so the prohibition does not bind. Cheapest, and leaves no artifact claiming
+  to be a version.
+- **Cut `v0.11.0` and leave the gap.** Nothing to edit and the numbering stays monotonic. The cost
+  is permanent: the changelog documents a `v0.10.0` with no tag, no assets and no install path,
+  sitting beside `LibrarySchemaReleases`, whose entire job is to name *real* tags a user can
+  downgrade to.
+
+**Do not resolve it by tagging `v0.10.0` at the prepare commit.** That would exclude 82 commits of
+work from a release cut from a tree that contains them, and the next changelog would have to
+explain the discontinuity.
+
+**Either way, one thing is not optional:** the ritual below says to add `{Schema: N, Tag: "vX.Y.Z"}`
+to `LibrarySchemaReleases` when a schema ships. Schema 6 ships in this release, and that entry must
+name the tag actually cut.
 
 ## How this works
 
@@ -75,7 +111,27 @@ finding or decision first, and lands here only if it should block the release.
 
 ## In flight — started, not finished
 
-*Nothing.*
+- **`sandbox-share-tiering`** — 47 commits, complete and green on both platforms (Linux
+  `make check`; macOS `make releasetest` 19/19). Deliberately **not merged to `main`**: it carries
+  the v5→v6 migration, and the owner's rule is that a migration lands last in its release, so it
+  stays revisable while the rest of the release is assembled. It should merge into **this branch**,
+  which is what this branch is for. Everything it needs is recorded — plan archived, deprecation
+  registered, BREAKING-CHANGES entries filed, DF170 addressed in place.
+
+**Unmerged branches, surveyed 2026-08-02.** None of these is tracked anywhere else, which is the
+reason for the survey rather than the reason to act on them:
+
+| Branch | Ahead | What it is |
+| --- | --- | --- |
+| `sandbox-share-tiering` | 47 | Above. Belongs in this release. |
+| `microvm-backend` | 16 | The QEMU-microvm spike, **superseded by D104** (retired: custom-kernel-only, no isolation gain over Kata). Archaeology; delete or leave, but it is not pending work. |
+| `base-trixie` | 2 | Debian trixie base image. The trixie move already shipped via other commits — these two look like leftovers and need one look before assuming so. |
+| `broker-podman-rootless` | 2 | One `wip(broker):` commit plus rootless-podman injector research. Genuinely unfinished. |
+| `sandbox-hostname` | 2 | The hostname work is **on `main`** already; these are the DF142 finding plus a duplicate. Probably absorbed. |
+| `testing/backend-conformance` | 1 | A single backend-idiosyncrasies note (DF28 Kata readiness race). Cherry-pick or drop. |
+
+**And one piece of debris:** a `release-prep` branch still exists from the v0.6.0 era — 0 ahead of
+`main`, 408 behind. It is why this branch is named for its version instead.
 
 The items are not what gets lost — **the stack is**. Fixing A reveals B, C and D; D is urgent so we
 jump; A is never resumed, and nothing records that it was interrupted or by what. **When you jump,
