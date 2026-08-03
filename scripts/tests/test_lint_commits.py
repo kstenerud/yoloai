@@ -32,6 +32,9 @@ def test_accepts_the_real_conventional_subjects() -> None:
         "build(deps): bump goreleaser-action from 6 to 7",
         "fix(config)!: a breaking change marks the type with a bang",
         "ci(release): attest provenance via actions/attest",
+        # Multi-scope: a change that really does span two backends. `feat(tart,seatbelt)!:`
+        # is in this repo's history; rejecting it left the gate red on a pushed release branch.
+        "feat(tart,seatbelt)!: tier the guest share on the two backends that share a directory",
     ):
         c = Commit("abc1234", subject, "A body explaining what was wrong.\n")
         assert not _rules(c), f"should accept: {subject}"

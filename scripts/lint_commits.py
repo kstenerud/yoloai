@@ -35,7 +35,11 @@ TYPES = ("feat", "fix", "docs", "test", "refactor", "build", "ci", "chore", "per
 # in all history carry one; a `docs:` typo fix legitimately does not.
 CODE_TYPES = ("feat", "fix", "refactor", "perf")
 
-SUBJECT_RE = re.compile(rf"^({'|'.join(TYPES)})(\([a-z0-9.\-/]+\))?(!)?: (.+)$")
+# The scope charclass allows commas so a change that genuinely spans two backends can say
+# so — `feat(tart,seatbelt)!:` is in this repo's history and was rejected here, leaving
+# `make lint-commits` permanently red on a release branch whose commit was already pushed.
+# A gate that cannot go green is one people learn to skip.
+SUBJECT_RE = re.compile(rf"^({'|'.join(TYPES)})(\([a-z0-9.\-/,]+\))?(!)?: (.+)$")
 
 # git's own default subject for `git revert`. b67dff88 uses it; rejecting it
 # would mean hand-editing a message git wrote correctly.
