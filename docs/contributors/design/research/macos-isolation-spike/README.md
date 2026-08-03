@@ -33,6 +33,14 @@ bash vmnet_switch.sh mac-coh-apple mac-coh-tart
 # 4. no root — does DF173's Docker Desktop staleness still reproduce?
 bash docker_desktop_stale.sh
 
+# 5. no root, creates its own tart sandbox — which host write pattern, if any,
+#    reaches a guest at a path it has already read? (DF175)
+bash df175_writepath.sh [sandbox-name]
+
+# 5b. the guest-side repair the fix is built on, runnable by hand against any
+#     tart guest: prints REFRESHED / ALREADY-FRESH / MISMATCH per file
+tart exec yoloai-cli-<box> /usr/bin/python3 msync_refresh.py <sha256> <guest-path>
+
 # 5. ROOT, once — pf enforcement, the dedicated-gid design, the ICMP hole, reaping
 #    apple-B is the per-VM SCOPING discriminator; without it the run shows only that a rule
 #    blocks a VM, not that it is scoped to one. isolated-apple must be created with
@@ -108,6 +116,15 @@ backends. The identical event costs ~800 ms observed by `stat` on tart. Free, an
 the guest in about a second — via `st_size` and `readdir` respectively. What never converges is
 `read()` on a rewritten file and `stat()` on a deleted one. An earlier version of this table
 reported three rows as "the change does not propagate", which was false.
+
+**2b. The `append` row reads as healthy and is not.** It converged because this harness prepares
+an *empty* file, so the append only added bytes past the cached extent. The mechanism, settled
+later (DF175, [`results/df175-write-patterns.txt`](results/df175-write-patterns.txt)): the guest
+caches file **pages** and never invalidates them on a host write, refreshing only attributes. A file
+that grows therefore looks correct while a file that shrinks — or is rewritten inside a cached
+page — serves stale bytes clamped to the new size. Appending to a file that already had content
+returns stale head plus fresh tail. Read this row as "the harness picked the one append that
+works", not as "append propagates".
 
 **3. The "~800 ms" figures were an artifact of this harness — swept, not argued.** `--settle` is now
 a flag; sweeping it on tart's `create` (raw: [`results/settle-sweep-tart.txt`](results/settle-sweep-tart.txt)):

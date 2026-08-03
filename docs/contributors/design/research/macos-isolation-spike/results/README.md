@@ -16,6 +16,7 @@ the impression that the harness worked first time.
 | `vmnet-switch.txt` | the controlled tart/apple switch that **refuted** the cross-backend exclusivity claim |
 | `pf-run1-invalidated.txt` | first pf run — the gid section returned empty strings because sudo refused the runas group; kept because the blanks are what a broken probe looks like |
 | `pf-p4-skipped.txt` | P4 correctly refusing to run against a stranded sandbox |
+| `df175-write-patterns.txt` | every host write pattern tried against a path the guest had read, plus the `msync` repair verified here and the prior art that reports the same defect |
 
 ## What these files do NOT support
 

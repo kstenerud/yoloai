@@ -1,0 +1,145 @@
+DF175 write-path experiment — which host write pattern, if any, reaches a tart guest at a
+path it has already read. Run 2026-08-03 via df175_writepath.sh, sandbox df175-writepath,
+macOS 26.5.1 (25F80), tart 2.32.1. Raw stdout below, then the follow-up probes.
+
+  host exchange dir : ~/.yoloai/library/sandboxes/df175-writepath/rw/files
+  guest exchange dir: /Volumes/My Shared Files/rw/files
+
+== P0  control: does DF175 still reproduce here? (nothing below means anything if not)
+  ok      guest reads v1 (must succeed)                AAAAAAAAAAAAAAAAAAAA
+  ok      host side is correct                         ZZZ
+  ok      guest reads STALE bytes (DF175)              AAA
+  ok      guest stat shows the NEW size                3
+
+== P1  control: does a path the guest has NEVER read update? (proves we can see success)
+  ok      guest reads the NEW bytes                    ZZZ
+
+== P2  the DF175 lead: write a temp file and rename it over the read path
+  ok      guest reads v1 (caches the path)             AAAAAAAAAAAAAAAAAAAA
+  ok      host side is correct                         ZZZ
+  ?       guest after rename-into-place                AAAAAAAAAAAAAAAAAAAA
+  ?       guest stat after rename                      20
+
+== P3  symlink indirection: p3.txt -> .blobs/p3.vN, repointed instead of rewritten
+  ok      guest reads v1 through the symlink           AAAAAAAAAAAAAAAAAAAA
+  ok      host side is correct                         ZZZ
+  ?       guest readlink (is the LINK stale?)          ?
+  ?       guest cat  (is the CONTENT stale?)           <empty>
+
+== P4  does stop+start clear the poisoned path from P0? (the workaround we would document)
+  ok      host side is still correct                   ZZZ
+  ?       guest reads p0.txt after restart             ZZZ
+
+10 ok, 0 FAIL
+
+-------------------------------------------------------------------------------------------
+FOLLOW-UP 1 — P3's error, captured properly
+
+The script's gcat/greadlink swallow stderr, so P3 reported "<empty>" and "?" for what were
+actually failures. Re-probed with stderr captured and 15s settles (2s was too short: the new
+blob had not propagated, so an early attempt blamed the repoint for a missing target).
+
+One attempt was contaminated by the harness itself and is kept because the contamination is a
+finding: it `rm -rf`'d and recreated the .blobs DIRECTORY between probes, and a directory
+recreated at a name the guest has read is poisoned exactly like a file — nothing inside the
+new directory was ever visible. Directory poisoning is the same class.
+
+Clean run, all names never seen by the guest before:
+
+  host: mkdir blobsA; blobsA/v1 = AAAAAAAAAAAAAAAAAAAA; ln -s blobsA/v1 link1.txt
+  guest readlink link1.txt   -> blobsA/v1                    correct
+  guest cat      link1.txt   -> AAAAAAAAAAAAAAAAAAAA         correct
+
+  host: blobsA/v2 = ZZZ                                      (a name the guest has not read)
+  guest cat      blobsA/v2   -> ZZZ                          correct — new names always work
+
+  host: ln -s blobsA/v2 .link1.tmp ; mv .link1.tmp link1.txt (atomic repoint)
+  guest readlink link1.txt   -> <empty>
+  guest cat      link1.txt   -> cat: .../link1.txt: Invalid argument
+  guest stat     link1.txt   -> 13 Symbolic Link             (right size, unreadable target)
+
+So a symlink repoint at a read path does not deliver: the guest keeps a symlink whose target
+string it reads as empty, giving an unresolvable link and EINVAL. It converts silent
+fabrication into a loud error, but the path becomes unusable — it is not a fix.
+
+FOLLOW-UP 2 — the P4 path after the restart
+
+  guest readlink p3.txt      -> .blobs/p3.v2                 correct
+  guest cat      p3.txt      -> ZZZ                          correct
+
+The restart clears symlink poisoning too, not just file content.
+
+-------------------------------------------------------------------------------------------
+SUMMARY — every host-side write pattern tried, at a path the guest has already read
+
+  in-place overwrite (what files put does today)  silent: old bytes, NEW size
+  temp + rename into place  (the DF175 lead)      silent: old bytes AND old size
+  symlink repoint to a fresh blob                 EINVAL; path unusable
+  a filename the guest has never read             CORRECT
+  stop + start                                    CORRECT (clears the poisoning)
+
+The recorded lead is not merely ineffective, it is strictly worse than the status quo: the
+in-place write at least updates st_size, so a guest can in principle notice the file changed.
+After a rename the guest's view is internally consistent and entirely wrong, which removes the
+only remaining signal. Had it shipped, the corruption would have become undetectable from
+inside the guest.
+
+There is no host-side write at an already-read path that works. That is the constraint any
+fix has to accept.
+
+===========================================================================================
+PRIOR ART AND A WORKING REPAIR — added 2026-08-03 after searching for existing reports
+
+The defect is independently reported, and not only for the file-exchange shape:
+
+  h1d3mun3/augur#124  macOS VM mode: read-only virtiofs shares serve stale content for minutes
+  h1d3mun3/augur#135  every share -- including the read-write workspace -- serves stale DATA
+                      until a guest vnode reclaim
+  anthropics/claude-code#38993  virtiofs FUSE mount serves truncated/stale files
+
+augur#135 corroborates every observation here and adds three we did not make:
+
+  - It is NOT permanent, it is "until a vnode reclaim". Measured stale for 904.9 s with zero
+    natural refreshes, then fresh 10.3 s after a forced reclaim burst. The guest's vnode table
+    is saturated (num_vnodes == maxvnodes) and idles at a near-zero recycle rate, so nothing
+    evicts the stale vnode on its own. Our "does not converge after 60 s" is the same thing
+    seen through a shorter window.
+  - A single read can TEAR -- one read returning a mix of old and new bytes.
+  - Attributes refresh while data does not, on every share, not just the exchange dir. Anything
+    deciding "unchanged since I last looked" from size or mtime decides wrongly.
+
+It also independently refutes the lead this repo recorded: "Atomic replace (temp + rename()).
+Refuted. Measured identical to in-place overwrite, plus EOF-CLAMPED (old size still believed)."
+That is our P2 exactly, including the old-size detail.
+
+THE REPAIR (augur PR #141, merged there): from inside the guest, msync(MS_INVALIDATE) on a
+PROT_READ mapping of the file drops the stale pages. No privilege, no write permission, works
+on :ro shares. Verified here on our own hardware -- see msync_refresh.py.
+
+  shrink   20B 'A'*20 -> 3B 'ZZZ'      guest read AAA        -> after msync: ZZZ        WORKS
+  same-len 'A'*20 -> 'B'*20            guest read 'A'*20     -> after msync: 'B'*20     WORKS
+  grow     20B -> 256KiB 'Z'           guest sha wrong       -> see below
+
+Two things we measured that the upstream write-up does not cover, both of which would break a
+naive implementation:
+
+  1. NEITHER size NOR hash-stability is a safe stop condition. In the grow arm the guest's size
+     was ALREADY correct (262144) before any msync, so a retry keyed on size never fires; and
+     the first pass produced a settled-looking hash that was still wrong. Only the host knows
+     the right bytes. Passing the host's sha256 in and retrying until it matches turns this
+     into verify-and-repair, with an explicit MISMATCH instead of a silent wrong answer.
+
+  2. THE RETRY MUST CROSS A PROCESS BOUNDARY. Four msync passes inside one guest process did
+     not converge the grow arm (MISMATCH, hash 6d5eb1dd...). A second, separate invocation of
+     the same program converged it in one pass (REFRESHED passes=1), and further invocations
+     reported ALREADY-FRESH. So the host must drive the loop and re-verify between guest
+     invocations; an in-process loop reports failure on a file it could have fixed.
+
+Controls (A22), both required before believing any REFRESHED verdict:
+  never-stale path, correct hash   -> ALREADY-FRESH passes=0   (not reported as a repair)
+  never-stale path, wrong hash     -> MISMATCH passes=4, exit 1 (fails loudly, does not pass)
+
+One transient: an arm reported ERROR / empty content while the host was mid-rewrite, and read
+correctly on the next invocation with no intervention. The guest's view of a path being
+rewritten can be briefly absent or empty, so a repair loop must tolerate that rather than
+treat it as terminal.
