@@ -53,22 +53,59 @@ the agent we are containing (the seatbelt profile is `(deny default)`), but reac
 else running as the user. `/sbin/pfctl` is the opposite: SIP-`restricted`, root-owned, unwritable
 even by root.
 
-**Why not load rules from stdin.** `pfctl -a <anchor> -f -` is the natural mechanism, and sudoers
-cannot constrain stdin at all — it matches argv only. Measured consequence: nat and rdr rules **are**
-installed when loaded into an anchor (Q2), and `/etc/pf.conf` references `com.apple/*` as
-`nat-anchor`, `rdr-anchor`, `scrub-anchor`, `dummynet-anchor` and `anchor`, so they are evaluated by
-the main ruleset rather than sitting inert. That grant is a traffic-interception primitive, not a
-per-sandbox firewall knob.
+**Why not load rules from stdin — into a top-level anchor.** `pfctl -a <anchor> -f -` is the natural
+mechanism, and sudoers cannot constrain stdin at all — it matches argv only. Measured: a `rdr` rule
+loaded into `com.apple/yoloai_*` **is evaluated**, redirecting a sandbox's traffic to a dead local
+port (`301` → `000`, with the rule confirmed loaded first). That grant is a traffic-interception
+primitive, not a per-sandbox firewall knob.
+
+**But a filter-only parent contains it.** The same rdr rule loaded into a **sub-anchor** whose parent
+declares only `anchor "*"` — and no `nat-anchor`/`rdr-anchor` — is **inert** (`301` → `301`, again
+with the rule confirmed loaded). Translation is only evaluated where a translation anchor is
+declared at every level, and the parent is ours to define. So stdin rule loading is safe *inside a
+sub-anchor of a filter-only parent*, and unsafe anywhere else
+([pf-rdr.txt](../research/macos-isolation-spike/results/pf-rdr.txt)).
 
 ## The mechanism
 
-**Static rules, dynamic table membership.** Rules are loaded exactly once, at setup, by a
-password-authenticated call. Everything per-sandbox is table membership, whose entire argument
-surface is one address.
+Two shapes work, and the measurement changed which one is preferable. **This is the open decision in
+this plan.**
 
-A fixed pool of slots is what makes this work. Per-sandbox allowlists mean per-sandbox *rules*, and
-dynamic rule loading is what we just ruled out — so the rules are pre-loaded for N slots against
-empty tables, and a sandbox is assigned a free slot at start:
+### Shape A — per-sandbox sub-anchor (recommended)
+
+A one-line filter-only parent, loaded once at setup:
+
+```
+anchor "*"
+```
+
+Then each sandbox gets its own sub-anchor, `com.apple/yoloai/<sandbox>`, loaded from stdin at start
+with whatever rules its allowlist implies, and flushed at stop. Sub-anchor filter rules **enforce and
+stay scoped** (measured), and sub-anchor translation rules are **inert** (measured). No fixed pool,
+so **no cap on concurrent isolated sandboxes**, and per-sandbox allowlists are arbitrary.
+
+> **The grant must never reach the parent anchor.** Containment rests entirely on the parent
+> declaring no translation anchor. A regex permitting `-a com\.apple/yoloai` (no sub-path) would let
+> its holder load `nat-anchor "*"` there and re-enable translation in every sub-anchor at once. The
+> regex must require the sub-path: `com\.apple/yoloai/[a-z0-9-]+`, never the bare parent. This is
+> the single load-bearing constraint of Shape A and it is invisible in testing — every enforcement
+> test passes either way.
+
+The cost relative to Shape B is a wider grant: "load arbitrary filter rules into your own
+sub-anchor" rather than "add one address to a table". Both are bounded by the same argument as
+before — the holder is the host user, who already has unrestricted network access — but Shape A also
+permits *cross-sandbox* interference, since a `pass … quick` in one sub-anchor can pre-empt another
+sub-anchor's block depending on evaluation order. Worth stating; not an escalation for the party
+holding the grant.
+
+### Shape B — fixed slot pool with static rules
+
+Rules loaded exactly once at setup; everything per-sandbox is table membership, whose entire argument
+surface is one address. Narrower grant, and it was the plan of record before the sub-anchor
+containment was measured. Its cost is a hard cap on concurrent isolated sandboxes.
+
+A fixed pool of slots is what makes it work — the rules are pre-loaded for N slots against empty
+tables, and a sandbox is assigned a free slot at start:
 
 ```
 table <yoloai_src_0> persist
@@ -94,9 +131,18 @@ last-match-wins, so had the order not survived the load, the allowlist would be 
 isolated sandbox simply cut off. That is a failure which looks exactly like working enforcement from
 the outside, so it belongs in the conformance suite rather than in a one-off check.
 
-**The slot count caps concurrent network-isolated sandboxes** — the one real cost of this design, and
-it needs a decision on default size and on what happens when the pool is exhausted (refuse, or fall
-back to today's behavior with the disclosure).
+**Under Shape B the slot count caps concurrent network-isolated sandboxes** — needing a decision on
+default size and on pool exhaustion (refuse, or fall back to today's behavior with the disclosure).
+Shape A has no such cap, which is the main reason to prefer it.
+
+### Enforcement, measured either way
+
+The rule form was validated against live sandboxes
+([pf-enforce.txt](../research/macos-isolation-spike/results/pf-enforce.txt)): the denied destination
+is blocked while the allowlisted one still passes, so **the `pass` override works**; a second sandbox
+on the same bridge is **unaffected**; **teardown by table delete alone restores egress** with no rule
+reload; and an orphaned entry naming a recycled address **silently denies its next occupant**, which
+is the reaping hazard reproduced rather than argued.
 
 **IPv6 comes free, and closes an existing hole.** pf accepts `inet6` rules and **mixed-family
 tables** — one table holding both v4 and v6, with an unqualified `block drop out from <table>`
