@@ -1,0 +1,20 @@
+guest: guest up: Darwin rounds=21 poll=0.0010
+backend=tart sandbox=mac-coh-tart reps=3 guest_poll=0.0010s deadline=12s
+
+SHAPE                rounds      read_ms    stat_ms readdir_ms
+--------------------------------------------------------------
+create               3               n/a        993        214
+overwrite_inplace    3             NEVER        989        n/a
+overwrite_rename     3             NEVER      NEVER        n/a
+mkdir                3               n/a        994        212
+symlink              3               n/a        995        207
+delete               3               n/a      NEVER        212
+append               3               992        992        n/a
+
+Times are GUEST-side medians, measured from the start of the round (before the host
+acted) — so they include the --settle 0.20s pause and are NOT host-observed latency.
+A host-side round trip would report (guest_ms - settle_ms), which hides any tick
+anchored to the guest's first lookup. Sweep --settle to see whether a figure moves.
+"NEVER" means that PREDICATE never observed the change within 12s — not that the
+change failed to arrive; check the other columns before concluding anything.
+"*" marks a cell where some rounds never observed it.

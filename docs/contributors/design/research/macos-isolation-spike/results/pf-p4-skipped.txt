@@ -1,0 +1,27 @@
+===================================================================
+ macOS isolation spike — privileged half
+ pf: Status: Enabled for 55 days 00:36:22          Debug: Urgent
+===================================================================
+
+== CONTROL 0 — are rules in the nested anchor even evaluated?
+   baseline host -> 1.0.0.1 : 301   (expect 301)
+
+   blocked  host -> 1.0.0.1 : 000   (expect 000 => anchor IS evaluated)
+   control  host -> 1.1.1.1: 301  (expect 301 => rule is scoped)
+   flushed  host -> 1.0.0.1 : 301   (expect 301)
+
+== P4 — can a guest that genuinely HOLDS NET_ADMIN defeat the host rule?
+   isolated sandbox mac-iso-apple = 192.168.64.5 via en0
+   PRECONDITION 1: the guest is privileged (else a failed tamper proves nothing):
+      iptables readable -> guest HAS NET_ADMIN
+   PRECONDITION 2: baseline iso -> 1.1.1.1 = 000 (need 301: the host rule's target)
+                   baseline iso -> 1.0.0.1  = 000  (expect 000: blocked by its OWN firewall)
+   *** SKIP P4: the guest cannot reach 1.1.1.1 even with no host rule. Any later 'blocked'
+       would be the guest's own firewall, not evidence about host pf.
+
+== FINAL
+   host -> 1.0.0.1 : 301  (expect 301)
+done.
+
+[restore] anchor flushed; group yoloaispike deleted; main ruleset untouched.
+  verified: group yoloaispike is gone

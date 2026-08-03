@@ -1,0 +1,85 @@
+===================================================================
+ macOS isolation spike — privileged half
+ pf: Status: Enabled for 55 days 00:12:54          Debug: Urgent
+===================================================================
+
+== CONTROL 0 — are rules in the nested anchor even evaluated?
+   baseline host -> 1.0.0.1 : 301   (expect 301)
+
+   blocked  host -> 1.0.0.1 : 000   (expect 000 => anchor IS evaluated)
+   control  host -> 1.1.1.1: 301  (expect 301 => rule is scoped)
+   flushed  host -> 1.0.0.1 : 301   (expect 301)
+
+== P1a — apple: per-VM scoping and the allowlist shape
+   appleA = 192.168.64.2 via bridge101
+   BASELINE appleA -> 1.0.0.1 = 301   (expect 301)
+
+   blocked  appleA -> 1.0.0.1 = 000   (want 000)
+   control  host  -> 1.0.0.1 = 301  (want 301, host unaffected)
+
+   allowlist appleA -> 1.1.1.1 = 301 (want 301)   -> 1.0.0.1 = 000 (want 000)
+   flushed  appleA -> 1.0.0.1 = 301   (expect 301)
+
+== P4 — can a guest that genuinely HOLDS NET_ADMIN defeat the host rule?
+   SKIP: no --network-isolated apple sandbox supplied (arg 3).
+   Without it this proves nothing: an unprivileged iptables failure is not a tamper attempt.
+
+== REAPING — what happens to an address-keyed rule when the sandbox dies?
+
+   rule installed for 192.168.64.2; destroying the sandbox out from under it...
+   anchor contents after the sandbox is gone:
+        block drop in quick on bridge101 inet from 192.168.64.2 to any
+   ^ nothing reaped it. A later sandbox issued 192.168.64.2 inherits this silently.
+   (that is the per-sandbox-lifetime cost the plans name as undesigned)
+
+== P2 — the ACTUAL dedicated-gid design (not borrowed admin/staff)
+   created group yoloaispike gid=700 (deleted on exit)
+   NOTE: karlstenerud is deliberately NOT a member — a sandbox gid should not be one the user holds.
+   baseline gid=yoloaispike -> 1.0.0.1 :   (expect 301)
+   baseline gid=staff -> 1.0.0.1 : 301  (expect 301)
+
+   allowlist gid=yoloaispike -> 1.1.1.1 :   (want 301)
+   allowlist gid=yoloaispike -> 1.0.0.1  :    (want 000)
+   unaffected gid=staff -> 1.0.0.1: 301  (want 301)
+
+== P2b — can a process in that gid shed it? (the whole design rests on 'no')
+Sorry, user root is not allowed to execute '/Users/karlstenerud/miniforge3/bin/python3 -' as karlstenerud:yoloaispike on Karls-MacBook-Air.local.
+
+== P3 — the ICMP hole: does 'group' filter non-TCP/UDP at all?
+   man 5 pf.conf: 'Only TCP and UDP packets can be associated with users; for other
+   protocols these parameters are ignored.' Three outcomes discriminate what 'ignored' means.
+   ping setuid? -r-xr-xr-x root  (a setuid-root ping would confound this)
+   baseline ping as gid=yoloaispike : blocked
+
+   icmp+group rule loaded:  gid=yoloaispike -> blocked    gid=staff -> REACHED
+     both REACHED  => the rule never matches ICMP: gid allowlists leak ICMP entirely
+     both blocked  => 'group' is ignored and the rule hits EVERY process (over-blocks)
+     only yoloaispike blocked => group works for ICMP, contradicting the man page
+   now the sharper version — a gid allowlist that blocks all TCP, does ICMP still escape?
+
+   tcp to 1.0.0.1 (should be blocked): 
+   ICMP to 1.0.0.1 under the same policy: blocked
+
+== P1b — tart (run last: taking its bridge kills apple's network)
+   handing the vmnet bridge to tart...
+   tart = 192.168.65.4 via bridge101
+   BASELINE tart -> 1.0.0.1 = 301   (expect 301)
+
+   blocked  tart -> 1.0.0.1 = 000   (want 000)
+   control  host  -> 1.0.0.1 = 301  (want 301, host unaffected)
+
+   allowlist tart -> 1.1.1.1 = 301 (want 301)   -> 1.0.0.1 = 000 (want 000)
+   flushed  tart -> 1.0.0.1 = 301   (expect 301)
+   guest-side tamper (tart guest is macOS with sudo):
+
+No ALTQ support in kernel
+      (guest disabled its OWN pf)
+   after guest pfctl -d: tart -> 1.0.0.1 = 000  (want 000)
+   positive control    : tart -> 1.1.1.1 = 000 (want 301)
+
+== FINAL
+   host -> 1.0.0.1 : 301  (expect 301)
+done.
+
+[restore] anchor flushed; group yoloaispike deleted; main ruleset untouched.
+  verified: group yoloaispike is gone
