@@ -22,3 +22,24 @@
    watching for 1677s (~27m), sampling every 30s
 
    t=120s steady  ip=192.168.65.2 lease_remaining=439s
+   t=241s steady  ip=192.168.65.2 lease_remaining=318s
+   t=361s steady  ip=192.168.65.2 lease_remaining=498s
+   t=482s steady  ip=192.168.65.2 lease_remaining=377s
+   t=602s steady  ip=192.168.65.2 lease_remaining=556s
+   t=723s steady  ip=192.168.65.2 lease_remaining=435s
+   t=843s steady  ip=192.168.65.2 lease_remaining=315s
+   t=963s steady  ip=192.168.65.2 lease_remaining=494s
+   t=1084s steady  ip=192.168.65.2 lease_remaining=373s
+   t=1204s steady  ip=192.168.65.2 lease_remaining=552s
+   t=1325s steady  ip=192.168.65.2 lease_remaining=431s
+   t=1445s steady  ip=192.168.65.2 lease_remaining=311s
+   t=1566s steady  ip=192.168.65.2 lease_remaining=489s
+   t=1686s steady  ip=192.168.65.2 lease_remaining=369s
+
+   RESULT  address held for 1677s across 3 lease lifetimes
+           with no restart. Renewal does NOT move the address on tart, so the
+           remaining fail-open path is closed for this backend on this host.
+
+== cleanup ==
+   sandboxes remaining: 0
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/renewal-watch.txt

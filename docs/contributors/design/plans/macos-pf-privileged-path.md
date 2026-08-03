@@ -278,16 +278,17 @@ property the whole plan exists for and belongs in `runtime/runtimetest`, not a s
 
 ## Unmeasured, and known limits
 
-- **Fail-open on address change while running.** A `block from <table>` rule stops matching if a
-  sandbox's address changes, silently unfiltering it. Not observed while running: 120 samples over
-  240s of induced bridge churn, through a full tart bring-up, held one address with working egress.
-  That is a **negative result, not stability** — it bounds the risk over minutes, not over the days a
-  sandbox lives. Every address change actually observed (`.5`→`.2`, `.2`→`.3`, `.22`→`.23`,
-  `.2`→`.4`) accompanied a **restart of the sandbox**, where the start path re-runs and reinstalls —
-  so the dangerous variant needs an address to move underneath a sandbox nobody restarted, which
-  nothing has yet produced. **Lease renewal on a long-running sandbox remains untested**, and tart's
-  lease was near expiry within minutes of issue, so renewal happens constantly rather than rarely.
-  Mitigation if it proves real: re-verify membership on the existing `SandboxNetHealth` probe tick,
+- **Fail-open on address change while running — closed for tart, open for apple.** A
+  `block from <table>` rule stops matching if a sandbox's address changes, silently unfiltering it.
+  tart's lease turned out to be **559s**, so renewal is constant rather than rare, and a 28-minute
+  watch caught **five renewals** directly — visible as the lease-remaining sawtooth
+  (`318→498`, `377→556`, `315→494`, `373→552`, `311→489`) — with the address unchanged across every
+  one. That closes the renewal path for tart on this host, and it is a positive result rather than
+  an absence of evidence, because the renewals are counted rather than assumed.
+  **apple's equivalent is unmeasured**: it has no record in `/var/db/dhcpd_leases` at all, so it does
+  not renew through bootpd and nothing here observed its address over time. Every apple address
+  change seen (`.5`→`.2`, `.22`→`.23`) accompanied a restart, where the start path reinstalls anyway.
+  Cheap mitigation regardless: re-verify membership on the existing `SandboxNetHealth` probe tick,
   which already runs and already knows the guest's current address.
 - **IPv6 end-to-end blocking is unverified.** Mixed-family tables and the grant are confirmed; real
   IPv6 traffic being dropped is not, and whether the guests have IPv6 egress at all is unchecked.
