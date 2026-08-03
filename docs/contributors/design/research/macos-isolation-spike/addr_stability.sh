@@ -56,7 +56,7 @@ git init --quiet "$WORK/repo"
 
 appip()  { container inspect "yoloai-cli-$SB" 2>/dev/null \
              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status"]["networks"][0].get("ipv4Address",""))' 2>/dev/null; }
-appegr() { container exec "yoloai-cli-$SB" curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://1.1.1.1/ 2>/dev/null || echo 000; }
+appegr() { local c; c=$(container exec "yoloai-cli-$SB" curl -s -o /dev/null -w '%{http_code}' --max-time 5 http://1.1.1.1/ 2>/dev/null); c=${c//[^0-9]/}; c=${c: -3}; printf '%s' "${c:-000}"; }
 bridges(){ ifconfig 2>/dev/null | awk '/^[a-z]/{i=$1} /inet /{print i"="$2}' | grep '^bridge' | tr '\n' ' '; }
 
 echo "==================================================================="

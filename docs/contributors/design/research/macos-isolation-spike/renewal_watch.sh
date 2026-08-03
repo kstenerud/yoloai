@@ -81,7 +81,7 @@ echo "   apple ($aip):"
 container exec "yoloai-cli-$ASB" sh -c 'ip -6 addr show scope global 2>/dev/null | grep inet6 || echo "     (no global IPv6)"' 2>&1 | sed 's/^/     /'
 container exec "yoloai-cli-$ASB" sh -c 'ip -6 addr show 2>/dev/null | grep -c inet6 || echo 0' 2>&1 | sed 's/^/     total inet6 addrs (incl link-local): /'
 echo -n "     IPv6 egress: "
-container exec "yoloai-cli-$ASB" sh -c 'curl -6 -s -o /dev/null -w "%{http_code}" --max-time 8 https://ipv6.google.com/ 2>/dev/null || echo 000' 2>/dev/null || echo "n/a"
+container exec "yoloai-cli-$ASB" sh -c 'curl -6 -s -o /dev/null -w "%{http_code}" --max-time 8 https://ipv6.google.com/ 2>/dev/null' 2>/dev/null || echo "n/a"
 echo
 
 "$YOLOAI" new --backend tart "$TSB" "$WORK/repo" >/dev/null 2>&1
@@ -89,7 +89,7 @@ for _ in $(seq 1 240); do tip=$(tartip); [ -n "$tip" ] && break; sleep 0.5; done
 echo "   tart ($tip):"
 tart exec "yoloai-cli-$TSB" sh -c 'ifconfig en0 inet6 2>/dev/null | grep inet6 || echo "(none)"' 2>&1 | sed 's/^/     /'
 echo -n "     IPv6 egress: "
-tart exec "yoloai-cli-$TSB" sh -c 'curl -6 -s -o /dev/null -w "%{http_code}" --max-time 8 https://ipv6.google.com/ 2>/dev/null || echo 000' 2>/dev/null || echo "n/a"
+tart exec "yoloai-cli-$TSB" sh -c 'curl -6 -s -o /dev/null -w "%{http_code}" --max-time 8 https://ipv6.google.com/ 2>/dev/null' 2>/dev/null || echo "n/a"
 
 # ---------------------------------------------------------------------------
 echo
@@ -116,7 +116,8 @@ while [ $(( $(date +%s) - start )) -lt "$watch" ]; do
   if [ -n "${cur:-}" ] && [ "$cur" != "$last" ]; then
     changed=1
     echo "   t=${el}s CHANGE  $last -> $cur  (mac $lastmac -> ${cmac:-?})"
-    egr=$(tart exec "yoloai-cli-$TSB" sh -c 'curl -s -o /dev/null -w "%{http_code}" --max-time 6 http://1.1.1.1/ 2>/dev/null || echo 000' 2>/dev/null)
+    egr=$(tart exec "yoloai-cli-$TSB" sh -c 'curl -s -o /dev/null -w "%{http_code}" --max-time 6 http://1.1.1.1/ 2>/dev/null' 2>/dev/null)
+    egr=${egr//[^0-9]/}; egr=${egr: -3}; [ -n "$egr" ] || egr=000
     if [ "$egr" = "000" ]; then
       echo "           fail-CLOSED: address moved but the guest is stranded"
     else
