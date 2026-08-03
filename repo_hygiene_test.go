@@ -2567,3 +2567,96 @@ func TestRepoHygiene_AllocationSites_AreInAscendingIDOrder(t *testing.T) {
 		})
 	}
 }
+
+// shellcheckLsFilesArgv extracts the `git ls-files …` invocation from the Makefile's
+// shellcheck recipe. Recipe lines only — a `##` comment mentioning the flags must not
+// count, the same trap TestRepoHygiene_EnvGateSetters_IgnoreCommentedMentions pins.
+func shellcheckLsFilesArgv(t *testing.T, root string) []string {
+	t.Helper()
+	var argv []string
+	inRecipe := false
+	eachLine(t, filepath.Join(root, "Makefile"), func(_ int, line string) {
+		if strings.HasPrefix(line, "shellcheck:") {
+			inRecipe = true
+			return
+		}
+		if inRecipe && len(line) > 0 && !strings.HasPrefix(line, "\t") {
+			inRecipe = false
+		}
+		if !inRecipe || argv != nil {
+			return
+		}
+		if i := strings.Index(line, "git ls-files"); i >= 0 {
+			rest := line[i:]
+			if j := strings.Index(rest, ")"); j >= 0 {
+				rest = rest[:j]
+			}
+			argv = strings.Fields(strings.ReplaceAll(rest, "'", ""))
+		}
+	})
+	if argv == nil {
+		t.Fatal("Makefile: no `git ls-files` found in the shellcheck recipe — has the target changed?")
+	}
+	return argv
+}
+
+// TestRepoHygiene_ShellcheckScope_CoversUntrackedScripts pins WHICH shell scripts the
+// shellcheck gate can see, by running the Makefile's own `git ls-files` argv against a
+// throwaway repo with one file of each kind.
+//
+// A script is at its least reviewed before it is first staged — and tracked-only scope
+// reports nothing wrong with it at exactly that moment. Four shell scripts authored under
+// docs/ passed a full `make check` that way; the one real defect among them surfaced only
+// when they were linted by hand. The argv is read out of the shipped Makefile rather than
+// restated here, so this fails if the target's scope regresses, not merely if some string
+// changes.
+func TestRepoHygiene_ShellcheckScope_CoversUntrackedScripts(t *testing.T) {
+	argv := shellcheckLsFilesArgv(t, repoRoot(t))
+
+	dir := t.TempDir()
+	run := func(name string, arg ...string) string {
+		// sysexec + testutil.GitEnv: DEV §12's one licensed subprocess site, and GitEnv pins
+		// GIT_CONFIG_GLOBAL=/dev/null — which matters here, because core.excludesFile would
+		// otherwise let a developer's own global gitignore change what this test observes.
+		cmd := sysexec.Command(testutil.GitEnv(), name, arg...)
+		cmd.Dir = dir
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s %v: %v\n%s", name, arg, err, out)
+		}
+		return string(out)
+	}
+	write := func(rel, body string) {
+		if err := os.MkdirAll(filepath.Dir(filepath.Join(dir, rel)), 0o750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, rel), []byte(body), 0o600); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	run("git", "init", "-q")
+	write(".gitignore", "ignored/\n")
+	write("tracked.sh", "#!/bin/bash\ntrue\n")
+	run("git", "add", ".gitignore", "tracked.sh")
+	run("git", "commit", "-qm", "seed")
+	write("untracked.sh", "#!/bin/bash\ntrue\n")      // the case tracked-only scope misses
+	write("ignored/skipme.sh", "#!/bin/bash\ntrue\n") // deliberately ignored: out of scope
+
+	listed := map[string]bool{}
+	for _, f := range strings.Fields(run(argv[0], argv[1:]...)) {
+		listed[f] = true
+	}
+
+	if !listed["tracked.sh"] {
+		t.Errorf("shellcheck scope lost tracked scripts: %v", listed)
+	}
+	if !listed["untracked.sh"] {
+		t.Errorf("shellcheck scope does not cover UNTRACKED scripts (argv %v). A new script is "+
+			"unlinted until it is staged, which is when it is least reviewed.", argv)
+	}
+	if listed["ignored/skipme.sh"] {
+		t.Errorf("shellcheck scope reaches into .gitignore'd paths (argv %v); an ignored file is "+
+			"out of scope by design, and linting it makes the gate fail on a developer's scratch dir", argv)
+	}
+}
