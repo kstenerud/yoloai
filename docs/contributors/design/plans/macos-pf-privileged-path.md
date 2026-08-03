@@ -87,7 +87,19 @@ back to today's behavior with the disclosure).
 **IPv6 comes free, and closes an existing hole.** pf accepts `inet6` rules and **mixed-family
 tables** — one table holding both v4 and v6, with an unqualified `block drop out from <table>`
 covering both. The in-guest iptables allowlist leaves IPv6 entirely unfiltered today (it is in the
-flag help). Parse-verified only; runtime confirmation is owed.
+flag help), because `firewall.resolve_domains` requests `AF_INET` only. Parse-verified; runtime
+confirmation is owed.
+
+**Where the allowlist gets resolved changes, and that is a new failure mode.** The `dst` table holds
+resolved addresses, exactly as the ipset does today — `resolve_domains` is one-shot at start with no
+refresher anywhere, so CDN rotation already breaks long-lived sandboxes and this design neither
+fixes nor worsens that. What *is* new: resolution moves from the guest to the host. A domain the
+host and guest resolve differently — split-horizon DNS, geo/anycast variance, a VPN resolver on one
+side only — yields a guest connecting to an address the host never put in the table, which is then
+**blocked despite being allowlisted**. In-guest enforcement cannot have this failure because the same
+resolver answers both questions. Needs either resolution parity (ask the guest, filter on the host)
+or an explicit documented limit; it should not be discovered by a user whose allowlisted domain
+intermittently fails.
 
 ### The authorization
 
@@ -101,10 +113,15 @@ regular expression."
 <user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -t yoloai_(src|dst)_([0-9]|1[0-5]) -T (add|delete|flush)( [0-9a-fA-F.:/]+)?$
 ```
 
-Measured against a live policy: both intended commands permitted, and **seven escapes refused** —
+**The regex above is not the one that was tested.** The measured policy was narrower —
+`^-a com\.apple/yoloai_authz -t yoloai_authz_src -T (add|delete) [0-9.]+$`, a single fixed table and
+IPv4 only. Against *that*, both intended commands were permitted and **seven escapes refused**:
 main-ruleset load, disable pf, flush all, a different anchor, a stdin ruleset, table-from-file, and
 table kill. The cache control passed, so those refusals reflect policy rather than a warm sudo
-timestamp.
+timestamp. The form above widens it in four ways — a slot alternation in the table name, `flush`,
+an optional address group, and hex/colon/slash for IPv6 — none of which have been run. **Re-running
+the escape matrix against the final regex is a Phase 1 deliverable, not a formality**, and it is the
+one place where a plausible-looking widening silently grants more than intended.
 
 Three things this must get right, all of them load-bearing:
 
@@ -174,20 +191,24 @@ unattended (Q5).
 Two measurements move this from tidiness to correctness
 ([lease-binding.txt](../research/macos-isolation-spike/results/lease-binding.txt)):
 
-- **A sandbox's address changes across its own stop/start.** apple went `192.168.64.22` →
-  `192.168.64.23` over one stop/start cycle. So the address is re-read and the table rewritten at
-  every start; **caching a sandbox's address is a defect**, not an optimization. This is not
-  fail-open — the start path runs and installs the new address — but it does mean every restart
-  leaves an orphan entry behind if stop did not clean up.
-- **Addresses are handed out incrementally and the pool is finite.** apple walked `.20`, `.22`,
-  `.23`; the host's historical lease log holds 253 distinct addresses across the vmnet subnets. A
-  pool that increments and wraps *will* re-issue an address that a stale `block` entry still names,
-  and the victim is then a sandbox — or an unrelated VM — that is silently denied egress while
-  looking healthy. On a long-lived host this is a certainty with a horizon, not a residual risk.
+- **A sandbox's address changes across its own stop/start, on both backends.** apple went
+  `192.168.64.22` → `.23`; tart went `192.168.65.2` → `.4`. So the address is re-read and the table
+  rewritten at every start; **caching a sandbox's address is a defect**, not an optimization. This is
+  not fail-open — the start path runs and installs the new address — but every restart leaves an
+  orphan entry behind if stop did not clean up.
+- **The address pool is consumed per START, not per sandbox.** tart's **MAC also changed** across the
+  restart (`8a:cb:49:70:e1:7b` → `d2:f0:23:b:24:29`), so bootpd issues a fresh lease rather than
+  honoring a binding. That explains the host's lease log holding 253 distinct MACs against 253
+  distinct addresses with no address ever bound to two MACs — and it **refutes the inference drawn
+  from that log**, which was that a MAC-keyed binding would preserve a sandbox's address. It does
+  not, because the MAC is not stable either. Consumption is therefore one address per start, so a
+  `/24` wraps far faster than "one per sandbox" suggests, and a wrapped pool *will* re-issue an
+  address some stale `block` entry still names. The victim is a sandbox — or an unrelated VM — that
+  is silently denied egress while looking healthy.
 
-Note the two backends do not share a mechanism: apple's address has **no record in
-`/var/db/dhcpd_leases`** at all, so it is not bootpd-issued, while tart's is. Nothing about
-addressing should be generalized from one to the other.
+Note also that the two backends do not share an addressing mechanism: apple's address has **no
+record in `/var/db/dhcpd_leases`** at all, so it is not bootpd-issued, while tart's is. They happen
+to agree on the behavior that matters here, but that agreement was measured, not derived.
 
 ## Shape of the work
 
@@ -224,11 +245,11 @@ property the whole plan exists for and belongs in `runtime/runtimetest`, not a s
   sandbox's address changes, silently unfiltering it. Not observed while running: 120 samples over
   240s of induced bridge churn, through a full tart bring-up, held one address with working egress.
   That is a **negative result, not stability** — it bounds the risk over minutes, not over the days a
-  sandbox lives. Every address change actually observed (`.5`→`.2`, `.2`→`.3`, `.22`→`.23`)
-  accompanied a **restart of the sandbox**, where the start path re-runs and reinstalls — so the
-  dangerous variant needs an address to move underneath a sandbox nobody restarted, which nothing has
-  yet produced. **Lease renewal on a long-running sandbox remains untested**, and tart's lease was
-  short enough to be near expiry within minutes, so renewal happens constantly rather than rarely.
+  sandbox lives. Every address change actually observed (`.5`→`.2`, `.2`→`.3`, `.22`→`.23`,
+  `.2`→`.4`) accompanied a **restart of the sandbox**, where the start path re-runs and reinstalls —
+  so the dangerous variant needs an address to move underneath a sandbox nobody restarted, which
+  nothing has yet produced. **Lease renewal on a long-running sandbox remains untested**, and tart's
+  lease was near expiry within minutes of issue, so renewal happens constantly rather than rarely.
   Mitigation if it proves real: re-verify membership on the existing `SandboxNetHealth` probe tick,
   which already runs and already knows the guest's current address.
 - **Is `set skip` honored inside an anchor?** Unmeasured — the harness's own verdict was invalid

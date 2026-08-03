@@ -1,0 +1,18 @@
+===================================================================
+ tart address binding across stop/start
+ host: 26.5.1   started: 10:39:03
+===================================================================
+
+== creating tart sandbox ==
+   ip=192.168.65.2  mac=1,8a:cb:49:70:e1:7b
+
+== stop / start ==
+   ip=192.168.65.4  mac=1,d2:f0:23:b:24:29
+
+   CHANGED  192.168.65.2 -> 192.168.65.4. Both backends move their address across a restart, so
+   're-read at every start, never cache' is unconditional and any orphan-entry
+   hazard applies to tart exactly as it does to apple.
+
+== cleanup ==
+   sandboxes remaining: 0
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/tart-binding.txt
