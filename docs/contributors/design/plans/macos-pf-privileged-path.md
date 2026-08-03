@@ -151,8 +151,9 @@ Each produced a false result during the research before it was understood.
 
 ## Ordering, and the enforcement window
 
-The sandbox address does not exist at launch — it is a DHCP lease read host-side. Measured: it
-appears **2s** after `yoloai new` begins, against **3s** for the command to return. So the sequence
+The sandbox address does not exist at launch — it is read host-side after the guest comes up.
+Measured on both address-keyed backends: apple's appears **2s** after `yoloai new` begins against
+**3s** for the command to return; tart's at **8s** against **39s**. So the sequence
 
 ```
 start guest → wait for address → add to table → VERIFY present → launch agent
@@ -163,16 +164,30 @@ boundary; boot traffic before the rule exists is unfiltered, which is acceptable
 agent code has run yet. **If agent launch is ever reordered ahead of the table add, the guarantee is
 void and nothing about the sandbox looks different.** That belongs in a test, not a comment.
 
-## Reaping
+## Reaping — mandatory, not housekeeping
 
 Table membership is reconciled against live sandboxes on every yoloAI run, rather than being treated
 as an append/remove log. A missed teardown is then self-healing at the next invocation, and there is
 no reaper process to supervise. Teardown itself is a table delete — no rule reload, and it works
 unattended (Q5).
 
-The residual case is a host where yoloAI never runs again, leaving a stale address in a `block`
-table. That over-blocks a VM that later receives the address; it does not let anything through. A
-`yoloai doctor` sweep covers it.
+Two measurements move this from tidiness to correctness
+([lease-binding.txt](../research/macos-isolation-spike/results/lease-binding.txt)):
+
+- **A sandbox's address changes across its own stop/start.** apple went `192.168.64.22` →
+  `192.168.64.23` over one stop/start cycle. So the address is re-read and the table rewritten at
+  every start; **caching a sandbox's address is a defect**, not an optimization. This is not
+  fail-open — the start path runs and installs the new address — but it does mean every restart
+  leaves an orphan entry behind if stop did not clean up.
+- **Addresses are handed out incrementally and the pool is finite.** apple walked `.20`, `.22`,
+  `.23`; the host's historical lease log holds 253 distinct addresses across the vmnet subnets. A
+  pool that increments and wraps *will* re-issue an address that a stale `block` entry still names,
+  and the victim is then a sandbox — or an unrelated VM — that is silently denied egress while
+  looking healthy. On a long-lived host this is a certainty with a horizon, not a residual risk.
+
+Note the two backends do not share a mechanism: apple's address has **no record in
+`/var/db/dhcpd_leases`** at all, so it is not bootpd-issued, while tart's is. Nothing about
+addressing should be generalized from one to the other.
 
 ## Shape of the work
 
@@ -205,13 +220,17 @@ property the whole plan exists for and belongs in `runtime/runtimetest`, not a s
 
 ## Unmeasured, and known limits
 
-- **Fail-open on address change.** A `block from <table>` rule stops matching if a sandbox's address
-  changes, silently unfiltering it. Not observed: 120 samples over 240s of induced bridge churn,
-  through a full tart bring-up, held one address with working egress. That is a **negative result,
-  not stability** — it bounds the risk over minutes, not over the days a sandbox lives, and **DHCP
-  lease renewal is untested**. Every address change seen in earlier runs accompanied a restart of the
-  sandbox itself, where the start path re-runs anyway. Mitigation if it proves real: re-verify
-  membership on the existing `SandboxNetHealth` probe tick.
+- **Fail-open on address change while running.** A `block from <table>` rule stops matching if a
+  sandbox's address changes, silently unfiltering it. Not observed while running: 120 samples over
+  240s of induced bridge churn, through a full tart bring-up, held one address with working egress.
+  That is a **negative result, not stability** — it bounds the risk over minutes, not over the days a
+  sandbox lives. Every address change actually observed (`.5`→`.2`, `.2`→`.3`, `.22`→`.23`)
+  accompanied a **restart of the sandbox**, where the start path re-runs and reinstalls — so the
+  dangerous variant needs an address to move underneath a sandbox nobody restarted, which nothing has
+  yet produced. **Lease renewal on a long-running sandbox remains untested**, and tart's lease was
+  short enough to be near expiry within minutes, so renewal happens constantly rather than rarely.
+  Mitigation if it proves real: re-verify membership on the existing `SandboxNetHealth` probe tick,
+  which already runs and already knows the guest's current address.
 - **Is `set skip` honored inside an anchor?** Unmeasured — the harness's own verdict was invalid
   (`grep -c` prints `0` *and* exits 1, so `|| echo 0` produced `0\n0` and the comparison errored into
   the not-honored branch unconditionally). Fixed, and moot for this plan, since the stdin form is out
