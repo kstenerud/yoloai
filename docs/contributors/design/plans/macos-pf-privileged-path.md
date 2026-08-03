@@ -73,10 +73,19 @@ empty tables, and a sandbox is assigned a free slot at start:
 ```
 table <yoloai_src_0> persist
 table <yoloai_dst_0> persist
-block drop out from <yoloai_src_0> to any
-pass  out from <yoloai_src_0> to <yoloai_dst_0>
+pass  in quick from <yoloai_src_0> to <yoloai_dst_0>
+block drop in quick from <yoloai_src_0> to any
 …repeated per slot
 ```
+
+> **The direction and `quick` are load-bearing, and an earlier draft of this plan had them
+> wrong.** It wrote `block drop out from <src>`, reasoning from last-match-wins. But pf applies
+> NAT to outbound traffic, so a rule filtering `out` sees the *host's* address as the source and
+> matches nothing — the sandbox is then wholly unfiltered, silently. The form that actually
+> enforced in the spike is `in` on the bridge, where the packet still carries the guest's
+> address, with `quick` making the `pass` win by appearing first. **The table variant above drops
+> the spike's `on <ifc>` qualifier** (hazard 3 — interface names move), which is a deviation from
+> what was measured and is what `pf_enforce.sh` exists to validate.
 
 Empty tables match nothing, so unused slots are inert. Verified on hardware: a 16-slot pool loads
 all **32 filter rules**, table add/show works at both ends of the pool, and — the part that actually
@@ -93,10 +102,21 @@ back to today's behavior with the disclosure).
 tables** — one table holding both v4 and v6, with an unqualified `block drop out from <table>`
 covering both. The in-guest iptables allowlist leaves IPv6 entirely unfiltered today (it is in the
 flag help), because `firewall.resolve_domains` requests `AF_INET` only. Confirmed at runtime that one
-table holds `192.0.2.7` and `2001:db8::1` together, and that the grant permits adding both. **What
-is still owed is end-to-end blocking of real IPv6 traffic**, which needs a guest that actually has
-IPv6 egress — an acceptance-test obligation, and worth checking that the guests have any IPv6 at all
-before treating the gap as urgent.
+table holds `192.0.2.7` and `2001:db8::1` together, and that the grant permits adding both.
+
+**This is not insurance — the gap is live on apple today.** Measured: an apple guest holds a
+**global-scope IPv6 address** (`fd96:9d70:8059:3047::/64`, three `inet6` addresses in total) and a
+**default IPv6 route advertised by the host itself** — the RA router's MAC is `bridge101`'s, and the
+host carries an address in the guest's own /64. Neighbour discovery from the guest resolves that
+host address to the bridge's lladdr and marks it `router REACHABLE`. So guest→host and guest→guest
+IPv6 both work right now, entirely outside an IPv4-only allowlist, and on any host with upstream
+IPv6 the guests would have unfiltered v6 egress as well — they are already configured for it and
+only the host's missing upstream stops them. **tart guests have no IPv6 on `en0` at all**, so this
+is apple-specific.
+
+What is still owed is end-to-end blocking of real IPv6 *egress*, which cannot be measured on this
+host: it has no IPv6 upstream (ULAs on `bridge100` and a Tailscale `utun`, `curl -6` returns 000).
+Guest→host blocking over IPv6 is measurable here and should be in the acceptance test.
 
 **Where the allowlist gets resolved changes, and that is a new failure mode.** The `dst` table holds
 resolved addresses, exactly as the ipset does today — `resolve_domains` is one-shot at start with no
