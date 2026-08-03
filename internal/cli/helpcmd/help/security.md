@@ -55,6 +55,23 @@ NETWORK ISOLATION
   Each agent has a default allowlist (e.g., api.anthropic.com for
   Claude). Use --network-none for maximum isolation.
 
+  WHERE THE ALLOWLIST IS ENFORCED, AND WHAT IT IS WORTH
+
+  On docker, the rules are installed from a separate helper container and
+  the sandbox is denied NET_ADMIN, so an agent inside it cannot remove
+  them. This is the case the allowlist actually contains a hostile agent.
+
+  On apple, podman and containerd the sandbox installs the rules itself
+  and therefore holds NET_ADMIN, so an agent that tries can flush them.
+  Treat the allowlist there as a guardrail against accidental or careless
+  egress, not as containment.
+
+  On tart and seatbelt there is no network isolation at all --
+  --network-isolated is refused rather than silently unenforced.
+
+  --network-none does not depend on any of this: it removes the network
+  instead of filtering it, so it holds on every backend.
+
   IPv6 IS NOT FILTERED. The allowlist is enforced with IPv4 iptables
   rules only; no ip6tables rules are installed on any backend. On the
   networks yoloAI creates today the guest gets no globally-routable

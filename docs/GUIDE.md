@@ -389,6 +389,7 @@ yoloai new task ./project --abandon-unapplied
 yoloai new task ./project -- --allowedTools "Edit,Write,Bash"
 
 # Network isolation (allow only agent API traffic; IPv4 only — IPv6 is not filtered)
+# Tamper-resistant on docker only; elsewhere the sandbox can remove its own rules ('yoloai help security')
 yoloai new task ./project --network-isolated
 
 # Allow extra domains in network-isolated mode
@@ -892,7 +893,7 @@ Isolation modes are silently ignored on non-container backends (tart, seatbelt).
 
 - **Requires macOS 26 (Tahoe) or newer on Apple Silicon.** yoloAI gates on `macOS ≥ 26`; on older macOS the `--isolation vm` error explains the upgrade path. Some features (e.g. Rosetta-backed amd64) want **M3 or newer**.
 - **Strong isolation, fast.** Each container gets a real VM boundary (the host kernel isn't shared), yet VMs start sub-second.
-- **Network isolation works** the same as on Linux — the in-VM Linux kernel enforces the `--network-isolated` allowlist.
+- **Network isolation is enforced by the in-VM Linux kernel.** The sandbox installs the rules itself, so it holds `NET_ADMIN` and an agent that tries can flush them. Same mechanism as podman and containerd. Docker is the one backend that installs the rules from outside the sandbox and withholds `NET_ADMIN`, so only there does the allowlist hold against an agent that works at it. Treat it here as a guardrail against careless egress, and use `--network-none` when you need a guarantee.
 - **No suspend/resume and no VS Code "Attach to Running Container".** `container` has no checkpoint or docker-compat API; `exec`-based attach (`yoloai attach`) works normally.
 - **Memory is not released back to the host** until the VM stops (virtio-balloon) — minor for ephemeral sandboxes.
 - **Profile Dockerfiles are built via Apple's own builder** (`container build`, same as `docker build`/`podman build`) — a profile's `yoloai-cli-<profile>` image is built and cached automatically, no manual step needed. One gap versus Docker/Podman: no `--secret` build-secret support, so an auto-detected secret (e.g. `~/.npmrc`) is reported and dropped rather than passed into the build.

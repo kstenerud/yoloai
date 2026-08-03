@@ -11,7 +11,9 @@
   injector stays reachable; live `network allow` patches the per-netns ipset from the sidecar).
   **macOS half measured on hardware 2026-08-02** (§ The macOS half): host `pf` enforces for all
   three macOS backends, so none of them is a "cannot" — but all three remain **deferred**, because
-  each needs a privileged path yoloAI does not have on macOS today. Deferred: containerd/Kata, the
+  each needs a privileged path yoloAI does not have on macOS today. **That privileged path now has
+  a decision and a plan of its own** (opt-in `sudo`, not an installed helper):
+  [macos-pf-privileged-path.md](macos-pf-privileged-path.md). Deferred: containerd/Kata, the
   legacy launch path, macOS (now measured rather than unknown). One boundary worth noting — see
   "Provisioning egress" below.
 - **Depends on:** host-controlled-agent-launch.md
