@@ -21,6 +21,7 @@ import (
 	"strings"
 	"testing"
 	"time"
+	"unicode"
 	"unicode/utf8"
 
 	"github.com/kstenerud/yoloai/internal/sysexec"
@@ -2658,5 +2659,283 @@ func TestRepoHygiene_ShellcheckScope_CoversUntrackedScripts(t *testing.T) {
 	if listed["ignored/skipme.sh"] {
 		t.Errorf("shellcheck scope reaches into .gitignore'd paths (argv %v); an ignored file is "+
 			"out of scope by design, and linting it makes the gate fail on a developer's scratch dir", argv)
+	}
+}
+
+// mdLinkRef is one relative markdown link, split into the file it names and the
+// in-page anchor it asks for. Either half may be empty: "other.md" has no
+// fragment, "#section" is a same-page anchor with no path.
+type mdLinkRef struct {
+	Path     string // relative path, "" for a same-page anchor
+	Fragment string // the part after '#', "" when there is none
+}
+
+// mdLinkRefs is mdRelativeLinkTargets' fragment-aware sibling. The older
+// function deliberately dropped the anchor, which is exactly the blind spot
+// DF174 records: a link to a heading that no longer exists passes forever,
+// and in a document whose stated navigation model is "scan the symptom index,
+// then read the entry" a dead index row degrades to "no entry exists" — which
+// is indistinguishable from the behaviour not being catalogued at all.
+func mdLinkRefs(body string) []mdLinkRef {
+	var out []mdLinkRef
+	inFence := false
+	for _, line := range strings.Split(body, "\n") {
+		if strings.HasPrefix(strings.TrimSpace(line), "```") || strings.HasPrefix(strings.TrimSpace(line), "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence {
+			continue
+		}
+		clean := mdCodeSpanRe.ReplaceAllString(line, "")
+		for _, m := range mdLinkRe.FindAllStringSubmatch(clean, -1) {
+			if ref, ok := mdLinkRefOf(m[1]); ok {
+				out = append(out, ref)
+			}
+		}
+	}
+	return out
+}
+
+// mdLinkRefOf splits one raw target, or reports ok=false for something this
+// gate does not check (external URL, mailto:, whitespace-bearing prose).
+func mdLinkRefOf(raw string) (mdLinkRef, bool) {
+	target := strings.TrimSpace(raw)
+	if target == "" {
+		return mdLinkRef{}, false
+	}
+	if strings.HasPrefix(target, "http://") || strings.HasPrefix(target, "https://") ||
+		strings.HasPrefix(target, "mailto:") {
+		return mdLinkRef{}, false
+	}
+	path, fragment, _ := strings.Cut(target, "#")
+	if strings.ContainsAny(path, " \t") || strings.ContainsAny(fragment, " \t") {
+		return mdLinkRef{}, false
+	}
+	if path == "" && fragment == "" {
+		return mdLinkRef{}, false
+	}
+	return mdLinkRef{Path: path, Fragment: fragment}, true
+}
+
+// mdHeadingSlug reproduces GitHub's heading-anchor algorithm: strip inline
+// markdown, lowercase, drop every character that is not a letter, digit,
+// space, hyphen or underscore, then turn spaces into hyphens.
+//
+// DF174 required the fix to ship this function rather than a count, and that
+// is the whole point of the entry: three hand-passes over the same file
+// produced 10, 13 and 17 broken anchors depending on whether underscores, '/'
+// and doubled hyphens were handled the way GitHub handles them. A number
+// nobody can re-derive is not a measurement. This is the derivation.
+func mdHeadingSlug(text string) string {
+	s := text
+	// Link syntax renders as its text, so the URL must not reach the slug:
+	// "### [foo](bar.md) baz" anchors at "#foo-baz", not "#foobarmd-baz".
+	s = mdLinkRe.ReplaceAllString(s, "$0")
+	for _, m := range mdLinkRe.FindAllStringSubmatch(text, -1) {
+		s = strings.Replace(s, m[0], mdLinkTextOf(m[0]), 1)
+	}
+	var b strings.Builder
+	for _, r := range strings.ToLower(s) {
+		switch {
+		case r == ' ':
+			b.WriteRune('-')
+		case r == '-' || r == '_':
+			b.WriteRune(r)
+		case unicode.IsLetter(r) || unicode.IsDigit(r):
+			b.WriteRune(r)
+		}
+	}
+	return b.String()
+}
+
+// mdLinkTextOf returns the display text of a full "[text](target)" match.
+func mdLinkTextOf(full string) string {
+	if i := strings.Index(full, "]("); i > 0 && strings.HasPrefix(full, "[") {
+		return full[1:i]
+	}
+	return full
+}
+
+// mdHeadingAnchors returns every anchor a document defines: one per ATX
+// heading, with GitHub's duplicate suffixes (-1, -2, …), plus any explicit
+// <a name="..."> / id="..." target.
+func mdHeadingAnchors(body string) map[string]bool {
+	anchors := map[string]bool{}
+	seen := map[string]int{}
+	inFence := false
+	for _, line := range strings.Split(body, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if strings.HasPrefix(trimmed, "```") || strings.HasPrefix(trimmed, "~~~") {
+			inFence = !inFence
+			continue
+		}
+		if inFence || !strings.HasPrefix(trimmed, "#") {
+			for _, m := range mdExplicitAnchorRe.FindAllStringSubmatch(line, -1) {
+				anchors[m[2]] = true
+			}
+			continue
+		}
+		// CommonMark requires 1-6 '#' followed by a space, so "#nospace" and
+		// "####### seven" are ordinary paragraphs and define no anchor.
+		hashes := len(trimmed) - len(strings.TrimLeft(trimmed, "#"))
+		heading := trimmed[hashes:]
+		if hashes > 6 || !strings.HasPrefix(heading, " ") {
+			continue
+		}
+		slug := mdHeadingSlug(strings.TrimSpace(heading))
+		if slug == "" {
+			continue
+		}
+		if n := seen[slug]; n > 0 {
+			anchors[fmt.Sprintf("%s-%d", slug, n)] = true
+		} else {
+			anchors[slug] = true
+		}
+		seen[slug]++
+	}
+	return anchors
+}
+
+var mdExplicitAnchorRe = regexp.MustCompile(`<a\s+[^>]*(name|id)="([^"]+)"`)
+
+// TestRepoHygiene_MarkdownAnchors_Resolve closes the hole DF174 records: the
+// file half of a link was checked and the "#fragment" half never was, so an
+// anchor pointing at no heading passed forever.
+//
+// This is D121's rule ("a convention nothing checks rots") applied to the
+// checker itself — the gate existed and was passing, which is precisely why
+// nobody noticed. It matters most in backend-idiosyncrasies.md, whose stated
+// navigation model is "scan the symptom index, then read the entry": a dead
+// index row degrades silently to "no entry exists", and the failure mode is a
+// contributor re-debugging something already solved.
+func TestRepoHygiene_MarkdownAnchors_Resolve(t *testing.T) {
+	root := repoRoot(t)
+	var docs []string
+	for _, p := range trackedFiles(t, root) {
+		if isLiveMarkdownDoc(p) {
+			docs = append(docs, p)
+		}
+	}
+	sort.Strings(docs)
+	if len(docs) == 0 {
+		t.Fatal("no live tracked *.md files — the anchor gate's corpus went quiet (DF94)")
+	}
+
+	anchorsOf := map[string]map[string]bool{}
+	bodyOf := map[string]string{}
+	load := func(rel string) (map[string]bool, bool) {
+		if a, ok := anchorsOf[rel]; ok {
+			return a, true
+		}
+		body, err := os.ReadFile(filepath.Join(root, rel)) //nolint:gosec // G304: path from git ls-files under repoRoot
+		if err != nil {
+			return nil, false
+		}
+		bodyOf[rel] = string(body)
+		anchorsOf[rel] = mdHeadingAnchors(string(body))
+		return anchorsOf[rel], true
+	}
+
+	checked := 0
+	for _, rel := range docs {
+		if _, ok := load(rel); !ok {
+			t.Fatalf("read %s", rel)
+		}
+		for _, ref := range mdLinkRefs(bodyOf[rel]) {
+			checked += checkAnchorRef(t, rel, ref, load)
+		}
+	}
+	t.Logf("markdown anchor gate scope: %d live docs, %d fragments checked", len(docs), checked)
+}
+
+// checkAnchorRef verifies one link's fragment against the anchors its target
+// defines, returning how many fragments it actually checked (0 when the ref
+// carries none, or names something with no headings to resolve against).
+func checkAnchorRef(t *testing.T, rel string, ref mdLinkRef, load func(string) (map[string]bool, bool)) int {
+	t.Helper()
+	if ref.Fragment == "" {
+		return 0
+	}
+	targetDoc := rel
+	if ref.Path != "" {
+		targetDoc = filepath.ToSlash(filepath.Join(filepath.Dir(rel), ref.Path))
+		if !strings.HasSuffix(targetDoc, ".md") {
+			return 0 // only markdown files have heading anchors
+		}
+	}
+	anchors, ok := load(targetDoc)
+	if !ok {
+		return 0 // the file half is the other gate's job to report
+	}
+	if !anchors[ref.Fragment] {
+		t.Errorf("%s links to %q, but %s defines no anchor %q. Repoint it at a heading "+
+			"that exists (anchors are GitHub-slugged: lowercase, punctuation dropped, "+
+			"spaces to hyphens), or drop the fragment.", rel, "#"+ref.Fragment, targetDoc, ref.Fragment)
+	}
+	return 1
+}
+
+// TestMarkdownHeadingSlug pins the algorithm against the cases that produced
+// three different hand-counts in DF174 — punctuation dropped rather than
+// hyphenated, hyphens and underscores kept, spaces hyphenated. Getting any of
+// these wrong changes the answer, which is why the finding demanded the
+// function rather than a number.
+func TestMarkdownHeadingSlug(t *testing.T) {
+	tests := []struct{ heading, want string }{
+		{"Simple Heading", "simple-heading"},
+		// '/' and '.' are dropped, not hyphenated — this is the exact shape of
+		// the anchor DF174 quotes as broken.
+		{"CNI results cache lives at /var/lib/cni/results", "cni-results-cache-lives-at-varlibcniresults"},
+		// A literal hyphen survives AND the space before it becomes one, so
+		// "use -v" yields a doubled hyphen. The other shape DF174 quotes.
+		{"Apple: mount type=virtiofs rejects a file source, use -v for file mounts",
+			"apple-mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts"},
+		{"Underscores_are_kept", "underscores_are_kept"},
+		{"`code` and **bold** and *em*", "code-and-bold-and-em"},
+		{"Trailing punctuation!?", "trailing-punctuation"},
+		{"em — dash", "em--dash"},
+		{"[linked](other.md) heading", "linked-heading"},
+		{"digits 123 ok", "digits-123-ok"},
+	}
+	for _, tc := range tests {
+		if got := mdHeadingSlug(tc.heading); got != tc.want {
+			t.Errorf("mdHeadingSlug(%q) = %q, want %q", tc.heading, got, tc.want)
+		}
+	}
+}
+
+func TestMarkdownHeadingAnchors_DuplicatesAndFences(t *testing.T) {
+	body := "# Top\n" +
+		"## Repeat\n" +
+		"## Repeat\n" +
+		"## Repeat\n" +
+		"```\n## Fenced Heading\n```\n" +
+		"#nospace is not a heading\n" +
+		"<a name=\"explicit-target\"></a>\n"
+	got := mdHeadingAnchors(body)
+	for _, want := range []string{"top", "repeat", "repeat-1", "repeat-2", "explicit-target"} {
+		if !got[want] {
+			t.Errorf("missing anchor %q (got %v)", want, got)
+		}
+	}
+	for _, notWant := range []string{"fenced-heading", "nospace-is-not-a-heading"} {
+		if got[notWant] {
+			t.Errorf("anchor %q must not be defined", notWant)
+		}
+	}
+}
+
+func TestMarkdownLinkRefs_SplitsFragments(t *testing.T) {
+	body := "[file only](a/b.md), [with anchor](a/b.md#some-section), [same page](#local), " +
+		"[external](https://x.example/y.md#frag), `[code](x.md#no)`\n"
+	got := mdLinkRefs(body)
+	want := []mdLinkRef{
+		{Path: "a/b.md"},
+		{Path: "a/b.md", Fragment: "some-section"},
+		{Fragment: "local"},
+	}
+	if !slices.Equal(got, want) {
+		t.Errorf("mdLinkRefs = %+v, want %+v", got, want)
 	}
 }

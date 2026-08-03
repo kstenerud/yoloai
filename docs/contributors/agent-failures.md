@@ -619,7 +619,7 @@ itself worth knowing when reading pattern 4.
   durable is the record: DF156's remedy (c) now states explicitly that the directory is
   agent-writable and that this is **not** an argument for the mount, so the next contributor who
   notices the permissions does not repeat the inference. Recording a *rejected* rationale is the
-  point; code shows the surviving branch and never the pruned one ([A14](#a14--reimplemented-an-approach-the-repo-had-already-rejected-2026-07-29)).
+  point; code shows the surviving branch and never the pruned one ([A14](#a14--reimplemented-an-approach-the-backend-idiosyncrasies-entry-had-explicitly-rejected-2026-07-29)).
 
 ### A17 — reported a capability as missing that I had built myself, earlier the same day (2026-07-30)
 
@@ -853,7 +853,7 @@ whose class already has three siblings.
   "do it properly" rather than a specific correction. But the workaround was fully designed, written
   into a finding as advice to the next person, and would have shipped a permanent fixture-placement
   rule enshrining a security bug as an environment property.
-- **Class:** new, and it is the inverse of [A14](#a14--reimplemented-an-approach-the-repo-had-already-rejected-2026-07-29). There I re-derived a decision the repo had already made because I read the code and not the record. Here I read the record — the skip strings — and treated it as settled *because* it was well-argued. **A written rationale is evidence about what someone concluded, never about what they checked.** The tell is specific: a skip, a `nolint`, a `t.Skip`, a "known limitation" comment is a place where someone stopped, and the reason they stopped is the part least likely to have been re-examined since.
+- **Class:** new, and it is the inverse of [A14](#a14--reimplemented-an-approach-the-backend-idiosyncrasies-entry-had-explicitly-rejected-2026-07-29). There I re-derived a decision the repo had already made because I read the code and not the record. Here I read the record — the skip strings — and treated it as settled *because* it was well-argued. **A written rationale is evidence about what someone concluded, never about what they checked.** The tell is specific: a skip, a `nolint`, a `t.Skip`, a "known limitation" comment is a place where someone stopped, and the reason they stopped is the part least likely to have been re-examined since.
 - **Gated now?** No, and the useful habit is narrow enough to state: **when a test is disabled, check what it would assert if enabled, before accepting why it is disabled.** Two questions, in this order — *is the obstacle essential or incidental?* and, if you get past it and the test fails, *is this a test problem or a product problem?* The second is the one that pays: a newly-enabled test that fails is reporting on the product by default, and treating its failure as a fixture problem needs positive evidence, not convenience. Both skips here were years-cheap to keep and one of them was hiding a HIGH-severity defect the whole time.
 
 **One thing is ready ahead of that, though** (pattern 4b): the repo-relative-citation rule for
@@ -961,7 +961,7 @@ as scarce as the failures and twice as useful.
   is `@`-prefixed so the command is not echoed either — so zero hits is exactly what *success*
   looks like. I then found the `if command -v` line, which fitted the story, and stopped reading
   four lines above the `elif docker info` branch that refutes it.
-- **What makes this specific rather than "read more carefully":** it is [A22](#a22--wrote-the-guard-for-a-security-invariant-and-it-passed-on-a-shell-parse-error)
+- **What makes this specific rather than "read more carefully":** it is [A22](#a22--wrote-the-guard-for-a-security-invariant-and-it-passed-on-a-shell-parse-error-2026-08-01)
   inverted, and I had re-derived A22's own rule from scratch that same session. A22: a *failure* you
   did not prove was attempted is not evidence. A25: an *absence of output* you did not prove was
   reachable is not evidence either. Both are the same missing question — **what would this look

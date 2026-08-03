@@ -6,7 +6,7 @@
 
 - **Status:** IN-PROGRESS — implemented on the `multi-workdir` branch for `diff`/`apply`
   (all 4 phases, merged to `main`); the specifier resolver is not yet wired into `reset`/export
-  (see Open questions). Records [D81](../../decisions/working-notes.md#d81). Revives the
+  (see Open questions). Records [D81](../../decisions/working-notes.md#d81--multi-workdir-diffapply-restored-bulk-ops-span-all-tracked-dirs-precise-ops-require-naming-one-revives-q-u). Revives the
   multi-dir diff/apply capability that [Q-U](../../decisions/working-notes.md) (2026-05-25)
   removed, with the cleaner CLI surface Q-U explicitly deferred to "real demand".
 - **Depends on:** —
