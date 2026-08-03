@@ -984,3 +984,66 @@ as scarce as the failures and twice as useful.
   shape — "agent infers a tool did not run from an empty log" — and a linter cannot. The
   transferable defence is a habit, not a check: **before reporting that something did not happen,
   run the thing and look at its exit code.**
+
+### A26 — recorded a fix lead that a measurement in the same workstream had already refuted (2026-08-03)
+
+- **What happened:** DF175 shipped with a stated lead — *"have `files put` write a new path and move
+  it into place, rather than overwriting the existing one"* — and that lead went into
+  `next-release.md` as the blocking item for v0.11.0. It was wrong. The spike's own coherence matrix,
+  written by me two days earlier and committed in the same directory, records
+  `overwrite_rename` on tart as `read NEVER, stat NEVER`. Temp+rename is not merely ineffective:
+  re-measured directly, the guest keeps the old bytes **and** the old size, where an in-place
+  overwrite at least updates `st_size`. Shipping it would have removed the last signal a guest has
+  that anything changed.
+- **Source of the false belief:** a narrative built from one comparison that was not a comparison.
+  `reset` did not reproduce the corruption, so I asked what `reset` does differently, answered
+  "it re-copies rather than truncating in place, so the parent dentry is replaced", and wrote that
+  down as the lead. The reasoning is plausible and the sentence reads like a finding. But `reset`
+  changed a file in the **workdir**, which `workcopy.Materialize(..., WipeAndCopy, ...)` replaces
+  wholesale — a different share, a different mechanism, and nothing `files/` can imitate, since
+  `clearCacheAndFiles` empties it in place by design (DF149).
+- **What makes this specific rather than "check your work":** the refuting evidence was not missing,
+  hard to obtain, or in someone else's repo. It was a table I had produced, in a file I had written,
+  cited two paragraphs above the lead in the same finding. The failure is not ignorance of the
+  measurement; it is that **prose and measurement were never put in the same room**. A lead composed
+  by reasoning about a mechanism reads exactly like one derived from data, and DF175 contained both
+  with nothing marking which was which.
+- **Caught by:** going to implement it. The first thing the work needed was the guest path for the
+  rename, which meant opening the coherence results, which showed the row.
+- **Cost:** none shipped — but the lead was the stated plan for a release blocker, and the owner had
+  approved fixing DF175 on the strength of it. One directed experiment would have been spent
+  confirming a refuted hypothesis.
+- **Gated now?** No, and this one resists a gate: nothing can diff a paragraph against a table. The
+  transferable habit is narrow enough to state — **when a finding proposes a fix, name the
+  measurement that supports it, or mark it as untested.** DF175 now separates the two explicitly,
+  and the retraction is left in place rather than edited away.
+
+### A27 — wrote a fix, watched every test pass, and shipped something that did nothing (2026-08-03)
+
+- **What happened:** the DF175 repair (verify a host write reached the tart guest, repair it with
+  `msync`) was implemented, unit-tested from both sides, mutation-checked 7/7, and `make check` was
+  green. Run against the real sandbox, the guest still read the fabricated bytes. `refreshGuestView`
+  began `rt := e.Runtime()`, and the `files` command builds a **backend-less** Engine — the handle's
+  own docstring says file exchange "needs no container backend" — so `rt` was `nil` on the only path
+  that mattered and the function returned immediately, every time.
+- **Source of the false belief:** the tests supplied a runtime, because I wrote them to. Each one
+  constructed an Engine *with* a mock backend and asserted the refresh behaved correctly given one.
+  Every assertion was true. None of them asked the question the product asks, which is whether a
+  backend is there at all.
+- **What makes this specific:** this is precisely the hazard AGENTS.md rule 10 spells out —
+  *"red-on-revert proves a test is wired to the code, never that the code is wired to the
+  program"* — and I hit it while following the rest of that rule carefully. The mutation checks were
+  real and they all passed, because mutating a function nothing reaches still turns its tests red.
+  The gap was never in the function; it was in the fixture, which quietly granted a capability the
+  caller does not have.
+- **Caught by:** running the shipped binary against real hardware with an unpatched control. Nothing
+  else would have. The corrected tests now build the Engine the way the CLI does — backend-less,
+  resolving the backend from the sandbox's `environment.json` — and re-introducing `e.Runtime()`
+  turns three of them red.
+- **Cost:** one build-and-verify cycle. It would have been a shipped no-op fix for a HIGH-severity
+  data-integrity defect, with a green gate and a confident commit message behind it.
+- **Gated now?** For this instance, yes — the tests construct the Engine the real caller constructs,
+  and a registered test backend goes through `runtime.Descriptor`/`runtime.New` rather than
+  bypassing the capability gate. The general shape is not gateable. The habit is: **build the
+  fixture the way the caller builds it, and if a test hands the code a dependency, check the caller
+  actually has one.**

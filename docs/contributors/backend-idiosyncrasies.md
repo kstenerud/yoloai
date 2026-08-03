@@ -2241,23 +2241,53 @@ visible in ~5 ms, and only *metadata* (size after a rename, dentry removal after
 size growth after an append) on the same ~1 s tick. So this is tart's VirtioFS, not virtiofs
 generally.
 
+**The mechanism (measured 2026-08-03).** The guest caches file *pages* and never invalidates
+them on a host write; only attributes refresh, on the ~1 s tick. So a file that **grows**
+looks healthy — bytes past the cached extent are fetched from the host — while a file that
+**shrinks, or is rewritten inside a cached page**, serves stale bytes clamped to the new
+size. That is why the `append` row above reads as working and is not: the harness appended
+to an *empty* file. Appending to a file with content returns stale head plus fresh tail.
+Independently reported and traced to a guest vnode that is never reclaimed, the guest's
+vnode table being saturated and idling at a near-zero recycle rate
+([augur#135](https://github.com/h1d3mun3/augur/issues/135), which also observed a single
+read returning a *mix* of old and new bytes). It affects **every** share, including the
+workspace — not only the exchange directory (DF176).
+
 **What to do.**
 
 - **Signal the guest by creating a new name, and poll with `readdir`.** That is the only
   combination that is both fast (~14 ms) and correct on tart. `stat`-polling the same file
   costs ~1 s; `read`-polling a rewritten file never terminates.
-- **Never hand the guest new data by rewriting a file it has already read** — not in place,
-  and not by temp+rename either. The guest may serve fabricated bytes indefinitely. Write a
-  new path instead.
+- **No host-side write pattern fixes this.** Not in place, not temp+rename, not a symlink
+  repointed to a fresh blob, not `rm` and recreate. Measured, with controls, in
+  [`results/df175-write-patterns.txt`](design/research/macos-isolation-spike/results/df175-write-patterns.txt).
+  **Temp+rename is strictly worse than in place**: the guest keeps the old bytes *and* the
+  old size, so the one signal an in-place overwrite leaves behind is gone. A symlink repoint
+  leaves an unresolvable link and `EINVAL`. Recreating a *directory* at a seen name hides
+  everything inside it.
+- **To deliver new bytes at a path the guest has read, make the guest drop its cache.**
+  `msync(addr, len, MS_INVALIDATE)` on a `PROT_READ` mapping, from inside the guest — no
+  privilege, no write permission, works on `:ro` shares. That is what
+  `runtime.GuestFileRefresher` does (`runtime/tart/guestrefresh.go`), and
+  `BackendCaps.HostWritesNeedGuestRefresh` is the property that says a backend needs it.
+  Two things about it are not optional: **the host's hash is the only safe stop condition**
+  (in the grow case the guest's size was already correct while its bytes were not, and the
+  first pass produced a settled-looking wrong hash), and **the retry must cross a process
+  boundary** — four invalidate passes inside one guest process did not converge what one
+  pass in a fresh process did.
+- A restart also clears it, which is what `files put` tells the user when the repair fails.
 - Deletion is a usable signal **only** via `readdir`.
 
-**Existing exposure.** The one host-side rewrite of a shared config, `patchKeepaliveOnly`
+**Existing exposure.** `yoloai files put` replacing an existing entry is fixed: it verifies
+and repairs (DF175). The one other host-side rewrite of a shared config, `patchKeepaliveOnly`
 (`internal/orchestrator/launch/launch.go:943-965`), is gated on `AgentFreeLaunch`, which
 only `runtime/docker/docker.go:63` sets — so it never runs on tart. The live path,
 `patchRuntimeConfig` (`internal/orchestrator/lifecycle/runtimeconfig_patch.go:32`, reached
 from `yoloai network allow`), *does* rewrite `runtime-config.json` on a running sandbox, but
 the guest reads that file at boot rather than polling it, so today's exposure is bounded by
-consumption timing rather than by design. See [DF175](design/findings-unresolved.md).
+consumption timing rather than by design. Whether any flow rewrites the **workdir** while a
+sandbox runs is open — that is DF176, and it is the one worth checking.
+See [DF175](design/findings-unresolved.md).
 
 
 ## Seatbelt (macOS sandboxing)
