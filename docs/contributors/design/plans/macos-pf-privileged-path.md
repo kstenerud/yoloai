@@ -1,3 +1,7 @@
+> **ABOUTME:** Build plan for enforcing `--network-isolated` from host `pf` on macOS, where the
+> allowlist today is either weak (apple grants the guest NET_ADMIN) or absent (tart, seatbelt).
+> Covers how yoloAI acquires the privilege `pf` needs without installing a root daemon.
+
 # macOS: enforce the network allowlist from host `pf`, via opt-in `sudo`
 
 - **Status:** PLANNED — mechanism measured on hardware 2026-08-02/03, approach chosen by the owner
