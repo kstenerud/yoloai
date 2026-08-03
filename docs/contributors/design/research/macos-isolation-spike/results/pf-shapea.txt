@@ -1,0 +1,74 @@
+host: 26.5.1 | A=enf-a(192.168.64.30) B=enf-b(192.168.64.31)
+parent=com.apple/yoloai_s sub=com.apple/yoloai_s/s1 | main ruleset=4 rules, com.apple nat=0
+
+== S0 BASELINE ==
+        A allow=301 deny=301 | B deny=301
+   PASS    baseline egress works — 'blocked' readings below are meaningful
+
+== S4 ENFORCE **AND** INERT, ONE PARENT, ONE SUB-ANCHOR, PARENT READ BACK ==
+        parent -s rules:
+          anchor "*" all
+        parent -s nat:
+        A is on bridge101
+        sub-anchor: 2 filter rule(s), 1 translation rule(s) loaded
+        A allow=301 deny=000 | B deny=301
+   PASS    filter rules ENFORCE (so the sub-anchor IS on the packet path) and the rdr did NOT
+           redirect the allowlisted destination — enforce and inert, together, one parent
+
+== S5 MISSING PARENT — does a sub-anchor load succeed and silently not enforce? ==
+        parent empty | sub rules loaded=1 | A->deny=301
+   PASS    CONFIRMED silent fail-open: the load succeeds, the rules do not evaluate, and nothing
+           distinguishes it from working enforcement. A start-time check is MANDATORY.
+
+== S1 CONTAINMENT BYPASS — can a sub-anchor write its parent via load anchor '..'? ==
+        parent translation rules before=0 after=0
+        parent -s nat now:
+   PASS    'load anchor ".."' did not write the parent — the sub-path rule holds against this vector
+   PASS    system com.apple anchor and main ruleset unchanged
+
+== S2 set skip — BEHAVIOURAL, on the sandbox path where blocking is PROVEN to work ==
+        with block rule: A->deny=000   (POSITIVE CONTROL — must be 000 or the test is blind)
+   PASS    control holds: the block demonstrably works, so a bypass would be visible
+        with 'set skip on bridge101' added: rules=1 A->deny=000
+   PASS    'set skip' did NOT bypass a demonstrably-working block — genuinely not honored
+
+== S3 SHAPE A'S ACTUAL GRANT — write it, install it, matrix it ==
+        candidate policy:
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s/[A-Za-z0-9][A-Za-z0-9._-]* -f -$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s/[A-Za-z0-9][A-Za-z0-9._-]* -(F rules|s rules|s nat)$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s -s (Anchors|rules)$
+   PASS    policy validated and installed
+   PASS    install rules (stdin) -> permit
+   PASS    teardown flush rules -> permit
+   PASS    verify own rules -> permit
+   PASS    verify own nat -> permit
+   PASS    legal name underscore -> permit
+   PASS    legal name uppercase -> permit
+   PASS    legal name dotted -> permit
+   PASS    reaping enumerate parent (read-only) -> permit
+   PASS    verify parent rules (read-only) -> permit
+   PASS    ESCAPE write the parent -> refuse
+   PASS    ESCAPE flush the parent -> refuse
+   PASS    ESCAPE parent via dotdot leaf -> refuse
+   PASS    ESCAPE traversal in leaf -> refuse
+   PASS    ESCAPE leading-dot leaf -> refuse
+   PASS    ESCAPE rules from a file -> refuse
+   PASS    ESCAPE another anchor -> refuse
+   PASS    ESCAPE main ruleset load -> refuse
+   PASS    ESCAPE disable pf -> refuse
+   PASS    ESCAPE flush all -> refuse
+   PASS    ESCAPE flush all in sub -> refuse
+   PASS    ESCAPE table op -> refuse
+   PASS    CONTROL: unlisted command refused — refusals reflect policy, not cache
+   PASS    unattended install with a ruleset on stdin and no tty WORKS (rule landed)
+
+== TOTALS ==
+   pass=31 fail=0 unknown=0
+
+== cleanup ==
+   parent rules=0 nat=0
+   sudoers probe present: no
+   system com.apple nat rules: 0
+   main ruleset rules: 4
+   A egress restored: 301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-shapea.txt
