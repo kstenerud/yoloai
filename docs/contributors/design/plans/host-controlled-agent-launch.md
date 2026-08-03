@@ -4,8 +4,8 @@
 
 # Plan: yoloAI decides when the agent starts
 
-- **Status:** PLANNED — researched 2026-08-02 against the code; one item verified by experiment on
-  real hardware. No production code written.
+- **Status:** PLANNED — researched 2026-08-02 against the code; the gVisor item and the whole macOS
+  half verified by experiment on real hardware (§ The macOS half). No production code written.
 - **Depends on:** —
 - **Rides:** **any.** Additive per backend; nothing here withdraws a promise.
 
@@ -83,14 +83,39 @@ start.
 | docker, gVisor | **exclusion unnecessary — verified** | available | [DF171](../findings-unresolved.md) |
 | podman | **verified working** | available | opt-in is one field |
 | containerd / Kata | needs design (systemd guest) | **available — shared sandbox dir** | B is the cheap path |
-| apple | needs design | **likely** | macOS research |
-| tart | needs design | **likely** | macOS research |
-| seatbelt | n/a | n/a | **already has the property** |
+| apple | **available — verified** | **verified, ~10 ms via `readdir`** | measured 2026-08-02 |
+| tart | **already does A — verified** | **verified, ~10 ms via `readdir`** | measured 2026-08-02 |
+| seatbelt | **holder already exists** (bare path) | n/a — no guest | **already has the property — confirmed** |
 
-**Seatbelt already satisfies it and is not a gap.** Its keep-alive model is `KeepAliveHostKeepAlive`
-— no container or VM; the sandbox is a host process group the host spawns. `runtime.go` says there is
-"no 'inside' to Launch into". The host owns the launch moment by construction. It needs an interface
-declaration, not an implementation.
+**Seatbelt already satisfies it and is not a gap — confirmed on hardware 2026-08-02.** Its keep-alive
+model is `KeepAliveHostKeepAlive` — no container or VM; the sandbox is a host process group the host
+spawns. `runtime.go` says there is "no 'inside' to Launch into". The host owns the launch moment by
+construction. It needs an interface declaration, not an implementation.
+
+One correction to how that is usually stated: the host does not spawn the *agent*, it spawns
+`sandbox-setup.py` under `sandbox-exec` (`runtime/seatbelt/seatbelt.go:357-373` — argv built at
+`:357`, `cmd.Start()` at `:373`), and that script starts
+tmux and the agent. Observed on the host: `sandbox-setup.py` → `agent-run.sh` → `claude`, all as host
+processes, with the same detector finding nothing before creation. So on the **production path**
+there is exactly one host-controlled moment — the window before that single spawn, which is
+unbounded and entirely the host's. That alone satisfies the firewall ordering requirement.
+
+**A holder already exists, though, and an earlier draft of this section wrongly said it did not.**
+`runtime/seatbelt/seatbelt.go:342-346` picks a bare keep-alive — `sandbox-exec -f <profile> tail -f
+/dev/null` — whenever the sandbox layer provisioned no `runtime-config.json`, described in its own
+comment as "a running, exec-able instance … with no monitor. Mirrors tart's P1/P2 split", with
+`Exec` running fresh `sandbox-exec`'d commands against it. That is precisely a neutral holder with a
+second injection point. It is currently selected only on the bare path (direct `runtime.Backend` use
+and the conformance suite), which is a fact about the branch condition, not about expressibility.
+
+**And it is exercised, not merely present** — verified 2026-08-03 rather than read from code, which
+matters because the claim it replaces ("seatbelt has no holder") was also read from code and was
+wrong. `go test -tags=integration -run Conformance ./runtime/seatbelt/` brings up instances on that
+bare path and passes `CreateStartStopRemove`, `InspectRunning`, `ExecSimple`, `ExecNonZeroExit` and
+both `InteractiveExec` cases against them. An instance that starts, stays running with no agent, and
+accepts `Exec` is mechanism A's premise in full. So adopting it means changing which branch the
+production path takes, not building a holder — and the assertion that would guard it has somewhere
+to live already.
 
 **gVisor is one field plus a shared decision.** `SupportsAgentFreeLaunch` excludes it because
 `docker exec --user <name>` resolves the username against the image's stale `/etc/passwd`. Real —
@@ -116,26 +141,86 @@ rather than borrowed from docker's `sleep infinity`, and a readiness signal that
 VM whose init is not ours. B needs only a barrier in the guest setup script — the same barrier the
 deferred legacy path already needs.
 
-## The macOS half — a research brief, not a scope estimate
+## The macOS half — measured on hardware 2026-08-02
 
-tart, apple and seatbelt cannot be evaluated from a Linux host, so this states **questions with the
-evidence that would answer them**. Nothing here should be costed until they are answered on hardware.
+macOS 26.5.1 / arm64, tart 2.32.1, `container` 1.0.0. All four questions answered; **both mechanisms
+are available on both VM backends**, and seatbelt's property is confirmed rather than assumed.
 
-1. **Does the guest-side barrier (B) work on tart and apple?** Both share the sandbox directory with
-   the host, so in principle the guest setup script can block on a host-written marker. Confirm the
-   marker is visible *promptly* from inside the guest — VirtioFS and the `container` framework's
-   sharing have their own coherence behaviour, and a barrier the guest observes late is a stall while
-   one it never observes is a hang. Measure it rather than assuming it matches a bind mount.
-2. **Can either backend host-launch (A)?** Both implement `Exec`, which is the raw material. The
-   question is whether a neutral holder is expressible — for tart, whether the VM can boot to a state
-   with no agent and be exec'd into afterwards; for apple, the same against the `container`
-   framework's lifecycle.
-3. **Seatbelt: confirm the property rather than assume it.** The claim above is read from the
-   keep-alive model and a code comment. Verify on hardware that the host genuinely spawns the agent
-   and that nothing in the sandbox scripts starts it earlier.
-4. **For each, what does the conformance assertion need in order to hold the barrier closed?** That
-   is the deliverable that makes mechanism divergence safe, and it is backend-specific plumbing even
-   though the assertion is not.
+**1. Mechanism B works on both — and the barrier's *predicate* matters more than its shape.**
+Guest-side medians, n=3, 1 ms poll, including a 200 ms settle pause (subtract 200 for
+time-after-the-host-acted). Raw output and harness:
+[macos-isolation-spike](../research/macos-isolation-spike/README.md).
+
+| host action | apple `read`/`stat`/`readdir` | tart `read`/`stat`/`readdir` |
+| --- | --- | --- |
+| **create a new file** | – / 208 / **209** | – / 993 / **214** ← use `readdir` |
+| mkdir, symlink | – / ~204 / ~206 | – / ~994 / **~210** |
+| overwrite in place | 206 / 205 / – | **NEVER** / 989 / – |
+| overwrite via temp+rename | 205 / 1004 / – | **NEVER** / **NEVER** / – |
+| delete | – / 1204 / 205 | – / **NEVER** / **212** |
+| append | 1004 / 1004 / – | 992 / 992 / – |
+
+**Poll the barrier with `readdir`, and signal by creating a new name.** That combination sees
+the host's action ~10–15 ms after it happens on *both* backends. The same event observed by
+`stat` costs ~800 ms on tart, and observed by `read` on a rewritten file never arrives at all.
+The choice of predicate is worth ~70× on tart and is free.
+
+**Three corrections to an earlier draft of this section, all in the same direction.**
+
+1. It reported tart's overwrite, rename and delete as "NEVER — the change does not propagate".
+   Wrong: those changes arrive in about a second. `NEVER` was a property of the *predicate* the
+   harness bound to each shape — content-polling for overwrites, `stat`-polling for deletes —
+   not of the filesystem. Measuring `action × predicate` and reporting it as a fact about the
+   action is what produced "rename does not rescue the barrier" and "a wait-until-gone barrier
+   hangs forever"; both are false, and a `readdir`-based disappearance barrier converges in
+   ~12 ms.
+2. It quoted ~797 ms as tart's create latency. That figure is `1000 − the harness's own 200 ms
+   settle pause`. The underlying quantity is a **~1 s revalidation tick anchored to the guest's
+   first lookup**: the guest's own clock reads ~1000 ms wherever in the interval the host acts.
+   The honest worst case for a `stat`-polled barrier is **1 s**, quantised — and the apple-vs-tart
+   difference the draft reported (803 vs 797) was noise on the same constant.
+3. It called apple "not uniformly coherent … the same cache biting occasionally". There are two
+   clocks, and the slow one is not occasional: apple serves *data* in ~5 ms and *metadata* (size
+   after a rename, dentry removal after a delete, size growth after an append) on the same ~1 s
+   tick, every round.
+
+**The one thing that got worse, not better.** `read()` never observing a host overwrite is not a
+barrier-latency problem — the guest reads the **old bytes at the new length**, with a correct
+`st_size` and no error. That is a data-integrity hazard well outside this plan's scope; filed as
+[DF175](../findings-unresolved.md) and catalogued in
+[backend-idiosyncrasies.md](../../backend-idiosyncrasies.md).
+
+**2. Mechanism A is expressible on both, and tart already uses it.**
+
+- **tart already has A.** The host boots the VM and then reaches in: `tart exec <vm> bash -c "…
+  sandbox-setup.py …"` (`runtime/tart/mounts.go:87-108`). Confirmed on hardware: after killing the
+  agent chain inside the guest, the VM stayed up — held by the host's own `tart run` process, not by
+  anything in the guest — stayed agent-free, and `tart exec` then started a process on demand.
+  Nothing in the guest auto-starts the agent: no yoloai LaunchAgents or LaunchDaemons, and
+  `launchctl` lists none (checked against a control showing 499 services present, so the negative is
+  not a broken command). The VM *is* the neutral holder, already.
+- **apple can hold neutrally.** `container run --entrypoint …` boots a genuine holder: the detector
+  found no agent chain in it, while the **same detector** against a normally-booted sandbox found
+  `sandbox-setup.py`, tmux, `agent-run.sh` and `claude`. `container exec` then started a process in
+  the holder post-boot. Apple is the one backend here whose guest genuinely self-starts today (the
+  image `ENTRYPOINT` runs the shared `entrypoint.py`), so A is a real change for it — but an
+  available one.
+
+**3. Seatbelt confirmed** — see the section above; the correction is that the host owns one launch
+moment, not a holder it can exec into later.
+
+**4. What the conformance assertion needs per backend.** The barrier itself is cheap everywhere; the
+backend-specific plumbing is only *where the marker lives* and *how the assertion observes the agent*:
+
+- apple / tart: the marker is a **created file** in the shared sandbox dir (never a rewritten one on
+  tart). The agent-presence probe is a process check via `container exec` / `tart exec`.
+- seatbelt: there is no barrier to hold — the assertion must instead verify that no agent process
+  exists between environment setup and the host's spawn, which is a host-side `ps` check.
+- Every case needs the positive control beside it ([A22](../../agent-failures.md)): release the
+  barrier and require the agent to actually start. This plan's assertion is about **agent-process
+  presence**, so the vacuity hazard here is a probe that cannot run (an `Exec` that fails for its own
+  reasons reads as "no agent") — hence the paired release-and-start half. The *network*-flavoured
+  version of that hazard belongs to the consumer plan; see [DF172](../findings-unresolved.md).
 
 ## What "done" means
 
