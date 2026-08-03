@@ -40,6 +40,14 @@ ANCHOR="com.apple/yoloai_authz"
 SUDOERS=/etc/sudoers.d/yoloai-authz-probe
 PASS=0; FAIL=0; UNKNOWN=0
 
+# Capture the whole run. The first version of this script printed verdicts to the
+# terminal and nowhere else, so the evidence lived only in one scrollback buffer —
+# which is the one thing a research harness must never do. Owned by the invoking
+# user, not root, so it can be read and committed without a second sudo.
+RESULTS="$(cd "$(dirname "$0")" && pwd)/results/pf-authz-privileged.txt"
+mkdir -p "$(dirname "$RESULTS")"
+exec > >(tee "$RESULTS") 2>&1
+
 cleanup() {
   echo
   echo "== cleanup =="
@@ -50,7 +58,11 @@ cleanup() {
   echo "   anchor rules remaining: ${leftover:-0}"
   echo "   $SUDOERS present: $([ -e "$SUDOERS" ] && echo YES-BAD || echo no)"
   echo "   pf status: $(pfctl -s info 2>/dev/null | head -1)"
-  echo "   lo0 skip flag: $(pfctl -s Interfaces -v 2>/dev/null | grep -A1 '^	lo0' | grep -c skip || echo 0)"
+  echo "   lo0 skip flag: $(pfctl -s Interfaces -v 2>/dev/null | grep -A1 '^	lo0' | grep -c skip || true)"
+  rm -f /tmp/pfauthz.err /tmp/pfauthz.inc /tmp/pfauthz.sudoers
+  chown "$U" "$RESULTS" 2>/dev/null
+  echo "   results written to: $RESULTS"
+  sync
 }
 trap cleanup EXIT
 
@@ -90,11 +102,11 @@ say "Q1 DECISIVE: is 'set skip' honored when loaded into a nested anchor?"
 # If yes, a NOPASSWD grant for `pfctl -a <anchor> -f -` lets anyone who can write to
 # that stdin disable pf filtering on any interface — i.e. it is a host-wide grant
 # wearing a per-sandbox costume, and the `-f -` form must be abandoned.
-before=$(pfctl -s Interfaces -v 2>/dev/null | grep -A1 '^	lo0' | grep -c skip || echo 0)
+before=$(pfctl -s Interfaces -v 2>/dev/null | grep -A1 '^	lo0' | grep -c skip || true)
 pfctl -a "$ANCHOR" -F all >/dev/null 2>&1
 if load_anchor 'set skip on lo0
 block drop out proto tcp from 192.0.2.77 to any'; then
-  after=$(pfctl -s Interfaces -v 2>/dev/null | grep -A1 '^	lo0' | grep -c skip || echo 0)
+  after=$(pfctl -s Interfaces -v 2>/dev/null | grep -A1 '^	lo0' | grep -c skip || true)
   echo "        lo0 skip flag before=$before after=$after"
   if [ "$after" -gt "$before" ]; then
     bad "'set skip' IS honored from inside an anchor — the -f - grant is host-wide. Use tables (Q3)."
