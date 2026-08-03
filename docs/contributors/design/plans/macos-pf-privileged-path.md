@@ -2,10 +2,10 @@
 > allowlist today is either weak (apple grants the guest NET_ADMIN) or absent (tart, seatbelt).
 > Covers how yoloAI acquires the privilege `pf` needs without installing a root daemon.
 
-# macOS: enforce the network allowlist from host `pf`, via opt-in `sudo`
+# macOS: enforce the network allowlist from host `pf`
 
-- **Status:** PLANNED — mechanism measured on hardware 2026-08-02/03, approach chosen by the owner
-  2026-08-03. Nothing built.
+- **Status:** PLANNED — mechanism and authorization both measured on hardware 2026-08-02/03.
+  Nothing built.
 - **Depends on:** tamper-resistant-network-isolation.md
 
 ## Why this exists
@@ -16,101 +16,210 @@ and `seatbelt` refuse `--network-isolated` outright, so they have none at all.
 
 The research settled that this is **not** a platform limitation. Host `pf` enforces per-sandbox on
 all three macOS backends, keyed on something the guest cannot change, and it holds against an agent
-that actively attacks it. The full measurement, its controls and its two discarded harness
-generations are in [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md)
-§ The macOS half; the raw runs are in
-[macos-isolation-spike](../research/macos-isolation-spike/README.md). What blocks it is one thing
-only: **`pf` needs root, and yoloAI on macOS has no privileged path.**
+that actively attacks it. The measurement, its controls and its two discarded harness generations
+are in [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md) § The macOS
+half; raw runs in [macos-isolation-spike](../research/macos-isolation-spike/README.md). What blocks
+it is one thing: **`pf` needs root, and yoloAI on macOS has no privileged path.**
 
-## The decision, and the constraint that drove it
+## The decision
 
-`AGENTS.md` opens with "Go binary, no runtime deps beyond the backend". That is not decoration — it
-is why yoloAI installs by copying a file. Three ways to get root, and what each costs:
+**A generated `NOPASSWD` sudoers line, authorizing table membership only.** Installing that line is
+the opt-in — no flag, no isolation mode, no password prompt at runtime.
 
-| Approach | Gets the property | Cost |
+The route here was not obvious and three earlier candidates died to measurement. The evidence is in
+[pf-authz-unprivileged.txt](../research/macos-isolation-spike/results/pf-authz-unprivileged.txt) and
+[pf-authz-privileged.txt](../research/macos-isolation-spike/results/pf-authz-privileged.txt).
+
+**Why not a runtime `sudo` prompt.** Rules must be removed at stop, and stop is the least
+interactive moment in the lifecycle: a script, a signal handler, an MCP call, a crash sweep. A
+teardown that needs a password strands a `block` rule keyed on an address vmnet will later reassign.
+So the unattended path is required, which forces `NOPASSWD`, which makes the authorized command set
+the security boundary. Confirmed: `sudo -n` succeeds with no controlling tty and stdin closed (Q5).
+
+**Why not `sudo yoloai …` with a privilege drop.** Mechanically available — `syscall.Setuid` returns
+EPERM rather than ENOTSUP on darwin, so Go implements it — and yoloAI already has the sudo-awareness
+layer (`fileutil.HostUID`, `ChownIfSudo`, `OwnershipAudit`). It dies on credentials instead: sudo
+strips `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` (Q6, both confirmed stripped, and this
+host's `env_keep` preserves HOME/MAIL/EDITOR/TZ/SSH_AUTH_SOCK but neither), and
+`fileutil.SudoParentEnv` recovers them by reading `/proc/<ppid>/environ`, which does not exist on
+macOS. `sudo yoloai new` would launch an agent that cannot authenticate. HOME itself survives, so
+the paths were never the problem.
+
+**Why not authorize a yoloAI subcommand.** `NOPASSWD: /usr/local/bin/yoloai _pf-sync` would move
+rule generation into our own code. But `/opt/homebrew/bin` is user-writable — Homebrew's Apple
+Silicon default, not a local quirk — and yoloAI on the test host resolves to `~/bin/yoloai`. A
+`NOPASSWD` grant on a binary any user process can overwrite *is* passwordless root. Not reachable by
+the agent we are containing (the seatbelt profile is `(deny default)`), but reachable by anything
+else running as the user. `/sbin/pfctl` is the opposite: SIP-`restricted`, root-owned, unwritable
+even by root.
+
+**Why not load rules from stdin.** `pfctl -a <anchor> -f -` is the natural mechanism, and sudoers
+cannot constrain stdin at all — it matches argv only. Measured consequence: nat and rdr rules **are**
+installed when loaded into an anchor (Q2), and `/etc/pf.conf` references `com.apple/*` as
+`nat-anchor`, `rdr-anchor`, `scrub-anchor`, `dummynet-anchor` and `anchor`, so they are evaluated by
+the main ruleset rather than sitting inert. That grant is a traffic-interception primitive, not a
+per-sandbox firewall knob.
+
+## The mechanism
+
+**Static rules, dynamic table membership.** Rules are loaded exactly once, at setup, by a
+password-authenticated call. Everything per-sandbox is table membership, whose entire argument
+surface is one address.
+
+A fixed pool of slots is what makes this work. Per-sandbox allowlists mean per-sandbox *rules*, and
+dynamic rule loading is what we just ruled out — so the rules are pre-loaded for N slots against
+empty tables, and a sandbox is assigned a free slot at start:
+
+```
+table <yoloai_src_0> persist
+table <yoloai_dst_0> persist
+block drop out from <yoloai_src_0> to any
+pass  out from <yoloai_src_0> to <yoloai_dst_0>
+…repeated per slot
+```
+
+Empty tables match nothing, so unused slots are inert. A 16-slot ruleset (64 rules) parses clean.
+pf's last-match-wins ordering makes the `pass` override the `block` for allowlisted destinations.
+**The slot count caps concurrent network-isolated sandboxes** — the one real cost of this design, and
+it needs a decision on default size and on what happens when the pool is exhausted (refuse, or fall
+back to today's behavior with the disclosure).
+
+**IPv6 comes free, and closes an existing hole.** pf accepts `inet6` rules and **mixed-family
+tables** — one table holding both v4 and v6, with an unqualified `block drop out from <table>`
+covering both. The in-guest iptables allowlist leaves IPv6 entirely unfiltered today (it is in the
+flag help). Parse-verified only; runtime confirmation is owed.
+
+### The authorization
+
+Literal command path plus an anchored regex on arguments. Globs are unusable here: sudoers matches
+arguments as **one concatenated string**, so `-a com.apple/yoloai*` also permits
+`-a com.apple/yoloai -f /etc/pf.conf`. sudo's own manual recommends the regex form and notes its
+ToCToU caveats "do not apply to rules where only the command line options are matched using a
+regular expression."
+
+```
+<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -t yoloai_(src|dst)_([0-9]|1[0-5]) -T (add|delete|flush)( [0-9a-fA-F.:/]+)?$
+```
+
+Measured against a live policy: both intended commands permitted, and **seven escapes refused** —
+main-ruleset load, disable pf, flush all, a different anchor, a stdin ruleset, table-from-file, and
+table kill. The cache control passed, so those refusals reflect policy rather than a warm sudo
+timestamp.
+
+Three things this must get right, all of them load-bearing:
+
+1. **`visudo -c` cannot validate it.** It accepted the safe and unsafe forms identically. So the
+   line is **generated by yoloAI and verified by a permit/refuse matrix**, never documented for a
+   user to hand-copy. A doc typo that widens the grant to passwordless root looks identical to the
+   correct line to every validation tool on the machine.
+2. **The regex must exclude `-f`.** `pfctl -T add -f <file>` is legal, so a `.*` argument form would
+   reopen file-sourced loading. The `[0-9a-fA-F.:/]+` form above does not.
+3. **Worst case is bounded by who holds the grant.** Its abuse ceiling is adding or removing
+   addresses in yoloAI's own tables, which can only affect traffic yoloAI's own rules already match.
+   The party holding it is the host user, who already has unrestricted network access — so this is
+   not an escalation for them. That is precisely what the stdin form failed: NAT and redirect reach
+   *other* traffic on the host, which is a capability the user did not previously have.
+
+### What the enforcement keys on, per backend
+
+| Backend | Key | Note |
 | --- | --- | --- |
-| **`sudo` on demand, opt-in** | yes | a password prompt per privileged operation (or a sudoers line the user writes); requires an admin user; needs a reaping story |
-| Installed helper (`SMJobBless` / launchd) | yes | an installer, code signing, an uninstall story, and a permanently root-privileged daemon on disk |
-| Do nothing | no | macOS stays materially weaker than Linux |
-
-**Chosen: `sudo` on demand, behind an explicit opt-in.** `sudo` ships on every Mac, nothing is
-installed, nothing persists, the shipped artifact is still one file, and the decision is reversible
-— if the prompts prove intolerable the installed helper is still available later, and the rule
-authoring work is the same either way.
-
-**Why Linux never needed this.** On Linux yoloAI borrows privilege from the backend instead of
-acquiring it: the allowlist is installed by asking Docker to run a sidecar with `NET_ADMIN`
-(`RunNetnsSidecar`, `CapAdd: ["NET_ADMIN"]`). The daemon is already root and already trusted with
-root by the user who installed it, and it has a defined way to delegate one capability into one
-namespace. macOS has no equivalent: `pf` is a host kernel facility with no delegation mechanism,
-and `seatbelt` has no daemon at all. macOS is the first case where the privilege would have to be
-**yoloAI's own**, which is exactly the line that sentence in `AGENTS.md` was drawing.
-
-## What the mechanism has to be, per backend
-
-Measured; do not re-derive from assumptions.
-
-| Backend | Enforcement key | Note |
-| --- | --- | --- |
-| apple | source address on the vmnet bridge | a second VM on the same bridge was unaffected — that discriminator is what makes it per-sandbox |
+| apple | source address on the vmnet bridge | a second VM on the same bridge was unaffected — the discriminator that makes it per-sandbox |
 | tart | source address on the vmnet bridge | same shape, same result |
-| seatbelt | **gid owning the socket** | `pf`'s `user`/`group` selectors match **TCP and UDP only**, so non-TCP/UDP egress is unfiltered by construction |
+| seatbelt | **gid owning the socket** | `pf`'s `user`/`group` selectors match **TCP and UDP only**, so non-TCP/UDP egress is unfiltered by construction — a materially weaker guarantee that must be stated in user-facing text, not discovered |
 
-Three hazards, each of which produced a false result before it was understood:
+For seatbelt there is a second privileged step: `setegid()` to a supplementary group returns `EPERM`
+**even for a member**, so the gid must be set by a privileged launcher rather than by the agent
+process dropping into it. That is a second authorized command, and its argument surface (a gid and a
+program path) is materially harder to constrain than an IP address. **Seatbelt should be its own
+phase and may not be worth doing.**
 
-1. **Never touch the main ruleset.** `pfctl -f` *replaces* it, and that is where vmnet's NAT lives —
-   the first harness silently destroyed egress for every VM on the host and then measured
-   "blocked". Reloading `/etc/pf.conf` does not restore the NAT; only restarting the vmnet service
-   does. Everything must live in a nested anchor under `com.apple/`.
+## Hazards
+
+Each produced a false result during the research before it was understood.
+
+1. **Never touch the main ruleset.** `pfctl -f` *replaces* it, and that is where vmnet's NAT lives.
+   The first harness silently destroyed egress for every VM on the host and then measured "blocked".
+   Reloading `/etc/pf.conf` does not restore the NAT; only restarting the vmnet service does.
+   Everything lives in a nested anchor under `com.apple/`.
 2. **`quick` follows the direction keyword.** `block drop quick in on …` does not parse;
    `block drop in quick on …` does. A rule that fails to parse reads exactly like traffic that
    cannot be filtered.
-3. **Key on the sandbox address, never the interface name.** vmnet re-picks subnets when a bridge is
-   re-created, and bridge indices move between backends (DF172) — a rule keyed on `bridge101` can
-   silently attach to a different backend's traffic after a restart.
+3. **Key on the address, never the interface name.** vmnet re-picks subnets when a bridge is
+   re-created and bridge indices move between backends (DF172), so a rule keyed on `bridge101` can
+   silently attach to another backend's traffic after a restart.
 
-For seatbelt there is a second privileged step: launching the agent under a dedicated gid.
-`setegid()` to a supplementary group returns `EPERM` **even for a member of that group**, so the
-gid has to be set by a privileged launcher, not by the agent process dropping into it.
+## Ordering, and the enforcement window
+
+The sandbox address does not exist at launch — it is a DHCP lease read host-side. Measured: it
+appears **2s** after `yoloai new` begins, against **3s** for the command to return. So the sequence
+
+```
+start guest → wait for address → add to table → VERIFY present → launch agent
+```
+
+is achievable synchronously in-process, with no post-start hook. Only the last arrow is a security
+boundary; boot traffic before the rule exists is unfiltered, which is acceptable only because no
+agent code has run yet. **If agent launch is ever reordered ahead of the table add, the guarantee is
+void and nothing about the sandbox looks different.** That belongs in a test, not a comment.
+
+## Reaping
+
+Table membership is reconciled against live sandboxes on every yoloAI run, rather than being treated
+as an append/remove log. A missed teardown is then self-healing at the next invocation, and there is
+no reaper process to supervise. Teardown itself is a table delete — no rule reload, and it works
+unattended (Q5).
+
+The residual case is a host where yoloAI never runs again, leaving a stale address in a `block`
+table. That over-blocks a VM that later receives the address; it does not let anything through. A
+`yoloai doctor` sweep covers it.
 
 ## Shape of the work
 
-**Phase 1 — opt-in and the privileged call site.** A config key and/or flag that says "use host `pf`
-for network isolation on macOS". Off by default; when off, nothing changes and nothing prompts. When
-on, `--network-isolated` becomes available on `tart` and `seatbelt` (today refused) and stops
-granting `NET_ADMIN` on `apple`.
+**Phase 1 — capability and setup.** Probe with `sudo -n /sbin/pfctl -a … -T show`; report through
+`yoloai doctor` like any other host prerequisite, with a command that generates and installs the
+policy plus the static slot ruleset. `pfctl -n -f -` validates a generated ruleset unprivileged
+(exit 0 valid / 1 invalid, confirmed), so yoloAI verifies before spending a privileged call — note
+it always prints the "Use of -f option" warning to stderr, which must be filtered rather than read
+as failure.
 
-**Phase 2 — rule lifecycle.** Rules are written to a per-sandbox nested anchor
-(`com.apple/yoloai_<principal>_<sandbox>`) at start and removed at stop. Two things need designing
-rather than assuming:
+**Phase 2 — apple and tart.** Slot assignment, membership add/verify/delete around the lifecycle,
+reconciliation, and removing the `NET_ADMIN` grant on apple when host enforcement is active. With
+the capability absent, tart keeps today's refusal and apple keeps today's weak path plus DF179's
+disclosure, so nothing that works today stops working.
 
-- **Reaping.** If yoloAI is killed between start and stop, the anchor outlives the sandbox. A stale
-  `block` rule keyed on an address that vmnet later hands to something else is a live hazard, not
-  just litter. Options: reap-on-next-run by comparing anchors against live sandboxes (cheap, but
-  leaves a window), or a `yoloai doctor` sweep, or both. This is the part most likely to be got
-  wrong quietly.
-- **How often it prompts.** One `sudo` per sandbox start plus one per stop is the naive shape.
-  Whether that is tolerable, and whether to document a scoped `sudoers` line as the escape hatch
-  (`NOPASSWD` for one exact `pfctl` invocation), is a UX decision this plan should not pre-empt.
-
-**Phase 3 — seatbelt's gid launcher.** Allocate a per-sandbox gid, launch the agent under it
-privileged, and write the matching `pf` rule. Note the TCP/UDP-only limitation in user-facing text
-rather than letting it be discovered.
+**Phase 3 — seatbelt.** The gid launcher, or a decision not to. See the table note above.
 
 ## Acceptance test
 
 Every assertion pairs a **block** with a **positive control in the same run**. This is not
-belt-and-braces: a macOS sandbox stranded by the vmnet subnet re-pick has *no* network at all, so it
-passes "egress to a non-allowlisted destination is refused" for free, on every destination — which
-silently invalidated the first run of the `pf` research harness (DF172). A conformance case that
-asserts only the denial certifies nothing.
+belt-and-braces: a sandbox stranded by the vmnet subnet re-pick has no network at all, so it passes
+"egress to a non-allowlisted destination is refused" for free, on every destination — which silently
+invalidated the first `pf` harness (DF172). A conformance case asserting only the denial certifies
+nothing.
 
-So, per backend, in one run: an allowlisted destination **succeeds**, a non-allowlisted destination
-**fails**, a second sandbox on the same bridge is **unaffected**, and after the sandbox stops the
-anchor is **gone**. The tamper arm — the sandbox tries to remove the rule and cannot — is the
-property the whole plan exists for and belongs in `runtime/runtimetest` rather than a spike script.
+Per backend, in one run: an allowlisted destination **succeeds**, a non-allowlisted destination
+**fails**, a second sandbox on the same bridge is **unaffected**, and after stop the address is
+**gone from the table**. The tamper arm — the sandbox tries to remove the rule and cannot — is the
+property the whole plan exists for and belongs in `runtime/runtimetest`, not a spike script.
+
+## Unmeasured, and known limits
+
+- **Fail-open on address change.** A `block from <table>` rule stops matching if a sandbox's address
+  changes, silently unfiltering it. Not observed: 120 samples over 240s of induced bridge churn,
+  through a full tart bring-up, held one address with working egress. That is a **negative result,
+  not stability** — it bounds the risk over minutes, not over the days a sandbox lives, and **DHCP
+  lease renewal is untested**. Every address change seen in earlier runs accompanied a restart of the
+  sandbox itself, where the start path re-runs anyway. Mitigation if it proves real: re-verify
+  membership on the existing `SandboxNetHealth` probe tick.
+- **Is `set skip` honored inside an anchor?** Unmeasured — the harness's own verdict was invalid
+  (`grep -c` prints `0` *and* exits 1, so `|| echo 0` produced `0\n0` and the comparison errored into
+  the not-honored branch unconditionally). Fixed, and moot for this plan, since the stdin form is out
+  on Q2's evidence alone. It would matter again if anyone revives `-f -`.
+- **IPv6 enforcement is parse-verified only**, not runtime-verified.
+- **Slot exhaustion behavior is undecided**, as is the default pool size.
 
 ## Not in scope
 
-IPv6 (the allowlist is IPv4-only on every backend today), and the `apple`/`podman`/`containerd`
-`NET_ADMIN` grant on Linux, which is DF179's own problem and has a different fix per backend.
+The `apple`/`podman`/`containerd` `NET_ADMIN` grant on Linux, which is DF179's own problem and has a
+different fix per backend.
