@@ -1,0 +1,28 @@
+===================================================================
+ address stability for host-pf enforcement
+ host: 26.5.1   started: 10:26:10
+===================================================================
+
+== U14: when does the address become knowable? ==
+   address appeared : 192.168.64.20/24 after 2s
+   'yoloai new' returned after 3s
+   PASS  the address is knowable BEFORE creation returns, so the ordering
+         'add to table -> verify -> launch agent' is achievable in-process
+
+== U15: can the address change while the sandbox keeps running? ==
+   baseline: addr=192.168.64.20/24 egress=301
+   bridges : bridge100:=192.168.139.3 bridge101:=192.168.64.1 
+
+   >>> inducing bridge churn with a tart VM while the apple sandbox keeps running
+   (this is the T2 condition from vmnet-switch.txt, but watched rather than sampled)
+
+   final   : addr=192.168.64.20/24 egress=301
+   bridges : bridge100:=192.168.139.3 bridge101:=192.168.64.1 bridge102:=192.168.65.1 
+   samples : 120 over ~240s of induced churn
+   RESULT  address did NOT move while running, across a full tart VM bring-up.
+           NEGATIVE result: bounds the risk over minutes of churn, NOT over the
+           days a sandbox lives. DHCP lease renewal remains untested.
+
+== cleanup ==
+   sandboxes remaining: 0
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/addr-stability.txt
