@@ -88,7 +88,7 @@ inclusion test first, then add a row to the index.
 | Apple: `container system df` reports `containers.reclaimable: 0` despite a multi-GB build cache; `prune` seems to free nothing | [Apple: build cache lives inside the running builder container](#apple-build-cache-lives-inside-the-running-builder-container-invisible-to-system-dfs-reclaimable-field) |
 | `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step-build-with-buildkit) |
 | Smoke/`system build` rebuilds `yoloai-base` from scratch every run on Docker Desktop (not OrbStack), though the image is present | [Docker Desktop: ImageInspect transiently NotFounds a present image on the idle containerd store](#docker-desktop-imageinspect-transiently-notfounds-a-present-image-on-the-idle-containerd-store) |
-| Every `new`/`start`/`clone` fails on Docker Desktop (passes on OrbStack/Linux) with `substrate not ready within 30s`; container log skips `entrypoint.keepalive_only`, no `.substrate-ready` | [Docker Desktop: single-file bind mount serves stale content after atomic rename](#docker-desktop-a-single-file-bind-mount-serves-stale-content-after-the-host-atomic-renames-it-keepalive_only-never-reaches-the-entrypoint) |
+| Every `new`/`start`/`clone` fails on Docker Desktop (passes on OrbStack/Linux) with `substrate not ready within 30s`; container log skips `entrypoint.keepalive_only`, no `.substrate-ready` | [Docker Desktop: single-file bind mount serves stale content after a host rewrite](#docker-desktop-a-single-file-bind-mount-serves-stale-content-after-the-host-rewrites-it-keepalive_only-never-reaches-the-entrypoint) |
 | `podman: build cache prune failed: Error response from daemon: Not Found` | [Podman: no build-cache endpoint (404)](#podman-docker-compat-api-has-no-build-cache-endpoint--buildcacheprune-returns-404-not-found) |
 | Long-lived `docker exec` (attached) process dies when the launching CLI exits; status-monitor / marker missing | [Docker: attached exec doesn't outlive its client](#docker-exec-an-attached-exec-does-not-outlive-the-client-that-started-it) |
 | `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
@@ -1042,7 +1042,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 ---
 
-### Docker Desktop: a single-file bind mount serves stale content after the host atomic-renames it (keepalive_only never reaches the entrypoint)
+### Docker Desktop: a single-file bind mount serves stale content after the host rewrites it (keepalive_only never reaches the entrypoint)
 
 **Symptom:** Every `yoloai new`/`start`/`clone` fails on **Docker Desktop** (macOS) with
 `yoloai: substrate not ready within 30s (root provisioning did not complete)`; the
@@ -1054,12 +1054,11 @@ in-container `sandbox.jsonl` jumped straight from `entrypoint.python_start` to
 /yoloai/runtime-config.json` seconds later *also* shows `true`.
 
 **Explanation:** The agent-free bring-up (D88 `startViaLaunch`) signals the entrypoint
-by patching `keepalive_only:true` into `runtime-config.json` just before `Create`. That
-patch is an **atomic rename** (write temp + rename), which gives the file a **new
-inode**. `runtime-config.json` is mounted into the container as a **single-file**
-read-only bind mount (`buildSystemMounts`). Docker Desktop's gRPC-FUSE file sharing
-caches the path→inode mapping and serves the **stale pre-patch content** for that
-single file when the entrypoint reads it at container start — so the entrypoint sees
+by patching `keepalive_only:true` into `runtime-config.json` just before `Create`.
+`runtime-config.json` is mounted into the container as a **single-file** read-only bind
+mount (`buildSystemMounts`), and Docker Desktop's gRPC-FUSE file sharing serves the
+**stale pre-patch content** for that single file when the entrypoint reads it at
+container start — so the entrypoint sees
 `keepalive_only` absent, evaluates `cfg.get("keepalive_only", not cfg)` to `False`
 (config is non-empty), takes the **legacy inline** path, runs sandbox-setup.py itself,
 and never writes `.substrate-ready`. The host's `waitForReady` polls for that marker
@@ -1069,6 +1068,17 @@ propagate the new inode immediately, so they never see stale content. **The bug 
 that the host failed to patch the file — it did — but that the patched single file does
 not reach the container in time on Docker Desktop.**
 
+**Corrected 2026-08-03 (DF173).** This entry previously attributed the staleness to the
+patch being an "atomic rename (write temp + rename), which gives the file a new inode",
+with gRPC-FUSE "caching the path→inode mapping". That premise was false: `patchKeepaliveOnly`
+calls `fileutil.WriteFile` — an in-place truncate that **keeps** the inode — and has done so
+since the function was introduced (`722b62ee`), so every reproduction of this symptom was
+against an in-place write. The file-level fact is what was actually observed and it stands;
+the cache-internals story was inferred from the rename premise and does not, so **what
+gRPC-FUSE keys its cache on here is not established**. The repo contains both idioms on this
+one file — the sibling writer `patchRuntimeConfig` *does* use `fileutil.AtomicWriteFile` —
+which is how the two got crossed. Do not reason from either mechanism without re-testing.
+
 **Fix:** Don't rely on the patched single-file bind mount as the only signal.
 `startViaLaunch` also sets `YOLOAI_KEEPALIVE_ONLY=1` in the container's env
 (`InstanceConfig.ContainerEnv` → `containerConfig.Env`), which is baked into the
@@ -1077,7 +1087,12 @@ treats the env var as authoritative (forces `keepalive=True` when set). The file
 stays as the Linux/OrbStack record and a backstop. General rule: **a host-side change to
 a single-file bind mount may not be visible inside a Docker Desktop container promptly;
 deliver create-time signals via env vars (or a bind-mounted *directory*, which
-propagates in real time) rather than by mutating a bind-mounted file.**
+propagates in real time) rather than by mutating a bind-mounted file.** The rule is
+stated in terms of the observation rather than a mechanism, precisely because the
+mechanism here turned out to be misdiagnosed — and it holds either way. Tart's VirtioFS
+punishes the same shape far harder (DF175): a host rewrite of a path the guest has
+already read is served stale indefinitely, and there temp+rename is *worse* than
+in-place, not better.
 
 **Code:** `internal/orchestrator/launch/launch.go` (`startViaLaunch` sets
 `YOLOAI_KEEPALIVE_ONLY=1`), `runtime/docker/resources/entrypoint.py` (env override of
