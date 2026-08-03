@@ -78,8 +78,13 @@ pass  out from <yoloai_src_0> to <yoloai_dst_0>
 …repeated per slot
 ```
 
-Empty tables match nothing, so unused slots are inert. A 16-slot ruleset (64 rules) parses clean.
-pf's last-match-wins ordering makes the `pass` override the `block` for allowlisted destinations.
+Empty tables match nothing, so unused slots are inert. Verified on hardware: a 16-slot pool loads
+all **32 filter rules**, table add/show works at both ends of the pool, and — the part that actually
+matters — **rule order is preserved**, with each `pass` landing after its `block`. pf is
+last-match-wins, so had the order not survived the load, the allowlist would be inert and every
+isolated sandbox simply cut off. That is a failure which looks exactly like working enforcement from
+the outside, so it belongs in the conformance suite rather than in a one-off check.
+
 **The slot count caps concurrent network-isolated sandboxes** — the one real cost of this design, and
 it needs a decision on default size and on what happens when the pool is exhausted (refuse, or fall
 back to today's behavior with the disclosure).
@@ -87,8 +92,11 @@ back to today's behavior with the disclosure).
 **IPv6 comes free, and closes an existing hole.** pf accepts `inet6` rules and **mixed-family
 tables** — one table holding both v4 and v6, with an unqualified `block drop out from <table>`
 covering both. The in-guest iptables allowlist leaves IPv6 entirely unfiltered today (it is in the
-flag help), because `firewall.resolve_domains` requests `AF_INET` only. Parse-verified; runtime
-confirmation is owed.
+flag help), because `firewall.resolve_domains` requests `AF_INET` only. Confirmed at runtime that one
+table holds `192.0.2.7` and `2001:db8::1` together, and that the grant permits adding both. **What
+is still owed is end-to-end blocking of real IPv6 traffic**, which needs a guest that actually has
+IPv6 egress — an acceptance-test obligation, and worth checking that the guests have any IPv6 at all
+before treating the gap as urgent.
 
 **Where the allowlist gets resolved changes, and that is a new failure mode.** The `dst` table holds
 resolved addresses, exactly as the ipset does today — `resolve_domains` is one-shot at start with no
@@ -113,15 +121,24 @@ regular expression."
 <user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -t yoloai_(src|dst)_([0-9]|1[0-5]) -T (add|delete|flush)( [0-9a-fA-F.:/]+)?$
 ```
 
-**The regex above is not the one that was tested.** The measured policy was narrower —
-`^-a com\.apple/yoloai_authz -t yoloai_authz_src -T (add|delete) [0-9.]+$`, a single fixed table and
-IPv4 only. Against *that*, both intended commands were permitted and **seven escapes refused**:
-main-ruleset load, disable pf, flush all, a different anchor, a stdin ruleset, table-from-file, and
-table kill. The cache control passed, so those refusals reflect policy rather than a warm sudo
-timestamp. The form above widens it in four ways — a slot alternation in the table name, `flush`,
-an optional address group, and hex/colon/slash for IPv6 — none of which have been run. **Re-running
-the escape matrix against the final regex is a Phase 1 deliverable, not a formality**, and it is the
-one place where a plausible-looking widening silently grants more than intended.
+**Measured against a live policy, in this exact form**
+([pf-authz-final.txt](../research/macos-isolation-spike/results/pf-authz-final.txt), 27/27, no
+failures). All five intended invocations permitted — v4, v6, CIDR, delete, and argument-less
+`flush` — and **twelve refused**, split between the four widenings this regex introduces over the
+narrower one first tested and the escapes any form must reject:
+
+| Refused | |
+| --- | --- |
+| widenings | slot 16 (out of range), arbitrary table name, `-T kill`, `-T replace`, `-T add -f <file>`, a path where an address belongs |
+| escapes | main-ruleset load, disable pf, flush all, a different anchor, a stdin ruleset, anchor `-F rules` |
+
+The cold-cache control passed, so those refusals reflect policy rather than a warm sudo timestamp.
+
+**Escaping: use the raw form.** `man sudoers` requires `:` and `\` escaped in command arguments but
+prefixes that with "Unless a regular expression is specified", which leaves the `:` in an IPv6
+charset and the `\.` genuinely ambiguous — and wrong in either direction fails silently. Both
+variants were installed and tested: the **unescaped form parses and permits**; the double-escaped
+form is not needed. Do not "fix" it later by adding escapes.
 
 Three things this must get right, all of them load-bearing:
 
@@ -252,12 +269,16 @@ property the whole plan exists for and belongs in `runtime/runtimetest`, not a s
   lease was near expiry within minutes of issue, so renewal happens constantly rather than rarely.
   Mitigation if it proves real: re-verify membership on the existing `SandboxNetHealth` probe tick,
   which already runs and already knows the guest's current address.
-- **Is `set skip` honored inside an anchor?** Unmeasured — the harness's own verdict was invalid
-  (`grep -c` prints `0` *and* exits 1, so `|| echo 0` produced `0\n0` and the comparison errored into
-  the not-honored branch unconditionally). Fixed, and moot for this plan, since the stdin form is out
-  on Q2's evidence alone. It would matter again if anyone revives `-f -`.
-- **IPv6 enforcement is parse-verified only**, not runtime-verified.
+- **IPv6 end-to-end blocking is unverified.** Mixed-family tables and the grant are confirmed; real
+  IPv6 traffic being dropped is not, and whether the guests have IPv6 egress at all is unchecked.
 - **Slot exhaustion behavior is undecided**, as is the default pool size.
+- **Resolution parity** between host and guest (see above) is unresolved.
+
+Now settled, recorded so nobody re-opens them: **`set skip` is NOT honored inside a nested anchor**
+— re-measured after the first harness produced an unfalsifiable verdict, this time requiring the
+companion block rule to have loaded before a negative is accepted. So the stdin form's excess
+privilege was nat/rdr traffic interception, not a host-wide filter disable. It stays rejected on
+that evidence; this only bounds how bad it was.
 
 ## Not in scope
 

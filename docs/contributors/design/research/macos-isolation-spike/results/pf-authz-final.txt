@@ -1,0 +1,53 @@
+host: 26.5.1 | pf: Status: Enabled for 55 days 16:31:28          Debug: Urgent
+sudo: Sudo version 1.9.17p2 | user: karlstenerud
+
+== F0 positive control: the anchor accepts and retains rules ==
+   PASS    anchor retains rules (count=1) — later verdicts are meaningful
+
+== F1: is 'set skip' honored inside a nested anchor? (pf_authz.sh Q1, harness now fixed) ==
+        lo0 skip flag before=0 after=0 (rules loaded=1)
+   PASS    'set skip' parsed but NOT honored in anchor context (the block rule DID load, so this
+           is a real negative rather than a load that silently failed)
+
+== F4: does the 16-slot pool ruleset LOAD (not merely parse), and do slot table ops work? ==
+   PASS    all 32 filter rules loaded (16 block + 16 pass)
+   PASS    rule order preserved: pass (line 2) follows block (line 1)
+   PASS    slot 0 table add/show works
+   PASS    slot 15 table add/show works
+
+== F5: do mixed-family tables hold v4 and v6 together at runtime? ==
+        table contents: 192.0.2.7,2001:db8::1,
+   PASS    one table holds both families — the unqualified block rule can cover v4 and v6
+
+== F3/F2: the FINAL regex — does it parse, and does it permit/refuse correctly? ==
+   PASS    RAW escaping: parses AND permits the intended command
+   PASS    escaping variant to use in the generated policy: RAW
+   (permit/refuse matrix, cache invalidated, -k on every probe)
+   PASS    intended add v4 -> permit
+   PASS    intended add v6 -> permit
+   PASS    intended add CIDR -> permit
+   PASS    intended delete -> permit
+   PASS    intended flush no-arg -> permit
+   PASS    WIDENING slot 16 out of range -> refuse
+   PASS    WIDENING arbitrary table name -> refuse
+   PASS    WIDENING table kill -> refuse
+   PASS    WIDENING table replace -> refuse
+   PASS    WIDENING address from file -> refuse
+   PASS    WIDENING path as address -> refuse
+   PASS    ESCAPE main ruleset load -> refuse
+   PASS    ESCAPE disable pf -> refuse
+   PASS    ESCAPE flush all -> refuse
+   PASS    ESCAPE other anchor -> refuse
+   PASS    ESCAPE stdin ruleset -> refuse
+   PASS    ESCAPE anchor flush rules -> refuse
+   PASS    CONTROL: unlisted command refused, so refusals reflect policy not cache
+
+== TOTALS ==
+   pass=27 fail=0 unknown=0
+
+== cleanup ==
+   anchor rules remaining: 0
+   /etc/sudoers.d/yoloai-authz2-probe present: no
+   pf status: Status: Enabled for 55 days 16:31:29          Debug: Urgent
+   lo0 skip flag: 0
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-authz-final.txt
