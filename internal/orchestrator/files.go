@@ -132,19 +132,25 @@ func ReadExchangeFile(layout config.Layout, name, rel string) ([]byte, error) {
 // exchange dir), creating the exchange directory and any parent directories as
 // needed. rel is validated to stay within the exchange directory. Files are
 // written 0600 (owner-only), matching the prior file-exchange write path.
-func WriteExchangeFile(layout config.Layout, name, rel string, data []byte) error {
+//
+// Returns the same ImportResult ImportFile does, for the same reason: this lands
+// bytes in the very share whose guest can serve stale content for a path it has
+// already read, so the caller has to know whether it replaced something (DF175).
+func WriteExchangeFile(layout config.Layout, name, rel string, data []byte) (ImportResult, error) {
 	filesDir := FilesDir(layout, name)
 	target, err := resolveExchangePath(filesDir, rel)
 	if err != nil {
-		return err
+		return ImportResult{}, err
 	}
 	if err := fileutil.MkdirAll(filepath.Dir(target), 0750); err != nil {
-		return fmt.Errorf("create files directory: %w", err)
+		return ImportResult{}, fmt.Errorf("create files directory: %w", err)
 	}
+	_, statErr := os.Stat(target)
+	existed := statErr == nil
 	if err := fileutil.WriteFile(target, data, 0600); err != nil {
-		return fmt.Errorf("write %s: %w", rel, err)
+		return ImportResult{}, fmt.Errorf("write %s: %w", rel, err)
 	}
-	return nil
+	return ImportResult{Name: filepath.Base(target), Path: target, Replaced: existed}, nil
 }
 
 // copyTree copies src to dst preserving mode and recursing into directories,

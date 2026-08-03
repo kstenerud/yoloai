@@ -166,7 +166,16 @@ func (e *Engine) ReadFile(name, rel string) ([]byte, error) {
 	return ReadExchangeFile(e.layout, name, rel)
 }
 
-// WriteFile writes data to one exchange entry (rel), creating parent dirs.
-func (e *Engine) WriteFile(name, rel string, data []byte) error {
-	return WriteExchangeFile(e.layout, name, rel, data)
+// WriteFile writes data to one exchange entry (rel), creating parent dirs. Like
+// ImportFile it verifies a replacement reached a running guest, because this is
+// the same share and the same hazard — the MCP file-write tool reaches it (DF175).
+func (e *Engine) WriteFile(ctx context.Context, name, rel string, data []byte) error {
+	res, err := WriteExchangeFile(e.layout, name, rel, data)
+	if err != nil {
+		return err
+	}
+	if res.Replaced {
+		return e.refreshGuestView(ctx, name, res.Path)
+	}
+	return nil
 }

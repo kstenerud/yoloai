@@ -231,3 +231,37 @@ func TestStaleList_CapsWhatItNames(t *testing.T) {
 	assert.Equal(t, "a, b, c and 2 more", staleList(stale))
 	assert.Equal(t, "a", staleList(stale[:1]))
 }
+
+// The exchange directory has two writers, not one. `files put` goes through
+// ImportFile; the MCP file-write tool goes through WriteFile, which lands bytes
+// in the same share with the same hazard. Fixing only the first would leave the
+// path an agent's tooling actually uses still delivering fabricated content.
+func TestWriteFile_ReplacementIsVerifiedAgainstTheGuest(t *testing.T) {
+	rt := &refreshingRuntime{}
+	engine, layout := newRefreshEngine(t, rt)
+	ctx := context.Background()
+
+	require.NoError(t, engine.WriteFile(ctx, "box", "notes.md", []byte("v1")))
+	assert.Empty(t, rt.calls, "a first write replaces nothing")
+
+	require.NoError(t, engine.WriteFile(ctx, "box", "notes.md", []byte("v2-different")))
+	require.Len(t, rt.calls, 1)
+	require.Len(t, rt.calls[0], 1)
+	assert.Equal(t, filepath.Join(FilesDir(layout, "box"), "notes.md"), rt.calls[0][0].HostPath)
+	assert.Equal(t, sha256Of("v2-different"), rt.calls[0][0].SHA256)
+}
+
+func TestWriteFile_UnrepairableStaleContentFailsTheWrite(t *testing.T) {
+	rt := &refreshingRuntime{}
+	engine, layout := newRefreshEngine(t, rt)
+	ctx := context.Background()
+	require.NoError(t, engine.WriteFile(ctx, "box", "notes.md", []byte("v1")))
+
+	rt.stale = []runtime.GuestFileDigest{{
+		HostPath: filepath.Join(FilesDir(layout, "box"), "notes.md"),
+		SHA256:   "deadbeef",
+	}}
+	err := engine.WriteFile(ctx, "box", "notes.md", []byte("v2"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notes.md")
+}

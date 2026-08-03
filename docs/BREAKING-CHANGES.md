@@ -23,6 +23,26 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `Files.WriteFile` takes a `context.Context` (Go embedding surface)
+
+**Previous behavior:** `func (f *Files) WriteFile(rel string, data []byte) error` — a pure
+host-filesystem write, needing no backend and therefore no context.
+
+**New behavior:** `func (f *Files) WriteFile(ctx context.Context, rel string, data []byte) error`.
+Writing into the exchange directory is no longer purely host-side: when the write **replaces** an
+existing entry, it now verifies the bytes actually reached a running sandbox and repairs the
+guest's view if they did not (DF175 — a tart guest can serve the OLD bytes at the NEW size, with a
+successful read and no error at any layer). That check execs into the guest, so it needs a context
+to be cancellable and to carry a deadline. `Import` and `Export` already took one; this brings the
+third writer into line.
+
+**Who this affects:** embedders calling `Files.WriteFile` directly. The migration is mechanical —
+pass the context you already have, or `context.Background()`. A caller that passes an already-
+cancelled context now gets an error where the write would previously have succeeded; that is the
+point of the parameter. No behavior changes for any backend other than tart, where a replacement
+write into a *stopped* sandbox also remains an unconditional no-op.
+
+
 ### `store.OverlayLowerDir` is removed (Go embedding surface)
 
 **Previous behavior:** the `store` package exported `OverlayLowerDir(sandboxDir, hostPath)`,
