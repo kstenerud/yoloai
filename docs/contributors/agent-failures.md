@@ -943,3 +943,44 @@ as scarce as the failures and twice as useful.
 - **Gated now?** No, and it is not obvious what would gate it — a linter cannot tell an intended
   denial from an accidental one. The transferable defence is the positive control, which is a review
   question, not a check: *for every assert-it-fails, what asserts it was even tried?*
+
+### A25 — reported that a lint gate had silently skipped, inferring "did not run" from "printed nothing" (2026-08-02)
+
+- **Claimed:** to the owner, that `make check`'s shellcheck target had not run over four new shell
+  scripts because "it runs shellcheck only `if command -v shellcheck`; it isn't installed here, so
+  the target passed by doing nothing" — offered as an instance of the exact hazard `CLAUDE.md`
+  warns about ("a target that *skips* rather than fails reports that into a void"). The owner
+  replied "yes I want that hole closed", authorising work on the strength of it.
+- **True:** the target does not skip. It falls back to Docker — which was running — and `exit 1`s
+  if neither shellcheck nor Docker is available. It had run, cleanly, over the tracked scripts.
+  The real gap was narrower and had nothing to do with skipping: `git ls-files '*.sh'` lists only
+  **tracked** files, and the new scripts were untracked, so they were out of scope rather than
+  unlinted-because-nothing-ran.
+- **Source of the false belief:** I grepped the `make check` log for "shellcheck", got zero hits,
+  and read that as "the target did not execute". A clean shellcheck prints nothing, and the recipe
+  is `@`-prefixed so the command is not echoed either — so zero hits is exactly what *success*
+  looks like. I then found the `if command -v` line, which fitted the story, and stopped reading
+  four lines above the `elif docker info` branch that refutes it.
+- **What makes this specific rather than "read more carefully":** it is [A22](#a22--wrote-the-guard-for-a-security-invariant-and-it-passed-on-a-shell-parse-error)
+  inverted, and I had re-derived A22's own rule from scratch that same session. A22: a *failure* you
+  did not prove was attempted is not evidence. A25: an *absence of output* you did not prove was
+  reachable is not evidence either. Both are the same missing question — **what would this look
+  like if the thing had worked?** — and for a silent-on-success tool the answer is "identical",
+  which is checkable in one command (`make shellcheck; echo $?`) and I never ran it.
+- **Caught by:** going to fix the hole. Reading the target in order to change it showed the Docker
+  fallback in the first ten seconds. Nothing else would have — the claim was plausible, cited a real
+  line of the Makefile, and matched a hazard the project documents.
+- **Cost:** a false statement to the owner, and a work request authorised on it. The work itself
+  turned out to be worth doing for the *other* reason, so the artifact survives; the justification
+  in the first commit message would have been wrong. Corrected to the owner before any of it
+  landed, and the Makefile comment now states the real scope rule.
+- **Contrast worth recording:** in the same message the owner also asked me to verify every place I
+  had claimed "this needs higher privileges". Those claims **held** — `/dev/pf` is root-only, a
+  non-root anchor load fails, `setegid()` to a supplementary group returns `EPERM` even for a
+  member. So the corrective instinct was right and the specific target of it was not the one that
+  was wrong, which is an argument for the owner's habit of asking rather than against it.
+- **Gated now?** Partly, and only for this instance: `TestRepoHygiene_ShellcheckScope_CoversUntrackedScripts`
+  reads the argv out of the Makefile and fails if the scope regresses. Nothing gates the general
+  shape — "agent infers a tool did not run from an empty log" — and a linter cannot. The
+  transferable defence is a habit, not a check: **before reporting that something did not happen,
+  run the thing and look at its exit code.**
