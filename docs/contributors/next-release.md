@@ -79,6 +79,8 @@ finding or decision first, and lands here only if it should block the release.
   v0.6.0
 - [DF162](design/findings-resolved.md) — seatbelt's `:ro` mounts were not read-only whenever a
   broader rule granted write **(the second breaking change: `:ro` is now enforced)**
+- [DF175](design/findings-unresolved.md) — `yoloai files put --overwrite` silently delivers
+  fabricated content to a running tart sandbox
 
 ## Candidates — undecided
 
