@@ -313,6 +313,53 @@ func SandboxNetHealthFor(ctx context.Context, rt Backend, name string) (health V
 	return health, true, err
 }
 
+// GuestFileDigest names one host file under a sandbox directory together with
+// the SHA-256 the host just wrote there. The host supplies the digest because
+// only the host knows the intended bytes: on a stale share the guest's own
+// size and mtime are already correct while its data is not, so anything the
+// guest could compute for itself would be computed from the same stale view
+// (DF175).
+type GuestFileDigest struct {
+	HostPath string // absolute host path, inside the sandbox directory
+	SHA256   string // lowercase hex of the bytes the host wrote
+}
+
+// GuestFileRefresher is implemented by a backend whose guest can serve stale
+// file DATA for a path it has already read, after the host rewrites that path.
+// Tart implements it: a macOS guest's VirtioFS client keeps cached pages for a
+// vnode that is never reclaimed, so a host-side overwrite is invisible — the
+// guest reads the OLD bytes with the NEW size and no error at any layer. No
+// host-side write pattern avoids it; temp+rename is measurably worse, since it
+// leaves the old size cached too and removes the last signal that anything
+// changed (DF175).
+//
+// The backend does the work because only the backend knows how a host path
+// under the sandbox directory reaches its guest — the same reason
+// WorkDirSetup.WorkDirStagingPath exists rather than the caller spelling out
+// tart's share layout.
+//
+// Implementations verify first and repair only what is stale, so a path that
+// was never cached costs nothing but the check. They return the digests still
+// mismatched after the repair — empty means everything the caller wrote is now
+// readable in the guest. Returning ErrNotRunning is expected and not a
+// failure: a stopped guest holds no cache to be stale.
+type GuestFileRefresher interface {
+	RefreshGuestFiles(ctx context.Context, name string, files []GuestFileDigest) ([]GuestFileDigest, error)
+}
+
+// RefreshGuestFilesFor re-reads files in the guest and repairs any the guest
+// sees staler than the host, returning the ones that could not be repaired.
+// ok=false means the backend needs no such refresh, which is every backend but
+// tart — callers treat that as "nothing to do", never as a failure.
+func RefreshGuestFilesFor(ctx context.Context, rt Backend, name string, files []GuestFileDigest) (stale []GuestFileDigest, ok bool, err error) {
+	r, ok := rt.(GuestFileRefresher)
+	if !ok {
+		return nil, false, nil
+	}
+	stale, err = r.RefreshGuestFiles(ctx, name, files)
+	return stale, true, err
+}
+
 // CacheUsage reports the backend's on-disk cache footprint, split by whether
 // reclaiming it forces a base-image rebuild. Returned by DiskUsageReporter.
 type CacheUsage struct {

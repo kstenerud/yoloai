@@ -61,6 +61,12 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalitySandboxSide,
 		KeepAliveModel:     runtime.KeepAliveGuestOSInit,
+		// A macOS guest's VirtioFS client keeps cached pages for a vnode it
+		// never reclaims, so a host rewrite of a path the guest has read is
+		// invisible to it — old bytes, new size, no error (DF175). No host-side
+		// write pattern avoids it, so host writes into a running sandbox are
+		// verified and repaired through RefreshGuestFiles.
+		HostWritesNeedGuestRefresh: true,
 		// Tart VMs reach yoloai state through two VirtioFS shares, one per
 		// guest-facing tier, under "/Volumes/My Shared Files" (a path with
 		// spaces). The setup script symlinks each mount under

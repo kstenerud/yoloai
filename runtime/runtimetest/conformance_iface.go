@@ -240,6 +240,14 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 		assert.True(t, isGitExecer, "a confining backend must implement runtime.GitExecer (git runs in the sandbox)")
 	})
 
+	// A backend whose guest can serve stale data for a host-rewritten path must
+	// offer the operation that repairs it, or the capability is a claim with
+	// nothing behind it: every host-side write would be gated on a check that
+	// silently never runs, which is the DF175 failure mode restored in full.
+	t.Run("StaleGuestReadsImplyARefresher", func(t *testing.T) {
+		assertStaleGuestReadsImplyARefresher(t, probe.Runtime)
+	})
+
 	// A SandboxSide backend additionally keeps its work copy inside the sandbox,
 	// so baseline creation is deferred to the sandbox (WorkDirSetup). The
 	// property-based dispatch in ExecuteVMWorkDirSetup assumes this invariant.
@@ -600,4 +608,19 @@ func assertSandboxTiers(t *testing.T, b InterfaceBackend, boot func(*testing.T, 
 	canary, err := os.ReadFile(filepath.Join(config.ReadWriteTierDir(hostDir), "tier-canary.txt"))
 	require.NoError(t, err, "a guest write to the view must land in the read-write tier on the host")
 	assert.Contains(t, string(canary), "ok")
+}
+
+// assertStaleGuestReadsImplyARefresher pins the capability to the operation that
+// honors it. A backend whose guest can serve stale data for a host-rewritten path
+// must offer the repair, or the capability is a claim with nothing behind it:
+// every host-side write would be gated on a check that silently never runs, which
+// is the DF175 failure mode restored in full.
+func assertStaleGuestReadsImplyARefresher(t *testing.T, rt runtime.Backend) {
+	t.Helper()
+	if !rt.Descriptor().Capabilities.HostWritesNeedGuestRefresh {
+		t.Skip("backend delivers host writes to a running guest live")
+	}
+	_, isRefresher := rt.(runtime.GuestFileRefresher)
+	assert.True(t, isRefresher,
+		"a backend setting HostWritesNeedGuestRefresh must implement runtime.GuestFileRefresher (DF175)")
 }

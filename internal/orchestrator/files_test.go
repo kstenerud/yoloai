@@ -78,7 +78,8 @@ func TestImportExportRemove_RoundTrip(t *testing.T) {
 
 	placed, err := ImportFile(ctx, layout, name, src, false)
 	require.NoError(t, err)
-	assert.Equal(t, "hello.txt", placed)
+	assert.Equal(t, "hello.txt", placed.Name)
+	assert.False(t, placed.Replaced, "a first import replaces nothing")
 	assert.FileExists(t, filepath.Join(FilesDir(layout, name), "hello.txt"))
 
 	// Importing again without force is rejected.

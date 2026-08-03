@@ -281,13 +281,20 @@ type BackendDescriptor struct {
 // BackendCaps declares what features a runtime backend supports.
 // Each backend returns its capabilities via BackendDescriptor.Capabilities.
 type BackendCaps struct {
-	NetworkIsolation   bool               // supports --network=isolated (iptables domain filtering)
-	CapAdd             bool               // supports cap_add, devices, and setup commands
-	HostFilesystem     bool               // true when sandbox state lives on the host (seatbelt, future SSH)
-	ContainerAttach    bool               // exposes a docker-compatible container surface so VS Code's "Attach to Running Container" works
-	VMRuntimeDir       string             // path to yoloai state inside the VM; "" means /yoloai (docker default)
-	FilesystemLocality FilesystemLocality // where tracked work copies live; see the type doc. Zero value = LocalityHostSide.
-	KeepAliveModel     KeepAliveModel     // init/keep-alive model; see the type doc. Zero value = KeepAliveContainerInit.
+	NetworkIsolation bool   // supports --network=isolated (iptables domain filtering)
+	CapAdd           bool   // supports cap_add, devices, and setup commands
+	HostFilesystem   bool   // true when sandbox state lives on the host (seatbelt, future SSH)
+	ContainerAttach  bool   // exposes a docker-compatible container surface so VS Code's "Attach to Running Container" works
+	VMRuntimeDir     string // path to yoloai state inside the VM; "" means /yoloai (docker default)
+	// HostWritesNeedGuestRefresh marks a backend whose guest can keep serving
+	// the OLD bytes of a file the host has since rewritten, for any path the
+	// guest already read — with the new size, no error, and no natural
+	// convergence (DF175, tart's VirtioFS shares). It decides whether a caller
+	// must verify a host-side write reached the sandbox; GuestFileRefresher is
+	// the operation that does it, and a backend setting this MUST implement it.
+	HostWritesNeedGuestRefresh bool
+	FilesystemLocality         FilesystemLocality // where tracked work copies live; see the type doc. Zero value = LocalityHostSide.
+	KeepAliveModel             KeepAliveModel     // init/keep-alive model; see the type doc. Zero value = KeepAliveContainerInit.
 	// GitExecInConfinement makes the copy-mode work-copy git run inside the
 	// sandbox (via GitExecer) instead of on the host, for a backend whose work
 	// copy IS host-readable (LocalityHostSide) but which can still confine the

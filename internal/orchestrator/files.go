@@ -29,38 +29,49 @@ func ListExchangeFiles(layout config.Layout, name string, patterns []string) ([]
 	return collectExchangeGlobs(FilesDir(layout, name), patterns)
 }
 
+// ImportResult describes one completed import into the exchange directory.
+type ImportResult struct {
+	Name string // base name placed in the exchange directory
+	Path string // absolute host path of the placed entry
+	// Replaced reports that an entry of that name already existed. Callers use
+	// it to decide whether a running guest may be holding a stale view of the
+	// path: a name the guest has never read is always delivered correctly, so
+	// only a replacement is worth the cost of checking (DF175).
+	Replaced bool
+}
+
 // ImportFile copies a single host file or directory into the exchange directory,
-// creating the exchange directory if needed. Returns the base name placed.
-// Without force, an existing entry of the same name is an error.
-func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string, force bool) (string, error) {
+// creating the exchange directory if needed. Without force, an existing entry of
+// the same name is an error.
+func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string, force bool) (ImportResult, error) {
 	filesDir := FilesDir(layout, name)
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
-		return "", fmt.Errorf("create files directory: %w", err)
+		return ImportResult{}, fmt.Errorf("create files directory: %w", err)
 	}
 
 	absSrc, err := filepath.Abs(hostPath)
 	if err != nil {
-		return "", fmt.Errorf("resolve path %s: %w", hostPath, err)
+		return ImportResult{}, fmt.Errorf("resolve path %s: %w", hostPath, err)
 	}
 	info, err := os.Stat(absSrc)
 	if err != nil {
-		return "", fmt.Errorf("source %s: %w", hostPath, err)
+		return ImportResult{}, fmt.Errorf("source %s: %w", hostPath, err)
 	}
 
 	dst, err := resolveExchangePath(filesDir, info.Name())
 	if err != nil {
-		return "", err
+		return ImportResult{}, err
 	}
-	if !force {
-		if _, statErr := os.Stat(dst); statErr == nil {
-			return "", fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
-		}
+	_, statErr := os.Stat(dst)
+	existed := statErr == nil
+	if !force && existed {
+		return ImportResult{}, fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
 	}
 	cpEnv := layout.Env().EnvForHostTool()
 	if err := copyTree(ctx, cpEnv, absSrc, dst); err != nil {
-		return "", fmt.Errorf("copy %s: %w", hostPath, err)
+		return ImportResult{}, fmt.Errorf("copy %s: %w", hostPath, err)
 	}
-	return info.Name(), nil
+	return ImportResult{Name: info.Name(), Path: dst, Replaced: existed}, nil
 }
 
 // ExportFile copies one exchange entry (rel, relative to the exchange dir) to dst
