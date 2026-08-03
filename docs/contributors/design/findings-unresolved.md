@@ -724,7 +724,7 @@ earlier signal and records nothing else.
 
 - **Discovered:** 2026-08-02, measuring host `pf` enforcement for the two macOS VM backends · **Workstream:** isolation / macOS
 - **Severity:** MEDIUM
-- **Disposition:** PARKED
+- **Disposition:** RESOLVED 2026-08-03 for the detector half; the test-design rule below stands
 - **Rides:** **any.** Detection is additive; it withdraws no promise.
 - **Description:** A macOS VM sandbox can be `running`, hold its assigned IP, and have zero egress — the known vmnet subnet re-pick leaves VMs stranded on a dead epoch. tart detects this and reports `(net-dead)` via `runtime.SandboxNetHealthProber`; **apple has no equivalent probe**, so `yoloai ls` reports a healthy sandbox that cannot reach anything. Separately, a sandbox in this state makes any "egress is blocked" conformance assertion pass vacuously. (An earlier version of this entry also claimed the two macOS backends cannot hold vmnet bridges at the same time — retracted below; they coexist fine.)
 - **This is mostly a rediscovery, and the known part is the load-bearing part.** The vmnet bridge churn itself is already catalogued: [backend-idiosyncrasies.md](../backend-idiosyncrasies.md) § *Tart: vmnet session wedges* records "subnet flapping under session churn" — tart's bridge "is torn down and re-created as tart VMs come and go, and macOS re-picks its subnet on re-creation (`192.168.64.x` ↔ `192.168.65.x` within minutes on the same host)" — and DF87 covers the stale-lease false-healthy variant. I observed exactly that re-pick and initially wrote it up as new. **Two things are genuinely new**, below; everything else here should be read as confirmation.
@@ -735,7 +735,11 @@ earlier signal and records nothing else.
 - **The test-design consequence, which is the sharper one.** [tamper-resistant-network-isolation.md](plans/tamper-resistant-network-isolation.md) proposes a conformance assertion of the form "egress to a non-allowlisted destination is refused" (its § Acceptance test). A sandbox in this state **passes that for free, on every destination**, because it has no network at all. This is [A22](../agent-failures.md) with a platform-level cause rather than a shell-quoting one, and it is not hypothetical: it silently invalidated the first run of the `pf` research harness. Any macOS network conformance case **must** assert a permitted destination still succeeds in the same run, or it certifies nothing. (The sibling plan, host-controlled-agent-launch.md, asserts agent-process presence rather than egress, so it is exposed to a different vacuity mode, not this one.)
 - **Aggravating factor for the `pf` design.** Because the subnet re-pick moves bridge identity, a `pf` rule keyed on an interface *name* can silently attach to a different backend's traffic after a restart. Key on the sandbox address — see [tamper-resistant-network-isolation.md](plans/tamper-resistant-network-isolation.md) § The macOS half.
 - **Not yet established.** Not the exclusivity question — that one is answered and retracted above. What remains open is narrower: whether **bridge re-creation** strands VMs of the *other* backend on a second Mac as it did here, and whether the subnet re-pick is deterministic or opportunistic. Cheap to check on another machine; neither answer changes the apple detection gap, which is the actionable half of this entry.
-- **Pointer:** `runtime/tart/netcheck.go:22` (the detector apple lacks), `runtime/apple/reach.go:31-37` (bridge-persistence assumption), `runtime/tart/reach.go:19-22` (per-VM bridge lifecycle), `runtime/apple/apple.go:68` (`NetworkIsolation: true`).
+- **RESOLVED 2026-08-03 (the actionable half).** apple now implements `runtime.SandboxNetHealthProber` in `runtime/apple/netcheck.go`. It needs **no guest exec**: `container inspect` reports the container's own `ipv4Address` *and* the `ipv4Gateway` it was given, so the wedge reduces to a pure host-side question — is that gateway still assigned to an interface? That is exactly this finding's mechanism, since a re-created bridge leaves the container holding an address and gateway from the dead epoch. Verified end-to-end against an unpatched control: `ls --json` now carries `net_health="ok" detail="192.168.64.6"` for a healthy apple sandbox where it previously carried nothing.
+  **What is NOT verified:** the WEDGED branch itself, on hardware. The vmnet subnet re-pick cannot be induced on demand, and the obvious proxy — stopping the container service — turns out to exercise a different state entirely (the sandbox reads `removed`, so the probe never runs). The classifier is unit-tested on all six branches with the real captured `container inspect` output pinning the parser, and the OK path is hardware-verified; the wedge verdict rests on the same host-interface comparison tart's has used since DF86.
+  **A by-product worth more than the probe:** making the host state visible produced [DF178](#df178--apples-vmnet-bridge-is-created-by-the-first-container-not-by-the-system-service-so-the-injector-is-unbindable-on-a-fresh-host), which refutes the bridge-persistence assumption this entry had already flagged as worth re-checking.
+- **Still open:** the vacuous-conformance consequence (a net-dead sandbox passes "egress is refused" for free) is a test-design rule, not code, and is unaffected by the detector landing.
+- **Pointer:** `runtime/apple/netcheck.go` (the detector, now built), `runtime/tart/netcheck.go:22` (the template), `runtime/apple/reach.go:31-37` (bridge-persistence assumption — now DF178), `runtime/tart/reach.go:19-22` (per-VM bridge lifecycle), `runtime/apple/apple.go:68` (`NetworkIsolation: true`).
 
 ### DF173 — a documented root cause rests on a mechanism the code does not use: `patchKeepaliveOnly` is an in-place write, not an atomic rename
 
@@ -812,6 +816,25 @@ earlier signal and records nothing else.
 - **How it surfaced, which is the useful part.** A DF175 test asserted that re-importing a directory verifies exactly the files it placed, and got four paths where two were expected. The DF175 repair was working correctly — it faithfully verified the tree the host actually had. Had that test hardcoded the two expected names, it would have pinned the nesting as intended behaviour, which is the trap AGENTS.md rule 10 names.
 - **Not fixed here** because it is not DF175 and the fix changes semantics: removing `dst` before the copy turns a directory merge into a replace. Someone may rely on the merge, so it wants its own decision and its own BREAKING-CHANGES entry.
 - **Pointer:** `internal/orchestrator/files.go` (`ImportFile`, `copyTree`), `internal/orchestrator/engine_files_test.go` (`TestImportFile_DirectoryVerifiesEveryFileInTheTree`).
+
+### DF178 — apple's vmnet bridge is created by the first container, not by the system service, so the injector is unbindable on a fresh host
+
+- **Discovered:** 2026-08-03, while giving apple the net-health probe DF172 asks for · **Workstream:** isolation / macOS
+- **Severity:** MEDIUM (silent degradation of credential brokering, on ordinary timing)
+- **Disposition:** UNRESOLVED
+- **Rides:** **any.**
+- **Description:** `runtime/apple/reach.go:31-37` states that "the shared vmnet bridge persists while the `container` system service runs, so the gateway is host-bindable **BEFORE any of our VMs is created** — the broker can start the injector ahead of the sandbox, independent of the launch path." The second half is false. Measured on macOS 26.5.1:
+
+  | host state | `192.168.64.1` assigned to an interface? |
+  | --- | --- |
+  | `container system start`, no container ever started | **no** |
+  | a container running | yes |
+  | that container stopped again | yes (the bridge survives the container) |
+
+  So the bridge is created by the **first container start** and persists afterwards. "Persists while the service runs" is right once something has created it, and wrong for the window the comment specifically relies on.
+- **Why it matters.** `InjectorReach` returns `ErrInjectorUnsupported` when the gateway is assigned to nothing, and the documented consequence is that "brokering safely degrades to direct delivery" — the agent's API key is handed into the sandbox instead of being kept host-side. The comment frames that as covering an exotic case (the service stopped, or never run). It actually covers a routine one: **the first sandbox created after a reboot, or after any `container system start`**. Whether a real `yoloai new --broker` on a fresh service degrades has not been run end to end — that is the one experiment this finding needs, and it decides the severity.
+- **Not established:** how long the bridge survives with no containers (it outlived a stop here, but not measured across a service restart), and whether creating any container — not just a yoloAI one — is enough to bring it up. Both are cheap on this hardware.
+- **Pointer:** `runtime/apple/reach.go:31-37` (the claim), `runtime/apple/reach.go:78-95` (`ipAssignedToHost`), `runtime/apple/netcheck.go` (the probe that made the host state visible).
 
 ## Policy origin
 
