@@ -120,6 +120,8 @@ inclusion test first, then add a row to the index.
 | Agent on a long-idle Tart sandbox: `ConnectionRefused`/`FailedToOpenSocket` on every API call; `tart ip` finds nothing; guest `en0` is `169.254.x.x` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) |
 | Smoke test: every tart lane fails (sentinel timeout, agent `ConnectionRefused`) on **freshly created** VMs while another long-running tart VM exists; other mac backends pass | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (host-wide contamination; run `yoloai doctor`) |
 | Tart guest has a normal (non-169.254) IP and `tart ip` returns it, but DNS/TCP all fail; guest's gateway pings 0% ; guest subnet matches no host `bridge*` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (stale-lease variant, DF87) |
+| Apple `container` sandbox shows `running` with a valid IP but zero egress; `yoloai ls` shows no warning (tart would say `net-dead`; apple has no such probe) | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (cross-backend correction to (c); apple has no detector, DF172) |
+| Tart guest reads a file the host overwrote and gets the OLD bytes at the NEW length (correct `st_size`, no error); or `stat` keeps finding a file the host deleted | [Tart VirtioFS: the guest can read fabricated file content](#tart-virtiofs-the-guest-can-read-fabricated-file-content--the-old-bytes-at-the-new-length-with-a-correct-st_size-and-no-error) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | Confined git under `sandbox-exec` dies (`xcrun_db` / `libxcrun` denied); or a malicious filter still writes to `/tmp`; or git works with `mach-lookup` denied | [Seatbelt: sandbox-exec-wrapping git — escape surfaces + the /usr/bin/git shim](#seatbelt-sandbox-exec-wrapping-git-for-confinement-has-two-escape-surfaces-mach-lookup-process-exec--the-usrbingit-shim-cant-run-confined) |
@@ -2139,6 +2141,26 @@ the long-lived VM afterwards; (c) other Virtualization.framework VMs
 sessions/bridges — they are not tart orphans, and podman survives a dead
 bridge because it networks over vsock/gvproxy, not vmnet IP.
 
+**Note on (c): the stranding can cross backends, but coexistence is the normal
+case (measured 2026-08-02, macOS 26.5.1, tart 2.32.1, `container` 1.0.0).**
+Clause (c) stands as written. A first pass at this note claimed the opposite —
+that tart and apple "cannot both hold a vmnet bridge" and alternate
+deterministically — and that was **wrong**, retracted the same day by a
+controlled re-run: three bridges coexisted (`bridge100` 192.168.139.3 Docker
+Desktop, `bridge101` 192.168.64.1 apple, `bridge102` 192.168.65.1 tart) with
+both backends at working egress simultaneously across a `container system`
+restart *and* a tart VM restart, indices stable per backend throughout.
+
+What is true is narrower and is the same cross-epoch problem clause (c) already
+implies: a bridge torn down and re-created can return on a **different subnet**,
+and any VM still attached to the old one — *whichever backend owns it* — goes
+silently net-dead while continuing to report its address. The earlier
+"exclusivity" reading came from a host whose container-framework vmnet was
+already wedged (new VMs coming up `NO-CARRIER`), where only two bridges existed
+and index 101 was recycled between backends with a fresh subnet each time. So
+treat "both backends running" as fine, and bridge *re-creation* as the hazard.
+Only tart detects the resulting dead state ([DF172](design/findings-unresolved.md)).
+
 **Second variant — stale lease, false-healthy (DF87, observed 2026-07-14):**
 after a restart, bootpd can re-ACK the guest's old lease out of
 `/var/db/dhcpd_leases` (hundreds of stale entries survive the subnet
@@ -2165,6 +2187,78 @@ automatically. The same probe also feeds `yoloai ls` (`<status>
 wedge (pre-flight abort + in-loop check + its own autopsy fingerprint)
 instead of burning sentinel timeouts. Full design:
 [`archive/plans/tart-network-liveness.md`](archive/plans/tart-network-liveness.md).
+
+### Tart VirtioFS: the guest can read fabricated file content — the OLD bytes at the NEW length, with a correct `st_size` and no error
+
+Measured 2026-08-02 (macOS 26.5.1, tart 2.32.1) on a `tart run --dir` share, with the
+apple `container` backend as a control. Harness and raw output:
+[macos-isolation-spike](design/research/macos-isolation-spike/README.md).
+
+**The corruption, first, because it is the part that matters beyond barriers.** The host
+overwrote a 20-byte file containing `AAAA…` with the 3 bytes `ZZZ`. About a second later
+the tart guest reported:
+
+```
+size=3   read()='AAA'      <- new length, OLD bytes. No error, no short read.
+```
+
+The guest picks up the new **size** and keeps serving the **stale page**, so a reader gets
+a plausible-looking file that never existed on either side. Reproduced with a growing file
+too (12 bytes written over 2 → guest reads 2 stale bytes). A guest process cannot detect
+this: the stat is right, the read succeeds, the bytes are wrong.
+
+Deletion has the mirror-image defect: after the host removes a file, `stat()` in the guest
+keeps succeeding **indefinitely** (stale positive dentry) while `readdir()` drops the name
+within milliseconds.
+
+**Per-predicate timings**, guest-side, medians over 3 rounds, including a 200 ms settle
+pause (so subtract 200 for time-after-the-host-acted):
+
+| host action | `read()` | `stat()` | `readdir()` |
+| --- | --- | --- | --- |
+| create a new file | n/a | 993 ms | **214 ms** |
+| mkdir / symlink | n/a | ~994 ms | **~210 ms** |
+| overwrite in place | **NEVER** | 989 ms | n/a |
+| overwrite via temp+rename | **NEVER** | **NEVER** | n/a |
+| delete | n/a | **NEVER** | **212 ms** |
+| append | 992 ms | 992 ms | n/a |
+
+**Read this table by column, not by row.** "NEVER" is a property of the *predicate*, not of
+the change: the overwrite and the delete both reach the guest in about a second — visible
+via `st_size` and `readdir` respectively — while `read()` and `stat()` never catch up. An
+earlier version of this entry reported three rows as "the change never propagates", which
+was an artifact of binding one predicate per action.
+
+**Two clocks, and only one of them is slow.** `readdir` observes a new name ~14 ms after
+the host acts. `stat` runs on a **~1 s revalidation tick anchored to the guest's first
+lookup of that path** — the guest's own clock reads ~1000 ms regardless of when in the
+interval the host acts, and moves to ~2000 ms if the host waits longer than the tick. Any
+figure quoted as "~800 ms" is that 1 s tick minus a settle delay the measuring harness
+inserted; the honest number is **1 s**, quantised.
+
+**apple `container` is the control and behaves differently**: no `NEVER` anywhere, data
+visible in ~5 ms, and only *metadata* (size after a rename, dentry removal after a delete,
+size growth after an append) on the same ~1 s tick. So this is tart's VirtioFS, not virtiofs
+generally.
+
+**What to do.**
+
+- **Signal the guest by creating a new name, and poll with `readdir`.** That is the only
+  combination that is both fast (~14 ms) and correct on tart. `stat`-polling the same file
+  costs ~1 s; `read`-polling a rewritten file never terminates.
+- **Never hand the guest new data by rewriting a file it has already read** — not in place,
+  and not by temp+rename either. The guest may serve fabricated bytes indefinitely. Write a
+  new path instead.
+- Deletion is a usable signal **only** via `readdir`.
+
+**Existing exposure.** The one host-side rewrite of a shared config, `patchKeepaliveOnly`
+(`internal/orchestrator/launch/launch.go:943-965`), is gated on `AgentFreeLaunch`, which
+only `runtime/docker/docker.go:63` sets — so it never runs on tart. The live path,
+`patchRuntimeConfig` (`internal/orchestrator/lifecycle/runtimeconfig_patch.go:32`, reached
+from `yoloai network allow`), *does* rewrite `runtime-config.json` on a running sandbox, but
+the guest reads that file at boot rather than polling it, so today's exposure is bounded by
+consumption timing rather than by design. See [DF175](design/findings-unresolved.md).
+
 
 ## Seatbelt (macOS sandboxing)
 
