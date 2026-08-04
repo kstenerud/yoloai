@@ -1,0 +1,71 @@
+host: 26.5.1 | A=enf-a(192.168.64.35) B=enf-b(192.168.64.36)
+allow_A=1.1.1.1 allow_B=1.0.0.2 deny=1.0.0.1 | main ruleset=4 rules
+
+== C0 BASELINE — every sandbox reaches every destination ==
+        A: 1.1.1.1=301 1.0.0.2=301 1.0.0.1=301 | B: 1.1.1.1=301 1.0.0.2=301 1.0.0.1=301
+   PASS    all six paths reachable — every 'blocked' below is meaningful
+
+== C1 TWO SANDBOXES, TWO SUB-ANCHORS, DIFFERENT ALLOWLISTS, SIMULTANEOUSLY ==
+        loaded: box_a=2 rule(s), box_b=2 rule(s)
+        A: own=301 other=000 deny=000 | B: other=000 own=301 deny=000
+   PASS    each sandbox gets its OWN allowlist with both anchors live — per-sandbox policy at n=2,
+           which is the 'no cap' claim actually exercised rather than assumed
+
+== C2 CEILING — can an alphabetically-early sub-anchor's 'pass quick' void another's block? ==
+        aaa_early rules=1 | A->deny before=000 after=301
+   FAIL    CEILING CONFIRMED: one sub-anchor's 'pass quick' voided another sandbox's block.
+           The grant is a host-wide filter-bypass primitive. State it in the indicative.
+   PASS    main ruleset unchanged (4)
+
+== C3 load anchor UNDER -a — inert, or a real write vector? ==
+        after load-anchor from a VALID file: sibling holds 0 rule(s)
+        CONTROL — same file loaded directly: 1 rule(s) (must be >=1 or test is blind)
+   PASS    'load anchor' under -a wrote NOTHING while the same file loads fine directly — the
+           directive is inert under -a, so it is not a containment vector at all
+
+== C4 set skip FROM A SUB-ANCHOR — the position the grant actually permits ==
+        A is on bridge101
+        control (block only, in sub-anchor): A->deny=000  (must be 000)
+   PASS    control holds — a bypass would be visible
+        with set skip in the SUB-anchor: rules=1 A->deny=000
+   PASS    'set skip' does not bypass from a sub-anchor either — the position the grant permits
+
+== C5 THE COMBINED FIVE-LINE GRANT, with a detector that can tell refusal from failure ==
+        combined policy (all five rows, installed together for the first time):
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s/[A-Za-z0-9][A-Za-z0-9._-]* -f -$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s/[A-Za-z0-9][A-Za-z0-9._-]* -(F rules|s rules|s nat)$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s -s (Anchors|rules)$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s -f /etc/yoloai/pf-parent\.conf$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-s info$
+   PASS    combined five-line policy validated and installed
+   PASS    install sub-anchor -> permit
+   PASS    teardown sub-anchor -> permit
+   PASS    verify sub-anchor -> permit
+   PASS    enumerate parent -> permit
+   PASS    restore parent from pinned file -> permit
+   PASS    read pf enable state -> permit
+   PASS    ESCAPE write parent from stdin -> refuse-by-policy
+   PASS    ESCAPE flush parent -> refuse-by-policy
+   PASS    ESCAPE dotdot leaf -> refuse-by-policy
+   PASS    ESCAPE traversal leaf -> refuse-by-policy
+   PASS    ESCAPE parent from another file -> refuse-by-policy
+   PASS    ESCAPE sub-anchor from a file -> refuse-by-policy
+   PASS    ESCAPE another anchor -> refuse-by-policy
+   PASS    ESCAPE main ruleset -> refuse-by-policy
+   PASS    ESCAPE disable pf -> refuse-by-policy
+   PASS    ESCAPE flush all -> refuse-by-policy
+   PASS    ESCAPE flush all in sub -> refuse-by-policy
+   PASS    ESCAPE table op -> refuse-by-policy
+   PASS    ESCAPE show all state -> refuse-by-policy
+   PASS    CONTROL: unlisted command refused BY POLICY (not merely failed)
+
+== TOTALS ==
+   pass=27 fail=1 unknown=0
+
+== cleanup ==
+   parent rules=0
+   main ruleset: before=4 after=4
+   sudoers probe present: no
+   A egress restored: allow=301 deny=301
+   B egress restored: allow=301 deny=301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-shapea2.txt
