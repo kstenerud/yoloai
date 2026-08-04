@@ -10,8 +10,13 @@ that wrote this will not remember any of it.
 ## Do this first
 
 ```
+yoloai ls          # note the sandbox states — that IS the P7 reading
+                   # if rb-a / rb-b are not active: yoloai start rb-a && yoloai start rb-b
 sudo bash docs/contributors/design/research/macos-isolation-spike/reboot_post.sh
 ```
+
+Starting a sandbox does not touch pf, so P1-P6 are unaffected by doing it first — but without an
+address on `rb-a` the end-to-end recovery check (P9) reports UNKNOWN instead of measuring anything.
 
 `reboot_pre.sh` ran before the restart: it installed a narrow `NOPASSWD` grant, a root-owned
 `/etc/yoloai/pf-pool.conf`, and a live pf anchor with working enforcement, then snapshotted
@@ -30,6 +35,27 @@ If the post half is never going to run, remove them by hand:
 sudo rm -f /etc/sudoers.d/yoloai-reboot-probe && sudo rm -rf /etc/yoloai \
   && sudo pfctl -a com.apple/yoloai_rb -F all
 ```
+
+## The full sequence, for reference
+
+The pre half needs **two running `apple` sandboxes** — the harnesses use `container inspect` and
+`container exec`, so tart and seatbelt will not work with them. Their workdir must be somewhere
+durable, **not** under `/tmp`: a workdir that vanishes across the restart adds a second variable to
+an experiment that already has nine.
+
+```
+mkdir -p ~/yoloai-reboot-test/repo && git init ~/yoloai-reboot-test/repo   # any small durable repo
+yoloai new --backend apple rb-a ~/yoloai-reboot-test/repo
+yoloai new --backend apple rb-b ~/yoloai-reboot-test/repo
+sudo bash .../reboot_pre.sh rb-a rb-b       # aborts unless both have addresses AND enforcement works
+sudo reboot
+# ... then the block at the top of this file
+```
+
+Cleanup afterwards: `yoloai destroy rb-a rb-b --abandon-unapplied && rm -rf ~/yoloai-reboot-test`.
+
+Note this continues the workstream's apple-only coverage. The slot pool has never been run on tart,
+which is recorded as a gap in the plan.
 
 ## What the workstream is
 
