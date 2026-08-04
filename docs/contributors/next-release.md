@@ -81,6 +81,8 @@ finding or decision first, and lands here only if it should block the release.
   broader rule granted write **(the second breaking change: `:ro` is now enforced)**
 - [DF175](design/findings-unresolved.md) — `yoloai files put --overwrite` silently delivers
   fabricated content to a running tart sandbox
+- [DF181](design/findings-unresolved.md) — the DF175 repair gives up inside one revalidation tick,
+  so `files put` fails on a guest that is about to be correct
 
 ## Candidates — undecided
 
@@ -93,8 +95,6 @@ finding or decision first, and lands here only if it should block the release.
   not
 - [DF171](design/findings-unresolved.md) — gVisor is excluded from agent-free launch by a
   username-resolution bug the codebase already fixed elsewhere
-- [DF181](design/findings-unresolved.md) — the DF175 repair gives up inside one revalidation tick,
-  so `files put` fails on a guest that is about to be correct
 
 ## In flight — started, not finished
 

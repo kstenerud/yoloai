@@ -1,0 +1,40 @@
+=== DF181: is the STALE verdict premature, or is the invalidation insufficient? ===
+date   : 2026-08-04 15:49:30
+trials : 12
+sandbox: df181-timing
+creating tart sandbox df181-timing (this takes a few minutes)
+Warning: using OAuth credentials from ~/.claude/.credentials.json
+  These tokens expire after ~30 minutes and may fail in long-running sessions.
+  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.
+
+Sandbox df181-timing created
+  Agent:    claude
+  Workdir:  /var/folders/h8/p75r4zq95d59q622q33pngzr0000gn/T/tmp.mVeymKzlVF (copy)
+
+Run 'yoloai attach df181-timing' to start working (Ctrl-b d to detach)
+
+== P0  control: a replacement written DIRECTLY (never repaired) must not self-heal
+  guest v1                      : AAAAAAAAAAAAAAAAAAAA
+  guest after 3s, unrepaired    : AAA
+  ok: unrepaired stays stale, so self-healing below is attributable to the repair passes
+
+== trials: put v1, guest reads it, then replace and watch what the verdict was worth
+trial 1: put rc=0 (repair succeeded first time)
+trial 2: put rc=0 (repair succeeded first time)
+trial 3: put rc=0 (repair succeeded first time)
+trial 4: put rc=0 (repair succeeded first time)
+trial 5: put rc=0 (repair succeeded first time)
+trial 6: put rc=0 (repair succeeded first time)
+trial 7: put rc=0 (repair succeeded first time)
+trial 8: put rc=0 (repair succeeded first time)
+trial 9: put rc=0 (repair succeeded first time)
+trial 10: put rc=0 (repair succeeded first time)
+trial 11: put rc=0 (repair succeeded first time)
+trial 12: put rc=0 (repair succeeded first time)
+
+== VERDICT ==
+  trials=12  puts that reported STALE=0
+  of those: self-healed while idle=0   needed further passes=0
+  ==> DF181 did not reproduce in this run; the rate is not 100%, so re-run before concluding.
+
+Cleanup: yoloai destroy df181-timing --abandon-unapplied

@@ -192,8 +192,10 @@ chk "host side: the file is gone after rm" "gone" \
     "$([ -e "$EX/$P2" ] && echo present || echo gone)"
 note "guest immediately after rm" "$(gcat "$P2" || echo '<none>')"
 # NOT `put` here: a non-zero exit is one of the three outcomes this probe classifies, not an
-# abort. The refresh is unconditional now, so an unrepairable path makes the command FAIL — and
-# a harness that dies on that reports "harness broken" for the product behaving as designed.
+# abort. Against the SHIPPED build this put exits 0 and corrupts silently (the refresh is gated on
+# the import having replaced something, and an rm+put has not). Against a build with that gate
+# removed it exits non-zero instead — see results/df175-rmput-gate-removed.txt. Both are findings,
+# and a harness that dies on either reports "harness broken" for the product behaving as designed.
 printf '%s' "$Q5" > "$STAGE/$P2"
 p2out=$(yoloai files "$BOX" put "$STAGE/$P2" --overwrite 2>&1); p2rc=$?
 chk "host side holds the new content" "$Q5" "$(cat "$EX/$P2")"

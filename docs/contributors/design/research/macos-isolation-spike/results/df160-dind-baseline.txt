@@ -1,0 +1,31 @@
+DF160 (a6) baseline — dind/podman-priv run in isolation on an idle Mac
+Extracted 2026-08-04 from .testcache/runs/yoloai-smoketest-20260804-123934.062 (.testcache is gitignored, so the numbers are
+copied here to be quotable; the run itself is not reproducible from this file).
+
+COMMAND: python3 scripts/smoke_test.py --test dind --backend podman-priv --debug
+
+== manifest.json, the cell's own timing ==
+    {"name": "dind/podman-priv", "status": "pass", "elapsed_s": 6.5}
+    run timestamp: 2026-08-04T12:40:25Z
+
+== the exec under test, and its Docker Hub pull (a8) ==
+    23:$ ./yoloai --bugreport unsafe exec ysmk-1wrEQgF4NX-dind-podman-priv-000 -- bash -lc sudo dockerd >/tmp/dockerd.log 2>&1 & for i in $(seq 1 30); do sudo docker info >/dev/null 2>&1 && break; sleep 1; done; sudo docker run --rm hello-world || { echo '--- dockerd.log ---'; cat /tmp/dockerd.log; exit 1; }
+    50:Unable to find image 'hello-world:latest' locally
+    51:latest: Pulling from library/hello-world
+    57:Status: Downloaded newer image for hello-world:latest
+
+== host load sampled during the run (10s interval) ==
+    14:39:33 load= 3.52 3.21 3.10  podman_ctrs=0
+    14:39:44 load= 3.44 3.20 3.10  podman_ctrs=0
+    14:39:54 load= 3.68 3.26 3.12  podman_ctrs=0
+    14:40:04 load= 4.69 3.50 3.21  podman_ctrs=0
+    14:40:14 load= 4.19 3.44 3.19  podman_ctrs=0
+    14:40:24 load= 3.78 3.37 3.17  podman_ctrs=1
+    14:40:34 load= 3.73 3.38 3.18  podman_ctrs=0
+    14:40:45 load= 3.54 3.35 3.17  podman_ctrs=0
+
+== wall clock of the whole invocation (mostly prerequisite base-image builds) ==
+    real 0m51.856s  — five prereq builds (apple/docker/podman/seatbelt/tart) + 1 cell
+
+READING: 6.5s against the exec's hardcoded timeout=120 (smoke_test.py) is ~18x headroom.
+So a 120s expiry is a stall, not a marginal budget. See DF160 (a6)-(a8).

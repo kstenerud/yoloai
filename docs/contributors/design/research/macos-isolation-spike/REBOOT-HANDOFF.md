@@ -186,7 +186,9 @@ withdrawn (above) and its tart UNKNOWN was a harness artifact — the address lo
 ls` saying `active|running`, and yoloAI calls a running tart VM whose agent is not attached `idle`,
 so the check excluded the guest it was measuring on both sides of its own comparison. It now asks the
 backend. Round 3: the verdicts hold, but its **pre-half log was destroyed** by a re-run of the wrong
-half and the file on disk is a 43-byte error message; what makes the round sound anyway is that the
+half and the file on disk is not round 3's at all — it is a partial, aborted round 4 (349 bytes,
+twelve lines), because verifying the guard meant running the pre half again. What makes round 3
+sound anyway is that the
 snapshot is written *after* a gate that aborts unless every sandbox is enforcing, so the snapshot's
 existence is the evidence the log would have carried. `results/README.md` indexes every round's
 caveats. That is A30, three times.

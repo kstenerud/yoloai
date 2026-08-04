@@ -414,12 +414,13 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
   resolved addresses and resolution moves to the host, so where the two sides resolve a domain
   differently the guest is blocked while allowlisted. apple only — tart and seatbelt never had
   in-guest resolution, so they have no second answer to disagree with. Measured with the same call
-  the product uses (`socket.getaddrinfo(…, AF_INET)`, `runtime/docker/resources/firewall.py:63`)
+  the product uses (`socket.getaddrinfo(…, AF_INET)`, `runtime/docker/resources/firewall.py:73`)
   on both sides, 3 rounds each, over `api.anthropic.com`, `registry.npmjs.org`, `github.com`,
   `objects.githubusercontent.com` and `example.com`: **every guest address was in the host set,
   for every domain** — including the CDN-heavy ones, where 12 Cloudflare addresses and 4
   githubusercontent addresses matched set-for-set. The two sides do *not* share a resolver (guest
-  `192.168.64.1`, the vmnet gateway; host `100.100.100.100`, Tailscale MagicDNS), so the gateway
+  `192.168.64.1`, the vmnet gateway; host `100.100.100.100 192.168.0.1 192.168.111.1`,
+  led by Tailscale MagicDNS), so the gateway
   forwards consistently with the host's upstream. Raw output:
   [`results/dns-parity.txt`](../research/macos-isolation-spike/results/dns-parity.txt).
   **Three limits before this is treated as settled:** it is one host's resolver configuration;
