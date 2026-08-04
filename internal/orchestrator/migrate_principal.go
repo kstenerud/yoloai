@@ -162,7 +162,10 @@ func classifyPrincipalRename(name string, bt runtime.BackendType, st status.Stat
 	case isUnauditable(st):
 		return migrate.Op{Description: fmt.Sprintf("cannot audit sandbox %s (start the %s backend or repair it, then re-run migrate)", name, bt), Auth: migrate.AuthBlocked, Sandbox: name}
 	case isInstanceUp(st):
-		return migrate.Op{Description: fmt.Sprintf("stop sandbox %s, then re-run migrate — %s cannot rename a running instance and recreating it would kill the running agent", name, bt), Auth: migrate.AuthBlocked, Sandbox: name}
+		// Naming the route matters here: every command but `system migrate`
+		// refuses an out-of-date data directory, so the obvious `yoloai stop`
+		// sends the operator straight back to this refusal.
+		return migrate.Op{Description: fmt.Sprintf("stop sandbox %s, then re-run migrate — %s cannot rename a running instance and recreating it would kill the running agent. `yoloai stop` will not do it from this build (it refuses an out-of-date data directory); use the release you were running before the upgrade, or stop the instance directly with %s", name, bt, bt), Auth: migrate.AuthBlocked, Sandbox: name}
 	default: // stopped / removed
 		return migrate.Op{Description: fmt.Sprintf("recreate sandbox %s under its new name (%s cannot rename; the container's writable layer is dropped, the work copy is preserved)", name, bt), Auth: migrate.AuthConfirm, Sandbox: name}
 	}

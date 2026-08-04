@@ -16,8 +16,9 @@ Nothing in this repo has ever executed an upgrade. `smoke_test.py` creates fresh
 unit tests, and unit tests are precisely what cannot see this class of defect, because they supply
 their own fixtures.
 
-Two findings on the sandbox-share-tiering branch came out of that gap, and they are worth naming
-because they failed in opposite directions:
+Three findings have now come out of that gap, and they are worth naming because they failed in
+different directions — the first two on the sandbox-share-tiering branch, the third during the
+pre-release audit that was supposed to be a formality:
 
 - **[DF164](../findings-unresolved.md)** — every pre-v6 migrator addressed the sandbox through the
   *live* path builders, so the tier move silently repointed them at the layout they were migrating
@@ -28,11 +29,23 @@ because they failed in opposite directions:
 - **[DF168](../findings-resolved.md)** — `system migrate` refused *every* install with pre-v3
   records, on v0.6.0, v0.9.0 and `main` alike, in both `--check` and apply, with no stepwise path
   out. Shipped, HIGH, and present for two releases.
+- **[DF185](../findings-unresolved.md)** — a **closed loop** between two correct refusals: `system
+  migrate` said "stop the sandbox", `yoloai stop` said "run system migrate", and only `system
+  migrate` is exempt from the out-of-date-directory gate. Plus a downgrade instruction — *recover
+  your changes and recreate those sandboxes* — appended to **every** blocked op, including a refusal
+  over insufficient disk space. Neither half is a defect in any component; both exist only in the
+  sequence an operator walks.
 
-Both were found the same way: a human built a binary from a release tag, created a sandbox with it,
-and ran the migration by hand. That is the only detector this project has ever had for the
-category, it was applied twice, and it found something serious both times. The macOS half of the
-branch was rehearsed the same way, by hand, because the handoff asked for it.
+All three were found the same way: a human built a binary from a release tag, created a sandbox with
+it, and ran the migration by hand. That is the only detector this project has ever had for the
+category, it has been applied three times, and it found something serious every time. The macOS half
+of the branch was rehearsed the same way, by hand, because the handoff asked for it.
+
+**And the third one moves the argument.** DF164 and DF168 were defects *in* a migrator, so a
+sufficiently thorough migrator test suite is a plausible substitute for rehearsal. DF185 is not: it
+is a composition defect across the schema gate, the migrator and the CLI's rendering, and no test of
+any one of them can see it. Coverage that exercises the operator's sequence — not just the
+migration — is therefore the requirement, which sharpens what §"What to build" has to assert.
 
 **The specific thing to internalize:** DF164's failure printed `Data directory migrated
 successfully` and exited 0. A test that runs `system migrate` and checks the exit code would have

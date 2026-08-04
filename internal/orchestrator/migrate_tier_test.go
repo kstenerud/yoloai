@@ -268,6 +268,21 @@ func TestTierLayout_Plan_RunningSandboxIsBlocked(t *testing.T) {
 	require.NotEmpty(t, plan.Ops)
 	assert.Equal(t, migrate.AuthBlocked, plan.Ops[0].Auth)
 	assert.Contains(t, plan.Ops[0].Description, "stop it and re-run migrate")
+
+	// The refusal has to name a route that exists. `yoloai stop` is the obvious
+	// move and it is refused by the same out-of-date-directory gate that sent the
+	// operator here, so a message saying only "stop it" is a closed loop: migrate
+	// says stop, stop says migrate. Observed end to end on a v0.10.0 install.
+	assert.Contains(t, plan.Ops[0].Description, "`yoloai stop` will not do it from this build",
+		"the refusal must say the obvious remedy is blocked")
+	assert.Contains(t, plan.Ops[0].Description, "docker stop",
+		"and must name a route out that does not need this binary")
+
+	// Clearing it needs no older release — that route is for work this build
+	// cannot reach at all, and offering it here would cost a rebuild to fix a
+	// sandbox that only needs stopping.
+	assert.False(t, plan.Ops[0].NeedsOlderRelease,
+		"a running sandbox is cleared in place, so the downgrade route must not be offered")
 }
 
 // A backend that cannot be constructed on this host reports nothing running,

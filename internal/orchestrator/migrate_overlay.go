@@ -116,7 +116,10 @@ func (o *OverlayFlatten) Plan(ctx context.Context) (migrate.Plan, error) {
 		// subuid-owned children.
 		if op.Auth != migrate.AuthConfirm {
 			if reason := o.hostUnmanageableReason(name); reason != "" {
-				op = migrate.Op{Description: reason, Auth: migrate.AuthBlocked, Sandbox: name}
+				// The one block that genuinely needs an older binary: the sandbox's
+				// state is owned by host subuids this version cannot reach, so the
+				// work can only be recovered by the release that wrote it.
+				op = migrate.Op{Description: reason, Auth: migrate.AuthBlocked, Sandbox: name, NeedsOlderRelease: true}
 			}
 		}
 		ops = append(ops, op)

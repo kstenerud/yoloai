@@ -103,7 +103,13 @@ func (t *TierLayout) runningReason(ctx context.Context, name string) string {
 	if err != nil || !isInstanceUp(st) {
 		return ""
 	}
-	return fmt.Sprintf("sandbox %q is running (%s) — stop it and re-run migrate; tiering replaces the sandboxes directory, and a running instance would keep writing into the displaced copy", name, st)
+	return fmt.Sprintf(
+		"sandbox %q is running (%s) — stop it and re-run migrate; tiering replaces the sandboxes "+
+			"directory, and a running instance would keep writing into the displaced copy. "+
+			"Note `yoloai stop` will not do it from this build: every command except `system migrate` "+
+			"refuses an out-of-date data directory, so use the yoloai release you were running before "+
+			"the upgrade, or stop the backend instance directly (e.g. `docker stop %s`)",
+		name, st, store.InstanceName(env.Principal, name))
 }
 
 func (t *TierLayout) Describe() string { return "v5->v6 sandbox directory tiering" }

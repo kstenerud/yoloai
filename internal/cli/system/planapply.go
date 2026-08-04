@@ -82,6 +82,21 @@ func refuseIfBlocked(ctx context.Context) error {
 // prior yoloai release that still reads the data dir at its current schema, fix
 // them there, then upgrade again. It names concrete release tags when the schema
 // is known (see config.PriorReleaseRange).
+// needsOlderRelease reports whether any blocked op in plan can only be cleared
+// from an older release. The audit offers that route for those and no others:
+// most blocks name their own fix in the op's Description ("stop it", "start the
+// backend", "free some space"), and appending "go back a version, then destroy
+// and recreate those sandboxes" underneath a full-disk refusal is advice that
+// costs work to fix something the operator can clear where they stand.
+func needsOlderRelease(plan yoloai.MigrationPlan) bool {
+	for _, op := range plan.Ops {
+		if op.Blocked && op.NeedsOlderRelease {
+			return true
+		}
+	}
+	return false
+}
+
 func downgradeGuidance(onDiskSchema int) string {
 	from, to, ok := config.PriorReleaseRange(onDiskSchema)
 	var target string
@@ -157,7 +172,7 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 	if err != nil {
 		return err
 	}
-	blocked := len(plan.BlockedDescriptions()) > 0
+	blocked := needsOlderRelease(plan)
 	if opts.json {
 		payload := map[string]any{
 			"cli_realm":      statusString(cliSt),

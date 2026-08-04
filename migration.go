@@ -29,6 +29,11 @@ type MigrationOp struct {
 	// Description carries the reason and fix; the run refuses while any op is
 	// blocked.
 	Blocked bool `json:"blocked,omitempty"`
+	// NeedsOlderRelease marks a blocked op whose only remedy is to go back to a
+	// release that can still read the sandbox and recover the work there. Most
+	// blocks are cleared in place ("stop it", "free some space"), so an app
+	// should offer the downgrade route only for the ops that carry this.
+	NeedsOlderRelease bool `json:"needs_older_release,omitempty"`
 	// Sandbox, when set, is the sandbox the op concerns.
 	Sandbox string `json:"sandbox,omitempty"`
 }
@@ -112,11 +117,12 @@ func (s *System) MigrationPlan(ctx context.Context) (MigrationPlan, error) {
 	for _, p := range plans {
 		for _, op := range p.Ops {
 			out.Ops = append(out.Ops, MigrationOp{
-				Description:  op.Description,
-				Destructive:  op.Destructive(),
-				AbandonsWork: op.Auth == migrate.AuthAbandonOverlay,
-				Blocked:      op.Blocked(),
-				Sandbox:      op.Sandbox,
+				Description:       op.Description,
+				Destructive:       op.Destructive(),
+				AbandonsWork:      op.Auth == migrate.AuthAbandonOverlay,
+				Blocked:           op.Blocked(),
+				NeedsOlderRelease: op.NeedsOlderRelease,
+				Sandbox:           op.Sandbox,
 			})
 		}
 	}
