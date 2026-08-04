@@ -117,6 +117,17 @@ poka-yoke failing. Worth watching: if a second entry lands where a co-located ru
 applied, the honest conclusion is that prose placement is a *readability* strategy that has been
 doing duty as an enforcement strategy.
 
+**5b. That second entry landed, twice, and both times the rule was in the file being edited.**
+A28's harness carried the comment *"a load that silently no-ops is indistinguishable from one that
+worked (A22)"* and then measured an effect from a rule that never loaded. A30's harness opens by
+declaring *"the snapshot IS the control, so no verdict here can be produced by a test that could not
+have gone the other way"* — and its control was the one input never tested. So the warning above
+should now be read as the result: a rule written into the artifact it governs is **read** reliably
+and **applied** to the case in front of it, not to the artifact stating it. Both were closed by
+making the wrong state unrepresentable instead — a load-gate, and a refusal to render any verdict
+when a control field is empty — which is pattern 5's own preferred answer and still has no
+counter-specimen.
+
 ## Specimens
 
 Newest first. Every entry here is from a single session (2026-07-16/17) — the first sustained
@@ -908,6 +919,50 @@ whose class already has three siblings.
   caught all five: **a claim about what the code does gets a file:line, or it gets hedged.** The plan
   now carries line references for every code assertion, which at least makes the unsourced ones
   visible.
+
+### A30 — built the harness whose control was the whole point, then let three of its verdicts run against a control that never loaded (2026-08-04)
+
+- **What happened:** `reboot_post.sh` opens by saying *"every question is answered by comparison
+  against a recorded pre-reboot value, so no verdict here can be produced by a test that could not
+  have gone the other way — the snapshot IS the control."* `reboot_pre.sh` then wrote that snapshot
+  with **unquoted** values, so the four carrying spaces did not survive being sourced: `PRE_DATE`,
+  `PF_STATUS` and `SANDBOXES` failed to assign, and `BRIDGES` truncated to its first token in
+  silence. The run rendered a verdict for each anyway. P6 concluded *"bridges differ across reboot"*
+  by comparing a one-token remnant against a host that had **no vmnet bridges at all** because
+  nothing was running. Two more printed empty `before:` lines and carried on. Separately, P8 reported
+  **PASS "tart address preserved across reboot"** for a VM in state `stopped`, on a host where its
+  bridge did not exist — `tart ip` resolves through `/var/db/dhcpd_leases`, and the lease file
+  survives a reboot. And the live half of the experiment measured an idle machine throughout: the
+  one thing a reboot guarantees is that nothing is running, and the harness never restarted anything,
+  so three of nine questions went unmeasured and now need a second reboot.
+- **Source of the false belief:** the three `command not found` lines sat at the **top of the results
+  file**, above every verdict, in the file I read to write the summary. They are shell noise of the
+  kind that precedes working output constantly, and I read past them to get to the section headers.
+  The truncation produced no line at all.
+- **What makes this specific:** A28 — written two days earlier, in this same workstream — says
+  *"before trusting a verdict, construct the input that should produce the opposite one."* I applied
+  it to every **probe** in this harness and not once to the **control**, which is the input that
+  decides what every probe means. The header quoted above is the tell: the design was explicitly
+  built around the control, and the control was the only part never tested.
+- **Caught by:** A8's second trigger — opening the primary source. The owner ran the test and said
+  so; nothing was contradicted. Reading the raw output rather than summarising it surfaced the
+  `command not found` lines, and the tart PASS fell to re-running the harness's own command four
+  minutes later, where `tart ip yoloai-cli-rb-t` answered *"no IP address found, is your VM
+  running?"* with rc=1. Neither needed review of the script.
+- **Cost:** one wrong published verdict (P6), one withdrawn PASS, three questions unmeasured, and a
+  second reboot of the owner's machine to get them. The five verdicts that matter most — anchor
+  survival, pf's own state, the main ruleset, the files, unattended restore — used single-token
+  controls, loaded correctly, and stand.
+- **Class:** `llm-shaped-repos.md` Part 7, and the third sibling of A22/A28 — a check that passes
+  because it never ran. That is the threshold this file names for revisiting the gating question.
+- **Gated now?** Partially, and the split is worth keeping. `reboot_pre.sh` now single-quotes every
+  value; `reboot_post.sh` refuses to render any verdict unless all twenty snapshot fields loaded
+  non-empty, and its numeric fields default to empty rather than `0` so a plausible-looking default
+  cannot sail through. Run against the snapshot that actually shipped, that guard names three of the
+  four — **not** `BRIDGES`, which loaded truncated rather than empty, so the quoting is the fix and
+  the guard is only the backstop. `ipof` now refuses to read an address for a guest that is not
+  running. The transferable rule: **the control is an input too — corrupt it deliberately and
+  confirm the harness refuses rather than reports.**
 
 ### A20 — accepted a skip reason as a constraint, then engineered around the defect it was hiding (2026-07-30)
 

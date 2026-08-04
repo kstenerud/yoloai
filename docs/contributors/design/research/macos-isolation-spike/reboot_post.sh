@@ -20,14 +20,34 @@ exec > >(tee "$RESULTS") 2>&1
 
 # Every value below comes from the snapshot. Declaring them first states the contract between the
 # two halves explicitly, and stops shellcheck reading a sourced variable as a typo for a local one.
-PRE_DATE=""; ANCHOR=""; SLOTS=0
+# All default to empty, including the numeric ones: a numeric default of 0 is a plausible-looking
+# value that would sail through the load check below and be compared against as if it were recorded.
+PRE_DATE=""; ANCHOR=""; SLOTS=""
 A_SB=""; B_SB=""; T_SB=""; A_IP=""; B_IP=""; T_IP=""
 ALLOW_A=""; ALLOW_B=""; DENY=""
-ANCHOR_RULES=0; SRC0=""; SRC1=""; SRC2=""
-MAIN_RULES=0; MAIN_SHA=""; PF_STATUS=""; PF_TOKENS=0; BRIDGES=""; CONF_SHA=""; SANDBOXES=""
+ANCHOR_RULES=""; SRC0=""; SRC1=""; SRC2=""
+MAIN_RULES=""; MAIN_SHA=""; PF_STATUS=""; PF_TOKENS=""; BRIDGES=""; CONF_SHA=""; SANDBOXES=""
 # shellcheck disable=SC1090
 . "$SNAP"
-[ -n "$ANCHOR" ] && [ -n "$A_SB" ] || { echo "snapshot at $SNAP is incomplete; cannot compare"; exit 2; }
+# Every field is checked, not two of them. The first run of this test sourced a snapshot whose
+# space-carrying values were unquoted: PRE_DATE and PF_STATUS and SANDBOXES failed to assign at all,
+# BRIDGES truncated to its first token without erroring, and the run went on to print "before:" lines
+# that were empty and one UNKNOWN verdict derived from a control that was never loaded. A comparison
+# against an absent control is not a weaker measurement, it is not a measurement.
+#
+# Run against that snapshot this guard names PRE_DATE, PF_STATUS and SANDBOXES — and not BRIDGES,
+# which loaded truncated rather than empty. So this catches three of the four and the quoting in
+# reboot_pre.sh catches the fourth; the guard is the backstop, not the fix.
+missing=""
+for v in PRE_DATE ANCHOR SLOTS A_SB B_SB A_IP B_IP ALLOW_A ALLOW_B DENY ANCHOR_RULES \
+         SRC0 SRC1 MAIN_RULES MAIN_SHA PF_STATUS PF_TOKENS BRIDGES CONF_SHA SANDBOXES; do
+  [ -n "${!v}" ] || missing="$missing $v"
+done
+[ -z "$missing" ] || {
+  echo "snapshot at $SNAP did not load cleanly — empty after sourcing:$missing"
+  echo "every verdict here is a comparison against those values; refusing to render one without them"
+  exit 2
+}
 CONFDIR=/etc/yoloai; CONF="$CONFDIR/pf-pool.conf"
 SUDOERS=/etc/sudoers.d/yoloai-reboot-probe
 PASS=0; FAIL=0; UNKNOWN=0
@@ -37,7 +57,14 @@ unk() { UNKNOWN=$((UNKNOWN+1)); printf '   UNKNOWN %s\n' "$*"; }
 say() { printf '\n== %s ==\n' "$*"; }
 asuser() { sudo -u "$U" "$@"; }
 bk() { asuser "$ROOT/yoloai" ls 2>/dev/null | awk -v n="$1" '$1==n {print $3}'; }
+state() { asuser "$ROOT/yoloai" ls 2>/dev/null | awk -v n="$1" '$1==n {print $2}'; }
+sbstates() { asuser "$ROOT/yoloai" ls 2>/dev/null | tail -n +2 | awk '{print $1":"$2}' | tr '\n' ' '; }
 ipof() {
+  # The running-state gate is not belt-and-braces. `tart ip` resolves through /var/db/dhcpd_leases,
+  # which survives a reboot: the first run of this test reported a stopped VM's address as "preserved
+  # across reboot" from a lease record, on a host where the VM's bridge did not exist. An address
+  # nothing holds is not an address.
+  case "$(state "$1")" in active|running) : ;; *) printf ''; return ;; esac
   case "$(bk "$1")" in
     tart)  asuser tart ip "yoloai-cli-$1" 2>/dev/null | tr -d '[:space:]' ;;
     apple) asuser container inspect "yoloai-cli-$1" 2>/dev/null \
@@ -114,24 +141,66 @@ if [ -f "$CONF" ] && [ "$(shasum "$CONF" | cut -d' ' -f1)" = "$CONF_SHA" ]; then
 else bad "pinned ruleset file missing or changed"; fi
 if [ -f "$SUDOERS" ]; then ok "sudoers grant survived"; else bad "sudoers grant did not survive"; fi
 
+say "P7 DID THE SANDBOXES SURVIVE, AND CAN THEY BE RESTARTED?"
+# P1-P5 are answered above and are unaffected by what follows: they read kernel and file state, which
+# starting a sandbox does not touch. Everything from here needs a guest that is actually running. The
+# first run of this test measured none of it — after a reboot nothing is up, and the harness read the
+# empty host as the answer, which is how "no vmnet bridges exist" became "the bridges moved".
+echo "        before: $SANDBOXES"
+echo "        after : $(sbstates)"
+restart_fail=0
+for sb in "$A_SB" "$B_SB" ${T_SB:+"$T_SB"}; do
+  st=$(state "$sb")
+  printf '        %-6s came back %-9s' "$sb" "${st:-<absent>}"
+  case "$st" in
+    active|running) echo "— already up" ; continue ;;
+    "")             echo "— gone from the store entirely"; restart_fail=$((restart_fail+1)); continue ;;
+  esac
+  out=$(asuser "$ROOT/yoloai" start "$sb" 2>&1); rc=$?
+  echo "— start rc=$rc, now $(state "$sb")"
+  if [ $rc -ne 0 ]; then
+    restart_fail=$((restart_fail+1))
+    printf '%s\n' "$out" | tail -3 | sed 's/^/           /'
+  fi
+done
+echo "        states now: $(sbstates)"
+# A guest's address lags its start by a few seconds. Poll for it rather than sleeping a guessed
+# constant, so a slow host reads as slow rather than as address-less.
+for _ in 1 2 3 4 5 6 7 8 9 10; do
+  [ -n "$(ipof "$A_SB")$(ipof "$B_SB")${T_SB:+$(ipof "$T_SB")}" ] && break
+  sleep 2
+done
+if [ "$restart_fail" -eq 0 ]; then
+  ok "every sandbox restarted after the reboot, so boot recovery has something to rebuild membership"
+  echo "           FROM — the pool restore and the sandbox's return are separate events either way"
+else
+  bad "$restart_fail sandbox(es) could not be restarted after the reboot — recovery cannot re-add an"
+  echo "           address for a sandbox that no longer runs, and 'removed' is a state the plan does"
+  echo "           not currently account for"
+fi
+
 say "P6 vmnet BRIDGES — same subnets, or did they move? (DF172)"
+# Read AFTER the restarts on purpose: apple's bridge is created by the first container (DF178), so on
+# an idle host this question has no answer at all rather than a negative one.
 now_bridges=$(ifconfig 2>/dev/null | awk '/^[a-z]/{i=$1; sub(/:$/,"",i)} /inet /{print i"="$2}' | grep '^bridge' | tr '\n' ' ')
 echo "        before: $BRIDGES"
 echo "        after : ${now_bridges:-<none>}"
-if [ "$now_bridges" = "$BRIDGES" ]; then ok "bridges returned on the same subnets"
-else unk "bridges differ across reboot — expected; records that rules keyed on interface names or"; echo "           on a cached subnet cannot survive a boot"; fi
+if [ "$now_bridges" = "$BRIDGES" ]; then ok "bridges returned on the same subnets and the same indices"
+elif [ -z "$now_bridges" ]; then
+  unk "no bridges are up even after the restarts — nothing to compare; treat P6 as unmeasured"
+else
+  ok "bridges differ across reboot ($BRIDGES -> $now_bridges) — rules keyed on an interface name or"
+  echo "           on a cached subnet cannot survive a boot"
+fi
 
-say "P7/P8 SANDBOXES — did they survive, and did their ADDRESSES change?"
-echo "        before: $SANDBOXES"
-echo "        after : $(asuser "$ROOT/yoloai" ls 2>/dev/null | tail -n +2 | awk '{print $1":"$2}' | tr '\n' ' ')"
+say "P8 ADDRESSES — did the guests come back on the same ones?"
 newA=$(ipof "$A_SB"); newB=$(ipof "$B_SB")
 echo "        A: before=$A_IP after=${newA:-<none>} | B: before=$B_IP after=${newB:-<none>}"
 if [ -n "${T_SB:-}" ]; then
   newT=$(ipof "$T_SB")
-  echo "        tart $T_SB: before=${T_IP:-<none>} after=${newT:-<none>}"
+  echo "        tart $T_SB: before=${T_IP:-<none>} after=${newT:-<none>} (state $(state "$T_SB"))"
   if [ -z "$newT" ]; then
-    unk "the tart VM has no address after boot — tart VMs are far likelier than apple containers"
-    echo "           to come back stopped; start it and re-check if the tart address matters to you"
+    unk "the tart VM has no address after boot and could not be given one"
   elif [ "$newT" = "${T_IP:-}" ]; then
     ok "tart address preserved across reboot"
   else

@@ -1,63 +1,63 @@
-> **ABOUTME:** Session handoff for the macOS host-`pf` workstream, written immediately before a
-> deliberate reboot that ends the authoring session's context. Read this first if you are picking
-> the work up cold; it records the state, the decisions and — most importantly — what NOT to redo.
+> **ABOUTME:** Session handoff for the macOS host-`pf` workstream, written across a deliberate reboot
+> that ended the authoring session's context. Read this first if you are picking the work up cold; it
+> records the state, the decisions and — most importantly — what NOT to redo.
 
-# Handoff: macOS host-`pf` enforcement, mid-reboot-test
+# Handoff: macOS host-`pf` enforcement, reboot test
 
-**Written 2026-08-04, immediately before a reboot.** The reboot is itself the experiment. The agent
-that wrote this will not remember any of it.
+**Round 1 ran 2026-08-04 and is complete** — `results/reboot-post.txt`, pass=8 fail=0 unknown=3, and
+the machine was cleaned up. It answered the plan's largest premise and left three questions open, all
+for the same reason: after a reboot nothing is running, and the harness measured an idle host. **Round
+2 is a rerun of the same two scripts, with the guests restarted before the live half.** It is set up
+and not yet run; nothing is currently installed on the machine.
 
-## Do this first
+## Whether to run round 2 at all
+
+It settles four things, and all four are downstream of a *running* guest — so the only way to get
+them is another restart:
+
+- Can an apple sandbox that came back **`removed`** be restarted? Round 1 found both of them in that
+  state, which is stronger than "its address went stale": recovery may have no sandbox to re-add an
+  address for. The plan does not currently account for it.
+- Do the vmnet bridges return on the same subnets and indices (DF172)? Round 1's P6 verdict was an
+  artifact and is withdrawn.
+- Does a guest come back on the same address? Round 1's tart PASS is withdrawn — it read a surviving
+  `dhcpd_leases` record for a stopped VM.
+- Does enforcement filter again **end to end** after a real reboot, in two slots with different
+  allowlists? Round 1 restored the pool and stopped there.
+
+If none of that is worth a restart, the plan already has what it most needed; say so and leave it.
+
+## Running it
 
 ```
-yoloai ls          # note the sandbox states — that IS the P7 reading
-                   # if rb-a / rb-b are not active: yoloai start rb-a && yoloai start rb-b
+mkdir -p ~/yoloai-reboot-test/repo && git init ~/yoloai-reboot-test/repo
+yoloai new --backend apple rb-a ~/yoloai-reboot-test/repo
+yoloai new --backend apple rb-b ~/yoloai-reboot-test/repo
+yoloai new --backend tart  rb-t ~/yoloai-reboot-test/repo   # optional 3rd, covers tart too
+sudo bash docs/contributors/design/research/macos-isolation-spike/reboot_pre.sh rb-a rb-b rb-t
+sudo reboot
 sudo bash docs/contributors/design/research/macos-isolation-spike/reboot_post.sh
 ```
 
-Starting a sandbox does not touch pf, so P1-P6 are unaffected by doing it first — but without an
-address on `rb-a` the end-to-end recovery check (P9) reports UNKNOWN instead of measuring anything.
+The pre half needs **two running `apple` sandboxes**, and optionally a **tart** one as a third
+argument. It aborts unless every guest has an address *and* enforcement is demonstrably live before
+going down. The helpers are backend-aware (apple answers through `container`, tart through `tart`)
+and derive the backend from `yoloai ls`, so a mis-ordered argument fails loudly rather than measuring
+one guest twice. Seatbelt has no guest network of its own and is not applicable. The workdir must be
+somewhere durable, **not** under `/tmp`: a workdir that vanishes across the restart adds a second
+variable to an experiment that already has nine.
 
-`reboot_pre.sh` ran before the restart: it installed a narrow `NOPASSWD` grant, a root-owned
-`/etc/yoloai/pf-pool.conf`, and a live pf anchor with working enforcement, then snapshotted
-everything to `results/reboot-snapshot.txt`. The post half compares live state against that
-snapshot and **removes all three**. Until it runs, the machine carries:
+The post half needs no manual step — it reads the kernel and file state first (those questions are
+unaffected by what is running), then restarts the guests itself, then measures the live half. Cleanup
+afterwards: `yoloai destroy rb-a rb-b rb-t --abandon-unapplied && rm -rf ~/yoloai-reboot-test`.
 
-```
-/etc/sudoers.d/yoloai-reboot-probe
-/etc/yoloai/pf-pool.conf
-pf anchor com.apple/yoloai_rb
-```
-
-If the post half is never going to run, remove them by hand:
+Between the two halves the machine carries a narrow `NOPASSWD` grant, a root-owned pinned ruleset and
+a live pf anchor. The post half removes all three. If it is never going to run:
 
 ```
 sudo rm -f /etc/sudoers.d/yoloai-reboot-probe && sudo rm -rf /etc/yoloai \
   && sudo pfctl -a com.apple/yoloai_rb -F all
 ```
-
-## The full sequence, for reference
-
-The pre half needs **two running `apple` sandboxes**, and optionally a **tart** one as a third
-argument. The helpers are backend-aware (apple answers through `container`, tart through `tart`) and
-derive the backend from `yoloai ls`, so a mis-ordered argument fails loudly rather than measuring one
-guest twice. Seatbelt has no guest network of its own and is not applicable. Their workdir must be somewhere
-durable, **not** under `/tmp`: a workdir that vanishes across the restart adds a second variable to
-an experiment that already has nine.
-
-```
-mkdir -p ~/yoloai-reboot-test/repo && git init ~/yoloai-reboot-test/repo   # any small durable repo
-yoloai new --backend apple rb-a ~/yoloai-reboot-test/repo
-yoloai new --backend apple rb-b ~/yoloai-reboot-test/repo
-yoloai new --backend tart  rb-t ~/yoloai-reboot-test/repo   # optional 3rd, covers tart too
-sudo bash .../reboot_pre.sh rb-a rb-b rb-t  # aborts unless every guest has an address AND
-                                            # enforcement is demonstrably live before going down
-sudo reboot
-# ... then the block at the top of this file
-```
-
-Cleanup afterwards:
-`yoloai destroy rb-a rb-b rb-t --abandon-unapplied && rm -rf ~/yoloai-reboot-test`.
 
 ## What the workstream is
 
@@ -109,18 +109,16 @@ lost.
 - `load anchor` is **inert under `-a`** — `pfctl` never opens the file.
 - sudoers: globs unsafe (args match as one concatenated string), regex safe, **no escaping**, and
   **`visudo -c` cannot tell safe from unsafe**.
+- **Settled by round 1 of the reboot test** (`reboot-post.txt`): nothing in the anchor survives a
+  reboot — rules 16 → 0, every table emptied, so boot restore is mandatory · pf comes back **enabled
+  on its own** with the same reference count, so the `-E` question is about surviving someone else's
+  `-X`, not about starting from a disabled host · the main ruleset returns byte-identical · the
+  pinned file and the grant survive · and the pool **restores unattended** from the pinned file with
+  no tty after a real restart.
 
-## What the reboot settles
-
-P1/P2 do anchor rules and table contents survive? (the plan's largest asserted-not-measured premise)
-· P3 is pf still enabled — it is reference-counted and not auto-enabled, so if nothing re-enables it
-every rule is inert · P4 main ruleset identical? · P5 do the files survive? · P6 do vmnet bridges
-return on the same subnets? · P7/P8 do sandboxes and their **addresses** survive? · P9 unattended
-recovery after a *real* reboot.
-
-**If P1 says the rules survived**, the plan is wrong in an interesting direction: reboot recovery,
-the pinned-file grant row and part of VERIFY exist for a problem that does not occur. Update the
-plan rather than defending it.
+**Do not re-read `reboot-post.txt` as if every line in it holds.** Three of its verdicts had a
+control that never loaded and one PASS was read off a stale DHCP lease; `results/README.md` says
+exactly which and why, and both scripts were fixed. That is A30.
 
 ## Still open — decisions, not research
 
@@ -137,8 +135,8 @@ docker sets `AgentFreeLaunch`. `host-controlled-agent-launch.md` is a declared d
 
 ## How this work went wrong, repeatedly
 
-Recorded properly as **A28** and **A29** in [`agent-failures.md`](../../../agent-failures.md). The
-short version, because it will happen again:
+Recorded properly as **A28**, **A29** and **A30** in
+[`agent-failures.md`](../../../agent-failures.md). The short version, because it will happen again:
 
 - **Ten instrumentation bugs** produced verdicts that could not have come out otherwise — a shell
   idiom for "default on failure" colliding with a command that already emits a value on failure.
@@ -146,6 +144,11 @@ short version, because it will happen again:
 - **Five flat claims about this codebase that were false or unsourced**, two of which were used to
   reject a design alternative. **A claim about what the code does gets a `file:line`, or it gets
   hedged.**
+
+- **A30 is the same shape aimed at the harness itself**: the control the whole design rested on was
+  the one input never tested, and three verdicts were rendered against a snapshot that had not
+  loaded. **The control is an input too — corrupt it deliberately and confirm the harness refuses
+  rather than reports.**
 
 Three independent audit agents caught what self-review did not, and the discriminating behaviour was
 that they *reproduced* idioms and *opened* files rather than reading and reasoning. If you are about
