@@ -106,21 +106,30 @@ chosen over the fixed slot pool recorded at the end of this document.
 
 ### The grant
 
-Three lines. Writes are sub-path-only; reads may name the parent, because `-s` cannot modify
-anything and reaping must enumerate orphans.
+Five lines, and the split is the design. **Writes from stdin are sub-path-only** — the parent can
+never be written by the grant holder. **Reads may name the parent**, because `-s` cannot modify
+anything and reaping must enumerate orphans. **One write to the parent is permitted**, and only from
+a root-owned file at a literal path, which is what makes unattended reboot recovery possible without
+handing over the parent.
 
 ```
 <user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai/[A-Za-z0-9][A-Za-z0-9._-]* -f -$
 <user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai/[A-Za-z0-9][A-Za-z0-9._-]* -(F rules|s rules|s nat)$
 <user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -s (Anchors|rules)$
+<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -f /etc/yoloai/pf-parent\.conf$
+<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-s info$
 ```
 
-Validated 24/24 against a live policy
-([pf-shapea.txt](../research/macos-isolation-spike/results/pf-shapea.txt)) — the tested anchor root
-was `com.apple/yoloai_s`, otherwise identical. Permitted: install, teardown, self-verify, and
-parent enumeration. **Refused:** writing the parent, flushing the parent, `..` as a leaf,
-`../evil`, a leading-dot leaf, rules from a file, another anchor, main-ruleset load, `pfctl -d`,
-`-F all` (globally and within a sub-anchor), and table ops. Cold-cache control passed.
+Validated against a live policy — 24/24 in
+[pf-shapea.txt](../research/macos-isolation-spike/results/pf-shapea.txt) and 20/20 in
+[pf-reboot.txt](../research/macos-isolation-spike/results/pf-reboot.txt); the tested anchor root was
+`com.apple/yoloai_s`, otherwise identical. Permitted: install, teardown, self-verify, parent
+enumeration, parent *restore from the pinned file*, and reading pf's enable state. **Refused:**
+writing the parent from stdin, flushing the parent, `..` as a leaf, `../evil`, a leading-dot leaf,
+per-sandbox rules from a file, another anchor, main-ruleset load, `pfctl -d`, `-F all` (globally and
+within a sub-anchor), table ops — and, for the restore row specifically, **a different file in the
+same directory**, a user-writable path, and the pinned file loaded into another anchor or into the
+main ruleset. Cold-cache control passed in both runs.
 
 Four things that must not be "tidied" later:
 
@@ -193,17 +202,35 @@ looks different** — see the acceptance test, which must assert this directly.
 `com.apple/yoloai` has no `anchor "*"`, the per-sandbox load **succeeds**, the rules never evaluate,
 and nothing distinguishes it from working enforcement.
 
-This is not an edge case. **pf anchor contents are in-kernel state and do not survive a reboot.**
-After every reboot the parent is empty until setup is re-run, and re-running it needs `pfctl -f`,
-which the grant refuses by design. So the start path must verify:
+This is not an edge case. **pf anchor contents are in-kernel state and do not survive a reboot**, so
+after every reboot the parent is empty. The start path must therefore verify three things, all
+granted and all read-only:
 
-1. the parent contains `anchor "*"` — `pfctl -a com.apple/yoloai -s rules` (granted, read-only), and
-2. this sandbox's own rules are present — `-a com.apple/yoloai/<instance> -s rules` (granted).
+1. **pf is enabled** — `pfctl -s info`. `/etc/pf.conf` states pf is *not* auto-enabled and is
+   reference-counted, so if nothing enabled it, every rule loaded is inert: the same silent
+   fail-open from a different cause. (Observed: `pfd` holds the enable token, 56 days.)
+2. **the parent contains `anchor "*"`** — `pfctl -a com.apple/yoloai -s rules`.
+3. **this sandbox's own rules are present** — `-a com.apple/yoloai/<instance> -s rules`.
 
-Failing either is an error, not a warning. What to do about reboot itself is **undecided**: either
-document "re-run setup after reboot" and fail closed until then, or install a `/etc/pf.anchors`
-fragment at setup — which is persistent but edits the main ruleset and collides with hazard 1. A
-LaunchDaemon contradicts this plan's premise. **This needs a decision before Phase 1.**
+Failing any is an error, not a warning.
+
+### Reboot recovery — the pinned-file grant
+
+Restoring the parent means writing it, which the grant refuses on purpose. The way out is to keep
+the parent's content in a **root-owned file at a path pinned literally in the sudoers regex**:
+setup writes `/etc/yoloai/pf-parent.conf` (`root:wheel`, `0644`, in a `root:wheel 0755` directory),
+containing exactly `anchor "*"`. yoloAI may then reload the parent unattended, and cannot alter what
+gets reloaded. The old objection to `-f <path>` — whoever writes the file controls the rules —
+dissolves once the file and its directory are root-owned and the path is literal.
+
+Measured end to end: with the parent emptied, a running sandbox is unfiltered (the S5 fail-open,
+reproduced); restoring the parent **as the invoking user via `sudo -n`, with no tty**, brings
+enforcement straight back. **Restoring the parent alone revives already-running sandboxes** — their
+sub-anchor rules survive in the kernel, only the dispatch line was missing — so recovery is one
+command and does not require restarting anything.
+
+The grant proved tight around it: loading a *different* file from the same directory, a
+user-writable path, or the pinned file into another anchor or the main ruleset are all refused.
 
 ## Reaping and concurrency
 
@@ -246,7 +273,8 @@ earlier drafts of this plan got wrong:
 generates and installs the policy and loads the parent. `pfctl -n -f -` validates a generated
 ruleset unprivileged (exit 0 valid / 1 invalid), so verify before spending a privileged call — note
 it always prints the "Use of -f option" warning to stderr, which must be filtered rather than read
-as failure. Decide the reboot story here.
+as failure. Setup also writes the root-owned `/etc/yoloai/pf-parent.conf` that makes
+unattended reboot recovery possible.
 
 **Phase 2 — apple and tart.** This is more than removing a line:
 
@@ -323,7 +351,10 @@ upstream traffic, so it would require an RA carrying a global prefix, which was 
   address the host never allowed and is blocked while allowlisted. Applies to apple only — tart and
   seatbelt never had in-guest resolution. `resolve_domains` is also one-shot, so CDN rotation
   already breaks long-lived sandboxes today; that is inherited, not caused.
-- **Reboot behaviour is undecided** (see VERIFY).
+- **Whether yoloAI should hold its own pf enable reference is open.** pf is reference-counted via
+  `pfctl -E`/`-X`; `pfd` currently holds a token, but nothing guarantees a holder exists. Deliberately
+  untested: getting `-X` wrong drops the count and breaks vmnet NAT for every VM on the host.
+  Detection is granted and sufficient to fail closed; holding a reference is a further decision.
 
 ## Rejected alternative: a fixed slot pool
 
