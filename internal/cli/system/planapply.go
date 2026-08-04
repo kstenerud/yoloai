@@ -172,7 +172,7 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 	if _, err := fmt.Fprintf(opts.out, "CLI realm:     %s\nLibrary realm: %s\n", statusString(cliSt), statusString(libSt)); err != nil {
 		return err
 	}
-	if err := renderPlanHuman(opts, plan); err != nil {
+	if err := renderPlanHuman(opts, plan, emptyPlanNote(cliSt, libSt)); err != nil {
 		return err
 	}
 	if blocked {
@@ -222,17 +222,35 @@ func statusString(s config.LayoutStatus) string {
 	}
 }
 
+// noPendingOpsNote is the empty-plan wording when nothing about the realms'
+// state qualifies it — the apply path, where the outcome line follows anyway.
+const noPendingOpsNote = "No pending framework migrations."
+
+// emptyPlanNote says what an empty plan means for THESE realms, because the two
+// meanings are opposite and the reader cannot tell them apart. With every realm
+// current it means "nothing to do"; with a realm out of date it means the realm
+// is raised by a version stamp alone, no sandbox tree needing restructuring —
+// and printing the unqualified wording directly beneath "Library realm: needs
+// migration" reads as a contradiction in the one command whose whole job is to
+// tell an operator what is about to happen.
+func emptyPlanNote(cliSt, libSt config.LayoutStatus) string {
+	if cliSt != config.LayoutMigrate && libSt != config.LayoutMigrate {
+		return noPendingOpsNote
+	}
+	return "No sandbox needs restructuring — the realm is brought up to date by a schema version stamp alone."
+}
+
 // renderPlan prints the plan (JSON or human), destructive ops flagged.
 func renderPlan(opts planApplyOpts, plan yoloai.MigrationPlan) error {
 	if opts.json {
 		return cliutil.WriteJSON(opts.out, plan)
 	}
-	return renderPlanHuman(opts, plan)
+	return renderPlanHuman(opts, plan, noPendingOpsNote)
 }
 
-func renderPlanHuman(opts planApplyOpts, plan yoloai.MigrationPlan) error {
+func renderPlanHuman(opts planApplyOpts, plan yoloai.MigrationPlan, emptyNote string) error {
 	if len(plan.Ops) == 0 {
-		_, err := fmt.Fprintln(opts.out, "No pending framework migrations.")
+		_, err := fmt.Fprintln(opts.out, emptyNote)
 		return err
 	}
 	for _, op := range plan.Ops {

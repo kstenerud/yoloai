@@ -156,6 +156,40 @@ func TestMigrate_PreV3Record_CheckReportsTheDeferredPlan(t *testing.T) {
 	assert.FileExists(t, filepath.Join(top, "sandboxes", "box1", "environment.json"))
 }
 
+// An out-of-date realm with nothing to restructure must say so. The two meanings
+// of an empty plan are opposite — "nothing to do" against "the version stamp is
+// the whole job" — and the unqualified wording printed the first one directly
+// under "Library realm: needs migration", which reads as a contradiction in the
+// one command whose entire purpose is to tell an operator what is about to
+// happen. Observed on a real install carrying no sandboxes at all.
+func TestMigrate_OutOfDateRealmWithNoOps_SaysTheStampIsTheWork(t *testing.T) {
+	top := migrateTestTop(t)
+	seedFlatV0(t, top)
+	require.NoError(t, os.RemoveAll(filepath.Join(top, "sandboxes")))
+
+	_, err := runMigrate(t)
+	require.NoError(t, err)
+
+	// Roll the library stamp back one rung, above the frozen ceiling so the
+	// framework plan is derivable — and derives empty, there being no sandbox.
+	libDir := filepath.Join(top, "library")
+	require.NoError(t, config.WriteSchemaVersion(
+		config.SchemaVersionPathFor(libDir), config.LibrarySchemaVersion-1))
+
+	cmd := newSystemMigrateCmd()
+	buf := new(bytes.Buffer)
+	cmd.SetOut(buf)
+	cmd.SetArgs([]string{"--check"})
+	require.NoError(t, cmd.Execute())
+
+	out := buf.String()
+	require.Contains(t, out, "needs migration", "precondition: the realm must be out of date")
+	assert.Contains(t, out, "version stamp alone",
+		"an empty plan under an out-of-date realm must say the stamp is the work")
+	assert.NotContains(t, out, "No pending framework migrations",
+		"the unqualified wording contradicts the realm line above it")
+}
+
 func TestMigrate_Idempotent(t *testing.T) {
 	top := migrateTestTop(t)
 	seedFlatV0(t, top)
