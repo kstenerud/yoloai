@@ -1,0 +1,51 @@
+=== reboot test, PRE half — 2026-08-04 09:25:54 ===
+host: 26.5.1 | A=rb-a(192.168.64.44) B=rb-b(192.168.64.45)
+
+== baseline ==
+        A: allow=301 deny=301
+   PASS    baseline reachable
+
+== install the full arrangement ==
+   PASS    sudoers grant installed
+
+== verify enforcement works BEFORE the reboot (or the after-comparison is meaningless) ==
+        A: allow=301 deny=000 | B: allow=301 deny=000
+        tart rb-t: allow=301 deny=000
+   PASS    enforcement live for every sandbox given
+
+== snapshot ==
+        # reboot-snapshot — written by reboot_pre.sh, read by reboot_post.sh. Do not edit.
+        PRE_DATE=2026-08-04 09:26:28
+        ANCHOR=com.apple/yoloai_rb
+        SLOTS=8
+        A_SB=rb-a
+        B_SB=rb-b
+        A_IP=192.168.64.44
+        B_IP=192.168.64.45
+        T_SB=rb-t
+        T_IP=192.168.65.2
+        SRC2=192.168.65.2,
+        ALLOW_A=1.1.1.1
+        ALLOW_B=1.0.0.2
+        DENY=1.0.0.1
+        ANCHOR_RULES=16
+        SRC0=192.168.64.44,
+        SRC1=192.168.64.45,
+        MAIN_RULES=4
+        MAIN_SHA=4b6742c20fa7546bc6cbed72a33ce30fbef58835
+        PF_STATUS=Status: Enabled for 56 days 11:09:28 Debug: Urgent
+        PF_TOKENS=3
+        BRIDGES=bridge100=192.168.139.3 bridge101=192.168.64.1 bridge102=192.168.65.1 
+        CONF_SHA=79659152669215434f21078f7fcaf6438ddecebc
+        SANDBOXES=rb-a:active rb-b:active rb-t:idle 
+
+===================================================================
+ NOW REBOOT, then run:  sudo bash /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/reboot_post.sh
+
+ Left on the machine deliberately (post half removes them):
+   /etc/sudoers.d/yoloai-reboot-probe
+   /etc/yoloai/pf-pool.conf
+   pf anchor com.apple/yoloai_rb
+ If you never run the post half, remove by hand:
+   sudo rm -f /etc/sudoers.d/yoloai-reboot-probe && sudo rm -rf /etc/yoloai && sudo pfctl -a com.apple/yoloai_rb -F all
+===================================================================

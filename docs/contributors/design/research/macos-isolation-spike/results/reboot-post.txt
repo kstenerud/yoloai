@@ -1,0 +1,66 @@
+/Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/reboot-snapshot.txt: line 2: 09:26:28: command not found
+/Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/reboot-snapshot.txt: line 20: Enabled: command not found
+/Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/reboot-snapshot.txt: line 24: rb-b:active: command not found
+=== reboot test, POST half — 2026-08-04 09:46:25 ===
+pre-reboot snapshot taken 
+uptime now: 2 mins
+        (if that is not a small number of minutes, the machine may not have rebooted)
+
+== P1/P2 DID THE ANCHOR SURVIVE? — the premise the plan rests on ==
+        rules: before=16 after=0
+        src_0: before='192.168.64.44,' after=''
+        src_1: before='192.168.64.45,' after=''
+        src_2: before='192.168.65.2,' after=''   (tart slot, empty if no tart sandbox)
+   PASS    anchor RULES did not survive the reboot — the plan's premise is CORRECT, and restoring the
+           pool at boot is mandatory rather than defensive
+   PASS    table CONTENTS did not survive in ANY slot — membership must be rebuilt, not assumed
+
+== P3 IS pf STILL ENABLED? — if not, every rule yoloAI loads is inert ==
+        before: 
+        after : Status: Enabled for 0 days 00:01:42 Debug: Urgent
+        reference rows: before=3 after=3
+   PASS    pf is enabled after boot without yoloAI doing anything — the -E reference question is a
+           robustness concern, not a prerequisite
+
+== P4 MAIN RULESET — did it come back identical? ==
+        count: before=4 after=4 | sha before=4b6742c20fa7 after=4b6742c20fa7
+   PASS    main ruleset identical across reboot
+
+== P5 DID THE FILES SURVIVE? (expected yes — they are files, not kernel state) ==
+   PASS    pinned ruleset file survived unchanged
+   PASS    sudoers grant survived
+
+== P6 vmnet BRIDGES — same subnets, or did they move? (DF172) ==
+        before: bridge100=192.168.139.3
+        after : bridge100=192.168.139.3 
+   UNKNOWN bridges differ across reboot — expected; records that rules keyed on interface names or
+           on a cached subnet cannot survive a boot
+
+== P7/P8 SANDBOXES — did they survive, and did their ADDRESSES change? ==
+        before: 
+        after : rb-a:removed rb-b:removed rb-t:stopped 
+        A: before=192.168.64.44 after=<none> | B: before=192.168.64.45 after=<none>
+        tart rb-t: before=192.168.65.2 after=192.168.65.2
+   PASS    tart address preserved across reboot
+   UNKNOWN neither sandbox has an address after boot (likely stopped) — restart them and re-check if
+           the address question matters to you; P1-P6 are unaffected
+
+== P9 UNATTENDED RECOVERY AFTER A REAL REBOOT ==
+        restore rc=0 rules now=16 (want 16)
+        pfctl: Use of -f option, could result in flushing of rules
+present in the main ruleset added by the system at startup.
+See /etc/pf.conf for further details.
+
+No ALTQ support in kernel
+ALTQ related functions disabled
+   PASS    the pool restored unattended from the pinned file after a REAL reboot
+   UNKNOWN A has no address; end-to-end recovery not exercised
+
+== cleanup — removing everything the pre half left ==
+   /etc/sudoers.d/yoloai-reboot-probe present: no
+   /etc/yoloai present: no
+   anchor rules: 0
+   main ruleset: 4 (was 4)
+
+== TOTALS ==
+   pass=8 fail=0 unknown=3

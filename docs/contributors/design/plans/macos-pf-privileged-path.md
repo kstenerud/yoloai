@@ -169,7 +169,9 @@ its table, the sandbox is unfiltered and nothing distinguishes it from working i
 So the start path verifies, all granted and read-only:
 
 1. **pf is enabled** — `pfctl -s info`. `/etc/pf.conf` states pf is not auto-enabled and is
-   reference-counted; with no holder every rule is inert. (`pfd` holds the token today.)
+   reference-counted; with no holder every rule is inert. (`pfd` holds the token today, and holds it
+   again across a reboot without anyone asking — `reboot-post.txt` P3. The check stays: what a boot
+   restores, a `pfctl -X` elsewhere on the host can still take away.)
 2. **the pool ruleset is loaded** — `-a com.apple/yoloai -s rules`, expected rule count.
 3. **this sandbox's address is in its slot** — `-T show`.
 
@@ -178,12 +180,27 @@ current lease; comparing against the live address closes the remaining staleness
 
 ### Reboot
 
-pf anchor contents are in-kernel state. **This is asserted, not measured** — every "reboot" result
-here emptied the anchor by hand. It is near-certain, and a real reboot plus one `-s rules` would
-settle it permanently.
+**Measured on a real restart** (`reboot-post.txt`, controlled by a pre-reboot snapshot):
 
-Recovery is measured: the full 32-slot ruleset restores unattended from the pinned root-owned file
-via `sudo -n` (`pf-assumptions.txt` D7), after which membership must be re-added for live sandboxes.
+- **Nothing in the anchor survives.** Rules went 16 → 0 and every `src` table emptied. Restoring the
+  pool at boot is mandatory, not defensive — this was the plan's largest asserted premise and it
+  holds.
+- **pf comes back enabled on its own**, with the same three reference rows as before the reboot. So
+  a boot does not leave the host in the inert state `/etc/pf.conf` describes, and yoloAI holding its
+  own `-E` reference is a robustness question rather than a prerequisite.
+- **The main ruleset returns byte-identical** (same count, same `pfctl -s rules` sha).
+- **The pinned file and the sudoers grant survive unchanged**, which is what makes the next line
+  possible.
+- **Recovery runs unattended after a real reboot.** The pool reloaded from the pinned root-owned
+  file via `sudo -n` with no tty, rc=0, full rule count (also measured without a reboot in
+  `pf-assumptions.txt` D7). Membership must then be re-added for live sandboxes.
+
+Not settled by that run, and it matters to the second half of recovery: **no guest was running
+afterwards**, so re-adding a live address and confirming egress is filtered again was not exercised.
+The apple sandboxes came back **`removed`** rather than `stopped` — an address to re-add is not
+merely stale after a reboot, there may be no sandbox to re-add one for. Whether that state can be
+restarted at all is unmeasured, and the recovery design should not assume it can. `reboot_post.sh`
+now restarts the guests before measuring, so a second run answers this.
 
 ## The security ceiling
 
@@ -305,7 +322,14 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
 
 ## Unmeasured, and known limits
 
-- **Reboot itself** — asserted, never performed (see above).
+- **Recovery's second half.** The reboot itself is now performed (see above) and the pool restores;
+  what is untested is everything downstream of a *running* guest — whether an apple sandboxes that
+  came back `removed` restarts, what address it gets, whether vmnet returns on the same subnets, and
+  whether enforcement is filtering again end to end. One further reboot with the guests restarted
+  before measurement closes all four; `reboot_post.sh` is set up to do exactly that.
+- **Whether a tart guest keeps its address across a reboot.** Reported as preserved in
+  `reboot-post.txt` and **withdrawn**: the VM was stopped and the reading came from a surviving
+  `dhcpd_leases` record, not from a guest holding an address.
 - **Renewal after a subnet re-pick.** Steady-state renewal does not move tart's address — five
   renewals counted over 28 minutes — but renewal *following* a re-pick is untested, and apple has no
   `dhcpd_leases` record so it does not renew through bootpd at all.
@@ -315,7 +339,9 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
   already breaks long-lived sandboxes today; inherited, not caused.
 - **Pool size and exhaustion behaviour** are undecided.
 - **Whether yoloAI should hold its own `pfctl -E` reference.** Deliberately untested: getting `-X`
-  wrong drops the count and breaks vmnet NAT for every VM on the host.
+  wrong drops the count and breaks vmnet NAT for every VM on the host. The reboot narrowed this —
+  pf is enabled at boot without help, so this is about surviving another process's `-X`, not about
+  starting from a disabled host.
 
 ## Sweep surfaces
 
