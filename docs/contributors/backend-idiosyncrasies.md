@@ -56,6 +56,7 @@ inclusion test first, then add a row to the index.
 | `hotplug memory error: ENOENT` in kata-agent logs | [Kata: hotplug ENOENT is normal](#hotplug-memory-error-enoent-is-normal) |
 | `yoloai destroy` hangs; `ctr tasks ls` shows RUNNING but no qemu/firecracker; host CPU 60–80% | [Kata: shim wedge with dead VM](#kata-shim-wedge-with-dead-vm-sigkill-via-containerd-doesnt-release-the-task) |
 | `yoloai destroy` hangs on a Tart sandbox; `tart list` shows VM running but guest unreachable | [Tart: VM process wedge](#tart-vm-process-wedge-tart-stop-and-sigterm-via-pgrep-dont-release-the-host-tart-run) |
+| A Tart VM comes back on a **different IP** after an ordinary stop/start (no reboot, no sleep, guest otherwise healthy); `/var/db/dhcpd_leases` keeps growing | [Tart: a new MAC per `tart run` burns a lease per start](#tart-regenerates-the-vms-mac-on-every-tart-run-so-each-start-burns-a-dhcp-lease-and-the-shared-vmnet-pool-is-consumed-per-start) |
 | Task stays in `Created` after `Start()` returns | [Containerd: task.Start returns early](#taskstart-returns-before-the-vm-is-actually-running) |
 | `OCI runtime exec failed: ... procReady not received` on exec/Launch | [Docker: procReady usually means the container is dying, not broken runc](#docker-procready-not-received-usually-means-the-container-is-exiting-not-a-broken-runtime) |
 | `parent snapshot sha256:... does not exist: not found` | [Containerd: WithNewSnapshot doesn't unpack](#withnewsnapshot-does-not-unpack-image-layers) |
@@ -2203,6 +2204,86 @@ automatically. The same probe also feeds `yoloai ls` (`<status>
 wedge (pre-flight abort + in-loop check + its own autopsy fingerprint)
 instead of burning sentinel timeouts. Full design:
 [`archive/plans/tart-network-liveness.md`](archive/plans/tart-network-liveness.md).
+
+### Tart regenerates the VM's MAC on every `tart run`, so each start burns a DHCP lease and the shared vmnet pool is consumed per start
+
+Measured 2026-08-04 (macOS 26.5.1) while separating "the reboot moved this
+guest's address" from "any restart moves it". Raw output:
+[`design/research/macos-isolation-spike/results/restart-control.txt`](design/research/macos-isolation-spike/results/restart-control.txt).
+
+**That an address moves across a stop/start was already known** — the same
+spike's `lease-binding.txt` L2 measured apple `.22`→`.23` and concluded that
+any cached address is a fail-open hazard. What this entry adds is *why*, and
+how much worse it gets over a host's lifetime.
+
+**Symptom:** a Tart VM comes back on a different IP after an ordinary
+`stop`/`start`, with no reboot, no host sleep and no subnet re-pick — so
+none of the wedge symptoms above apply, and the guest is perfectly healthy
+on its new address.
+
+**Why:** `tart run` writes a **new random MAC** into the VM's own
+`~/.tart/vms/<name>/config.json` on every start. yoloAI passes no MAC flag
+(`runtime/tart/tart.go`, `buildRunArgs` — the invocation is `run
+--no-graphics` plus `--dir` shares), and `--random-mac` is an explicit
+`tart set` option we never use, so this is Tart's own default. Verified by
+reading `macAddress` from the VM's config across two consecutive restarts:
+
+| event | MAC | address |
+| --- | --- | --- |
+| running | `fa:71:58:f0:c3:85` | `192.168.65.3` |
+| after `stop` | `fa:71:58:f0:c3:85` (unchanged — the rewrite happens at start) | — |
+| after `start` | `da:86:c1:09:b2:13` | `192.168.65.2` |
+| after another `stop`/`start` | `b2:f5:76:a9:08:f2` | `192.168.65.4` |
+
+To vmnet's DHCP server each start is therefore a **brand-new host**, which
+gets a brand-new lease. Leases are consumed per *start*, not per VM, and
+`/var/db/dhcpd_leases` accumulates a record per start that nothing prunes —
+the file survives reboots, so the accumulation is permanent. On the host
+above it had reached **253 records covering the whole of
+`192.168.65.2`–`.254`, with zero free**, at which point starts recycle
+addresses that previous VMs held. **A reboot does not heal this**: measured
+directly across one, the count read 253 before and 253 after
+(`reboot-post.txt` P11, the round taken 2026-08-04 11:30). A full pool is
+therefore a permanent state of the host, not a condition that clears itself
+overnight, and the only thing that empties the file is deleting it. That is how a VM can come back on a
+*lower* address than it had (`.3` → `.2` above): it is being handed a
+stranger's expired lease, not remembering its own.
+
+**Consequence for anything that keys on a guest address.** An address is
+not an identity here and does not survive a restart. Worse, once the pool
+wraps, an address authorized for sandbox X is eventually handed to sandbox
+Y — so a stale host-side rule naming that address applies to whoever holds
+it next. The host-`pf` design's reaping requirements exist for exactly this
+([`design/plans/macos-pf-privileged-path.md`](design/plans/macos-pf-privileged-path.md),
+"Reaping is a security requirement"); this entry is the mechanism underneath
+them.
+
+**The apple `container` backend does not share any of this.** It holds
+**zero** records in `/var/db/dhcpd_leases` — its vmnet plugin runs a
+separate allocator — so the two backends neither share a pool nor share its
+exhaustion. (`lease-binding.txt` L1 suspected this and left it UNKNOWN for
+want of a census; the count settles it.) Apple's addresses move on restart too (`.3`→`.5`, `.4`→`.6`
+measured, each with a fresh MAC), but the allocation is sequential from its
+own store, and it appears to restart from the low end after a host reboot.
+Do not generalise one backend's address behaviour to the other.
+
+**Across a host reboot, both backends move every guest and regenerate every
+MAC** — the same behaviour as a plain restart, so a reboot buys back nothing.
+Measured over one real reboot with the guests deliberately restarted in
+**reversed** order, which is what distinguishes the two available
+explanations: if addresses were pinned to sandboxes they would not move, and
+if they were purely a function of start order the reversed order would swap
+them. Neither happened. Apple's A went `192.168.64.5`→`.4` and B went
+`.6`→`.3` — B did **not** take A's old `.5` — while tart's guest went
+`192.168.65.4`→`.2`; all three came up with a newly generated MAC. The pool
+simply advances from wherever it stood.
+
+**So an address is not an identity and cannot be persisted.** Anything that
+needs to know which address a sandbox holds must ask the backend at the
+moment it needs to know. A slot→address mapping written before a reboot
+names, after it, either nothing or somebody else — and on tart, where the
+pool has wrapped, "somebody else" is the likely case rather than the
+pathological one.
 
 ### Tart VirtioFS: the guest can read fabricated file content — the OLD bytes at the NEW length, with a correct `st_size` and no error
 

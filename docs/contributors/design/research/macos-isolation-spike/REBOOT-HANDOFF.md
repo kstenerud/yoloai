@@ -1,31 +1,57 @@
-> **ABOUTME:** Session handoff for the macOS host-`pf` workstream, written across a deliberate reboot
-> that ended the authoring session's context. Read this first if you are picking the work up cold; it
-> records the state, the decisions and — most importantly — what NOT to redo.
+> **ABOUTME:** Session handoff for the macOS host-`pf` workstream, written across a deliberate
+> reboot that ended the authoring session's context. Read this first if you are picking the work
+> up cold; it records the state, the decisions and — most importantly — what NOT to redo.
 
 # Handoff: macOS host-`pf` enforcement, reboot test
 
-**Round 1 ran 2026-08-04 and is complete** — `results/reboot-post.txt`, pass=8 fail=0 unknown=3, and
-the machine was cleaned up. It answered the plan's largest premise and left three questions open, all
-for the same reason: after a reboot nothing is running, and the harness measured an idle host. **Round
-2 is a rerun of the same two scripts, with the guests restarted before the live half.** It is set up
-and not yet run; nothing is currently installed on the machine.
+**All three rounds ran 2026-08-04 and are complete. Nothing is installed on the machine and no
+further round is needed.** Round 1: pass=8 fail=0 unknown=3, in git at `7c913d32`. Round 2:
+pass=12 fail=0 unknown=1 — **its output no longer exists**, having never been committed before
+round 3 overwrote it in place. Round 3: **pass=15 fail=1 unknown=0**, taken 11:30, and it is the
+`results/reboot-post.txt` on disk. The machine was cleaned up after each.
 
-## Whether to run round 2 at all
+Round 3 closed the last open question — *does a guest come back on the same address?* — with a
+straight no on both backends, and turned up one FAIL that is a genuine property of the host rather
+than a harness fault (tart's lease pool is exhausted and a reboot does not clear it). Every verdict
+that matters to the plan is now measured. **The one thing to carry forward is a discipline, not an
+experiment: commit a round's three files before starting the next one.** The harness rewrites them
+in place, and that destroyed data twice in one morning — round 2's entire output, and round 3's
+pre-half log.
 
-It settles four things, and all four are downstream of a *running* guest — so the only way to get
-them is another restart:
+## What round 2 got wrong, because it was the whole reason for round 3
 
-- Can an apple sandbox that came back **`removed`** be restarted? Round 1 found both of them in that
-  state, which is stronger than "its address went stale": recovery may have no sandbox to re-add an
-  address for. The plan does not currently account for it.
-- Do the vmnet bridges return on the same subnets and indices (DF172)? Round 1's P6 verdict was an
-  artifact and is withdrawn.
-- Does a guest come back on the same address? Round 1's tart PASS is withdrawn — it read a surviving
-  `dhcpd_leases` record for a stopped VM.
-- Does enforcement filter again **end to end** after a real reboot, in two slots with different
-  allowlists? Round 1 restored the pool and stopped there.
+Round 2 reported both apple guests returning on the addresses they went down on and recorded **"PASS
+addresses preserved across reboot"**. A no-reboot control run afterwards (`results/restart-control.txt`)
+moved *every* guest on *both* backends with a plain stop/start — no reboot, no sleep — each with a
+freshly generated MAC. So nothing preserves an address, and what round 2 saw was an allocator counting
+from the same place while the harness happened to restart the guests in creation order.
 
-If none of that is worth a restart, the plan already has what it most needed; say so and leave it.
+**The two explanations are not equally bad.** If allocation follows start order, then after a reboot a
+saved slot→address mapping does not go stale, it names the **wrong sandbox** — restoring it hands one
+guest the allowlist authorized for another, which is fail-open. So round 3 starts **B first** (P10).
+That single reversal was the experiment; everything else in the run was re-measurement.
+
+**The answer: neither.** Both addresses moved and B did not land on A's old one (A `.5`→`.4`, B
+`.6`→`.3`, tart `65.4`→`65.2`, all with regenerated MACs). Allocation is not pinned to identity and
+not a clean function of start order — the pool just advances from wherever it stood. A stored
+mapping is therefore stale in general, and *wrong* specifically when the pool has wrapped, which on
+tart it permanently has. The plan already assumed this worse case; it now has the measurement.
+
+Two mechanisms found alongside it, both now in `backend-idiosyncrasies.md`: `tart run` regenerates the
+VM's MAC on every start (yoloAI passes no MAC flag), so leases are burned per start and
+`/var/db/dhcpd_leases` — already **exhausted** on this host, 253/253 — now recycles addresses that
+previous VMs held; and apple holds **zero** records in that file, running a separate allocator, so
+neither backend's address behaviour generalises to the other. P11 re-measured both pools across the
+reboot and confirmed the exhaustion is permanent: 253 before, 253 after. Nothing prunes that file.
+
+## Whether to run another round
+
+**No.** Every question this test was built to answer is measured, and the remaining weakness is
+replication rather than coverage — everything here is n=1 on one host, and a fourth round on the
+*same* host would not fix that. Bridge-index stability is the one result actively contradicted
+elsewhere in this directory, so treat it as an observation and never as a property. If a round 4 ever
+does happen, it should be on **different hardware**, and the pre half should be run against a fresh
+`git status` so the previous round's files are safely committed first.
 
 ## Running it
 
@@ -47,9 +73,30 @@ one guest twice. Seatbelt has no guest network of its own and is not applicable.
 somewhere durable, **not** under `/tmp`: a workdir that vanishes across the restart adds a second
 variable to an experiment that already has nine.
 
+The pre half snapshots each guest's **MAC**, the **start order**, a census of both DHCP pools, and
+the pre-reboot enforcement digits — the values P10 and P11 compare against.
+
+**The pre half now refuses to run when you have pasted the wrong filename**, which is the mistake
+that cost round 3 its log: an unconsumed snapshot written before the machine's current boot means
+the reboot already happened and the half you want is `reboot_post.sh`. `reboot_post.sh` stamps
+`CONSUMED=` into the snapshot when it finishes, so a new round is never blocked by a spent one. If
+you genuinely want to restart a round from scratch, delete the snapshot.
+
+That check runs **before** the root check, deliberately. It needs no privilege, so the wrong-half
+mistake is caught before the password prompt — and, more usefully, its refusal can be exercised
+without sudo. The first attempt to verify it could not: reaching the guard required a real
+privileged run, so "confirm it refuses" and "run the thing it must refuse" were the same command,
+and the confirmation attempt overwrote the log a second time. **A guard you can only test by
+triggering the damage is not tested.**
+
 The post half needs no manual step — it reads the kernel and file state first (those questions are
-unaffected by what is running), then restarts the guests itself, then measures the live half. Cleanup
+unaffected by what is running), starts the apple `container` service, then restarts the guests
+itself **in reversed order (B before A, deliberately — P10)**, then measures the live half. Cleanup
 afterwards: `yoloai destroy rb-a rb-b rb-t --abandon-unapplied && rm -rf ~/yoloai-reboot-test`.
+
+`restart_control.sh` is not part of the reboot pair and needs no restart: it stops and starts each
+guest in place to establish what an ordinary restart does, so the reboot halves cannot attribute to
+the reboot what happens anyway. Run it before the pre half if you want a fresh control.
 
 Between the two halves the machine carries a narrow `NOPASSWD` grant, a root-owned pinned ruleset and
 a live pf anchor. The post half removes all three. If it is never going to run:
@@ -116,9 +163,33 @@ lost.
   pinned file and the grant survive · and the pool **restores unattended** from the pinned file with
   no tty after a real restart.
 
-**Do not re-read `reboot-post.txt` as if every line in it holds.** Three of its verdicts had a
-control that never loaded and one PASS was read off a stale DHCP lease; `results/README.md` says
-exactly which and why, and both scripts were fixed. That is A30.
+- **Settled by rounds 2 and 3, and reproduced by round 3** (which is the readable one): the apple
+  sandboxes **do** survive and restart rc=0 once `container system start` has run — round 1's
+  `removed` reading was DF180, not a destroyed sandbox; they come back `stopped`, all of them · the
+  vmnet bridges came back on the **same subnets and the same indices** (n=1 each time;
+  `vmnet-switch.txt` and `pf-main-run.txt` disagree 26 minutes apart on this host, so do not promote
+  it to a property) · **enforcement filters again end to end after a real reboot, in two slots with
+  different allowlists** (`allow=301 deny=000` each), which is the half round 1 could not reach.
+
+- **Settled by round 3** (`reboot-post.txt` on disk): **addresses move on both backends across a
+  reboot**, with regenerated MACs, and reversing the start order neither preserves nor swaps them —
+  membership must be rebuilt from live state, never restored from a mapping (P8/P10) · **tart's
+  lease pool is exhausted and stays exhausted across a reboot**, 253/253 both sides, so every new VM
+  recycles an address a previous VM held — the one FAIL in the run, and a real property of the host
+  (P11) · apple holds **zero** `dhcpd_leases` records, so the two backends share neither pool nor
+  exhaustion.
+
+**Do not re-read `reboot-post.txt` as if every line in it holds** — and note it is rewritten in place
+by each round, so check which one you have. Round 1: three verdicts had a control that never loaded
+and one PASS was read off a stale DHCP lease. Round 2: the controls loaded, but its address PASS was
+withdrawn (above) and its tart UNKNOWN was a harness artifact — the address lookup gated on `yoloai
+ls` saying `active|running`, and yoloAI calls a running tart VM whose agent is not attached `idle`,
+so the check excluded the guest it was measuring on both sides of its own comparison. It now asks the
+backend. Round 3: the verdicts hold, but its **pre-half log was destroyed** by a re-run of the wrong
+half and the file on disk is a 43-byte error message; what makes the round sound anyway is that the
+snapshot is written *after* a gate that aborts unless every sandbox is enforcing, so the snapshot's
+existence is the evidence the log would have carried. `results/README.md` indexes every round's
+caveats. That is A30, three times.
 
 ## Still open — decisions, not research
 
