@@ -245,9 +245,9 @@ its next occupant** — measured directly.
 
 **Concurrency needs two ordering rules, not a new lock.** Per-sandbox `flock`s already exist —
 `store.AcquireLock(layout, name)`, taken in create, start, stop, destroy and reset — so two
-processes acting on the *same* sandbox are already serialized. (`concurrency-guard-sandbox-operations.md`
-still says "No concurrency controls exist"; that plan is **stale** and should not be designed
-against.) What no lock covers is the sweep, which is cross-sandbox and holds none.
+processes acting on the *same* sandbox are already serialized. (A plan asserting "No concurrency
+controls exist" was retired to `archive/plans/` once it turned out to describe a gap
+`store.AcquireLock` had already filled — it misled this design before it was caught.) What no lock covers is the sweep, which is cross-sandbox and holds none.
 
 It does not need one:
 
@@ -317,7 +317,10 @@ unattended reboot recovery possible.
 With the capability absent, tart keeps today's refusal and apple keeps today's weak path plus
 DF179's disclosure, so nothing that works today stops working.
 
-**Phase 3 — seatbelt.** The gid launcher, or a decision not to. See the backend table.
+**Phase 3 — seatbelt: parked.** Designed and deliberately not built —
+[seatbelt-host-pf-enforcement.md](seatbelt-host-pf-enforcement.md) records the mechanism and the
+four costs that outweigh it. Seatbelt keeps today's honest refusal, which advertises the real limit
+rather than shipping a `--network-isolated` that means something weaker than it does elsewhere.
 
 ## Acceptance test
 
