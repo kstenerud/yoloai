@@ -87,6 +87,8 @@ finding or decision first, and lands here only if it should block the release.
   instead of replacing it
 - [DF180](design/findings-unresolved.md) — apple's `Inspect` reports "not found" for a daemon it
   cannot reach, so `destroy` claims success and leaks the container
+- [DF178](design/findings-unresolved.md) — apple's vmnet bridge is created by the first container,
+  not by the system service, so the injector is unbindable on a fresh host
 
 ## Candidates — undecided
 

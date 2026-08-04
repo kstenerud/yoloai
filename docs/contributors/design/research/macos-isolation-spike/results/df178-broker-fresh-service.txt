@@ -1,0 +1,43 @@
+DF178 — does brokering degrade on a freshly started apple service?
+Run 2026-08-04, macOS 26.5.1. Hand-run rather than scripted, because the first two
+scripted attempts measured nothing (see VOID RUNS below) and the fix was a control,
+not more automation.
+
+SETUP for every arm: container system stop; container system start; sleep 3.
+Confirmed each time: "gateway before: DOWN" (192.168.64.1 assigned to no interface).
+A dummy credential is exported so brokering has something to broker:
+ANTHROPIC_API_KEY=sk-ant-dummy-for-probe-only  (never a real key; the injector only
+needs a credential to exist in order to start).
+
+SIGNAL: host/injector.json — the persisted handle to a RUNNING sidecar
+(internal/broker/host.go). Present = the key is held host-side. Absent = delivery
+went direct.
+
+  arm                                        gateway before | new rc | injector.json
+  ------------------------------------------ ---------------|--------|--------------
+  1. explicit --broker                       DOWN           |   0    | present
+  2. default, no flag (the user's path)      DOWN           |   0    | present
+
+  positive control: --broker with gateway UP                |   0    | present
+                    (host/injector.json + host/injector.log)
+
+RESULT: brokering ENGAGES on a bridgeless service. No silent degradation on either
+arm. The reach check runs after the container exists, and creating that container
+is what brings the bridge up — so by the time reachability is asked, it is there.
+
+WHY IT IS STILL A FINDING: the ordering is what saves it, not the property
+reach.go claimed. The bridge is NOT up merely because the service is running, so
+any change that starts the injector before the first container re-opens the
+degradation — and the old comment explicitly invited exactly that.
+
+VOID RUNS, recorded because they are the more instructive half:
+  (a) First attempt sampled `env | grep ANTHROPIC_API_KEY` inside a fresh
+      `container exec` shell. That shell does not reproduce the agent process's
+      environment, so it could not distinguish brokered from direct at all.
+  (b) Second attempt used injector.json — the right signal — but ran on a host with
+      NO credentials at all (no ANTHROPIC_API_KEY, no ~/.claude/.credentials.json).
+      Both arms reported "no injector.json (delivery went DIRECT)", which reads
+      exactly like the feared finding. It was absence of anything to broker.
+      Caught by a positive control: --broker with the bridge UP also produced no
+      injector.json, which cannot be right. A negative result with no positive
+      control is not a measurement.

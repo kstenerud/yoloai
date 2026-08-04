@@ -83,32 +83,44 @@ printf 'x\n' > "$WORKDIR/README.md"
 git -C "$WORKDIR" add -A
 git -C "$WORKDIR" -c user.email=s@e.com -c user.name=s commit -qm init
 
-# BOTH arms, because they are governed by different code and only one is the user's default path.
-# `--broker` is documented "Require … (errors if the backend can't)", so an explicit request should
-# FAIL loudly on a bridgeless host — that is the good outcome. The silent degradation DF178 is about
-# can only happen on the DEFAULT path, where nobody asked out loud. Testing only the explicit flag
-# would report the safe half and miss the finding.
-printf '  arm 1: explicit --broker on the fresh service (expect a loud failure)\n'
+# The authoritative signal is injector.json — the persisted handle to a RUNNING sidecar
+# (internal/broker/host.go). Its presence with a live PID means the key stayed host-side; its
+# absence means delivery went direct. An earlier version of this probe sampled `env` inside a
+# fresh `container exec` shell instead, which does not reproduce the agent process's
+# environment and so could not distinguish the two at all.
+brokerstate() { # brokerstate <box>
+  local sb rec pid
+  sb="$(yoloai files "$1" path 2>/dev/null)/../.."
+  rec=$(find "$sb" -maxdepth 2 -name injector.json 2>/dev/null | head -1)
+  if [ -z "$rec" ]; then printf 'no injector.json (delivery went DIRECT)'; return; fi
+  pid=$(python3 -c "import json,sys;print(json.load(open(sys.argv[1])).get('PID',''))" "$rec" 2>/dev/null)
+  if [ -n "$pid" ] && kill -0 "$pid" 2>/dev/null; then
+    printf 'injector.json present, pid %s ALIVE (key held HOST-SIDE)' "$pid"
+  else
+    printf 'injector.json present, pid %s not alive' "${pid:-?}"
+  fi
+}
+
+printf '  arm 1: explicit --broker on the fresh service\n'
+printf '    (documented as "errors if the backend can\x27t", so a failure here is the CORRECT\n'
+printf '     outcome and a success means the bridge was up in time)\n'
 newout=$(yoloai new --backend apple --broker "$BOX" "$WORKDIR" 2>&1); newrc=$?
 printf '    new rc=%s\n' "$newrc"
-printf '%s\n' "$newout" | grep -iE "broker|inject|degrad|direct|key|error" | head -3 | sed 's/^/      /' || true
+[ "$newrc" != 0 ] && printf '%s\n' "$newout" | grep -iE "broker|inject|error" | head -2 | sed 's/^/      /'
+[ "$newrc" = 0 ] && note "  broker state" "$(brokerstate "$BOX")"
+note "  gateway now?" "$(ifconfig 2>/dev/null | grep -q "inet $GW " && echo yes || echo no)"
 yoloai destroy "$BOX" --abandon-unapplied >/dev/null 2>&1
 
-printf '  arm 2: DEFAULT (no broker flag) on the fresh service — the path users take\n'
+printf '  arm 2: DEFAULT (no broker flag) on a fresh service — the path users take\n'
 container system stop >/dev/null 2>&1; sleep 3; container system start >/dev/null 2>&1; sleep 3
 note "  gateway before this sandbox" \
   "$(ifconfig 2>/dev/null | grep -q "inet $GW " && echo yes || echo no)"
 newout2=$(yoloai new --backend apple "$BOX" "$WORKDIR" 2>&1); newrc2=$?
 printf '    new rc=%s\n' "$newrc2"
-printf '%s\n' "$newout2" | grep -iE "broker|inject|degrad|direct|key" | head -3 | sed 's/^/      /' || true
-note "gateway assigned after first container?" \
+[ "$newrc2" != 0 ] && printf '%s\n' "$newout2" | grep -iE "broker|inject|error" | head -2 | sed 's/^/      /'
+note "  broker state" "$(brokerstate "$BOX")"
+note "  gateway after first container" \
   "$(ifconfig 2>/dev/null | grep -q "inet $GW " && echo yes || echo no)"
-# The question is whether the KEY reached the guest. Brokered means it did not.
-if yoloai files "$BOX" path >/dev/null 2>&1; then
-  envout=$(container exec "yoloai-cli-$BOX" sh -c 'env | grep -c ANTHROPIC_API_KEY' 2>/dev/null || echo "?")
-  note "ANTHROPIC_API_KEY vars in guest env" "$envout"
-  note "  (0 = brokered/host-side; >0 = key delivered into the sandbox)" ""
-fi
 
 printf '\n== what this settles ==\n'
 printf '  DF180: compare P1 and P2. DF178: P3 is the end-to-end run the finding asked for.\n'
