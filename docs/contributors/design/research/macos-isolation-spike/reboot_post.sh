@@ -18,8 +18,16 @@ RESULTS="$HERE/results/reboot-post.txt"
 [ -f "$SNAP" ] || { echo "no snapshot at $SNAP — run reboot_pre.sh first"; exit 2; }
 exec > >(tee "$RESULTS") 2>&1
 
+# Every value below comes from the snapshot. Declaring them first states the contract between the
+# two halves explicitly, and stops shellcheck reading a sourced variable as a typo for a local one.
+PRE_DATE=""; ANCHOR=""; SLOTS=0
+A_SB=""; B_SB=""; T_SB=""; A_IP=""; B_IP=""; T_IP=""
+ALLOW_A=""; ALLOW_B=""; DENY=""
+ANCHOR_RULES=0; SRC0=""; SRC1=""; SRC2=""
+MAIN_RULES=0; MAIN_SHA=""; PF_STATUS=""; PF_TOKENS=0; BRIDGES=""; CONF_SHA=""; SANDBOXES=""
 # shellcheck disable=SC1090
 . "$SNAP"
+[ -n "$ANCHOR" ] && [ -n "$A_SB" ] || { echo "snapshot at $SNAP is incomplete; cannot compare"; exit 2; }
 CONFDIR=/etc/yoloai; CONF="$CONFDIR/pf-pool.conf"
 SUDOERS=/etc/sudoers.d/yoloai-reboot-probe
 PASS=0; FAIL=0; UNKNOWN=0
@@ -28,10 +36,24 @@ bad() { FAIL=$((FAIL+1)); printf '   FAIL    %s\n' "$*"; }
 unk() { UNKNOWN=$((UNKNOWN+1)); printf '   UNKNOWN %s\n' "$*"; }
 say() { printf '\n== %s ==\n' "$*"; }
 asuser() { sudo -u "$U" "$@"; }
-ipof() { asuser container inspect "yoloai-cli-$1" 2>/dev/null \
-           | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status"]["networks"][0].get("ipv4Address","").split("/")[0])' 2>/dev/null; }
-egress() { local c; c=$(asuser container exec "yoloai-cli-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 6 "http://$2/" 2>/dev/null)
-  c=${c//[^0-9]/}; c=${c: -3}; printf '%s' "${c:-000}"; }
+bk() { asuser "$ROOT/yoloai" ls 2>/dev/null | awk -v n="$1" '$1==n {print $3}'; }
+ipof() {
+  case "$(bk "$1")" in
+    tart)  asuser tart ip "yoloai-cli-$1" 2>/dev/null | tr -d '[:space:]' ;;
+    apple) asuser container inspect "yoloai-cli-$1" 2>/dev/null \
+             | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status"]["networks"][0].get("ipv4Address","").split("/")[0])' 2>/dev/null ;;
+    *) printf '' ;;
+  esac
+}
+egress() {
+  local c
+  case "$(bk "$1")" in
+    tart)  c=$(asuser tart exec "yoloai-cli-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 8 "http://$2/" 2>/dev/null) ;;
+    apple) c=$(asuser container exec "yoloai-cli-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 8 "http://$2/" 2>/dev/null) ;;
+    *) c="" ;;
+  esac
+  c=${c//[^0-9]/}; c=${c: -3}; printf '%s' "${c:-000}"
+}
 
 echo "=== reboot test, POST half — $(date '+%Y-%m-%d %H:%M:%S') ==="
 echo "pre-reboot snapshot taken $PRE_DATE"
@@ -43,8 +65,12 @@ echo "        (if that is not a small number of minutes, the machine may not hav
 say "P1/P2 DID THE ANCHOR SURVIVE? — the premise the plan rests on"
 now_rules=$(pfctl -a "$ANCHOR" -s rules 2>/dev/null | grep -c . || true)
 now_src0=$(pfctl -a "$ANCHOR" -t yb_src_0 -T show 2>/dev/null | tr -d ' ' | tr '\n' ',')
+now_src1=$(pfctl -a "$ANCHOR" -t yb_src_1 -T show 2>/dev/null | tr -d ' ' | tr '\n' ',')
+now_src2=$(pfctl -a "$ANCHOR" -t yb_src_2 -T show 2>/dev/null | tr -d ' ' | tr '\n' ',')
 echo "        rules: before=$ANCHOR_RULES after=${now_rules:-0}"
 echo "        src_0: before='$SRC0' after='${now_src0}'"
+echo "        src_1: before='$SRC1' after='${now_src1}'"
+echo "        src_2: before='$SRC2' after='${now_src2}'   (tart slot, empty if no tart sandbox)"
 if [ "${now_rules:-0}" -eq 0 ]; then
   ok "anchor RULES did not survive the reboot — the plan's premise is CORRECT, and restoring the"
   echo "           pool at boot is mandatory rather than defensive"
@@ -54,9 +80,9 @@ elif [ "${now_rules:-0}" -eq "${ANCHOR_RULES:-0}" ]; then
 else
   unk "partial survival: $ANCHOR_RULES -> $now_rules"
 fi
-if [ -z "$now_src0" ] && [ -n "$SRC0" ]; then
-  ok "table CONTENTS did not survive either — membership must be rebuilt, not assumed"
-elif [ "$now_src0" = "$SRC0" ]; then
+if [ -z "$now_src0$now_src1$now_src2" ] && [ -n "$SRC0$SRC1$SRC2" ]; then
+  ok "table CONTENTS did not survive in ANY slot — membership must be rebuilt, not assumed"
+elif [ "$now_src0" = "$SRC0" ] && [ "$now_src1" = "$SRC1" ]; then
   bad "table contents survived ('$now_src0') — if rules did not, this is the silent fail-open"
   echo "           state by default at every boot, which is worse than either alone"
 fi
@@ -100,6 +126,18 @@ echo "        before: $SANDBOXES"
 echo "        after : $(asuser "$ROOT/yoloai" ls 2>/dev/null | tail -n +2 | awk '{print $1":"$2}' | tr '\n' ' ')"
 newA=$(ipof "$A_SB"); newB=$(ipof "$B_SB")
 echo "        A: before=$A_IP after=${newA:-<none>} | B: before=$B_IP after=${newB:-<none>}"
+if [ -n "${T_SB:-}" ]; then
+  newT=$(ipof "$T_SB")
+  echo "        tart $T_SB: before=${T_IP:-<none>} after=${newT:-<none>}"
+  if [ -z "$newT" ]; then
+    unk "the tart VM has no address after boot — tart VMs are far likelier than apple containers"
+    echo "           to come back stopped; start it and re-check if the tart address matters to you"
+  elif [ "$newT" = "${T_IP:-}" ]; then
+    ok "tart address preserved across reboot"
+  else
+    ok "tart address CHANGED across reboot ($T_IP -> $newT)"
+  fi
+fi
 if [ -z "$newA" ] && [ -z "$newB" ]; then
   unk "neither sandbox has an address after boot (likely stopped) — restart them and re-check if"
   echo "           the address question matters to you; P1-P6 are unaffected"
@@ -130,6 +168,16 @@ else
       if [ "$r2" = 000 ] && [ "$r1" != 000 ]; then
         ok "enforcement restored end to end after a real reboot"
       else bad "enforcement not restored (allow=$r1 deny=$r2)"; fi
+      # Second slot, second allowlist — proves the restore brought back the whole pool, not one rule.
+      if [ -n "${newB:-}" ]; then
+        pfctl -a "$ANCHOR" -t yb_src_1 -T add "$newB"    >/dev/null 2>&1
+        pfctl -a "$ANCHOR" -t yb_dst_1 -T add "$ALLOW_B" >/dev/null 2>&1
+        r3=$(egress "$B_SB" "$ALLOW_B"); r4=$(egress "$B_SB" "$DENY")
+        echo "        re-added B into slot 1 with its own allowlist: allow=$r3 deny=$r4"
+        if [ "$r4" = 000 ] && [ "$r3" != 000 ]; then
+          ok "a SECOND slot with a DIFFERENT allowlist also works after the reboot"
+        else bad "second slot not restored (allow=$r3 deny=$r4)"; fi
+      fi
     else
       unk "A has no address; end-to-end recovery not exercised"
     fi

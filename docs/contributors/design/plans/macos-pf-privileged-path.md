@@ -89,6 +89,12 @@ untouched, two slots give two sandboxes **independent allowlists**, an empty `ds
 **closed**, and **table contents survive a ruleset reload** — so resizing or repairing the pool does
 not de-isolate running sandboxes (`pf-assumptions.txt` D1/D2/D4, `pf-shapeb.txt` B1/B2).
 
+**Backend-agnostic, measured rather than predicted.** The pool enforces on **tart** as well as
+apple, and an apple guest and a tart guest hold **different allowlists in different slots
+simultaneously**, on separate vmnet bridges, with teardown by table delete restoring either
+(`pf-tart-pool.txt` T1/T2/T3). Nothing in the design distinguishes the backends because the rules
+key on source address; that was a prediction until this run.
+
 **Pool size and exhaustion are open.** 32 was measured; the cap is this design's one structural cost.
 What happens when the pool is full — refuse, or fall back to today's behaviour with DF179's
 disclosure — is undecided.
@@ -300,8 +306,6 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
 ## Unmeasured, and known limits
 
 - **Reboot itself** — asserted, never performed (see above).
-- **Enforcement on tart under this pool form.** tart pf enforcement *was* measured, three times, in a
-  flat anchor (`pf-main-run.txt` P1b and two reruns). The slot pool has been run on apple only.
 - **Renewal after a subnet re-pick.** Steady-state renewal does not move tart's address — five
   renewals counted over 28 minutes — but renewal *following* a re-pick is untested, and apple has no
   `dhcpd_leases` record so it does not renew through bootpd at all.

@@ -2,7 +2,7 @@
 # ABOUTME: Half one of the only test a reboot can settle — sets up full pf enforcement, verifies
 # ABOUTME: it works, and snapshots every fact the post-reboot half needs to compare against.
 #
-# Run: sudo bash reboot_pre.sh <sandbox-A> <sandbox-B>
+# Run: sudo bash reboot_pre.sh <apple-A> <apple-B> [tart-C]
 #   then REBOOT, then: sudo bash reboot_post.sh
 #
 # WHY THIS EXISTS
@@ -39,7 +39,7 @@
 set -u
 [ "$(id -u)" -eq 0 ] || { echo "must run as root: sudo bash $0 <A> <B>"; exit 2; }
 U="${SUDO_USER:?run via sudo, not as a root login}"
-A_SB="${1:?need sandbox A}"; B_SB="${2:?need sandbox B}"
+A_SB="${1:?need sandbox A}"; B_SB="${2:?need sandbox B}"; T_SB="${3:-}"   # 3rd optional: a TART sandbox
 
 ANCHOR="com.apple/yoloai_rb"
 CONFDIR=/etc/yoloai; CONF="$CONFDIR/pf-pool.conf"
@@ -55,15 +55,36 @@ exec > >(tee "$RESULTS") 2>&1
 
 asuser() { sudo -u "$U" "$@"; }
 quiet_pf() { grep -viE 'use of -f option|main ruleset added|/etc/pf.conf for further|ALTQ|^$'; }
-ipof() { asuser container inspect "yoloai-cli-$1" 2>/dev/null \
-           | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status"]["networks"][0].get("ipv4Address","").split("/")[0])' 2>/dev/null; }
-egress() { local c; c=$(asuser container exec "yoloai-cli-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 6 "http://$2/" 2>/dev/null)
-  c=${c//[^0-9]/}; c=${c: -3}; printf '%s' "${c:-000}"; }
+# Backend-aware: apple answers through `container`, tart through `tart`. Derived from `yoloai ls`
+# so a mis-ordered argument fails loudly rather than measuring one guest twice.
+bk() { asuser "$ROOT/yoloai" ls 2>/dev/null | awk -v n="$1" '$1==n {print $3}'; }
+ipof() {
+  case "$(bk "$1")" in
+    tart)  asuser tart ip "yoloai-cli-$1" 2>/dev/null | tr -d '[:space:]' ;;
+    apple) asuser container inspect "yoloai-cli-$1" 2>/dev/null \
+             | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status"]["networks"][0].get("ipv4Address","").split("/")[0])' 2>/dev/null ;;
+    *) printf '' ;;
+  esac
+}
+egress() {
+  local c
+  case "$(bk "$1")" in
+    tart)  c=$(asuser tart exec "yoloai-cli-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 8 "http://$2/" 2>/dev/null) ;;
+    apple) c=$(asuser container exec "yoloai-cli-$1" curl -s -o /dev/null -w '%{http_code}' --max-time 8 "http://$2/" 2>/dev/null) ;;
+    *) c="" ;;
+  esac
+  c=${c//[^0-9]/}; c=${c: -3}; printf '%s' "${c:-000}"
+}
 ok()  { printf '   PASS    %s\n' "$*"; }
 bad() { printf '   FAIL    %s\n' "$*"; }
 
 A_IP=$(ipof "$A_SB"); B_IP=$(ipof "$B_SB")
 [ -n "$A_IP" ] && [ -n "$B_IP" ] || { echo "could not resolve both sandbox IPs (A=$A_IP B=$B_IP)"; exit 2; }
+T_IP=""
+if [ -n "$T_SB" ]; then
+  [ "$(bk "$T_SB")" = tart ] || { echo "$T_SB is backend '$(bk "$T_SB")', expected tart"; exit 2; }
+  T_IP=$(ipof "$T_SB"); [ -n "$T_IP" ] || { echo "could not resolve tart sandbox $T_SB"; exit 2; }
+fi
 
 echo "=== reboot test, PRE half — $(date '+%Y-%m-%d %H:%M:%S') ==="
 echo "host: $(sw_vers -productVersion) | A=$A_SB($A_IP) B=$B_SB($B_IP)"
@@ -90,6 +111,10 @@ pfctl -a "$ANCHOR" -t yb_src_0 -T add "$A_IP"    >/dev/null 2>&1
 pfctl -a "$ANCHOR" -t yb_dst_0 -T add "$ALLOW_A" >/dev/null 2>&1
 pfctl -a "$ANCHOR" -t yb_src_1 -T add "$B_IP"    >/dev/null 2>&1
 pfctl -a "$ANCHOR" -t yb_dst_1 -T add "$ALLOW_B" >/dev/null 2>&1
+if [ -n "$T_IP" ]; then
+  pfctl -a "$ANCHOR" -t yb_src_2 -T add "$T_IP"    >/dev/null 2>&1
+  pfctl -a "$ANCHOR" -t yb_dst_2 -T add "$ALLOW_A" >/dev/null 2>&1
+fi
 cat > /tmp/rbp.sudoers <<EOF
 $U ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\\.apple/yoloai_rb -t yb_(src|dst)_[0-7] -T (add|delete|flush|show)( [0-9a-fA-F.:/]+)*\$
 $U ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\\.apple/yoloai_rb -f /etc/yoloai/pf-pool\\.conf\$
@@ -107,8 +132,14 @@ echo
 echo "== verify enforcement works BEFORE the reboot (or the after-comparison is meaningless) =="
 e1=$(egress "$A_SB" $ALLOW_A); e2=$(egress "$A_SB" $DENY); e3=$(egress "$B_SB" $ALLOW_B); e4=$(egress "$B_SB" $DENY)
 echo "        A: allow=$e1 deny=$e2 | B: allow=$e3 deny=$e4"
-if [ "$e2" = 000 ] && [ "$e1" != 000 ] && [ "$e4" = 000 ] && [ "$e3" != 000 ]; then
-  ok "enforcement live for both sandboxes"
+tok=0
+if [ -n "$T_SB" ]; then
+  t1=$(egress "$T_SB" $ALLOW_A); t2=$(egress "$T_SB" $DENY)
+  echo "        tart $T_SB: allow=$t1 deny=$t2"
+  { [ "$t2" = 000 ] && [ "$t1" != 000 ]; } && tok=1
+fi
+if [ "$e2" = 000 ] && [ "$e1" != 000 ] && [ "$e4" = 000 ] && [ "$e3" != 000 ] && { [ -z "$T_SB" ] || [ "$tok" = 1 ]; }; then
+  ok "enforcement live for every sandbox given"
 else
   bad "enforcement NOT live before reboot (A:$e1/$e2 B:$e3/$e4) — fix before rebooting"; exit 1
 fi
@@ -124,6 +155,9 @@ echo "== snapshot =="
   echo "B_SB=$B_SB"
   echo "A_IP=$A_IP"
   echo "B_IP=$B_IP"
+  echo "T_SB=$T_SB"
+  echo "T_IP=$T_IP"
+  echo "SRC2=$(pfctl -a "$ANCHOR" -t yb_src_2 -T show 2>/dev/null | tr -d ' ' | tr '\n' ',')"
   echo "ALLOW_A=$ALLOW_A"
   echo "ALLOW_B=$ALLOW_B"
   echo "DENY=$DENY"

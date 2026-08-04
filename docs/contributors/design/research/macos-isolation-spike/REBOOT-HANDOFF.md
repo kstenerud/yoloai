@@ -38,8 +38,10 @@ sudo rm -f /etc/sudoers.d/yoloai-reboot-probe && sudo rm -rf /etc/yoloai \
 
 ## The full sequence, for reference
 
-The pre half needs **two running `apple` sandboxes** — the harnesses use `container inspect` and
-`container exec`, so tart and seatbelt will not work with them. Their workdir must be somewhere
+The pre half needs **two running `apple` sandboxes**, and optionally a **tart** one as a third
+argument. The helpers are backend-aware (apple answers through `container`, tart through `tart`) and
+derive the backend from `yoloai ls`, so a mis-ordered argument fails loudly rather than measuring one
+guest twice. Seatbelt has no guest network of its own and is not applicable. Their workdir must be somewhere
 durable, **not** under `/tmp`: a workdir that vanishes across the restart adds a second variable to
 an experiment that already has nine.
 
@@ -47,15 +49,15 @@ an experiment that already has nine.
 mkdir -p ~/yoloai-reboot-test/repo && git init ~/yoloai-reboot-test/repo   # any small durable repo
 yoloai new --backend apple rb-a ~/yoloai-reboot-test/repo
 yoloai new --backend apple rb-b ~/yoloai-reboot-test/repo
-sudo bash .../reboot_pre.sh rb-a rb-b       # aborts unless both have addresses AND enforcement works
+yoloai new --backend tart  rb-t ~/yoloai-reboot-test/repo   # optional 3rd, covers tart too
+sudo bash .../reboot_pre.sh rb-a rb-b rb-t  # aborts unless every guest has an address AND
+                                            # enforcement is demonstrably live before going down
 sudo reboot
 # ... then the block at the top of this file
 ```
 
-Cleanup afterwards: `yoloai destroy rb-a rb-b --abandon-unapplied && rm -rf ~/yoloai-reboot-test`.
-
-Note this continues the workstream's apple-only coverage. The slot pool has never been run on tart,
-which is recorded as a gap in the plan.
+Cleanup afterwards:
+`yoloai destroy rb-a rb-b rb-t --abandon-unapplied && rm -rf ~/yoloai-reboot-test`.
 
 ## What the workstream is
 
@@ -93,6 +95,9 @@ lost.
   outbound). Both candidates in one run: `pf-enforce.txt` E1.
 - 32 slots load; a high slot index enforces; **table contents survive a ruleset reload**;
   an empty `dst` fails **closed** — `pf-assumptions.txt` D1/D2/D4.
+- **The pool is backend-agnostic.** It enforces on tart as well as apple, and an apple guest and a
+  tart guest hold different allowlists in different slots simultaneously, on separate bridges, with
+  teardown by table delete restoring either (`pf-tart-pool.txt` T1/T2/T3).
 - **A stale entry does not merely block — it grants the stale slot's allowlist.** Not a slot-pool
   cost: an orphaned sub-anchor does the same (`pf-assumptions.txt` D3, `pf-stale-a.txt` SA2). This is
   why reaping is a security requirement.
@@ -123,8 +128,7 @@ Pool size and exhaustion behaviour · the slot-allocation lock (cross-sandbox; p
 already exist via `store.AcquireLock`) · host/guest DNS resolution parity · whether yoloAI holds its
 own `pfctl -E` reference (**deliberately untested** — a wrong `-X` breaks vmnet NAT for every VM).
 
-Known gaps: the slot pool has been run on **apple only**; renewal *after* a subnet re-pick is
-untested; seatbelt is parked ([`seatbelt-host-pf-enforcement.md`](../../plans/seatbelt-host-pf-enforcement.md)).
+Known gaps: renewal *after* a subnet re-pick is untested; seatbelt is parked ([`seatbelt-host-pf-enforcement.md`](../../plans/seatbelt-host-pf-enforcement.md)).
 
 **Blocking dependency:** rules must precede the agent's first packet, but apple and tart have no
 host-side step between guest boot and agent exec — `entrypoint.py` execs the agent itself, and only

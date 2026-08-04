@@ -1,0 +1,29 @@
+host: 26.5.1
+apple=rb-a(192.168.64.44)  tart=rb-t(192.168.65.2)  allow_apple=1.1.1.1 allow_tart=1.0.0.2 deny=1.0.0.1
+
+== T0 BASELINE — both guests reach everything (a stranded backend would pass every block for free) ==
+        apple: 301 301 301 | tart: 301 301 301
+   PASS    all six paths reachable across both backends
+
+== T1/T2 THE POOL, WITH APPLE IN SLOT 0 AND TART IN SLOT 1 ==
+        rules=8 | slot0(apple)=192.168.64.44 slot1(tart)=192.168.65.2
+        apple: own=301 other=000 deny=000
+        tart : own=301 other=000 deny=000
+   PASS    T1: the slot pool ENFORCES on tart — deny blocked, allowlist passes
+   PASS    T2: apple and tart hold DIFFERENT allowlists in different slots simultaneously —
+           the pool is backend-agnostic, as the address-keyed design predicts
+
+== T3 TEARDOWN — does a table delete restore the tart guest? ==
+        tart->deny before=000 after=301
+   PASS    table delete alone restores tart egress — teardown needs no rule reload on either backend
+   PASS    main ruleset unchanged (4)
+
+== TOTALS ==
+   pass=5 fail=0 unknown=0
+
+== cleanup ==
+   anchor rules=0
+   main ruleset: before=4 after=4
+   apple restored: allow=301 deny=301
+   tart  restored: allow=301 deny=301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-tart-pool.txt
