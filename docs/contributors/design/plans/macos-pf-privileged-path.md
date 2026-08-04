@@ -243,12 +243,33 @@ changes on every stop/start (apple `.22`→`.23`, tart `.2`→`.4`, and tart's M
 pool is consumed per *start*), and a stale `block` rule naming a recycled address **silently denies
 its next occupant** — measured directly.
 
-**Concurrency is unsolved and must not be hand-waved.** `concurrency-guard-sandbox-operations.md`
-records that no concurrency controls exist anywhere in the project. Reconciliation is therefore also
-a de-synchroniser: process A starts sandbox X and loads its sub-anchor; process B runs `ls` and
-reconciles before X is visible in on-disk state, and flushes it. X is then running, healthy, and
-unfiltered — exactly the silent fail-open this design exists to prevent. Phase 2 must either take a
-lock or make reconciliation delete-only past a grace window, with the reasoning recorded.
+**Concurrency needs two ordering rules, not a new lock.** Per-sandbox `flock`s already exist —
+`store.AcquireLock(layout, name)`, taken in create, start, stop, destroy and reset — so two
+processes acting on the *same* sandbox are already serialized. (`concurrency-guard-sandbox-operations.md`
+still says "No concurrency controls exist"; that plan is **stale** and should not be designed
+against.) What no lock covers is the sweep, which is cross-sandbox and holds none.
+
+It does not need one:
+
+1. **Write the sandbox's record before loading its sub-anchor.** Free — the anchor load happens
+   after the guest leases an address, long after the record exists. This makes "an anchor with no
+   record" mean genuinely orphaned.
+2. **In the sweep, enumerate anchors first, then read records, then flush only anchors absent from
+   the record set.**
+
+Given rule 1, any anchor present in the enumeration had its record written earlier, so the later
+record read must see it — unless the sandbox was destroyed in between, where flushing is correct. A
+sandbox created after the enumeration is not in it and cannot be flushed. No live sandbox is ever
+swept.
+
+This shape also has **no shared mutable state between sandboxes**: each writes only its own anchor,
+so concurrent starts touch disjoint objects. The rejected slot pool does not have that property —
+two concurrent starts could claim the same slot and silently apply one sandbox's allowlist to
+another.
+
+**Reconciliation is delete-only and never repairs.** A crash between the record write and the anchor
+load leaves a sandbox with no rules and nothing to add them later. Tolerable only because rules
+precede agent launch, so no agent code runs in that window — state it rather than let it be found.
 
 ## The security ceiling
 
