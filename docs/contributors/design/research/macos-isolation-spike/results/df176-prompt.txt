@@ -1,0 +1,43 @@
+=== DF176: does a tart guest see a file that reappears after it saw it missing? ===
+date   : 2026-08-04 14:07:25
+sandbox: df176-prompt
+creating tart sandbox df176-prompt (this takes a few minutes)
+Warning: using OAuth credentials from ~/.claude/.credentials.json
+  These tokens expire after ~30 minutes and may fail in long-running sessions.
+  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.
+
+Sandbox df176-prompt created
+  Agent:    claude
+  Workdir:  /var/folders/h8/p75r4zq95d59q622q33pngzr0000gn/T/tmp.SsAZ2IBgKv (copy)
+
+Run 'yoloai attach df176-prompt' to interact (Ctrl-b d to detach)
+    'yoloai diff df176-prompt' when done
+sandbox dir: /Users/karlstenerud/.yoloai/library/sandboxes/df176-prompt
+ro tier    : /Users/karlstenerud/.yoloai/library/sandboxes/df176-prompt/ro
+guest ro   : /Volumes/My Shared Files/ro
+
+== P0  the mechanism: guest looks up a missing name, then the host creates it
+  ok      guest sees it before creation (must be no)     no
+  ?       guest cat before creation                      
+  ?       guest cat after host created it                NEG-CREATED
+  ?       guest sees it now                              yes
+  ==> negative lookups do NOT stick: the restored prompt would be visible.
+
+== P1  control: same creation, but a name the guest never looked up
+  ok      guest reads it (proves creates propagate at all) FRESH-CREATED
+
+== P2  the product path: yoloai reset --no-prompt, which hides prompt.txt then restores it
+        (tart is LocalitySandboxSide, so this auto-upgrades to a restart: the container is
+         removed, prompt.txt is hidden, the guest starts WITHOUT it, and the deferred
+         cleanup renames it back while that new guest is running)
+  ok      host holds prompt.txt again after reset        yes
+  ok      no .bak left behind                            no
+  ?       GUEST READS prompt.txt                         PROMPT-BODY-V1
+  ?       guest sees prompt.txt                          yes
+  ==> DF176 row CLOSED: the restored prompt is visible to the running guest.
+
+== TOTALS ==
+   pass=4 fail=0 observations=5
+
+P2 is the product question; P0 is the mechanism under it and P1 licenses reading P0.
+Cleanup: yoloai destroy df176-prompt --abandon-unapplied

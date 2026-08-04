@@ -20,6 +20,9 @@ the impression that the harness worked first time.
 | `reboot-snapshot.txt` | the pre-reboot control the post half compares against — written by `reboot_pre.sh`, machine-read, not prose. `CONSUMED=` at the end means the post half has read it and the round is closed |
 | `reboot-pre.txt` | the pre half. **Not round 3's** — that log was destroyed, twice over; what is on disk is the first ten lines of an aborted round 4 (see the round 3 caveats). The enforcement round 3 measured is in the snapshot instead |
 | `reboot-post.txt` | the post half, after a **real** restart: anchor survival, pf's own state, and unattended recovery from the pinned file |
+| `df175-rmput-tart.txt` | DF175's residual gap, **confirmed**: `files rm` then `files put` of the same name leaves a tart guest serving the whole original file (20 bytes) where the host holds 5. Its P1 line also caught [DF181](../../../findings-unresolved.md) — the repair reporting failure on a guest that then converges |
+| `df175-rmput-apple.txt` | the cross-backend control for the above: apple runs the identical sequence correctly, so the gap is tart-specific like the rest of DF175 |
+| `df176-prompt.txt` | DF176's loose end, **closed**: negative lookups do not stick on tart, and `reset --no-prompt` restores `prompt.txt` visibly to the running guest. Note the row it closes named an in-place reset, which tart cannot reach at all — see the finding |
 | `restart-control.txt` | the **no-reboot** control: a plain stop/start moves every guest's address on both backends, each with a freshly generated MAC. Replicates `lease-binding.txt` L2 and extends it — the new parts are the MAC mechanism, the exhausted lease pool, and a census resolving L1's UNKNOWN. Written to stop the reboot halves attributing to the reboot what an ordinary restart does anyway |
 
 ## What these files do NOT support
