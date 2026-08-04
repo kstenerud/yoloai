@@ -391,10 +391,27 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
 - **Renewal after a subnet re-pick.** Steady-state renewal does not move tart's address — five
   renewals counted over 28 minutes — but renewal *following* a re-pick is untested, and apple has no
   `dhcpd_leases` record so it does not renew through bootpd at all.
-- **Host/guest resolution parity.** `dst` holds resolved addresses and resolution moves to the host;
-  where the two resolve a domain differently, the guest is blocked while allowlisted. apple only —
-  tart and seatbelt never had in-guest resolution. `resolve_domains` is one-shot, so CDN rotation
-  already breaks long-lived sandboxes today; inherited, not caused.
+- **Host/guest resolution parity — measured 2026-08-04, and it did not diverge.** `dst` holds
+  resolved addresses and resolution moves to the host, so where the two sides resolve a domain
+  differently the guest is blocked while allowlisted. apple only — tart and seatbelt never had
+  in-guest resolution, so they have no second answer to disagree with. Measured with the same call
+  the product uses (`socket.getaddrinfo(…, AF_INET)`, `runtime/docker/resources/firewall.py:63`)
+  on both sides, 3 rounds each, over `api.anthropic.com`, `registry.npmjs.org`, `github.com`,
+  `objects.githubusercontent.com` and `example.com`: **every guest address was in the host set,
+  for every domain** — including the CDN-heavy ones, where 12 Cloudflare addresses and 4
+  githubusercontent addresses matched set-for-set. The two sides do *not* share a resolver (guest
+  `192.168.64.1`, the vmnet gateway; host `100.100.100.100`, Tailscale MagicDNS), so the gateway
+  forwards consistently with the host's upstream. Raw output:
+  [`results/dns-parity.txt`](../research/macos-isolation-spike/results/dns-parity.txt).
+  **Three limits before this is treated as settled:** it is one host's resolver configuration;
+  only public domains were tested, and a **split-horizon name** — a MagicDNS or VPN-internal host
+  the guest's resolver cannot see at all — is the case most likely to diverge and was not
+  exercised; and it says nothing about the *temporal* hazard below, which is the one already
+  breaking sandboxes.
+- **Resolution is one-shot, so parity at start says nothing about hour six.** `resolve_domains`
+  runs once, and CDN rotation moves the addresses under a long-lived sandbox regardless of whether
+  the two sides agreed at launch. Inherited, not caused by host `pf` — but host `pf` inherits it,
+  and a table loaded once is exactly as stale as an ipset loaded once. Unmeasured.
 - **Pool size and exhaustion behaviour** are undecided.
 - **Whether yoloAI should hold its own `pfctl -E` reference.** Deliberately untested: getting `-X`
   wrong drops the count and breaks vmnet NAT for every VM on the host. The reboot narrowed this —
