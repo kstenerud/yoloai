@@ -197,10 +197,16 @@ current lease; comparing against the live address closes the remaining staleness
 
 Not settled by that run, and it matters to the second half of recovery: **no guest was running
 afterwards**, so re-adding a live address and confirming egress is filtered again was not exercised.
-The apple sandboxes came back **`removed`** rather than `stopped` — an address to re-add is not
-merely stale after a reboot, there may be no sandbox to re-add one for. Whether that state can be
-restarted at all is unmeasured, and the recovery design should not assume it can. `reboot_post.sh`
-now restarts the guests before measuring, so a second run answers this.
+`reboot_post.sh` now restarts the guests before measuring, so a second run answers it.
+
+**What a boot-time restore cannot assume: that the backend is even reachable.** The run recorded both
+apple sandboxes as `removed`, which reads as "the reboot destroyed them" and is not what happened —
+apple's `container` service is not registered with launchd, so it is simply down after a restart, and
+yoloAI renders an unreachable daemon as a *gone* container (**DF180**, `backend-idiosyncrasies.md`).
+The sandboxes were intact. Two consequences for this plan: recovery must not infer "no sandbox needs
+a slot" from a status read taken before the backend is up, and the reboot ordering is now three
+events, not two — pf comes back on its own, the sandboxes do not, and the backend service does not
+either.
 
 ## The security ceiling
 
@@ -323,10 +329,10 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
 ## Unmeasured, and known limits
 
 - **Recovery's second half.** The reboot itself is now performed (see above) and the pool restores;
-  what is untested is everything downstream of a *running* guest — whether an apple sandboxes that
-  came back `removed` restarts, what address it gets, whether vmnet returns on the same subnets, and
-  whether enforcement is filtering again end to end. One further reboot with the guests restarted
-  before measurement closes all four; `reboot_post.sh` is set up to do exactly that.
+  what is untested is everything downstream of a *running* guest — what address a restarted sandbox
+  gets, whether vmnet returns on the same subnets, and whether enforcement is filtering again end to
+  end. One further reboot with the guests restarted before measurement closes all three;
+  `reboot_post.sh` is set up to do exactly that.
 - **Whether a tart guest keeps its address across a reboot.** Reported as preserved in
   `reboot-post.txt` and **withdrawn**: the VM was stopped and the reading came from a surviving
   `dhcpd_leases` record, not from a guest holding an address.

@@ -159,6 +159,7 @@ inclusion test first, then add a row to the index.
 | `system disk` shows seatbelt `IMAGES: ?` / `CACHE: 0 B` — is it a gap? | [Seatbelt has no backend image/cache store](#seatbelt-has-no-backend-imagecache-store--cacheusageprunecache-are-correctly-absent) |
 | Apple `container create … --mount …` fails: `path '…' is not a directory` | [Apple: `--mount type=virtiofs` rejects file sources; use `-v`](#apple---mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts) |
 | Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build--silently-drops-a-relative--context-pass-an-absolute-dir) |
+| After a reboot every apple sandbox reads `removed`; `container ls` fails with `XPC connection error: Connection invalid`; `yoloai destroy` says Destroyed but the container is still there afterwards (DF180) | [Apple: the `container` service does not survive a reboot](#apple-the-container-service-does-not-survive-a-reboot-and-every-yoloai-sandbox-reads-removed-until-it-is-restarted) |
 | `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
 | `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
 | `install network-isolation firewall: netns sidecar exited 2: … can't open file '/yoloai/bin/install-firewall.py'` (intermittent, under concurrent churn; file is present in image) | [Docker/OrbStack: ephemeral container transiently exposes an incomplete rootfs](#a-freshly-created-ephemeral-container-can-transiently-expose-an-incomplete-rootfs-under-heavy-concurrent-churn) |
@@ -2837,6 +2838,35 @@ prune's honest reclaim figure is measured as the drop in `system df`'s **total**
 prune sequence, not the `reclaimable` field.
 
 **Code:** `runtime/apple/prune.go` (`PruneCache`, `systemDF`, `reclaimDelta`).
+
+### Apple: the `container` service does not survive a reboot, and every yoloAI sandbox reads `removed` until it is restarted
+
+**Symptom:** after a host restart, `yoloai ls` shows every apple sandbox as
+`removed` and `container ls -a` fails with
+`internalError: "failed to list containers" (cause: "interrupted: "XPC connection
+error: Connection invalid"")`. The containers are intact — they come back
+`stopped` the moment the service is started.
+
+**Explanation:** `container system status` reports *"apiserver is not running and
+not registered with launchd"*. The service is started on demand, is not a launchd
+job, and nothing brings it back at boot. So the post-reboot state of the apple
+backend is "unreachable", not "empty", and it stays that way until something runs
+`container system start`.
+
+**Why it bites without warning:** yoloAI renders unreachable as *gone*.
+`runtime/apple/apple.go:289-292` maps every `container inspect` failure to
+`runtime.ErrNotFound`, and `internal/orchestrator/status/status.go:235-237` maps
+that to `StatusRemoved` — so a reboot looks exactly like someone having deleted
+the containers. The same conflation makes `yoloai destroy` report success while
+leaving the container behind (**DF180**). This cost a wrong reading in this
+project's own research before it was noticed: round 1 of the macOS reboot test
+recorded "the apple sandboxes came back `removed`" and reasoned about reboot
+recovery from it.
+
+**Fix:** none in the product yet — DF180 holds it. Anything measuring apple state
+after a reboot must run `container system start` first, which
+`docs/contributors/design/research/macos-isolation-spike/reboot_post.sh` now does
+before reading any sandbox state.
 
 ## Docker: `procReady not received` usually means the container is exiting, not a broken runtime
 

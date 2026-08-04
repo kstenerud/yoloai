@@ -142,6 +142,15 @@ else bad "pinned ruleset file missing or changed"; fi
 if [ -f "$SUDOERS" ]; then ok "sudoers grant survived"; else bad "sudoers grant did not survive"; fi
 
 say "P7 DID THE SANDBOXES SURVIVE, AND CAN THEY BE RESTARTED?"
+# The apple `container` service is not registered with launchd, so it is down after every reboot, and
+# yoloAI renders an unreachable daemon as a REMOVED container (DF180). Round 1 read that as "the
+# sandboxes did not survive" and reasoned about recovery from it; they were intact. Start the service
+# before reading any sandbox state, and say what it was, because "was it up?" is now part of the
+# result rather than a precondition nobody recorded.
+svc_before=$(asuser container system status 2>&1 | grep -Em1 '^status|not running')
+echo "        apple container service before: $svc_before"
+asuser container system start >/dev/null 2>&1
+echo "        apple container service after : $(asuser container system status 2>&1 | grep -Em1 '^status|not running')"
 # P1-P5 are answered above and are unaffected by what follows: they read kernel and file state, which
 # starting a sandbox does not touch. Everything from here needs a guest that is actually running. The
 # first run of this test measured none of it — after a reboot nothing is up, and the harness read the

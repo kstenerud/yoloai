@@ -54,6 +54,12 @@ Read this before quoting anything from them.
   your VM running?"* with rc=1. A `/var/db/dhcpd_leases` record for `192.168.65.2` did survive the
   reboot, which is the likeliest thing that PASS read. Nothing here establishes that a tart guest
   **holds** its address across a restart.
-- **P8 and P9's end-to-end half were not exercised at all**, and the reason is worth keeping: the
-  apple sandboxes came back `removed` rather than `stopped`, so no guest had an address to re-add to
-  a slot. The pool-restore half of P9 is measured; "enforcement works again afterwards" is not.
+- **P8 and P9's end-to-end half were not exercised at all**, because no guest had an address to
+  re-add to a slot. The pool-restore half of P9 is measured; "enforcement works again afterwards" is
+  not.
+- **"The apple sandboxes came back `removed`" is a reading, and the wrong one.** It was taken at face
+  value here and in the plan for a day. The sandboxes were intact: apple's `container` service is not
+  registered with launchd, so it was simply not running after the reboot, and yoloAI renders an
+  unreachable daemon as a *gone* container — reproduced deliberately by stopping the service under a
+  live sandbox (**DF180**, and `backend-idiosyncrasies.md`). Anything that reads apple sandbox state
+  after a restart must run `container system start` first, which `reboot_post.sh` now does.
