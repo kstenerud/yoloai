@@ -149,6 +149,7 @@ type Runtime struct {
 	hostMajor         func() (int, error)   // host macOS major version; seam for tests
 	execEnv           []string              // explicit subprocess env (DEV §12); from layout, never inherited
 	bridgeNets        func() []bridgeSubnet // host bridge* interface subnets; seam for tests (see netcheck.go)
+	settle            func(time.Duration)   // wait between guest-refresh passes; seam for tests (see guestrefresh.go)
 }
 
 // Compile-time check.

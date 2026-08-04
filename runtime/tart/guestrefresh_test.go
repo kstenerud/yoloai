@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
@@ -116,6 +117,10 @@ exit 99
 		tartBin: fake,
 		execEnv: []string{"PATH=/usr/bin:/bin"},
 		layout:  config.Layout{DataDir: "/lib"}.WithPrincipal(config.CLIPrincipal),
+		// Waits are real seconds and there is no revalidation clock here to wait
+		// for, so the default is a no-op. Tests that care about the wait install
+		// their own recorder.
+		settle: func(time.Duration) {},
 	}, argvLog
 }
 
@@ -152,6 +157,45 @@ func TestRefreshGuestFiles_RetriesInASecondInvocation(t *testing.T) {
 	require.NoError(t, err)
 	assert.Empty(t, stale, "the second invocation repaired it")
 	assert.Equal(t, 2, invocationCount(t, argvLog), "exactly one retry, not a single shot and not the full bound")
+}
+
+// Each pass invalidates and then re-hashes immediately, and the guest's
+// revalidation is a ~1 s quantised tick — so undelayed passes can all land inside
+// one interval, see the same pre-tick state, and report STALE for a file that is
+// about to be correct. Measured: 2 of 3 replacements failed that way and every one
+// read correctly seconds later with no further pass (DF181).
+//
+// This pins that a wait is requested, and how long for. It cannot show the wait is
+// LONG ENOUGH — a fake guest has no revalidation clock to outlast, and asserting
+// otherwise here would certify a dead path (D129). df181_timing.sh is what shows
+// that, on hardware.
+func TestRefreshGuestFiles_WaitsForTheTickBetweenPasses(t *testing.T) {
+	rt, argvLog := fakeRefreshTart(t, `  printf 'STALE\t%s\n' "$2"`)
+	var waits []time.Duration
+	rt.settle = func(d time.Duration) { waits = append(waits, d) }
+
+	_, err := rt.RefreshGuestFiles(context.Background(), "yoloai-cli-box", testDigests(rt))
+	require.NoError(t, err)
+
+	assert.Equal(t, guestRefreshAttempts, invocationCount(t, argvLog))
+	// One fewer wait than passes: the first costs nothing, so a path the guest
+	// already agrees on stays free.
+	require.Len(t, waits, guestRefreshAttempts-1, "waits go BETWEEN passes, never before the first")
+	for _, d := range waits {
+		assert.Equal(t, guestRefreshSettle, d)
+		assert.Greater(t, d, time.Second, "a sub-tick wait can land inside the interval it must outlast")
+	}
+}
+
+// A path the guest already agrees on must not pay the wait at all.
+func TestRefreshGuestFiles_CurrentPathWaitsNotAtAll(t *testing.T) {
+	rt, _ := fakeRefreshTart(t, `  printf 'OK\t%s\n' "$2"`)
+	waited := false
+	rt.settle = func(time.Duration) { waited = true }
+
+	_, err := rt.RefreshGuestFiles(context.Background(), "yoloai-cli-box", testDigests(rt))
+	require.NoError(t, err)
+	assert.False(t, waited, "one check, no repair, no delay")
 }
 
 func TestRefreshGuestFiles_GivesUpAfterTheBound(t *testing.T) {

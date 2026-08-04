@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
@@ -23,6 +24,25 @@ const guestPython = "/usr/bin/python3"
 // between processes, an in-process loop does not reach it — so the host drives the
 // loop and each invocation does exactly one pass.
 const guestRefreshAttempts = 3
+
+// guestRefreshSettle is how long to wait before the NEXT pass re-reads a path an
+// earlier pass just invalidated. Without it the attempts above are worth far less
+// than their count suggests: each pass invalidates and then re-hashes immediately,
+// and the guest's revalidation is a **~1 s quantised tick**, so all three passes
+// can land inside one interval, observe the same pre-tick state, and report STALE
+// for a file that is about to be correct. Measured: 2 of 3 replacements over a
+// path the guest had read reported STALE, and every one of them read the correct
+// bytes seconds later with no further pass — the invalidation had worked and only
+// the verdict was early (DF181).
+//
+// It therefore has to EXCEED the tick, not merely be non-zero: a sub-tick wait can
+// fall inside the same interval and see exactly what the previous pass saw.
+//
+// This is on the ordinary repair path, not just a rare one — a genuinely stale file
+// fails the first pass by construction — so it is latency every such `files put`
+// pays. That is the trade: about a second, against a command that exits non-zero
+// and tells the user to restart the sandbox.
+const guestRefreshSettle = 1100 * time.Millisecond
 
 // guestRefreshProgram runs in the guest with argv of (sha256, path) pairs. It
 // prints one "<verdict>\t<path>" line per pair: OK when the guest's bytes already
@@ -85,6 +105,19 @@ for i in range(0, len(args) - 1, 2):
         print("ERR:%s\t%s" % (str(exc).replace("\t", " "), path))
 `
 
+// settleBeforeRetry waits for the guest's revalidation tick to advance. The seam
+// exists so tests can assert that a wait was requested, and how long for, without
+// paying it — but note what that can and cannot show: a fake guest proves the loop
+// waits, never that the wait outlasts a real tick. Only hardware shows that
+// (`design/research/macos-isolation-spike/df181_timing.sh`).
+func (r *Runtime) settleBeforeRetry(d time.Duration) {
+	if r.settle != nil {
+		r.settle(d)
+		return
+	}
+	time.Sleep(d)
+}
+
 // RefreshGuestFiles verifies each file in the guest and repairs the stale ones,
 // returning those still mismatched. See runtime.GuestFileRefresher for why this
 // is the backend's job and why the host supplies the digest.
@@ -111,6 +144,11 @@ func (r *Runtime) RefreshGuestFiles(ctx context.Context, name string, files []ru
 	}
 
 	for attempt := 0; attempt < guestRefreshAttempts && len(pending) > 0; attempt++ {
+		// Not before the first pass: a path the guest already agrees on must still
+		// cost one check and no delay, which is the common case by far.
+		if attempt > 0 {
+			r.settleBeforeRetry(guestRefreshSettle)
+		}
 		argv := make([]string, 0, 3+2*len(pending))
 		argv = append(argv, guestPython, "-c", guestRefreshProgram)
 		for _, t := range pending {

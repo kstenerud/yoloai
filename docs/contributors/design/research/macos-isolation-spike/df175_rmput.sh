@@ -191,16 +191,29 @@ rmf "$P2"
 chk "host side: the file is gone after rm" "gone" \
     "$([ -e "$EX/$P2" ] && echo present || echo gone)"
 note "guest immediately after rm" "$(gcat "$P2" || echo '<none>')"
-put "$P2" "$Q5"                                # res.Replaced=false -> no refreshGuestView
+# NOT `put` here: a non-zero exit is one of the three outcomes this probe classifies, not an
+# abort. The refresh is unconditional now, so an unrepairable path makes the command FAIL — and
+# a harness that dies on that reports "harness broken" for the product behaving as designed.
+printf '%s' "$Q5" > "$STAGE/$P2"
+p2out=$(yoloai files "$BOX" put "$STAGE/$P2" --overwrite 2>&1); p2rc=$?
 chk "host side holds the new content" "$Q5" "$(cat "$EX/$P2")"
 P2GOT=$(await "$P2" "$Q5")
+note "put exit code" "$p2rc"
 note "GUEST READS" "$P2GOT"
 note "guest stat size" "$(gsize "$P2")"
-if [ "$P2GOT" = "$Q5" ]; then
-  printf '  ==> NO GAP on %s: rm+put delivers correctly.\n' "$BACKEND"
+# Three outcomes, and only one of them is the original defect. Collapsing "refused loudly" into
+# "failed" would lose the distinction the whole fix is about.
+if [ "$p2rc" = 0 ] && [ "$P2GOT" = "$Q5" ]; then
+  printf '  ==> DELIVERED on %s: rm+put reaches the guest and the command succeeds.\n' "$BACKEND"
+elif [ "$p2rc" != 0 ]; then
+  printf '  ==> REFUSED on %s: the put exits non-zero rather than delivering content the guest\n' "$BACKEND"
+  printf '      cannot read. Not silent corruption, and not a delivery either — the invalidation\n'
+  printf '      cannot repair a path whose dentry still resolves to the unlinked inode. The error\n'
+  printf '      names a restart, which does clear it. Message: %s\n' "$(printf '%s' "$p2out" | head -1)"
 else
-  printf '  ==> GAP CONFIRMED on %s: the guest serves %s where the host holds %s.\n' \
-    "$BACKEND" "${P2GOT:-<empty>}" "$Q5"
+  printf '  ==> SILENT CORRUPTION on %s: put exited 0 and the guest serves %s where the host\n' \
+    "$BACKEND" "${P2GOT:-<empty>}"
+  printf '      holds %s. This is the original DF175 defect, unguarded.\n' "$Q5"
 fi
 
 # --- P3: a never-read path must land correctly -------------------------------------------
