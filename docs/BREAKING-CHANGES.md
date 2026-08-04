@@ -23,6 +23,28 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running
+
+**Previous behavior:** `yoloai files <box> rm f` followed by `yoloai files <box> put f` succeeded and
+exited 0. On the **tart** backend, if the sandbox had already read `f`, the guest then served the
+**removed file's** contents for that name — the agent operated on bytes that were on nobody's disk,
+with every layer reporting success.
+
+**New behavior:** on backends whose guest caches the shared directory (tart today), the second `put`
+is **rejected** with an error naming both remedies: use a different name, or restart the sandbox.
+The same guard covers the MCP file-write tool. `start` clears the record, so a restart genuinely
+releases the name. Other backends are unaffected, and an ordinary in-place overwrite still works
+everywhere.
+
+**Who this affects:** anyone scripting a remove-then-replace of the same exchange filename against a
+tart sandbox. Write to a new name instead — that is the operation Apple documents as supported — or
+restart between the two.
+
+**Why it changed:** DF175. Apple lists both "modify in place, host → guest" and "delete, host →
+guest" as unsupported for virtiofs shares (Feedback FB22905515), and no host-side repair reaches
+it — two were built and measured before this. Rejecting an operation the platform cannot perform
+correctly beats performing it and being wrong in silence.
+
 ### `yoloai files put --overwrite <dir>` replaces the directory instead of merging into it
 
 **Previous behavior:** re-importing a directory copied the source *inside* the existing one, because
