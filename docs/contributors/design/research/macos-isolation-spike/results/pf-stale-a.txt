@@ -1,0 +1,24 @@
+host: 26.5.1 | A=enf-a(192.168.64.41) B=enf-b(192.168.64.42)
+
+== SA0 BASELINE ==
+        B: 1.1.1.1=301 1.0.0.2=301 1.0.0.1=301
+   PASS    B reaches all three
+
+== SA1 CONTROL — B in its OWN sub-anchor only, with its own allowlist ==
+        B: own=301 other=000
+   PASS    control holds — B has exactly its own policy
+
+== SA2 THE TEST — add an ORPHANED sub-anchor naming B's address with a DIFFERENT allowlist ==
+        orphan rules=2 | B: own=000 other(orphan's allowlist)=301
+   FAIL    SAME HAZARD UNDER SHAPE A: B lost its own policy and inherited the orphan's.
+           D3 is a property of address-keyed enforcement, NOT of Shape B's slots — it does
+           not differentiate the shapes, and raises reaping to a security requirement for both
+   PASS    main ruleset unchanged (4)
+
+== TOTALS ==
+   pass=3 fail=1 unknown=0
+
+== cleanup ==
+   main ruleset: before=4 after=4
+   B restored: own=301 deny=301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-stale-a.txt
