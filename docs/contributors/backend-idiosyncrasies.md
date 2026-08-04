@@ -2285,6 +2285,34 @@ names, after it, either nothing or somebody else — and on tart, where the
 pool has wrapped, "somebody else" is the likely case rather than the
 pathological one.
 
+### The sandbox's tier layout reaches a tart guest but not an apple one, so the same file has different in-guest paths per backend
+
+The host lays a sandbox out in three access tiers — `host/`, `ro/`, `rw/`.
+**tart reproduces that structure inside the guest; apple flattens it away.**
+The exchange directory the host knows as `<sandbox>/rw/files` is:
+
+| backend | path inside the guest |
+| --- | --- |
+| tart | `/Volumes/My Shared Files/rw/files` |
+| apple | `/yoloai/files` — no tier component |
+
+Same for the read-only tier: `/Volumes/My Shared Files/ro/prompt.txt` on tart
+against `/yoloai/prompt.txt` on apple. The reason is visible in tart's
+descriptor: it mounts **one VirtioFS share per guest-facing tier** under
+`/Volumes/My Shared Files` (`runtime/tart/tart.go:70-75`), so the tier name is
+necessarily a path component. apple mounts at literal targets under `/yoloai`
+and the tier is not part of the target.
+
+**Why this is worth writing down:** a probe or script that derives one guest
+path and reuses it across backends does not fail loudly. It reads an absent
+file, gets empty output, and that is indistinguishable from "the guest cannot
+see the content" — which is exactly the symptom every finding in this section
+is about. Deriving `/yoloai/rw/files` for apple by analogy with tart produced a
+clean-looking run in which every probe returned empty
+(`design/research/macos-isolation-spike/df175_rmput.sh`, whose comments record
+it). Ask the guest — `container exec <box> ls /yoloai` — rather than reasoning
+from the host layout or from the other backend.
+
 ### Tart VirtioFS: the guest can read fabricated file content — the OLD bytes at the NEW length, with a correct `st_size` and no error
 
 Measured 2026-08-02 (macOS 26.5.1, tart 2.32.1) on a `tart run --dir` share, with the

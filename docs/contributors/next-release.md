@@ -93,6 +93,8 @@ finding or decision first, and lands here only if it should block the release.
   not
 - [DF171](design/findings-unresolved.md) — gVisor is excluded from agent-free launch by a
   username-resolution bug the codebase already fixed elsewhere
+- [DF181](design/findings-unresolved.md) — the DF175 repair gives up inside one revalidation tick,
+  so `files put` fails on a guest that is about to be correct
 
 ## In flight — started, not finished
 
