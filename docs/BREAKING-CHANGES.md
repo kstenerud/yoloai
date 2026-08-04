@@ -199,11 +199,14 @@ sits rather than by a list that has to be maintained. Nothing in any guest ever
 read these files, so no in-sandbox behavior changes.
 
 **And the other two tiers move with them.** `runtime-config.json`, `bin/`,
-`prompt.txt`, `machine-id`, `home-seed/` and `secrets/` go to `ro/`, which the
-guest reads and must not write; `logs/`, `work/`, `files/`, `cache/`,
-`agent-runtime/`, `agent-status.json`, `tmux/`, `vscode-cli/` and the guest's
-`home/` go to `rw/`. A sandbox root now holds exactly those three directories and
-nothing else, so there is no un-tiered place to put a new file.
+`prompt.txt`, `resume-prompt.txt`, `machine-id`, `home-seed/` and `secrets/` go to
+`ro/`, which the guest reads and must not write; `logs/`, `work/`, `files/`,
+`cache/`, `agent-runtime/`, `agent-status.json`, `log.txt`, `tmux/`, `vscode-cli/`,
+`lifecycle-on-create-done`, the guest's `home/`, and tart's `setup.log` and
+`xcodebuild-firstlaunch.log`/`.started` go to `rw/`. A sandbox root now holds
+exactly those three directories and nothing else, so there is no un-tiered place
+to put a new file. (`internal/config`'s `entryTiers` is the authoritative table,
+and `architecture/host-layout.md` draws the whole tree.)
 
 **The guest still sees one flat root.** Each backend assembles the flat view the
 in-sandbox scripts already expect, so nothing inside a sandbox changes — no agent

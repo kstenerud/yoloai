@@ -621,7 +621,7 @@ Proxy flags: `--agent <name>` (default: `idle`), `--model`, `--profile`, `-d`/`-
 
 ## How It Works
 
-1. **`yoloai new`** copies your project into `~/.yoloai/library/sandboxes/<name>/work/`, creates a git baseline commit, and launches a Docker container running the agent.
+1. **`yoloai new`** copies your project into `~/.yoloai/library/sandboxes/<name>/rw/work/`, creates a git baseline commit, and launches a Docker container running the agent.
 
 2. **The agent works inside the container** on the copy. Your original files are never touched.
 
@@ -728,20 +728,32 @@ You can also edit the config files directly — `config set` preserves comments 
 
 ## Sandbox State
 
-All sandbox state lives on the host at `~/.yoloai/library/sandboxes/<name>/`:
+All sandbox state lives on the host at `~/.yoloai/library/sandboxes/<name>/`, split into
+three tiers by who is allowed to reach the file:
 
 ```
 ~/.yoloai/library/sandboxes/<name>/
-  environment.json   # sandbox config (paths, mode, baseline SHA, backend)
-  sandbox-state.json # per-sandbox state (agent_files_initialized, etc.)
-  runtime-config.json # container entrypoint config
-  prompt.txt         # initial prompt (if provided)
-  log.txt            # tmux session log
-  agent-runtime/     # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
-  files/             # bidirectional file exchange (mounted at /yoloai/files/)
-  cache/             # agent cache — HTTP responses, cloned repos (mounted at /yoloai/cache/)
-  work/              # isolated copy of your project
+  host/                # never shared into a sandbox, on any backend
+    environment.json   # sandbox config (paths, mode, baseline SHA, backend)
+    sandbox-state.json # per-sandbox state (agent_files_initialized, etc.)
+    agent.json         # resolved agent config
+    netpolicy.json     # network policy
+  ro/                  # the agent reads these and cannot write them
+    runtime-config.json # container entrypoint config
+    prompt.txt         # initial prompt (if provided)
+    resume-prompt.txt  # prompt for a resumed session
+  rw/                  # the agent's read-write region
+    log.txt            # tmux session log
+    agent-runtime/     # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
+    files/             # bidirectional file exchange (mounted at /yoloai/files/)
+    cache/             # agent cache — HTTP responses, cloned repos (mounted at /yoloai/cache/)
+    work/              # isolated copy of your project
 ```
+
+The agent still sees one flat directory — each backend assembles that view over the tiers, so
+no path inside a sandbox changed. The tiers exist so that a file's reachability is decided by
+*where it sits* rather than by a list somewhere, which is what stops a sandbox rewriting its own
+`environment.json`. Sandboxes created before v0.11.0 need `yoloai system migrate`.
 
 Containers are ephemeral — if removed, `yoloai start` recreates them from `environment.json`. Your work and agent state persist.
 

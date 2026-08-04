@@ -926,6 +926,18 @@ earlier signal and records nothing else.
 - **What would close it:** take the existing per-sandbox `flock` around the file-exchange mutations, the way every other mutating path already does. The mechanism exists and needs no invention. Check the ordering against `reset`, which takes the lock and rebuilds the same tree.
 - **Pointer:** `internal/orchestrator/engine_files.go` (no `AcquireLock`), `store.AcquireLock`, `internal/mcpsrv/server.go`.
 
+### DF183 — the tiering sweep updated the contributor docs and missed the user-facing ones, on the one path a user is told to look at
+
+- **Discovered:** 2026-08-04, pre-release audit of everything since v0.10.0 · **Workstream:** docs / sandbox-share-tiering
+- **Severity:** MEDIUM. No code is wrong; the two documents a *user* consults to find their own sandbox state both described a layout that v0.11.0 removes.
+- **Disposition:** RESOLVED IN PLACE 2026-08-04 (both documents corrected). Recorded under rule 7 because the miss is the point, not the typo, and because the forest below is not fixed.
+- **Rides:** **any.**
+- **What was wrong.** [GUIDE.md](../../GUIDE.md) § *Sandbox State* still drew the **flat** sandbox directory — `environment.json`, `runtime-config.json`, `prompt.txt`, `log.txt`, `agent-runtime/`, `files/`, `cache/`, `work/` all at the sandbox root — every one of which moved into `host/`, `ro/` or `rw/`. Its § *How It Works* still pointed at `sandboxes/<name>/work/`, now `rw/work/`. Separately, [BREAKING-CHANGES.md](../../BREAKING-CHANGES.md)'s tiering entry enumerated the `ro/` and `rw/` membership and the enumeration was **incomplete** — it omitted `resume-prompt.txt` from `ro/`, and `log.txt`, `lifecycle-on-create-done`, `setup.log` and the two `xcodebuild-firstlaunch` artifacts from `rw/` — while reading as exhaustive.
+- **The contributor tier was swept correctly.** `architecture/host-layout.md` carries the full three-tier tree, and `internal/config`'s `entryTiers` — the authoritative table — is pinned by six tests including one asserting every named entry is classified. So this is not a case of nobody knowing where the files went. The sweep happened; it stopped at the boundary of the docs the people doing the sweep read.
+- **The forest, which is the part worth keeping (rule 7 / GEN §18).** This is the *second* time a tiering-era name went stale in a doc tier, and the backstop we have is on the other one. D124 gated `architecture/` precisely because it had drifted — it now fails loudly rather than quietly. Nothing equivalent guards `docs/` (users) or `docs/integrators/`, and `AGENTS.md`'s own note records why the ordinary defences cannot reach here: `make check` does not read prose, and `.claude/hooks/post-edit.sh` **exempts `docs/*`**, so a docs-only edit never even stamps. The drift landed in exactly the tier with no detector, which is not a coincidence — it is where drift is free. Whether to extend D124's name-gating to the user tier is a decision, not a fix, and it is not made here.
+- **Why nothing caught it, stated plainly.** Rule 2 ("invalidate a name, sweep every surface that names it") names the surfaces to sweep and `docs/GUIDE.md` is one of them. The rule was followed for code and for contributor docs and not for the user tier, and no mechanism disagreed, because none exists that could.
+- **Pointer:** `docs/GUIDE.md` §§ *How It Works*, *Sandbox State*; `docs/BREAKING-CHANGES.md` § *A sandbox directory is now three tiers*; `internal/config/sandbox_tier.go` (`entryTiers`); `docs/contributors/architecture/host-layout.md`.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
