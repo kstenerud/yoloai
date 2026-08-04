@@ -83,6 +83,10 @@ finding or decision first, and lands here only if it should block the release.
   fabricated content to a running tart sandbox
 - [DF181](design/findings-unresolved.md) — the DF175 repair gives up inside one revalidation tick,
   so `files put` fails on a guest that is about to be correct
+- [DF177](design/findings-unresolved.md) — `yoloai files put --overwrite <dir>` nests the directory
+  instead of replacing it
+- [DF180](design/findings-unresolved.md) — apple's `Inspect` reports "not found" for a daemon it
+  cannot reach, so `destroy` claims success and leaks the container
 
 ## Candidates — undecided
 

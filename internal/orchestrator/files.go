@@ -62,10 +62,22 @@ func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string
 	if err != nil {
 		return ImportResult{}, err
 	}
-	_, statErr := os.Stat(dst)
+	dstInfo, statErr := os.Stat(dst)
 	existed := statErr == nil
 	if !force && existed {
 		return ImportResult{}, fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
+	}
+	// A directory has to be removed before the copy, because `cp -rp src dst`
+	// copies src INSIDE an existing directory dst rather than over it. Without
+	// this, a second `--overwrite` of somedir/ produced files/somedir/somedir/…
+	// while files/somedir/* kept the OLD content, and the command exited 0
+	// (DF177). Single files are left alone: cp truncates those in place, and
+	// removing them first would turn every overwrite into an unlink+recreate,
+	// which is the one shape a tart guest cannot be made to re-read (DF175).
+	if existed && dstInfo.IsDir() {
+		if err := os.RemoveAll(dst); err != nil {
+			return ImportResult{}, fmt.Errorf("replace directory %s: %w", info.Name(), err)
+		}
 	}
 	cpEnv := layout.Env().EnvForHostTool()
 	if err := copyTree(ctx, cpEnv, absSrc, dst); err != nil {

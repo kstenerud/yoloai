@@ -156,3 +156,55 @@ func TestSelectBackend_DarwinPrefersApple(t *testing.T) {
 	got, _ = runtime.SelectBackend(ctx, runtime.BackendApple, runtime.IsolationModeDefault, "", nil)
 	assert.Equal(t, runtime.BackendApple, got, "container_backend=apple is honored")
 }
+
+// The two failure modes of `container inspect` are indistinguishable by exit code
+// — both exit 1 — so these fixtures reproduce the CLI's real stderr verbatim, as
+// measured on macOS 26.5.1 in
+// design/research/macos-isolation-spike/results/apple-daemon-states.txt.
+// Paraphrasing them would test the paraphrase.
+const (
+	realNotFoundStderr   = `Error: container not found: yoloai-cli-box`
+	realDaemonDownStderr = `Error: internalError: "failed to list containers" (cause: "interrupted: "XPC connection error: Connection invalid"")`
+)
+
+// The daemon answering "no such container" is the only thing that may become
+// ErrNotFound, because status.go turns ErrNotFound into StatusRemoved and Remove
+// turns it into "already gone".
+func TestInspect_DaemonSaysNotFound_IsErrNotFound(t *testing.T) {
+	r := newFakeContainerRuntime(t, "#!/bin/sh\necho '"+realNotFoundStderr+"' >&2\nexit 1\n")
+
+	_, err := r.Inspect(context.Background(), "yoloai-cli-box")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, runtime.ErrNotFound)
+}
+
+// DF180: an unreachable daemon must NOT read as absence. Reverting the fix makes
+// this return ErrNotFound, which is what rendered live sandboxes `removed` after
+// every reboot and let `destroy` exit 0 over a container it never touched.
+func TestInspect_DaemonUnreachable_IsNotErrNotFound(t *testing.T) {
+	r := newFakeContainerRuntime(t, "#!/bin/sh\necho '"+realDaemonDownStderr+"' >&2\nexit 1\n")
+
+	_, err := r.Inspect(context.Background(), "yoloai-cli-box")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, runtime.ErrNotFound,
+		"a daemon that could not be asked has not reported an absence")
+	assert.Contains(t, err.Error(), "XPC connection error",
+		"the daemon's own diagnostic must survive, or the user cannot tell why (DF145)")
+}
+
+// Remove's job is to be idempotent, not to guess. A genuine absence still exits 0.
+func TestRemove_DaemonSaysNotFound_IsIdempotent(t *testing.T) {
+	r := newFakeContainerRuntime(t, "#!/bin/sh\necho '"+realNotFoundStderr+"' >&2\nexit 1\n")
+
+	assert.NoError(t, r.Remove(context.Background(), "yoloai-cli-box"))
+}
+
+// The DF180 leak itself: destroy must fail loudly rather than report success over
+// a container that is still there. Reverting the fix turns this green.
+func TestRemove_DaemonUnreachable_FailsRatherThanClaimingSuccess(t *testing.T) {
+	r := newFakeContainerRuntime(t, "#!/bin/sh\necho '"+realDaemonDownStderr+"' >&2\nexit 1\n")
+
+	err := r.Remove(context.Background(), "yoloai-cli-box")
+	require.Error(t, err, "reporting success here leaks the container and drops the store entry")
+	assert.Contains(t, err.Error(), "XPC connection error")
+}

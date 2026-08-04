@@ -196,12 +196,13 @@ func TestImportFile_DirectoryVerifiesEveryFileInTheTree(t *testing.T) {
 	_, err = engine.ImportFile(context.Background(), "box", srcDir, true)
 	require.NoError(t, err)
 
-	// Expectation is read off the tree that is actually on disk, not hardcoded:
-	// re-importing a directory currently NESTS it rather than replacing it
-	// (DF177 — `cp -rp src dst` copies into an existing dst). That is a separate
-	// defect, and pinning a literal file list here would quietly pin it as
-	// intended behaviour. What this test owns is that every regular file under
-	// the placed entry gets verified, whatever the copy left there.
+	// Expectation is read off the tree that is actually on disk, not hardcoded.
+	// That was originally to avoid pinning DF177's nesting bug as intended
+	// behaviour — re-importing a directory used to copy INTO it, leaving
+	// bundle/bundle/… beside stale bundle/*. DF177 is fixed now, so the tree is
+	// the replaced one, and reading it off disk still keeps this test owning one
+	// thing: that every regular file under the placed entry gets verified,
+	// whatever the copy left there.
 	dstDir := filepath.Join(FilesDir(layout, "box"), filepath.Base(srcDir))
 	want, err := digestTree(dstDir)
 	require.NoError(t, err)
@@ -264,4 +265,71 @@ func TestWriteFile_UnrepairableStaleContentFailsTheWrite(t *testing.T) {
 	err := engine.WriteFile(ctx, "box", "notes.md", []byte("v2"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "notes.md")
+}
+
+// DF177: `cp -rp src dst` copies INTO an existing directory. So a second
+// --overwrite of a directory used to leave the old files in place and nest a copy
+// beneath them, exiting 0 — "overwrite" that did not overwrite.
+func TestImportFile_DirectoryOverwriteReplacesRatherThanNesting(t *testing.T) {
+	engine, layout := newImportEngine(t, "mock")
+	srcDir := filepath.Join(t.TempDir(), "bundle")
+	require.NoError(t, os.MkdirAll(srcDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "keep.txt"), []byte("v1"), 0600))
+
+	_, err := engine.ImportFile(context.Background(), "box", srcDir, false)
+	require.NoError(t, err)
+
+	// Second import: one file changed, one file gone from the source entirely.
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "keep.txt"), []byte("v2"), 0600))
+	_, err = engine.ImportFile(context.Background(), "box", srcDir, true)
+	require.NoError(t, err)
+
+	dst := filepath.Join(FilesDir(layout, "box"), "bundle")
+	assert.NoDirExists(t, filepath.Join(dst, "bundle"), "the copy must not nest inside the old directory")
+	got, err := os.ReadFile(filepath.Join(dst, "keep.txt")) //nolint:gosec // test-controlled path
+	require.NoError(t, err)
+	assert.Equal(t, "v2", string(got), "the replaced tree holds the new content, not the old")
+}
+
+// A file that the source no longer has must not survive the replace — that is the
+// difference between a replace and the merge this used to be.
+func TestImportFile_DirectoryOverwriteDropsFilesTheSourceRemoved(t *testing.T) {
+	engine, layout := newImportEngine(t, "mock")
+	srcDir := filepath.Join(t.TempDir(), "bundle")
+	require.NoError(t, os.MkdirAll(srcDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "stale.txt"), []byte("old"), 0600))
+	_, err := engine.ImportFile(context.Background(), "box", srcDir, false)
+	require.NoError(t, err)
+
+	require.NoError(t, os.Remove(filepath.Join(srcDir, "stale.txt")))
+	require.NoError(t, os.WriteFile(filepath.Join(srcDir, "fresh.txt"), []byte("new"), 0600))
+	_, err = engine.ImportFile(context.Background(), "box", srcDir, true)
+	require.NoError(t, err)
+
+	dst := filepath.Join(FilesDir(layout, "box"), "bundle")
+	assert.NoFileExists(t, filepath.Join(dst, "stale.txt"), "a merge would have left this behind")
+	assert.FileExists(t, filepath.Join(dst, "fresh.txt"))
+}
+
+// A single-file overwrite must NOT become an unlink+recreate: that is the one
+// shape a tart guest cannot be made to re-read (DF175), so cp's truncate-in-place
+// is load-bearing rather than incidental.
+func TestImportFile_SingleFileOverwriteKeepsTheSameInode(t *testing.T) {
+	engine, layout := newImportEngine(t, "mock")
+	src := hostFile(t, "v1")
+	_, err := engine.ImportFile(context.Background(), "box", src, false)
+	require.NoError(t, err)
+
+	dst := filepath.Join(FilesDir(layout, "box"), "payload.txt")
+	before, err := os.Stat(dst)
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(src, []byte("v2"), 0600))
+	_, err = engine.ImportFile(context.Background(), "box", src, true)
+	require.NoError(t, err)
+
+	after, err := os.Stat(dst)
+	require.NoError(t, err)
+	assert.True(t, os.SameFile(before, after),
+		"a file overwrite must truncate in place; unlinking it would create DF175's unrepairable case")
 }

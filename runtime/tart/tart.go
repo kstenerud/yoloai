@@ -338,7 +338,11 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Record whether the VM is suspended before tart run resumes it.
 	// Used after boot to decide whether to kill the stale tmux session.
-	wasSuspended := r.vmState(ctx, name) == "suspended"
+	// An unreadable inventory means "not known to be suspended", which is the
+	// conservative answer: the stale-tmux cleanup below is skipped rather than
+	// run against a VM whose state was never established.
+	priorState, _ := r.vmState(ctx, name)
+	wasSuspended := priorState == "suspended"
 
 	// Load instance config saved by Create
 	var cfg runtime.InstanceConfig
@@ -513,7 +517,10 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 
 // Inspect returns the current state of the VM instance.
 func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
-	state := r.vmState(ctx, name)
+	state, err := r.vmState(ctx, name)
+	if err != nil {
+		return runtime.InstanceInfo{}, fmt.Errorf("inspect VM %q: %w", name, err)
+	}
 	if state == "" {
 		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
@@ -849,29 +856,40 @@ func (r *Runtime) runTart(ctx context.Context, args ...string) (string, error) {
 
 // vmState returns the tart state string for the named VM: "running",
 // "suspended", "stopped", or "" if the VM does not exist.
-func (r *Runtime) vmState(ctx context.Context, vmName string) string {
+//
+// An error means the inventory could not be READ, which is a different fact from
+// the VM being absent from it. Returning "" for both is the shape DF180 found in
+// the apple backend, where it made `destroy` report success over a container it
+// never removed; tart carried the identical conflation and this is the sibling
+// half of that fix. Callers that only need "does it exist" can still ignore the
+// error, but they have to say so.
+func (r *Runtime) vmState(ctx context.Context, vmName string) (string, error) {
 	out, err := r.runTart(ctx, "list", "--format", "json")
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("list tart VMs: %w", err)
 	}
 	var entries []struct {
 		Name  string `json:"Name"`
 		State string `json:"State"`
 	}
 	if err := json.Unmarshal([]byte(out), &entries); err != nil {
-		return ""
+		return "", fmt.Errorf("parse tart VM list: %w", err)
 	}
 	for _, e := range entries {
 		if e.Name == vmName {
-			return e.State
+			return e.State, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // vmExists checks whether a VM with the given name exists in tart's inventory.
+// An unreadable inventory answers "no", which is this predicate's historical
+// behaviour and is safe for its callers: they use it to decide whether to create,
+// and creating over a VM tart cannot see fails loudly on its own.
 func (r *Runtime) vmExists(ctx context.Context, vmName string) bool {
-	return r.vmState(ctx, vmName) != ""
+	state, err := r.vmState(ctx, vmName)
+	return err == nil && state != ""
 }
 
 // isRunning checks if the VM is running by attempting a trivial exec.

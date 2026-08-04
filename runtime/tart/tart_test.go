@@ -709,3 +709,50 @@ func TestAttachCommand_ForcesUTF8_NoSocket(t *testing.T) {
 	assert.NotContains(t, joined, "-S")
 	assert.Contains(t, joined, "attach -t main")
 }
+
+// fakeTartWithScript builds a Runtime whose tartBin runs script instead of the
+// real CLI. Distinct from build_test.go's fakeTartRuntime, which always fails:
+// these cases need a tart that SUCCEEDS with chosen output.
+func fakeTartWithScript(t *testing.T, script string) *Runtime {
+	t.Helper()
+	dir := t.TempDir()
+	bin := filepath.Join(dir, "tart")
+	require.NoError(t, os.WriteFile(bin, []byte(script), 0700)) //nolint:gosec // test fixture needs exec bit
+	return &Runtime{
+		tartBin: bin,
+		layout:  config.NewLayout(filepath.Join(t.TempDir(), ".yoloai")).WithPrincipal(config.CLIPrincipal),
+		execEnv: []string{"PATH=/usr/bin:/bin"},
+	}
+}
+
+// A VM genuinely absent from a readable inventory is ErrNotFound.
+func TestInspect_VMAbsentFromInventory_IsErrNotFound(t *testing.T) {
+	r := fakeTartWithScript(t, "#!/bin/sh\necho '[{\"Name\":\"other\",\"State\":\"running\"}]'\n")
+
+	_, err := r.Inspect(context.Background(), "yoloai-cli-box")
+	require.Error(t, err)
+	assert.ErrorIs(t, err, runtime.ErrNotFound)
+}
+
+// DF180's sibling half: `tart list` failing is not an absence. vmState returned ""
+// for both, so Inspect reported ErrNotFound for a VM it had simply failed to ask
+// about — the same conflation the apple backend shipped.
+func TestInspect_TartListFails_IsNotErrNotFound(t *testing.T) {
+	r := fakeTartRuntime(t, "tart: something went wrong")
+
+	_, err := r.Inspect(context.Background(), "yoloai-cli-box")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, runtime.ErrNotFound,
+		"an inventory that could not be read has not reported an absence")
+	assert.Contains(t, err.Error(), "something went wrong",
+		"tart's own diagnostic must survive (DF145)")
+}
+
+// Unparseable JSON is likewise a failure to read, not an absence.
+func TestInspect_TartListUnparseable_IsNotErrNotFound(t *testing.T) {
+	r := fakeTartWithScript(t, "#!/bin/sh\necho 'not json at all'\n")
+
+	_, err := r.Inspect(context.Background(), "yoloai-cli-box")
+	require.Error(t, err)
+	assert.NotErrorIs(t, err, runtime.ErrNotFound)
+}

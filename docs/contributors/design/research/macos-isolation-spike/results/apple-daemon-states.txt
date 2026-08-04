@@ -1,0 +1,41 @@
+=== apple daemon states: what the CLI says, and when the bridge exists ===
+date: 2026-08-04 16:20:57
+host: 26.5.1
+
+== P1  daemon UP — the two cases that must be distinguishable
+  service status                               running
+  inspect missing name       rc=1   Error: container not found: no-such-container-xyz
+  list --all                 rc=0   ID  IMAGE  OS  ARCH  STATE  IP  CPUS  MEMORY  STARTED
+  gateway 192.168.64.1 assigned?               no
+
+== P2  daemon DOWN — the state after every reboot (the service is not launchd-registered)
+  service status                               apiserver is not running and not registered with launchd
+  inspect missing name       rc=1   Error: internalError: "failed to list containers" (cause: "interrupted: "XPC connection error: Connection invalid"")
+  inspect plausible name     rc=1   Error: internalError: "failed to list containers" (cause: "interrupted: "XPC connection error: Connection invalid"")
+  list --all                 rc=1   Error: internalError: "failed to list containers" (cause: "interrupted: "XPC connection error: Connection invalid"")
+  gateway 192.168.64.1 assigned?               no
+
+  READ THIS ROW PAIR: if P1 and P2 emit different text or different exit codes for the
+  SAME command, Inspect can discriminate. If they are identical, it cannot, and the fix
+  has to ask the service directly instead.
+
+== P3  DF178 — does a real --broker sandbox degrade on a freshly started service?
+  service just started; gateway assigned?      no  <-- DF178: the bridge is not up yet
+  arm 1: explicit --broker on the fresh service (expect a loud failure)
+    new rc=0
+      Sandbox df178-broker-probe created
+      Run 'yoloai attach df178-broker-probe' to start working (Ctrl-b d to detach)
+  arm 2: DEFAULT (no broker flag) on the fresh service — the path users take
+    gateway before this sandbox                no
+    new rc=0
+      Sandbox df178-broker-probe created
+      Run 'yoloai attach df178-broker-probe' to start working (Ctrl-b d to detach)
+  gateway assigned after first container?      yes
+  ANTHROPIC_API_KEY vars in guest env          0
+?
+    (0 = brokered/host-side; >0 = key delivered into the sandbox) 
+
+== what this settles ==
+  DF180: compare P1 and P2. DF178: P3 is the end-to-end run the finding asked for.
+
+[cleanup] container service restarted; probe sandbox removed

@@ -226,6 +226,32 @@ rmf "$P3"
 put "$P3" "$Q5"
 chk "guest reads the NEW bytes" "$Q5" "$(await "$P3" "$Q5")"
 
+# --- P4: DF177's directory replace, which can only be safe if P2 is ------------------------
+hr "P4  DF177: re-putting a DIRECTORY must replace it, and the guest must see the new tree"
+printf '        (the replace unlinks the old directory, so on tart this IS an rm+put — it is safe
+'
+printf '         only because the removal now drops the guest dentries. That coupling is the point.)
+'
+DSRC=$STAGE/bundle-$RUN
+mkdir -p "$DSRC"
+printf '%s' "$A20" > "$DSRC/keep.txt"
+printf 'STALE-SOURCE' > "$DSRC/gone.txt"
+yoloai files "$BOX" put "$DSRC" --overwrite >/dev/null 2>&1 || die "directory put failed"
+BN=$(basename "$DSRC")
+chk "guest reads v1 of keep.txt" "$A20" "$(await "$BN/keep.txt" "$A20")"
+# Second import: one file changed, one removed from the source entirely.
+printf '%s' "$Q5" > "$DSRC/keep.txt"
+rm -f "$DSRC/gone.txt"
+d2out=$(yoloai files "$BOX" put "$DSRC" --overwrite 2>&1); d2rc=$?
+note "second directory put rc" "$d2rc"
+[ "$d2rc" = 0 ] || printf '        %s\n' "$(printf '%s' "$d2out" | head -1)"
+chk "host: no nested copy (DF177)" "gone" \
+    "$([ -d "$EX/$BN/$BN" ] && echo present || echo gone)"
+chk "host: source-removed file is gone" "gone" \
+    "$([ -e "$EX/$BN/gone.txt" ] && echo present || echo gone)"
+note "GUEST READS keep.txt" "$(await "$BN/keep.txt" "$Q5")"
+note "guest still sees gone.txt?" "$(gexec sh -c "[ -e '$GEX/$BN/gone.txt' ] && echo yes || echo no")"
+
 printf '\n== TOTALS ==\n   pass=%d fail=%d observations=%d\n' "$PASS" "$FAIL" "$UNKNOWN"
 printf '\nP2 is the finding; P0/P1/P3 only license reading it.\n'
 printf 'Cleanup: yoloai destroy %s --abandon-unapplied\n' "$BOX"

@@ -23,6 +23,46 @@ conflict — a misfile lands cleanly and silently.
 
 ## Unreleased
 
+### `yoloai files put --overwrite <dir>` replaces the directory instead of merging into it
+
+**Previous behavior:** re-importing a directory copied the source *inside* the existing one, because
+`cp -rp src dst` treats an existing directory dst as a destination to copy into. A second
+`files put --overwrite bundle/` produced `files/bundle/bundle/…` while `files/bundle/*` kept the
+**old** content — and exited 0. The flag did not overwrite.
+
+**New behavior:** an existing directory is removed before the copy, so the result is the source
+tree and nothing else. Files the source no longer contains are gone rather than left behind.
+Single files are unaffected (`cp` already truncated those in place).
+
+**Who this affects:** anyone relying on the merge — accumulating files in a sandbox's exchange
+directory by repeatedly putting the same directory name. That now discards anything not in the
+source. Put the individual files, or use distinct directory names.
+
+**Why it changed:** DF177. "Overwrite" that silently merges and nests is not a behaviour anyone
+chose; it was `cp` semantics leaking through a flag that promises the opposite.
+
+### macOS: a backend that cannot be reached is an error, not a "removed" sandbox
+
+**Previous behavior:** on the `apple` and `tart` backends, *any* failure to inspect an instance was
+reported as "no such instance". So with the apple `container` service stopped, `yoloai ls` listed
+every intact sandbox as `removed`, and `yoloai destroy <name>` printed `Destroyed <name>`, exited 0
+and dropped the store entry — while the container was still there when the service came back.
+
+**New behavior:** "the daemon says no such container" and "the daemon could not be asked" are
+distinguished. Only the first still reads as removed. The second surfaces the backend's own error,
+so `yoloai ls` and `yoloai destroy` now **fail loudly** where they previously succeeded with a
+wrong answer.
+
+**Who this affects:** anyone running the apple backend with the `container` service stopped — which
+is its state after **every reboot**, because the service is not registered with launchd. If you
+have scripted around `removed` appearing after a restart, that reading was never true; the fix is
+`container system start` before the command. Scripts that parse `yoloai ls --json` should expect a
+non-zero exit instead of a `removed` row when the backend is down.
+
+**Why it changed:** DF180. The old behaviour lost containers silently, and it corrupted this
+project's own reboot research before it was caught — a test run recorded both sandboxes as
+destroyed by a reboot when the daemon was simply not running.
+
 ### `Files.WriteFile` takes a `context.Context` (Go embedding surface)
 
 **Previous behavior:** `func (f *Files) WriteFile(rel string, data []byte) error` — a pure
