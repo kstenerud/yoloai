@@ -1,0 +1,41 @@
+host: 26.5.1 | A=enf-a(192.168.64.38) B=enf-b(192.168.64.39)
+allow_A=1.1.1.1 allow_B=1.0.0.2 deny=1.0.0.1 | main=4 rules
+
+== B0 BASELINE ==
+        six paths: 301 301 301 301 301 301 
+   PASS    all six paths reachable — 'blocked' readings below are meaningful
+
+== B1/B2 SHAPE B WITH THE CORRECT RULE FORM — two slots, two sandboxes ==
+        loaded 4 filter rule(s) for 2 slots
+        slot0 src=192.168.64.38  slot1 src=192.168.64.39
+        A: own=301 other=000 deny=000 | B: other=000 own=301 deny=000
+   PASS    B1: Shape B ENFORCES with the in-quick form — deny blocked, allowlist passes
+   PASS    B2: two slots give two sandboxes INDEPENDENT allowlists — Shape A's advantage is not
+           unique to it; Shape B's real cost is the slot COUNT, not per-sandbox policy
+
+== B3 IS SHAPE B'S CEILING ACTUALLY LOWER? (the reason to reconsider it) ==
+   PASS    Shape B table-only policy installed
+   PASS    intended add -> permit
+   PASS    intended delete -> permit
+   PASS    CEILING load any ruleset -> refuse-by-policy
+   PASS    CEILING load into a sub-anchor -> refuse-by-policy
+   PASS    CEILING flush the anchor -> refuse-by-policy
+   PASS    CEILING disable pf -> refuse-by-policy
+   PASS    CEILING flush all -> refuse-by-policy
+   PASS    CEILING kill a table -> refuse-by-policy
+   PASS    CEILING another anchor's table -> refuse-by-policy
+   PASS    CONTROL: unlisted command refused by policy
+        => Shape A's holder could load 'pass in quick all' (C2, measured). Shape B's
+           cannot load any ruleset at all; the reachable surface is one address.
+   PASS    main ruleset unchanged (4)
+
+== TOTALS ==
+   pass=15 fail=0 unknown=0
+
+== cleanup ==
+   anchor rules=0
+   main ruleset: before=4 after=4
+   sudoers probe present: no
+   A restored: allow=301 deny=301
+   B restored: allow=301 deny=301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-shapeb.txt
