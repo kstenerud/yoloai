@@ -386,6 +386,13 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 		return err
 	}
 
+	// A booting guest holds no page cache from the previous one, so every name the
+	// old guest may have been caching is safe again. Clearing here is what makes
+	// "restart the sandbox" the real remedy the refusal message promises (DF175).
+	if err := store.ClearStaleNames(sandboxDir); err != nil {
+		return err
+	}
+
 	// Sync lifecycle on-create-done marker to sandbox state.
 	// Python writes a marker file after successful on-create commands; Go
 	// reads it on next start and persists the flag to sandbox-state.json so

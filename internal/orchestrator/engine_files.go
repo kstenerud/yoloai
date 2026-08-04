@@ -30,6 +30,12 @@ func (e *Engine) ListFiles(name string, patterns []string) ([]string, error) {
 // guest's view of it is verified — and repaired if stale — before returning, so
 // the command never reports success over content the sandbox cannot read.
 func (e *Engine) ImportFile(ctx context.Context, name, hostPath string, force bool) (string, error) {
+	// Refused before the copy, not after: the point is that this content cannot be
+	// delivered correctly, so writing it and then reporting failure would leave the
+	// host holding bytes the guest will never read.
+	if base := filepath.Base(hostPath); e.guestCachesShare(name) && store.LoadStaleNames(e.layout.SandboxDir(name))[base] {
+		return "", store.ErrStaleName(name, base)
+	}
 	res, err := ImportFile(ctx, e.layout, name, hostPath, force)
 	if err != nil {
 		return "", err
@@ -156,9 +162,34 @@ func (e *Engine) ExportFile(ctx context.Context, name, rel, dst string, force bo
 	return ExportFile(ctx, e.layout, name, rel, dst, force)
 }
 
+// guestCachesShare reports whether this sandbox's backend has a guest that can
+// keep serving a path's old contents after the host changes or removes it. Read
+// from the sandbox's own environment.json rather than the Engine, because `files`
+// is documented as host-side work and builds its Client backend-less (DF138).
+func (e *Engine) guestCachesShare(name string) bool {
+	meta, err := store.LoadEnvironment(e.layout.SandboxDir(name))
+	if err != nil || meta.BackendType == "" {
+		return false
+	}
+	desc, known := runtime.Descriptor(meta.BackendType)
+	return known && desc.Capabilities.HostWritesNeedGuestRefresh
+}
+
 // RemoveFile deletes one exchange entry (rel).
+//
+// On a backend whose guest caches this share, the name is recorded as unsafe to
+// reuse. The guest keeps serving the removed file's bytes for that path — Apple
+// lists "delete, host to guest" as unsupported for virtiofs, and no host-side
+// invalidation reaches it (DF175). Recording is what lets a later put refuse
+// instead of silently delivering the old content.
 func (e *Engine) RemoveFile(name, rel string) error {
-	return RemoveExchangeFile(e.layout, name, rel)
+	if err := RemoveExchangeFile(e.layout, name, rel); err != nil {
+		return err
+	}
+	if !e.guestCachesShare(name) {
+		return nil
+	}
+	return store.RecordStaleName(e.layout.SandboxDir(name), rel)
 }
 
 // ReadFile returns the bytes of one exchange entry (rel).
@@ -170,6 +201,9 @@ func (e *Engine) ReadFile(name, rel string) ([]byte, error) {
 // ImportFile it verifies a replacement reached a running guest, because this is
 // the same share and the same hazard — the MCP file-write tool reaches it (DF175).
 func (e *Engine) WriteFile(ctx context.Context, name, rel string, data []byte) error {
+	if e.guestCachesShare(name) && store.LoadStaleNames(e.layout.SandboxDir(name))[rel] {
+		return store.ErrStaleName(name, rel)
+	}
 	res, err := WriteExchangeFile(e.layout, name, rel, data)
 	if err != nil {
 		return err

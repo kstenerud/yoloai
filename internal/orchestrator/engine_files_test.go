@@ -333,3 +333,83 @@ func TestImportFile_SingleFileOverwriteKeepsTheSameInode(t *testing.T) {
 	assert.True(t, os.SameFile(before, after),
 		"a file overwrite must truncate in place; unlinking it would create DF175's unrepairable case")
 }
+
+// DF175's residual gap, as shipped for v0.11.0: the platform cannot deliver a
+// recreated name to a guest that has cached it, and Apple lists both halves as
+// unsupported, so the put is refused rather than silently delivering bytes the
+// sandbox will never read.
+func TestImportFile_RefusesANameRemovedWhileTheGuestWasRunning(t *testing.T) {
+	rt := &refreshingRuntime{}
+	engine, _ := newRefreshEngine(t, rt)
+	src := hostFile(t, "v1")
+	_, err := engine.ImportFile(context.Background(), "box", src, false)
+	require.NoError(t, err)
+
+	require.NoError(t, engine.RemoveFile("box", "payload.txt"))
+
+	require.NoError(t, os.WriteFile(src, []byte("v2"), 0600))
+	_, err = engine.ImportFile(context.Background(), "box", src, true)
+	require.Error(t, err)
+	// Both remedies, because they differ in cost and the cheap one is easy to miss.
+	assert.Contains(t, err.Error(), "different name")
+	assert.Contains(t, err.Error(), "yoloai stop box")
+}
+
+// The refusal is scoped to backends whose guest actually caches the share. Every
+// other backend delivers host writes live, and refusing there would be a
+// regression invented for a hazard that does not exist.
+func TestImportFile_OtherBackendsStillAllowReuseAfterRemoval(t *testing.T) {
+	engine, _ := newImportEngine(t, "mock")
+	src := hostFile(t, "v1")
+	_, err := engine.ImportFile(context.Background(), "box", src, false)
+	require.NoError(t, err)
+	require.NoError(t, engine.RemoveFile("box", "payload.txt"))
+
+	_, err = engine.ImportFile(context.Background(), "box", src, false)
+	assert.NoError(t, err, "only a caching guest makes name reuse unsafe")
+}
+
+// The MCP file-write tool reaches the same share and must refuse the same way,
+// or the guard covers the person and not the agent.
+func TestWriteFile_RefusesANameRemovedWhileTheGuestWasRunning(t *testing.T) {
+	rt := &refreshingRuntime{}
+	engine, _ := newRefreshEngine(t, rt)
+	ctx := context.Background()
+	require.NoError(t, engine.WriteFile(ctx, "box", "notes.md", []byte("v1")))
+	require.NoError(t, engine.RemoveFile("box", "notes.md"))
+
+	err := engine.WriteFile(ctx, "box", "notes.md", []byte("v2"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "notes.md")
+}
+
+// A name that was never removed is untouched — the guard keys on removal, not on
+// the share being cached.
+func TestImportFile_UnremovedNamesAreUnaffected(t *testing.T) {
+	rt := &refreshingRuntime{}
+	engine, _ := newRefreshEngine(t, rt)
+	src := hostFile(t, "v1")
+	_, err := engine.ImportFile(context.Background(), "box", src, false)
+	require.NoError(t, err)
+
+	require.NoError(t, os.WriteFile(src, []byte("v2-longer"), 0600))
+	_, err = engine.ImportFile(context.Background(), "box", src, true)
+	assert.NoError(t, err, "an in-place overwrite is repairable and must keep working")
+}
+
+// The refusal promises a restart clears it. If start did not clear the record,
+// the message would be telling users to do something that does not work.
+func TestStaleNameRecord_IsClearedSoARestartIsARealRemedy(t *testing.T) {
+	rt := &refreshingRuntime{}
+	engine, layout := newRefreshEngine(t, rt)
+	src := hostFile(t, "v1")
+	_, err := engine.ImportFile(context.Background(), "box", src, false)
+	require.NoError(t, err)
+	require.NoError(t, engine.RemoveFile("box", "payload.txt"))
+	require.NotEmpty(t, store.LoadStaleNames(layout.SandboxDir("box")))
+
+	require.NoError(t, store.ClearStaleNames(layout.SandboxDir("box")))
+
+	_, err = engine.ImportFile(context.Background(), "box", src, true)
+	assert.NoError(t, err, "a fresh guest holds no cache, so every name is safe again")
+}
