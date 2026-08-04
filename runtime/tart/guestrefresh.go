@@ -40,8 +40,11 @@ const guestRefreshAttempts = 3
 //
 // This is on the ordinary repair path, not just a rare one — a genuinely stale file
 // fails the first pass by construction — so it is latency every such `files put`
-// pays. That is the trade: about a second, against a command that exits non-zero
-// and tells the user to restart the sandbox.
+// pays: one wait in the common case, and up to (guestRefreshAttempts-1) * this =
+// **2.2s** when a path never converges. The wait is per REFRESH CALL, not per file,
+// so a `files put` of a directory pays it once for the whole tree rather than once
+// each. That is the trade, against a command that exits non-zero and tells the user
+// to restart the sandbox.
 const guestRefreshSettle = 1100 * time.Millisecond
 
 // guestRefreshProgram runs in the guest with argv of (sha256, path) pairs. It
@@ -105,17 +108,26 @@ for i in range(0, len(args) - 1, 2):
         print("ERR:%s\t%s" % (str(exc).replace("\t", " "), path))
 `
 
-// settleBeforeRetry waits for the guest's revalidation tick to advance. The seam
-// exists so tests can assert that a wait was requested, and how long for, without
-// paying it — but note what that can and cannot show: a fake guest proves the loop
-// waits, never that the wait outlasts a real tick. Only hardware shows that
+// settleBeforeRetry waits for the guest's revalidation tick to advance, or until
+// the caller gives up. The seam exists so tests can assert that a wait was
+// requested, and how long for, without paying it — but note what that can and
+// cannot show: a fake guest proves the loop waits, never that the wait outlasts a
+// real tick. Only hardware shows that
 // (`design/research/macos-isolation-spike/df181_timing.sh`).
-func (r *Runtime) settleBeforeRetry(d time.Duration) {
+//
+// The wait honours ctx rather than sleeping blind. Nothing on the path to
+// RefreshGuestFiles imposes a deadline today, so this is not about budgets — it is
+// that a `files put` which has just become cancellable for up to 2.2s should still
+// answer Ctrl-C, and on the MCP path the SDK drives its own shutdown cancel.
+func (r *Runtime) settleBeforeRetry(ctx context.Context, d time.Duration) {
 	if r.settle != nil {
 		r.settle(d)
 		return
 	}
-	time.Sleep(d)
+	select {
+	case <-ctx.Done():
+	case <-time.After(d):
+	}
 }
 
 // RefreshGuestFiles verifies each file in the guest and repairs the stale ones,
@@ -147,7 +159,7 @@ func (r *Runtime) RefreshGuestFiles(ctx context.Context, name string, files []ru
 		// Not before the first pass: a path the guest already agrees on must still
 		// cost one check and no delay, which is the common case by far.
 		if attempt > 0 {
-			r.settleBeforeRetry(guestRefreshSettle)
+			r.settleBeforeRetry(ctx, guestRefreshSettle)
 		}
 		argv := make([]string, 0, 3+2*len(pending))
 		argv = append(argv, guestPython, "-c", guestRefreshProgram)

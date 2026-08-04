@@ -187,6 +187,35 @@ func TestRefreshGuestFiles_WaitsForTheTickBetweenPasses(t *testing.T) {
 	}
 }
 
+// Every other test here injects the `settle` seam, which means they all exercise a
+// branch production never takes: the constructor does not set the field, so the
+// real wait is always the nil branch. This test deliberately leaves it nil and
+// drives that branch, using a cancelled context so it can do so without spending
+// the real 2.2s — which is also the behaviour being asserted. Without honouring
+// ctx this blocks for guestRefreshSettle per retry and the test times out.
+func TestRefreshGuestFiles_CancelledContextDoesNotWaitOutTheTick(t *testing.T) {
+	rt, _ := fakeRefreshTart(t, `  printf 'STALE\t%s\n' "$2"`)
+	rt.settle = nil // the shipped configuration
+
+	// The deadline has to fall INSIDE the first wait, not before the call. A ctx
+	// that is already dead on entry makes isRunning fail and RefreshGuestFiles
+	// return ErrNotRunning without ever reaching the loop — the test then passes
+	// whether or not the wait honours ctx, which is how the first version of this
+	// test managed to stay green with the fix reverted.
+	ctx, cancel := context.WithTimeout(context.Background(), 300*time.Millisecond)
+	defer cancel()
+
+	start := time.Now()
+	_, err := rt.RefreshGuestFiles(ctx, "yoloai-cli-box", testDigests(rt))
+	elapsed := time.Since(start)
+
+	// The guest exec fails once ctx expires; the assertion is about how long it sat,
+	// not about the error.
+	_ = err
+	assert.Less(t, elapsed, guestRefreshSettle,
+		"a cancelled caller must not be made to wait out the guest's revalidation tick")
+}
+
 // A path the guest already agrees on must not pay the wait at all.
 func TestRefreshGuestFiles_CurrentPathWaitsNotAtAll(t *testing.T) {
 	rt, _ := fakeRefreshTart(t, `  printf 'OK\t%s\n' "$2"`)
