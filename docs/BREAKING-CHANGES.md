@@ -21,6 +21,16 @@ so a tag left the *shipped* version's section on top, reading exactly like an op
 separate agents filed an entry into a frozen section that way, and neither hit a merge
 conflict — a misfile lands cleanly and silently.
 
+**A break is measured against the last *published release*, never against `main` and never
+against an earlier commit on your own branch.** This is what decides whether an entry belongs
+here at all, so it is the first question, not a detail. A behaviour introduced and then changed
+again before the release ships was never promised to anyone: no user ran it, so nothing was
+withdrawn and there is no entry to write. The same applies to the commit subject's `!` — mark it
+against what users have, not against what the branch had an hour ago. Getting this wrong in the
+cautious direction still costs something real: it inflates the release's apparent breakage,
+escalates the version on a promise nobody lost, and makes `git log --grep '!:'` stop being a
+usable index of what actually broke (DF184).
+
 ## Unreleased
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running
