@@ -388,9 +388,28 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
   particular should not be promoted to a property: two other files in the same results directory
   disagree about bridge indices on this same host 26 minutes apart. What is replicated is the
   address movement, which the no-reboot control shows independently.
-- **Renewal after a subnet re-pick.** Steady-state renewal does not move tart's address — five
-  renewals counted over 28 minutes — but renewal *following* a re-pick is untested, and apple has no
-  `dhcpd_leases` record so it does not renew through bootpd at all.
+- **Renewal after a subnet re-pick — untested, and it is the one address change that would fail
+  open.** Steady-state renewal does not move tart's address (five renewals over 28 minutes), and the
+  other two ways an address moves — restart and reboot — are measured. But both of those happen
+  *through yoloAI*, which reconciles on every run and rebuilds membership from live state. A subnet
+  re-pick is the only candidate for an address moving **while the sandbox runs and nothing invokes
+  yoloAI**, and that case is worse than stale: an address in no `src` table matches neither
+  `pass in quick from <yb_src_i> to <yb_dst_i>` nor `block drop in quick from <yb_src_i> to any`, so
+  it falls through to the main ruleset and the sandbox is **unfiltered** — D6's fail-open, reached
+  from the other direction. Membership without rules and rules without membership fail identically
+  and silently.
+  **Why it is still untested.** A re-pick is triggered by the *host's environment* — joining a
+  network that collides with the vmnet subnet — not by anything yoloAI does, so it cannot be
+  scheduled. Forcing one means editing `com.apple.vmnet`'s `Shared_Net_Address`
+  (`/Library/Preferences/SystemConfiguration/com.apple.vmnet.plist`, root-only) and restarting the
+  service. That was deliberately **not** done on the spike host: its DNS runs over Tailscale
+  (`100.100.100.100` on `utun2`, which also owns `100.64/10`) and its default route is
+  `192.168.0.1/24`, so a re-picked subnet colliding with either takes out host name resolution or
+  routing — on the machine the work is running from. **Run it on a host that is not the one you
+  need, with console access**, and check the one thing that matters: whether a running guest's
+  address moves, and if so whether anything re-adds it before the next yoloAI invocation.
+  Note apple holds no `dhcpd_leases` record and does not renew through bootpd at all, so the two
+  backends need separate answers here as everywhere else.
 - **Host/guest resolution parity — measured 2026-08-04, and it did not diverge.** `dst` holds
   resolved addresses and resolution moves to the host, so where the two sides resolve a domain
   differently the guest is blocked while allowlisted. apple only — tart and seatbelt never had
