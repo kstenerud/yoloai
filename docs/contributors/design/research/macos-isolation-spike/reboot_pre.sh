@@ -24,6 +24,12 @@
 #     P8 do sandbox ADDRESSES change across a reboot? If they do, membership must be rebuilt from
 #        live state at boot, not restored from a saved mapping.
 #     P9 does unattended restore work after a REAL reboot, not a simulated one?
+#     P10 is an address determined by START ORDER rather than by sandbox identity? A no-reboot
+#        control established that both backends move every guest's address on a plain stop/start
+#        with a fresh MAC, so P8 cannot distinguish "the reboot preserved it" from "we restarted
+#        them in the same order and the allocator counts from the same place". The post half starts
+#        B FIRST for exactly this reason; if B takes A's old address, a saved slot->address mapping
+#        is not merely stale, it points at the wrong sandbox.
 #
 # WHAT THIS LEAVES ON THE MACHINE ACROSS THE REBOOT — deliberately, because the point is to see
 # whether it survives:
@@ -37,6 +43,47 @@
 #   The main ruleset is never loaded or flushed, and pf enable state is never touched.
 
 set -u
+HERE="$(cd "$(dirname "$0")" && pwd)"
+SNAP="$HERE/results/reboot-snapshot.txt"
+RESULTS="$HERE/results/reboot-pre.txt"
+
+# Refuse to run when the obvious mistake has been made: an UNCONSUMED snapshot written before the
+# machine's current boot means the reboot has already happened and the half you want is the other
+# one. This must come BEFORE the tee below, because the tee is the damage — it truncates the log in
+# place, and round 3's pre-half log was destroyed exactly this way by a paste of the wrong filename.
+# Nothing else noticed: the run then died at the IP gate, whose message ("could not resolve both
+# sandbox IPs") describes a symptom of the stopped guests and names neither the reboot nor the log.
+#
+# It also comes before the root check, for two reasons. It needs no privilege — it reads a file mtime
+# and a sysctl — so putting it first means the wrong-half mistake is caught BEFORE the password
+# prompt rather than after it. And it makes the refusal testable without sudo, which matters because
+# the first attempt to verify this guard could not exercise the refusing path at all: the only way to
+# reach it was a real privileged run, so "confirm it refuses" and "run the thing it must refuse" were
+# the same command.
+#
+# Consumption is what makes this safe to gate on. A snapshot older than boot is the NORMAL state at
+# the start of every round after the first, so mtime alone would refuse every legitimate new round;
+# reboot_post.sh stamps CONSUMED into the file when it finishes reading it, and only an unstamped
+# one is still waiting for its other half.
+if [ -f "$SNAP" ] && ! grep -q '^CONSUMED=' "$SNAP" 2>/dev/null; then
+  snap_written=$(stat -f %m "$SNAP" 2>/dev/null || echo 0)
+  # Anchored at ^{ deliberately: kern.boottime reads "{ sec = N, usec = M }", and an unanchored
+  # ".*sec = " matches greedily through the "usec = " and captures the MICROseconds. That parse
+  # yields a five-digit epoch, every comparison against it is false, and the guard becomes a silent
+  # no-op that looks like it is working. Caught here only by printing the value.
+  booted=$(sysctl -n kern.boottime 2>/dev/null | sed -n 's/^{ sec = \([0-9][0-9]*\).*/\1/p')
+  if [ -n "$booted" ] && [ "$booted" -gt "$snap_written" ] 2>/dev/null; then
+    echo "REFUSING: the machine booted $(date -r "$booted" '+%Y-%m-%d %H:%M:%S'), AFTER the unconsumed"
+    echo "snapshot at $SNAP was written $(date -r "$snap_written" '+%Y-%m-%d %H:%M:%S')."
+    echo "The reboot this test is waiting on has already happened — you want:"
+    echo "    sudo bash $HERE/reboot_post.sh"
+    echo
+    echo "Running the pre half here would truncate $RESULTS and destroy this round's log."
+    echo "If you really do mean to start a NEW round, delete the snapshot first."
+    exit 2
+  fi
+fi
+
 [ "$(id -u)" -eq 0 ] || { echo "must run as root: sudo bash $0 <A> <B>"; exit 2; }
 U="${SUDO_USER:?run via sudo, not as a root login}"
 A_SB="${1:?need sandbox A}"; B_SB="${2:?need sandbox B}"; T_SB="${3:-}"   # 3rd optional: a TART sandbox
@@ -46,11 +93,9 @@ CONFDIR=/etc/yoloai; CONF="$CONFDIR/pf-pool.conf"
 SUDOERS=/etc/sudoers.d/yoloai-reboot-probe
 SLOTS=8
 ALLOW_A=1.1.1.1; ALLOW_B=1.0.0.2; DENY=1.0.0.1
-HERE="$(cd "$(dirname "$0")" && pwd)"
 ROOT="$(cd "$HERE/../../../../.." && pwd)"
-SNAP="$HERE/results/reboot-snapshot.txt"
-RESULTS="$HERE/results/reboot-pre.txt"
 mkdir -p "$(dirname "$RESULTS")"
+
 exec > >(tee "$RESULTS") 2>&1
 
 asuser() { sudo -u "$U" "$@"; }
@@ -58,13 +103,56 @@ quiet_pf() { grep -viE 'use of -f option|main ruleset added|/etc/pf.conf for fur
 # Backend-aware: apple answers through `container`, tart through `tart`. Derived from `yoloai ls`
 # so a mis-ordered argument fails loudly rather than measuring one guest twice.
 bk() { asuser "$ROOT/yoloai" ls 2>/dev/null | awk -v n="$1" '$1==n {print $3}'; }
+# Liveness is asked of the BACKEND, never of yoloAI. Both halves need this and they must agree, so
+# the definition is duplicated verbatim rather than approximated: `yoloai ls` reports a running tart
+# VM whose agent is not attached as `idle`, so gating on yoloAI's status refuses to read a guest that
+# is up and addressable — which is how round 2 rendered UNKNOWN for the tart leg on both sides of its
+# own comparison. A gate is needed at all because a dhcpd_leases record outlives the VM that held it,
+# and round 1 read a stopped guest's surviving lease as an address "preserved across the reboot".
+live() {
+  case "$(bk "$1")" in
+    tart)  [ "$(asuser tart get "yoloai-cli-$1" --format json 2>/dev/null \
+             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("State",""))' 2>/dev/null)" = running ] ;;
+    apple) [ "$(asuser container inspect "yoloai-cli-$1" 2>/dev/null \
+             | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["status"].get("state",""))' 2>/dev/null)" = running ] ;;
+    *) false ;;
+  esac
+}
 ipof() {
+  live "$1" || { printf ''; return; }
   case "$(bk "$1")" in
     tart)  asuser tart ip "yoloai-cli-$1" 2>/dev/null | tr -d '[:space:]' ;;
     apple) asuser container inspect "yoloai-cli-$1" 2>/dev/null \
              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status"]["networks"][0].get("ipv4Address","").split("/")[0])' 2>/dev/null ;;
     *) printf '' ;;
   esac
+}
+# tart persists its MAC in the VM's own config.json; apple assigns one at start and reports it only
+# while the container runs, so a stopped apple guest has no MAC to read. Captured because an address
+# that moves with a new MAC is a lease allocation, and an address that moves under a stable MAC is
+# something else entirely — without this the post half can only say "it changed".
+macof() {
+  case "$(bk "$1")" in
+    tart)  asuser python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("macAddress",""))' \
+             "/Users/$U/.tart/vms/yoloai-cli-$1/config.json" 2>/dev/null ;;
+    apple) asuser container inspect "yoloai-cli-$1" 2>/dev/null \
+             | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["status"]["networks"][0].get("macAddress",""))' 2>/dev/null ;;
+    *) printf '' ;;
+  esac
+}
+# The vmnet DHCP pool tart draws from is finite, shared, and consumed one lease per START rather than
+# one per VM. Counting it makes exhaustion and wrap-around visible as a number instead of as a
+# surprising address. apple does not appear in this file at all — its vmnet plugin runs a separate
+# allocator — so a zero for 64.x is the expected reading, not a broken probe.
+leasecount() { # $1 = subnet prefix, e.g. 192.168.65.
+  python3 - "$1" <<'EOF' 2>/dev/null
+import re,sys
+try: t=open('/var/db/dhcpd_leases').read()
+except Exception: print(0); raise SystemExit
+p=sys.argv[1]
+print(sum(1 for b in re.findall(r'\{(.*?)\}',t,re.S)
+          for m in [re.search(r'ip_address=(\S+)',b)] if m and m.group(1).startswith(p)))
+EOF
 }
 egress() {
   local c
@@ -162,10 +250,29 @@ snap() { printf "%s='%s'\n" "$1" "${2//\'/\'\\\'\'}"; }
   snap B_IP         "$B_IP"
   snap T_SB         "$T_SB"
   snap T_IP         "$T_IP"
+  snap A_MAC        "$(macof "$A_SB")"
+  snap B_MAC        "$(macof "$B_SB")"
+  snap T_MAC        "${T_SB:+$(macof "$T_SB")}"
+  # The order the guests were started in, recorded because it is the variable the post half changes.
+  # Round 2 restarted them in this same order and read the addresses coming back unchanged as the
+  # guests having KEPT them; both allocators hand out in start order, so that verdict was ordering
+  # and not preservation. The post half now starts B first, which makes the two explanations differ.
+  snap START_ORDER  "$A_SB $B_SB${T_SB:+ $T_SB}"
+  snap LEASES64     "$(leasecount 192.168.64.)"
+  snap LEASES65     "$(leasecount 192.168.65.)"
   snap SRC2         "$(pfctl -a "$ANCHOR" -t yb_src_2 -T show 2>/dev/null | tr -d ' ' | tr '\n' ',')"
   snap ALLOW_A      "$ALLOW_A"
   snap ALLOW_B      "$ALLOW_B"
   snap DENY         "$DENY"
+  # The pre-reboot enforcement measurements, recorded because the post half's "restored" verdicts are
+  # claims about a CHANGE and were being compared against a number that existed only in this script's
+  # stdout. When round 3's log was clobbered the digits went with it. What survived was the stronger
+  # half of the evidence — the gate above exits non-zero unless every sandbox enforces, so a snapshot
+  # existing at all proves enforcement was live — but "reconstruct it from the control flow of the
+  # script that did not write it down" is not a thing a reader should have to do.
+  snap PRE_ENF_A    "allow=$e1 deny=$e2"
+  snap PRE_ENF_B    "allow=$e3 deny=$e4"
+  snap PRE_ENF_T    "${T_SB:+allow=$t1 deny=$t2}"
   snap ANCHOR_RULES "$(pfctl -a "$ANCHOR" -s rules 2>/dev/null | grep -c . || true)"
   snap SRC0         "$(pfctl -a "$ANCHOR" -t yb_src_0 -T show 2>/dev/null | tr -d ' ' | tr '\n' ',')"
   snap SRC1         "$(pfctl -a "$ANCHOR" -t yb_src_1 -T show 2>/dev/null | tr -d ' ' | tr '\n' ',')"

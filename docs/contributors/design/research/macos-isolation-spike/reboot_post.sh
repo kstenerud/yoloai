@@ -24,8 +24,17 @@ exec > >(tee "$RESULTS") 2>&1
 # value that would sail through the load check below and be compared against as if it were recorded.
 PRE_DATE=""; ANCHOR=""; SLOTS=""
 A_SB=""; B_SB=""; T_SB=""; A_IP=""; B_IP=""; T_IP=""
+A_MAC=""; B_MAC=""; T_MAC=""; START_ORDER=""; LEASES64=""; LEASES65=""
 ALLOW_A=""; ALLOW_B=""; DENY=""
 ANCHOR_RULES=""; SRC0=""; SRC1=""; SRC2=""
+PRE_ENF_A=""; PRE_ENF_B=""
+# PRE_ENF_T is a real snapshot field and is declared for the same contract reason as the rest, but
+# nothing here reads it: P9 re-adds and re-verifies slots 0 and 1 only, so there is no post-reboot
+# tart enforcement measurement for it to be the "before" of. Printing it alone would be half a
+# comparison, which is the thing this harness keeps getting wrong. It stays recorded in the snapshot
+# because that file is the round's durable record, and is consumed here by nothing.
+# shellcheck disable=SC2034
+PRE_ENF_T=""                               # empty when the round had no tart sandbox
 MAIN_RULES=""; MAIN_SHA=""; PF_STATUS=""; PF_TOKENS=""; BRIDGES=""; CONF_SHA=""; SANDBOXES=""
 # shellcheck disable=SC1090
 . "$SNAP"
@@ -40,7 +49,8 @@ MAIN_RULES=""; MAIN_SHA=""; PF_STATUS=""; PF_TOKENS=""; BRIDGES=""; CONF_SHA="";
 # reboot_pre.sh catches the fourth; the guard is the backstop, not the fix.
 missing=""
 for v in PRE_DATE ANCHOR SLOTS A_SB B_SB A_IP B_IP ALLOW_A ALLOW_B DENY ANCHOR_RULES \
-         SRC0 SRC1 MAIN_RULES MAIN_SHA PF_STATUS PF_TOKENS BRIDGES CONF_SHA SANDBOXES; do
+         SRC0 SRC1 MAIN_RULES MAIN_SHA PF_STATUS PF_TOKENS BRIDGES CONF_SHA SANDBOXES \
+         A_MAC B_MAC START_ORDER LEASES64 LEASES65 PRE_ENF_A PRE_ENF_B; do
   [ -n "${!v}" ] || missing="$missing $v"
 done
 [ -z "$missing" ] || {
@@ -59,18 +69,50 @@ asuser() { sudo -u "$U" "$@"; }
 bk() { asuser "$ROOT/yoloai" ls 2>/dev/null | awk -v n="$1" '$1==n {print $3}'; }
 state() { asuser "$ROOT/yoloai" ls 2>/dev/null | awk -v n="$1" '$1==n {print $2}'; }
 sbstates() { asuser "$ROOT/yoloai" ls 2>/dev/null | tail -n +2 | awk '{print $1":"$2}' | tr '\n' ' '; }
+# The gate below is not belt-and-braces: `tart ip` resolves through /var/db/dhcpd_leases, which
+# survives a reboot, and round 1 reported a stopped VM's address as "preserved across reboot" off a
+# lease record on a host where the VM's bridge did not exist. An address nothing holds is not an
+# address. But the gate round 1 grew asked YOLOAI, matching `active|running` — and `yoloai ls` calls
+# a running tart VM whose agent is not attached `idle`, which is the state the tart guest was in
+# BEFORE the reboot as well as after. So the check excluded the one guest it was measuring, on both
+# sides of its own comparison, and round 2's tart verdict was UNKNOWN for a VM that was up and
+# addressable throughout. Ask the backend, which is the thing that knows.
+live() {
+  case "$(bk "$1")" in
+    tart)  [ "$(asuser tart get "yoloai-cli-$1" --format json 2>/dev/null \
+             | python3 -c 'import json,sys; print(json.load(sys.stdin).get("State",""))' 2>/dev/null)" = running ] ;;
+    apple) [ "$(asuser container inspect "yoloai-cli-$1" 2>/dev/null \
+             | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["status"].get("state",""))' 2>/dev/null)" = running ] ;;
+    *) false ;;
+  esac
+}
 ipof() {
-  # The running-state gate is not belt-and-braces. `tart ip` resolves through /var/db/dhcpd_leases,
-  # which survives a reboot: the first run of this test reported a stopped VM's address as "preserved
-  # across reboot" from a lease record, on a host where the VM's bridge did not exist. An address
-  # nothing holds is not an address.
-  case "$(state "$1")" in active|running) : ;; *) printf ''; return ;; esac
+  live "$1" || { printf ''; return; }
   case "$(bk "$1")" in
     tart)  asuser tart ip "yoloai-cli-$1" 2>/dev/null | tr -d '[:space:]' ;;
     apple) asuser container inspect "yoloai-cli-$1" 2>/dev/null \
              | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d[0]["status"]["networks"][0].get("ipv4Address","").split("/")[0])' 2>/dev/null ;;
     *) printf '' ;;
   esac
+}
+macof() {
+  case "$(bk "$1")" in
+    tart)  asuser python3 -c 'import json,sys; print(json.load(open(sys.argv[1])).get("macAddress",""))' \
+             "/Users/$U/.tart/vms/yoloai-cli-$1/config.json" 2>/dev/null ;;
+    apple) asuser container inspect "yoloai-cli-$1" 2>/dev/null \
+             | python3 -c 'import json,sys; print(json.load(sys.stdin)[0]["status"]["networks"][0].get("macAddress",""))' 2>/dev/null ;;
+    *) printf '' ;;
+  esac
+}
+leasecount() { # $1 = subnet prefix. apple does not use this file; a 0 for 64.x is the expected read.
+  python3 - "$1" <<'EOF' 2>/dev/null
+import re,sys
+try: t=open('/var/db/dhcpd_leases').read()
+except Exception: print(0); raise SystemExit
+p=sys.argv[1]
+print(sum(1 for b in re.findall(r'\{(.*?)\}',t,re.S)
+          for m in [re.search(r'ip_address=(\S+)',b)] if m and m.group(1).startswith(p)))
+EOF
 }
 egress() {
   local c
@@ -157,8 +199,16 @@ echo "        apple container service after : $(asuser container system status 2
 # empty host as the answer, which is how "no vmnet bridges exist" became "the bridges moved".
 echo "        before: $SANDBOXES"
 echo "        after : $(sbstates)"
+# DELIBERATELY REVERSED — B first, then A. Round 2 restarted them in creation order, saw the same
+# addresses come back, and recorded "addresses preserved across reboot". A no-reboot control then
+# showed every guest moves its address on an ordinary stop/start with a freshly generated MAC, so
+# nothing preserves anything: both allocators hand out in start order, and round 2 restarted in the
+# order that reproduced the original assignment. Same order, two explanations, one observation.
+# Starting B first separates them — if B takes A's old address, a saved slot->address mapping does
+# not go stale, it silently names the WRONG SANDBOX, which is a fail-open the plan must account for.
+echo "        start order: pre='$START_ORDER' post='$B_SB $A_SB${T_SB:+ $T_SB}' (REVERSED on purpose — P10)"
 restart_fail=0
-for sb in "$A_SB" "$B_SB" ${T_SB:+"$T_SB"}; do
+for sb in "$B_SB" "$A_SB" ${T_SB:+"$T_SB"}; do
   st=$(state "$sb")
   printf '        %-6s came back %-9s' "$sb" "${st:-<absent>}"
   case "$st" in
@@ -204,10 +254,15 @@ fi
 
 say "P8 ADDRESSES — did the guests come back on the same ones?"
 newA=$(ipof "$A_SB"); newB=$(ipof "$B_SB")
+macA=$(macof "$A_SB"); macB=$(macof "$B_SB")
 echo "        A: before=$A_IP after=${newA:-<none>} | B: before=$B_IP after=${newB:-<none>}"
+echo "        A mac: before=$A_MAC after=${macA:-<none>}"
+echo "        B mac: before=$B_MAC after=${macB:-<none>}"
 if [ -n "${T_SB:-}" ]; then
-  newT=$(ipof "$T_SB")
-  echo "        tart $T_SB: before=${T_IP:-<none>} after=${newT:-<none>} (state $(state "$T_SB"))"
+  newT=$(ipof "$T_SB"); macT=$(macof "$T_SB")
+  echo "        tart $T_SB: before=${T_IP:-<none>} after=${newT:-<none>} (yoloai says '$(state "$T_SB")',"
+  echo "           backend says $(live "$T_SB" && echo running || echo 'not running'))"
+  echo "        tart mac: before=${T_MAC:-<none>} after=${macT:-<none>}"
   if [ -z "$newT" ]; then
     unk "the tart VM has no address after boot and could not be given one"
   elif [ "$newT" = "${T_IP:-}" ]; then
@@ -220,10 +275,62 @@ if [ -z "$newA" ] && [ -z "$newB" ]; then
   unk "neither sandbox has an address after boot (likely stopped) — restart them and re-check if"
   echo "           the address question matters to you; P1-P6 are unaffected"
 elif [ "$newA" = "$A_IP" ] && [ "$newB" = "$B_IP" ]; then
-  ok "addresses preserved across reboot"
+  ok "each guest came back on its own former address DESPITE the reversed start order — the address"
+  echo "           tracks the sandbox, not the order, and P10 below says so with the MACs"
 else
   ok "addresses CHANGED across reboot (A $A_IP->${newA:-none}, B $B_IP->${newB:-none}) — membership"
   echo "           must be rebuilt from live state at boot; a saved slot->address mapping is stale"
+fi
+# A MAC that changes proves the address was newly LEASED rather than remembered, which is the
+# mechanism behind everything above. A MAC that survives while the address moves would mean
+# something else entirely, and the two are indistinguishable without this line.
+# Three positional args, not a packed string: a MAC is full of colons, so any colon-delimited
+# packing here splits inside the address and reports "unchanged" for every input it is given.
+macline() { # name before after
+  [ -n "$3" ] || return 0
+  if [ "$2" = "$3" ]; then echo "        $1 mac unchanged ($3)"
+  else echo "        $1 MAC REGENERATED $2 -> $3"; fi
+}
+macline A "$A_MAC" "$macA"
+macline B "$B_MAC" "$macB"
+[ -z "${T_SB:-}" ] || macline T "${T_MAC:-}" "${macT:-}"
+
+say "P10 IS THE ADDRESS THE SANDBOX'S, OR THE START ORDER'S? — B was started FIRST"
+echo "        pre-reboot order '$START_ORDER' gave A=$A_IP B=$B_IP"
+echo "        post-reboot order started $B_SB first and gave A=${newA:-<none>} B=${newB:-<none>}"
+if [ -z "$newA" ] || [ -z "$newB" ]; then
+  unk "one or both apple guests have no address — P10 unmeasured"
+elif [ "$newB" = "$A_IP" ]; then
+  bad "B TOOK A'S OLD ADDRESS ($A_IP). Allocation follows start order, not sandbox identity, so a"
+  echo "           saved slot->address mapping does not merely go stale — after a reboot it names the"
+  echo "           WRONG SANDBOX, and restoring it would hand B the allowlist authorized for A."
+  echo "           Round 2's 'addresses preserved' was the creation order reproducing the assignment."
+elif [ "$newA" = "$A_IP" ] && [ "$newB" = "$B_IP" ]; then
+  ok "reversing the order did NOT move either address — allocation is pinned to the sandbox somehow,"
+  echo "           which the no-reboot control did not predict. Worth explaining before relying on it."
+else
+  ok "both addresses moved and B did not land on A's ($A_IP) — allocation is neither identity-pinned"
+  echo "           nor a clean order swap; the pool simply advanced. Rebuild membership from live state"
+fi
+
+say "P11 THE ADDRESS POOLS THEMSELVES"
+now64=$(leasecount 192.168.64.); now65=$(leasecount 192.168.65.)
+echo "        dhcpd_leases 64.x (apple): before=$LEASES64 after=$now64"
+echo "        dhcpd_leases 65.x (tart) : before=$LEASES65 after=$now65   (253 = the whole /24 is spoken for)"
+if [ "$now64" -eq 0 ] 2>/dev/null; then
+  ok "apple holds NO record in /var/db/dhcpd_leases — its vmnet plugin runs a separate allocator, so"
+  echo "           the two backends do not share a pool and do not share its exhaustion"
+else
+  unk "apple has $now64 lease record(s) here; the separate-allocator reading needs revisiting"
+fi
+if [ "$now65" -ge 253 ] 2>/dev/null; then
+  bad "tart's pool is EXHAUSTED across the reboot ($now65/253) — leases are consumed per START, so"
+  echo "           every new VM now recycles an address a previous VM held. That is the precondition"
+  echo "           for a stale table entry naming a live sandbox, and a reboot does not clear it."
+elif [ "$now65" -lt "$LEASES65" ] 2>/dev/null; then
+  ok "the lease table SHRANK across the reboot ($LEASES65 -> $now65) — exhaustion is boot-healed"
+else
+  ok "lease table carried across the reboot ($LEASES65 -> $now65), still below the 253 ceiling"
 fi
 
 say "P9 UNATTENDED RECOVERY AFTER A REAL REBOOT"
@@ -242,7 +349,7 @@ else
       pfctl -a "$ANCHOR" -t yb_src_0 -T add "$newA"     >/dev/null 2>&1
       pfctl -a "$ANCHOR" -t yb_dst_0 -T add "$ALLOW_A"  >/dev/null 2>&1
       r1=$(egress "$A_SB" "$ALLOW_A"); r2=$(egress "$A_SB" "$DENY")
-      echo "        re-added A's CURRENT address: allow=$r1 deny=$r2"
+      echo "        re-added A's CURRENT address: allow=$r1 deny=$r2  (before reboot: $PRE_ENF_A)"
       if [ "$r2" = 000 ] && [ "$r1" != 000 ]; then
         ok "enforcement restored end to end after a real reboot"
       else bad "enforcement not restored (allow=$r1 deny=$r2)"; fi
@@ -251,7 +358,7 @@ else
         pfctl -a "$ANCHOR" -t yb_src_1 -T add "$newB"    >/dev/null 2>&1
         pfctl -a "$ANCHOR" -t yb_dst_1 -T add "$ALLOW_B" >/dev/null 2>&1
         r3=$(egress "$B_SB" "$ALLOW_B"); r4=$(egress "$B_SB" "$DENY")
-        echo "        re-added B into slot 1 with its own allowlist: allow=$r3 deny=$r4"
+        echo "        re-added B into slot 1 with its own allowlist: allow=$r3 deny=$r4  (before reboot: $PRE_ENF_B)"
         if [ "$r4" = 000 ] && [ "$r3" != 000 ]; then
           ok "a SECOND slot with a DIFFERENT allowlist also works after the reboot"
         else bad "second slot not restored (allow=$r3 deny=$r4)"; fi
@@ -272,4 +379,11 @@ echo "   $CONFDIR present: $([ -d "$CONFDIR" ] && echo YES-BAD || echo no)"
 echo "   anchor rules: $(pfctl -a "$ANCHOR" -s rules 2>/dev/null | grep -c . || true)"
 echo "   main ruleset: $(pfctl -s rules 2>/dev/null | grep -c . || true) (was $MAIN_RULES)"
 chown "$U" "$RESULTS" 2>/dev/null
+
+# Stamp the snapshot spent. This is what lets reboot_pre.sh tell "a round is mid-flight and you just
+# ran the wrong half" from "the last round finished and this is a new one" — an mtime older than boot
+# describes both, and refusing on that alone would block every legitimate round after the first.
+printf "CONSUMED='%s'\n" "$(date '+%Y-%m-%d %H:%M:%S')" >> "$SNAP"
+chown "$U" "$SNAP" 2>/dev/null
+
 printf '\n== TOTALS ==\n   pass=%d fail=%d unknown=%d\n' "$PASS" "$FAIL" "$UNKNOWN"
