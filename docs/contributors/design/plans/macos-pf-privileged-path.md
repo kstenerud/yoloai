@@ -4,388 +4,341 @@
 
 # macOS: enforce the network allowlist from host `pf`
 
-- **Status:** PLANNED — mechanism, authorization and enforcement all measured on hardware
-  2026-08-02/03. Nothing built.
-- **Depends on:** tamper-resistant-network-isolation.md
+- **Status:** PLANNED — mechanism, authorization and enforcement measured on hardware
+  2026-08-02/04. Nothing built.
+- **Depends on:** tamper-resistant-network-isolation.md, host-controlled-agent-launch.md
 - **Rides:** **any** — the user-visible surface only gains capability. `--network-isolated` becomes
-  *accepted* on tart and seatbelt where it is refused today (newly-accepted input is not a break),
-  and on apple it becomes stronger without changing its spelling. The `BackendCaps` change in
-  Phase 2 is internal. If Phase 2 instead ends up *withdrawing* isolation anywhere, that half is
-  **breaking** and needs a `docs/BREAKING-CHANGES.md` entry.
+  *accepted* on tart where it is refused today (newly-accepted input is not a break), and on apple
+  it becomes stronger without changing its spelling. Seatbelt is unchanged. The `BackendCaps` change
+  is internal. If any phase ends up *withdrawing* isolation somewhere, that half is **breaking** and
+  needs a `docs/BREAKING-CHANGES.md` entry.
 
 ## Why this exists
 
 On macOS, `--network-isolated` is either weak or absent. `apple` installs the allowlist inside the
-sandbox and grants it `NET_ADMIN`, so the agent can flush its own rules (DF179, measured). `tart`
-and `seatbelt` refuse `--network-isolated` outright, so they have none at all.
+sandbox and grants it `NET_ADMIN`, so the agent can flush its own rules (DF179). `tart` and
+`seatbelt` refuse it outright, so they have none at all.
 
-The research settled that this is **not** a platform limitation. Host `pf` enforces per-sandbox on
-macOS, keyed on something the guest cannot change, and it holds against an agent that actively
-attacks it. Measurements and their controls are in
-[macos-isolation-spike](../research/macos-isolation-spike/README.md); the surrounding design is in
-[tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md) § The macOS half.
-What blocks it is one thing: **`pf` needs root, and yoloAI on macOS has no privileged path.**
+Host `pf` fixes this. It enforces per-sandbox, keyed on something the guest cannot change, and it
+holds against a guest that tears down its own firewall first (`pf-p4-tamper.txt`). What blocks it is
+one thing: **`pf` needs root, and yoloAI on macOS has no privileged path.**
+
+Evidence for everything below is in
+[macos-isolation-spike/results](../research/macos-isolation-spike/results/); the surrounding design
+is [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md) § The macOS half.
 
 ## The decision
 
-**A generated `NOPASSWD` sudoers line.** Installing that line is the opt-in — no flag, no isolation
-mode, no password prompt at runtime.
+**A generated `NOPASSWD` sudoers grant, authorizing pf *table membership* and nothing else.**
+Installing it is the opt-in — no flag, no isolation mode, no runtime prompt.
 
-**Why not a runtime `sudo` prompt.** Teardown has no tty: `yoloai stop`, a signal handler, an MCP
-call, a crash sweep. A teardown that cannot run unattended strands rules. So `NOPASSWD` is forced,
-which makes the authorized command set the security boundary. Confirmed: `sudo -n` succeeds with no
-controlling tty, including with a **ruleset on stdin**.
+**Why not a runtime prompt.** Teardown has no tty: `yoloai stop`, signal handlers, MCP calls, crash
+sweeps. So `NOPASSWD` is forced, which makes the authorized command set the security boundary.
 
-**Why not `sudo yoloai …` with a privilege drop.** Mechanically available: `syscall.Setuid` returns
-EPERM not ENOTSUP on darwin, `fileutil.HostUID`/`ChownIfSudo` already exist, and `HOME` survives
-sudo on macOS (measured), so the layout root resolves correctly. Two reasons, in order of weight:
+**Why not `sudo yoloai …` with a privilege drop.** It cannot run unattended either — every lifecycle
+command touching pf would need `sudo`, including `stop` — and it puts the agent-facing process at
+root, so a sandbox escape escapes to root. (An earlier draft rejected it on credentials; that was
+wrong. `sudo -E`, or `Defaults env_keep +=`, surmounts the stripped API keys, and `sudo -E yoloai`
+is already an established invocation on Linux. It is a papercut on a model rejected for the two
+reasons above.)
 
-1. **It cannot run unattended, which is the same wall the prompt hits.** Under this model *every*
-   lifecycle command that touches pf must be invoked as `sudo yoloai …`, including `stop`. Teardown
-   runs from scripts, signal handlers, MCP calls and crash-recovery sweeps, none of which have a tty
-   or a warm credential cache. The sudoers-line model needs privilege for one `pfctl` call and
-   leaves yoloAI itself unprivileged.
-2. **The blast radius is the whole process tree.** The agent-facing process would run as root, so a
-   sandbox escape escapes to root rather than to the user. Elevating one `pfctl` invocation does not.
+**Why not authorize a yoloAI subcommand.** `/opt/homebrew/bin` is user-writable on Apple Silicon, so
+a grant on the yoloAI binary is passwordless root for anything running as the user. `/sbin/pfctl` is
+SIP-`restricted` and unwritable even by root.
 
-> **Correction.** An earlier version of this plan rejected the wrapper on credentials — sudo strips
-> `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` (measured), and `fileutil.SudoParentEnv`
-> recovers them by reading `/proc/<ppid>/environ`, which does not exist on macOS. That fact is
-> right; the conclusion was not. `sudo -E`, or a `Defaults env_keep +=` line, surmounts it — and
-> **`sudo -E yoloai` is already an established invocation in this project** (`podman.go:340`, and
-> throughout the archived VM-isolation work). Citing it as fatal was wrong. It is a papercut on a
-> model rejected for the two reasons above.
+**Why not let the grant load rulesets at all.** This decision picked the mechanism, and it was
+measured both ways:
 
-None of this bears on the chosen design, where yoloAI never runs under sudo at all — only `pfctl`
-is elevated, so the environment its own process sees is untouched.
+- A grant that can load a ruleset **can void every sandbox's filtering**. Loading `pass in quick all`
+  into any anchor the grant can write took a sandbox from blocked to reachable (`pf-shapea2.txt` C2,
+  `before=000 after=301`). `man pf.conf`: a `quick` match *"aborts the evaluation of the rules in
+  other anchors and the main ruleset"*. That is a host-wide filter-bypass primitive.
+- A grant restricted to **table membership cannot express it**. Nine bypasses were attempted against
+  the table-only grant — load a ruleset, load into a sub-anchor, flush, disable pf, kill a table,
+  reach another anchor — all refused by policy (`pf-shapeb.txt` B3, `pf-assumptions.txt` D5).
 
-**Why not authorize a yoloAI subcommand.** `/opt/homebrew/bin` is user-writable — Homebrew's Apple
-Silicon default — so a `NOPASSWD` grant on the yoloAI binary is passwordless root for anything
-running as the user. `/sbin/pfctl` is SIP-`restricted` and unwritable even by root.
-
-**Why not load rules into a top-level anchor.** sudoers cannot constrain stdin, and a `rdr` rule
-loaded into `com.apple/yoloai_*` **is evaluated** — measured, redirecting a sandbox's traffic to a
-dead port. That grant is a traffic-interception primitive.
+So the rules are static and only membership moves. The rejected alternative, per-sandbox sub-anchors
+loaded from stdin, is recorded at the end.
 
 ## The mechanism
 
-**Per-sandbox sub-anchors under a filter-only parent.**
+**A fixed pool of slots. Static rules, dynamic table membership.**
 
-Setup, once, privileged, interactive — the parent anchor's entire contents:
-
-```
-anchor "*"
-```
-
-No `nat-anchor`, no `rdr-anchor`. That single line is the whole security boundary: translation is
-evaluated only where a translation anchor is declared **at every level**, so rules inside a
-sub-anchor can filter but cannot translate.
-
-Per sandbox at start: `pfctl -a com.apple/yoloai/<instance> -f -`, rules on stdin, translation
-before filtering (pf enforces the order options → normalization → queueing → translation →
-filtering; a `rdr` after a filter rule is a syntax error). At stop: `-F rules` on that sub-anchor.
+Setup, once, privileged, interactive: load a slot ruleset into `com.apple/yoloai`, and write it to a
+root-owned file so it can be restored later.
 
 ```
-pass  in quick from <sandbox-ip> to <allowed-ip>
-block drop in quick from <sandbox-ip> to any
+table <yb_src_0> persist
+table <yb_dst_0> persist
+pass  in quick from <yb_src_0> to <yb_dst_0>
+block drop in quick from <yb_src_0> to any
+…repeated per slot
 ```
 
-`in` on the bridge, evaluated **before** NAT so the packet still carries the guest's address, and
-`quick` so the `pass` wins by appearing first. Both halves are load-bearing: a `block drop out`
-form sees the host's post-NAT source, matches nothing, and leaves the sandbox wholly unfiltered
-while loading cleanly. That form was proposed in an earlier draft of this plan and is why the
-acceptance test asserts a positive control rather than only a denial.
+Per sandbox at start: claim a free slot, `-T add` its address to `yb_src_N` and its resolved
+allowlist to `yb_dst_N`. At stop: `-T delete`.
 
-Measured together, one parent, parent read back as filter-only: filter rules **enforce** (so the
-sub-anchor is demonstrably on the packet path), a `rdr` in the same sub-anchor is **inert**, a
-second sandbox on the same bridge is **unaffected**, and `load anchor ".."` does **not** write the
-parent. `set skip` is **not honored**, tested against a block rule proven working in the same run.
+**`in quick` is load-bearing.** `in` on the bridge is evaluated **before** NAT, so the packet still
+carries the guest's address; `quick` makes the `pass` win by appearing first. A `block drop out` form
+sees the host's post-NAT source, **matches nothing, and leaves the sandbox wholly unfiltered while
+loading cleanly** (`pf-enforce.txt` E1 ran both candidates in one pass). An earlier draft of this
+plan proposed the `out` form.
 
-There is **no cap on concurrent isolated sandboxes**, which is the main reason this shape was
-chosen over the fixed slot pool recorded at the end of this document.
+Measured: 32 slots load (64 rules), a **high** slot index enforces, an unassigned sandbox is
+untouched, two slots give two sandboxes **independent allowlists**, an empty `dst` table fails
+**closed**, and **table contents survive a ruleset reload** — so resizing or repairing the pool does
+not de-isolate running sandboxes (`pf-assumptions.txt` D1/D2/D4, `pf-shapeb.txt` B1/B2).
+
+**Pool size and exhaustion are open.** 32 was measured; the cap is this design's one structural cost.
+What happens when the pool is full — refuse, or fall back to today's behaviour with DF179's
+disclosure — is undecided.
 
 ### The grant
 
-Five lines, and the split is the design. **Writes from stdin are sub-path-only** — the parent can
-never be written by the grant holder. **Reads may name the parent**, because `-s` cannot modify
-anything and reaping must enumerate orphans. **One write to the parent is permitted**, and only from
-a root-owned file at a literal path, which is what makes unattended reboot recovery possible without
-handing over the parent.
-
 ```
-<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai/[A-Za-z0-9][A-Za-z0-9._-]* -f -$
-<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai/[A-Za-z0-9][A-Za-z0-9._-]* -(F rules|s rules|s nat)$
-<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -s (Anchors|rules)$
-<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -f /etc/yoloai/pf-parent\.conf$
+<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -t yb_(src|dst)_([0-9]|[12][0-9]|3[01]) -T (add|delete|flush|show)( [0-9a-fA-F.:/]+)*$
+<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -f /etc/yoloai/pf-pool\.conf$
+<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -s rules$
 <user> ALL=(root) NOPASSWD: /sbin/pfctl ^-s info$
 ```
 
-Validated against a live policy — 24/24 in
-[pf-shapea.txt](../research/macos-isolation-spike/results/pf-shapea.txt) and 20/20 in
-[pf-reboot.txt](../research/macos-isolation-spike/results/pf-reboot.txt); the tested anchor root was
-`com.apple/yoloai_s`, otherwise identical. Permitted: install, teardown, self-verify, parent
-enumeration, parent *restore from the pinned file*, and reading pf's enable state. **Refused:**
-writing the parent from stdin, flushing the parent, `..` as a leaf, `../evil`, a leading-dot leaf,
-per-sandbox rules from a file, another anchor, main-ruleset load, `pfctl -d`, `-F all` (globally and
-within a sub-anchor), table ops — and, for the restore row specifically, **a different file in the
-same directory**, a user-writable path, and the pinned file loaded into another anchor or into the
-main ruleset. Cold-cache control passed in both runs.
+Validated as a unit (`pf-assumptions.txt` D5/D7 — the tested anchor root was `com.apple/yoloai_b`,
+otherwise identical). Permitted: membership add/delete/flush/**show**, **multiple addresses in one
+call** (so a 40-IP allowlist is not 40 `sudo` invocations), restore from the pinned file, and reads
+of the ruleset and pf's enable state. Refused: an out-of-pool slot, an arbitrary table name, a
+ruleset from stdin, a ruleset from any other file, an `-f` smuggled where an address belongs,
+`-T kill`, `pfctl -d`, `-F all`. Cold-cache control passed.
 
-Four things that must not be "tidied" later:
+Four things that must not be "tidied":
 
-1. **The leaf must start with an alphanumeric.** That is what makes `..` unmatchable. A charset of
-   `[A-Za-z0-9._-]+` alone would permit `-a com.apple/yoloai/.. -f -`, which writes the parent and
-   destroys the containment.
-2. **Globs are unusable.** sudoers matches arguments as one concatenated string, so
-   `-a com.apple/yoloai*` would also permit `-a com.apple/yoloai -f /etc/pf.conf`. Regex only.
-3. **Do not add escapes.** `man sudoers`: *"There is no need to escape sudoers special characters in
-   a regular expression other than the pound sign."* The unescaped form is correct and tested.
-4. **`visudo -c` cannot validate any of this.** It accepts the unsafe glob and the safe regex
-   identically. The policy is **generated by yoloAI and verified by a permit/refuse matrix**, never
-   documented for a user to hand-copy.
+1. **Reads may name the anchor; writes are membership-only.** `-s` cannot modify anything, and
+   reaping and verification both need reads. The dangerous grant is the *ruleset* write.
+2. **The one ruleset write is pinned to a literal root-owned path.** `/etc/yoloai/pf-pool.conf`,
+   `root:wheel 0644` in a `root:wheel 0755` directory — confirmed not user-writable. That is what
+   makes unattended reboot recovery possible without handing over ruleset loading.
+3. **Globs are unusable.** sudoers matches arguments as one concatenated string, so `-t yb_src_*`
+   would also permit `-t yb_src_0 -T kill`. Regex only.
+4. **Do not add escapes.** `man sudoers`: *"There is no need to escape sudoers special characters in
+   a regular expression other than the pound sign."* And **`visudo -c` cannot validate any of this**
+   — it accepts the unsafe glob and the safe regex identically. The policy is generated by yoloAI
+   and verified by a permit/refuse matrix, never documented for a user to hand-copy.
 
-The leaf is the **principal-scoped instance name** (`store.InstanceName`), not the bare sandbox
-name: sandbox names are unique per principal, anchors are not, so two principals with the same
-sandbox name would otherwise collide on one anchor. The charset follows the real grammar in
-`internal/config/names.go` (`^[A-Za-z0-9]+(?:[._-][A-Za-z0-9]+)*$`) — an earlier `[a-z0-9-]+` would
-have rejected `my_box`, `Feature2` and `a.b`, surfacing as a permission error rather than a name
-error.
+## Reaping is a security requirement
 
-### What enforcement keys on, per backend
+**A stale entry does not merely block — it grants reach the sandbox was never configured for.** With
+a stale entry naming its address in another slot, a sandbox **lost its own allowlist and inherited
+the stale slot's** (`pf-assumptions.txt` D3, with a control establishing it had exactly its own
+policy immediately before). `quick` is first-match over rules keyed on a recycled address.
 
-| Backend | Key | Note |
-| --- | --- | --- |
-| apple | source address on the vmnet bridge | a second VM on the same bridge was unaffected — the discriminator that makes it per-sandbox |
-| tart | source address on the vmnet bridge | same shape; enforcement itself measured on apple only |
-| seatbelt | **gid owning the socket** | `pf`'s `user`/`group` selectors match **TCP and UDP only**, so non-TCP/UDP egress is unfiltered by construction — a materially weaker guarantee that must be stated in user-facing text |
+This is **not** a cost of the slot pool: an orphaned *sub-anchor* does the identical thing
+(`pf-stale-a.txt` SA2). It is a property of address-keyed enforcement and applies to any shape.
 
-seatbelt also needs a second privileged step: `setegid()` to a supplementary group returns `EPERM`
-**even for a member**, so the gid must be set by a privileged launcher. Its argument surface (a gid
-and a program path) is much harder to constrain than an anchor name. **Phase 3, and possibly not
-worth doing.**
+It is reachable because **addresses recycle on every start** — apple `.22`→`.23`, tart `.2`→`.4` with
+a new MAC, so the pool is consumed per start, not per sandbox.
 
-## Hazards
+Therefore:
 
-Each produced a false result during the research before it was understood.
+- **At start, delete this sandbox's address from every `src` table before adding it to its own.**
+  Deleting a non-member is a no-op, so this is deterministic regardless of stored state, and it
+  closes D3 without depending on teardown having succeeded.
+- **Reconcile on every run**: any address in a `src` table that no live sandbox holds is removed.
+  Orphans are identified **by address**, not by name — which avoids the ambiguity
+  `runtime/orphan.go` documents (`yoloai-acme-probe` is both principal `acme`'s sandbox `probe` and a
+  legacy sandbox named `acme-probe`, DF125). Any design that names orphans re-creates that finding.
+- The sweep holds no lock. Two ordering rules make it safe without one: write the sandbox record
+  before its membership, and in the sweep **enumerate membership before reading records**. Then an
+  address seen in a table had its record written earlier, so a live sandbox is never swept, and one
+  created mid-sweep is not in the enumeration.
+- **Reconciliation must key on RUNNING, not on record-exists.** A stopped-but-not-destroyed sandbox
+  keeps its record, so a "record gone" predicate never reaps its stale entry.
+- Per-sandbox `flock`s already exist (`store.AcquireLock`, taken in create/start/stop/destroy/reset),
+  so same-sandbox races are closed. **Slot allocation is cross-sandbox and needs its own lock.**
 
-1. **Never touch the main ruleset.** `pfctl -f` *replaces* it, and that is where vmnet's NAT lives.
-   Reloading `/etc/pf.conf` does not restore it; only restarting the vmnet service does.
-2. **Rule order inside a ruleset is enforced**: options → normalization → queueing → translation →
-   filtering. A `rdr` after a filter rule is a syntax error, and the failed load looks exactly like
-   a rule that loaded and did nothing.
-3. **`quick` follows the direction keyword.** `block drop quick in on …` does not parse;
-   `block drop in quick on …` does.
-4. **Key on the address, never the interface name.** vmnet re-picks subnets and bridge indices move
-   between backends (DF172).
-5. **Sub-anchors evaluate in alphabetical order of anchor name**, and a `quick` match *"aborts the
-   evaluation of the rules in other anchors and the main ruleset"* (`man pf.conf`). For yoloAI's own
-   rules this is harmless — every rule is keyed on its own sandbox's source address, so one
-   sandbox's `pass` cannot match another's packets. It matters for the security ceiling below.
+## Verification is mandatory
 
-## Ordering, and the enforcement window
+**Membership without rules fails open silently** — with the ruleset flushed and the address still in
+its table, the sandbox is unfiltered and nothing distinguishes it from working isolation
+(`pf-assumptions.txt` D6; the sub-anchor design fails the same way, `pf-shapea.txt` S5).
 
-The sandbox address does not exist at launch. Measured: apple's appears **2s** after `yoloai new`
-begins against **3s** for the command to return; tart's at **8s** against **39s**. So
+So the start path verifies, all granted and read-only:
 
-```
-start guest → wait for address → load sub-anchor → VERIFY → launch agent
-```
+1. **pf is enabled** — `pfctl -s info`. `/etc/pf.conf` states pf is not auto-enabled and is
+   reference-counted; with no holder every rule is inert. (`pfd` holds the token today.)
+2. **the pool ruleset is loaded** — `-a com.apple/yoloai -s rules`, expected rule count.
+3. **this sandbox's address is in its slot** — `-T show`.
 
-is achievable synchronously in-process. Only the last arrow is a security boundary; boot traffic
-before the rules exist is unfiltered, acceptable only because no agent code has run yet. **If agent
-launch is ever reordered ahead of the rule load, the guarantee is void and nothing about the sandbox
-looks different** — see the acceptance test, which must assert this directly.
+Failing any is an error. Note (3) asserts *presence*, not that the address is still the sandbox's
+current lease; comparing against the live address closes the remaining staleness gap and is free.
 
-## VERIFY is mandatory, and must check the parent
+### Reboot
 
-**A missing parent fails open silently** (measured): `pfctl` auto-creates an anchor path, so if
-`com.apple/yoloai` has no `anchor "*"`, the per-sandbox load **succeeds**, the rules never evaluate,
-and nothing distinguishes it from working enforcement.
+pf anchor contents are in-kernel state. **This is asserted, not measured** — every "reboot" result
+here emptied the anchor by hand. It is near-certain, and a real reboot plus one `-s rules` would
+settle it permanently.
 
-This is not an edge case. **pf anchor contents are in-kernel state and do not survive a reboot**, so
-after every reboot the parent is empty. The start path must therefore verify three things, all
-granted and all read-only:
-
-1. **pf is enabled** — `pfctl -s info`. `/etc/pf.conf` states pf is *not* auto-enabled and is
-   reference-counted, so if nothing enabled it, every rule loaded is inert: the same silent
-   fail-open from a different cause. (Observed: `pfd` holds the enable token, 56 days.)
-2. **the parent contains `anchor "*"`** — `pfctl -a com.apple/yoloai -s rules`.
-3. **this sandbox's own rules are present** — `-a com.apple/yoloai/<instance> -s rules`.
-
-Failing any is an error, not a warning.
-
-### Reboot recovery — the pinned-file grant
-
-Restoring the parent means writing it, which the grant refuses on purpose. The way out is to keep
-the parent's content in a **root-owned file at a path pinned literally in the sudoers regex**:
-setup writes `/etc/yoloai/pf-parent.conf` (`root:wheel`, `0644`, in a `root:wheel 0755` directory),
-containing exactly `anchor "*"`. yoloAI may then reload the parent unattended, and cannot alter what
-gets reloaded. The old objection to `-f <path>` — whoever writes the file controls the rules —
-dissolves once the file and its directory are root-owned and the path is literal.
-
-Measured end to end: with the parent emptied, a running sandbox is unfiltered (the S5 fail-open,
-reproduced); restoring the parent **as the invoking user via `sudo -n`, with no tty**, brings
-enforcement straight back. **Restoring the parent alone revives already-running sandboxes** — their
-sub-anchor rules survive in the kernel, only the dispatch line was missing — so recovery is one
-command and does not require restarting anything.
-
-The grant proved tight around it: loading a *different* file from the same directory, a
-user-writable path, or the pinned file into another anchor or the main ruleset are all refused.
-
-## Reaping and concurrency
-
-Sub-anchors are reconciled against live sandboxes: enumerate with
-`pfctl -a com.apple/yoloai -s Anchors` (granted, read-only), flush any whose sandbox is gone.
-Teardown itself is `-F rules` on one sub-anchor.
-
-Reaping is **correctness, not housekeeping**, because addresses are recycled: a sandbox's address
-changes on every stop/start (apple `.22`→`.23`, tart `.2`→`.4`, and tart's MAC changes too, so the
-pool is consumed per *start*), and a stale `block` rule naming a recycled address **silently denies
-its next occupant** — measured directly.
-
-**Concurrency needs two ordering rules, not a new lock.** Per-sandbox `flock`s already exist —
-`store.AcquireLock(layout, name)`, taken in create, start, stop, destroy and reset — so two
-processes acting on the *same* sandbox are already serialized. (A plan asserting "No concurrency
-controls exist" was retired to `archive/plans/` once it turned out to describe a gap
-`store.AcquireLock` had already filled — it misled this design before it was caught.) What no lock covers is the sweep, which is cross-sandbox and holds none.
-
-It does not need one:
-
-1. **Write the sandbox's record before loading its sub-anchor.** Free — the anchor load happens
-   after the guest leases an address, long after the record exists. This makes "an anchor with no
-   record" mean genuinely orphaned.
-2. **In the sweep, enumerate anchors first, then read records, then flush only anchors absent from
-   the record set.**
-
-Given rule 1, any anchor present in the enumeration had its record written earlier, so the later
-record read must see it — unless the sandbox was destroyed in between, where flushing is correct. A
-sandbox created after the enumeration is not in it and cannot be flushed. No live sandbox is ever
-swept.
-
-This shape also has **no shared mutable state between sandboxes**: each writes only its own anchor,
-so concurrent starts touch disjoint objects. The rejected slot pool does not have that property —
-two concurrent starts could claim the same slot and silently apply one sandbox's allowlist to
-another.
-
-**Reconciliation is delete-only and never repairs.** A crash between the record write and the anchor
-load leaves a sandbox with no rules and nothing to add them later. Tolerable only because rules
-precede agent launch, so no agent code runs in that window — state it rather than let it be found.
+Recovery is measured: the full 32-slot ruleset restores unattended from the pinned root-owned file
+via `sudo -n` (`pf-assumptions.txt` D7), after which membership must be re-added for live sandboxes.
 
 ## The security ceiling
 
-The grant's holder is the host user, who already has unrestricted network access — so for the
-**single-user Mac this project targets**, the grant is not an escalation. Two qualifications the
-earlier drafts of this plan got wrong:
+The grant's reachable surface is **one or more addresses in yoloAI's own tables**. It cannot load a
+ruleset, disable pf, or touch anything else — measured, not argued.
 
-- **This shape's ceiling is "load arbitrary filter rules into a sub-anchor", not "add one address to
-  a table".** pf filter rules are host-global, and per hazard 5 a `pass … quick` in an
-  alphabetically-early sub-anchor aborts evaluation of every other anchor *and the main ruleset*. On
-  a **multi-user** Mac that is a host-wide filter-bypass or denial primitive an unprivileged user
-  does not otherwise have. Document it; do not claim it away.
-- **On seatbelt the agent runs as the same uid on the host.** The argument that the contained agent
-  cannot reach the grant rests entirely on the seatbelt profile being `(deny default)`. If that
-  profile ever permits exec of `sudo`, the contained agent *is* the grant holder. This is a further
-  reason Phase 3 is separate.
+Two qualifications:
+
+- Adding an arbitrary address to a `dst` table widens one sandbox's allowlist; adding to a `src`
+  table subjects an address to a slot's policy. On a **multi-user** Mac that reaches another user's
+  VM. On the single-user Mac this project targets, the holder already has unrestricted network
+  access.
+- **A contained agent cannot reach the grant.** macOS `sandbox-exec` denies exec of setuid binaries
+  regardless of the profile's `(allow process-exec)`: `sudo` and `su` are both refused from inside a
+  seatbelt sandbox while non-setuid binaries — including a root-owned one in the same directory —
+  run fine. This matters because the grant is host-global and not backend-keyed, so a seatbelt
+  sandbox coexisting with it would otherwise be a way in.
+
+## Hazards
+
+Each produced a false result during the research.
+
+1. **Never touch the main ruleset.** `pfctl -f` replaces it, and that is where vmnet's NAT lives.
+   Reloading `/etc/pf.conf` does not restore it.
+2. **Rule order inside a ruleset is enforced**: options → normalization → queueing → translation →
+   filtering. A misordered load is a syntax error, and a failed load looks exactly like a rule that
+   loaded and did nothing.
+3. **`quick` follows the direction keyword.** `block drop in quick on …` parses; `block drop quick in
+   on …` does not.
+4. **Key on the address, never the interface name.** vmnet re-picks subnets and bridge indices move
+   between backends (DF172).
+5. **`load anchor` is inert under `-a`** — `pfctl` never opens the file. An earlier run concluded
+   "containment holds" from exactly this no-op; the file was never read.
+
+## Ordering, and the dependency this needs
+
+The rules must be installed before the agent can emit a packet. The address is knowable in time —
+apple's appears 2s in against 3s for `yoloai new` to return; tart's 8s against 39s.
+
+**But the host has no turn in which to install them.** `AgentFreeLaunch` is set by docker alone
+(`runtime/docker/docker.go:63`) and `usesAgentFreeLaunch` requires it, so apple and tart take
+`startLegacy`, where `entrypoint.py` execs the agent itself. There is no host-side step between
+"guest booted" and "agent running".
+
+That makes **host-controlled-agent-launch.md** a real dependency, now declared. Until it lands,
+Phase 2 can only install rules concurrently with an already-starting agent — a weaker guarantee than
+this plan otherwise describes, and it makes the ordering acceptance test unwritable.
 
 ## Shape of the work
 
-**Phase 1 — capability, setup, verification.** Probe with `sudo -n /sbin/pfctl -a com.apple/yoloai
--s Anchors`; report through `yoloai doctor` like any other host prerequisite, with a command that
-generates and installs the policy and loads the parent. `pfctl -n -f -` validates a generated
-ruleset unprivileged (exit 0 valid / 1 invalid), so verify before spending a privileged call — note
-it always prints the "Use of -f option" warning to stderr, which must be filtered rather than read
-as failure. Setup also writes the root-owned `/etc/yoloai/pf-parent.conf` that makes
-unattended reboot recovery possible.
+**Phase 1 — capability, setup, verification.** Larger than it looks:
 
-**Phase 2 — apple and tart.** This is more than removing a line:
+- Doctor's capability model is keyed on **(backend, isolation mode)** only; there is no dimension for
+  a host prerequisite that is neither. `FixStep` is **display-only** — there is no "run the fix"
+  machinery. And **nothing in production code execs `sudo`**, so this is the project's first
+  privileged subprocess and needs its own injection seam for tests.
+- `pfctl -n -f -` validates a generated ruleset unprivileged (exit 0/1), so verify before spending a
+  privileged call — it always warns on stderr, which must be filtered rather than read as failure.
 
-- `runtime.BackendCaps.NetworkIsolation` is documented as *"supports `--network=isolated` (iptables
-  domain filtering)"*. Flipping it to `true` on tart/seatbelt routes them into the ip-filter path,
-  which neither can execute. The capability must be able to express "isolated, enforced by host pf"
-  — a new field or a mechanism enum.
-- `internal/netpolicy/strategy.go` has a `Strategy` seam (`StrategyEgressProxy` is reserved), but no
-  strategy-*selection* function exists; the sole call site hardcodes `StrategyIPFilter`. A
-  `StrategyHostPF` needs one, plus a defined behaviour when the grant is absent.
-- The `NET_ADMIN` grant at `launch.go:1040` is `NetworkMode == "isolated" && caps.NetworkIsolation
-  && !sidecarFirewall`, and `sidecarFirewall` requires both `NetnsSidecarRunner` and
-  `AgentFreeLaunch` — docker-only. A third condition is needed.
-- **Dropping `NET_ADMIN` alone breaks boot.** `entrypoint.py` still runs `isolate_network` and
-  raises `NetworkIsolationError` if a rule fails to install, so the sandbox would not start. The
-  seam already exists — `YOLOAI_FIREWALL_EXTERNAL=1` (`entrypoint.py:187`, set today at
-  `launch.go:1016`) — and must be set on this path.
+**Phase 2 — apple and tart.** Also larger than "remove a line":
 
-With the capability absent, tart keeps today's refusal and apple keeps today's weak path plus
-DF179's disclosure, so nothing that works today stops working.
+- **`BackendCaps.NetworkIsolation` cannot express this.** It is documented as *"(iptables domain
+  filtering)"* and has exactly **two** production consumers — `netpolicy.CanEnforce` ("can the
+  allowlist be enforced?") and `launch.go:1040` ("does the guest install its own rules, so it needs
+  `NET_ADMIN`?"). Those are different questions that coincide only while there is one mechanism.
+  Make it an enum — `None | InSandboxIPFilter | HostPF` — following this file's own
+  `FilesystemLocality`/`KeepAliveModel` precedent. ~10 test fixtures move.
+- **There is no strategy-selection function.** `CanEnforce` switches on `Strategy` and the sole call
+  site hardcodes `StrategyIPFilter`. Selection needs the grant probe, which is I/O, so it cannot go
+  in `buildInstanceConfig` (a pure function, unit-tested as such) — put it where `sidecarFirewall` is
+  computed and thread one derived value to both call sites, not two conditions that will drift.
+- **Dropping `NET_ADMIN` alone breaks boot.** `entrypoint.py` still runs `isolate_network` and raises
+  if a rule fails. The seam exists — `YOLOAI_FIREWALL_EXTERNAL=1` (`entrypoint.py:187`, set at
+  `launch.go:1016`) — but it is gated on `sidecarFirewall`, which is docker-only, so the gate must
+  widen to "enforced outside the guest, by any mechanism".
+- **There is no guest-address accessor.** `parseContainerNetwork` is unexported; the only exported
+  surface is `SandboxNetHealth`, whose `Detail` is a human-readable clause. A new optional interface
+  is needed on apple and tart — an unbudgeted production contract change.
+- **`LivePatchNetwork` is a third enforcement path.** `yoloai <box> allow <domain>` execs an ipset
+  script inside the container (`engine_network.go:37`). Under host pf there is no in-guest ipset, so
+  it would silently no-op while appearing to succeed. It needs a `StrategyHostPF` branch that updates
+  the `dst` table.
 
-**Phase 3 — seatbelt: parked.** Designed and deliberately not built —
-[seatbelt-host-pf-enforcement.md](seatbelt-host-pf-enforcement.md) records the mechanism and the
-four costs that outweigh it. Seatbelt keeps today's honest refusal, which advertises the real limit
-rather than shipping a `--network-isolated` that means something weaker than it does elsewhere.
+**Phase 3 — seatbelt: parked.** See
+[seatbelt-host-pf-enforcement.md](seatbelt-host-pf-enforcement.md). Seatbelt keeps today's honest
+refusal.
 
 ## Acceptance test
 
-Every assertion pairs a **block** with a **positive control in the same run**. A sandbox stranded by
-the vmnet subnet re-pick refuses every destination for free, which silently invalidated the first pf
-harness (DF172). A case asserting only the denial certifies nothing.
+Every assertion pairs a **block** with a **positive control in the same run** — a sandbox stranded by
+the vmnet subnet re-pick refuses every destination for free (DF172).
 
-Per backend, in one run: an allowlisted destination **succeeds**, a non-allowlisted destination
-**fails**, a second sandbox on the same bridge is **unaffected**, and after stop the sub-anchor is
-**empty**. Plus two the earlier draft of this test omitted:
+Per backend, in one run: allowlisted **succeeds**, non-allowlisted **fails**, a second sandbox is
+**unaffected**, after stop the address is **gone from the table**, an **empty allowlist fails
+closed**, and a **stale entry in another slot does not grant reach** (the D3 regression).
 
-- **The ordering assertion.** The agent's first egress attempt must be observably after the rules
-  are installed. Nothing else in the list goes red if launch is reordered ahead of the load.
-- **The parent-missing case.** With an empty parent, starting an isolated sandbox must **fail**, not
-  succeed unfiltered.
+Two the earlier draft omitted: the **ordering assertion** (the agent's first egress attempt is
+observably after install — unwritable until the launch dependency lands), and the **pool-missing
+case** (with the ruleset flushed, starting an isolated sandbox must fail, not succeed unfiltered).
 
-Per AGENTS.md rule 10, name the capability intersection before writing these: with
-`NetworkIsolation: false` on tart and seatbelt today, a `runtime/runtimetest` case gated on that cap
-has an **empty** backend set and would certify nothing. The tamper arm — the sandbox tries to remove
-the rule and cannot — belongs in `runtime/runtimetest`, not a spike script.
+**Rule 10 intersection, named:** `NetworkIsolation` is **true on apple** today, so a conformance case
+gated on it has a non-empty set including the one backend Phase 2 targets. But `runtime/runtimetest`
+gates sections on **fixture-declared skip fields**, not capability reads
+(`conformance_iface.go:56-60`), so the correct guard is a new fixture field. The suite is
+`//go:build integration` and macOS-only, so it cannot go red in CI: rule 10 compliance comes from
+unit tests of the pure pieces — ruleset generation, slot derivation, the permit/refuse matrix as an
+argv table, and the three verification parsers.
 
 ## IPv6 — owned elsewhere
 
 `--network-isolated` is IPv4-only on every backend (**DF104**), because `firewall.resolve_domains`
-requests `AF_INET` only. Two plans already own this: `ipv6-network-isolation.md` (filter what is
-present) and `guest-network-families.md` (decide what guests get, **Rides: breaking**). **This plan
-does not close DF104** and must not grow a second mechanism for it.
+requests `AF_INET` only. `ipv6-network-isolation.md` and `guest-network-families.md` own this.
+**This plan does not close DF104.**
 
-What this plan contributes is that the mechanism is ready when those land: pf accepts `inet6` rules,
-and one table or ruleset can carry both families — confirmed at runtime. Any v6 rule must use the
-same `in quick` form; a `block drop out` variant fails open exactly as the v4 one does.
-
-Measured, and the limit of it: an apple guest holds three `inet6` addresses including a **ULA**
-(`fd96::/8`) and has no IPv6 egress; tart guests have none. This host has no IPv6 upstream, so
-whether guests would egress over v6 on a host that does is **unmeasured** — a ULA cannot source
-upstream traffic, so it would require an RA carrying a global prefix, which was not observed.
+What it contributes: pf accepts `inet6` rules (parse-only) and a table holds both families at
+runtime. Any v6 rule must use the same `in quick` form. Measured limit: an apple guest holds a
+**ULA** (`fd00::/8` space) and has no IPv6 egress; tart guests have none; this host has no v6
+upstream, so whether guests would egress over v6 elsewhere is unmeasured.
 
 ## Unmeasured, and known limits
 
-- **Enforcement was measured on apple only.** tart shares the addressing shape but its pf
-  enforcement has not been run.
-- **Fail-open on address change while running.** Renewal alone does not move tart's address —
-  five renewals counted across a 28-minute watch, address unchanged. But **renewal following a
-  vmnet subnet re-pick is untested**, and that is the sharpest remaining risk. apple's long-run
-  behaviour is also unmeasured: it has no `/var/db/dhcpd_leases` record, so it does not renew
-  through bootpd at all.
-- **`SandboxNetHealth` is not a periodic probe.** `probeNetHealth` runs only from the list and
-  inspect read paths (`status.go:344`, `:486`) — when a user types `ls`, never on a schedule. Any
-  proposal to re-verify "on the probe tick" must first create the tick.
-- **Host/guest resolution parity.** The `pass` rules hold resolved addresses, and resolution moves
-  from the guest to the host. Where the two resolve a domain differently, the guest connects to an
-  address the host never allowed and is blocked while allowlisted. Applies to apple only — tart and
-  seatbelt never had in-guest resolution. `resolve_domains` is also one-shot, so CDN rotation
-  already breaks long-lived sandboxes today; that is inherited, not caused.
-- **Whether yoloAI should hold its own pf enable reference is open.** pf is reference-counted via
-  `pfctl -E`/`-X`; `pfd` currently holds a token, but nothing guarantees a holder exists. Deliberately
-  untested: getting `-X` wrong drops the count and breaks vmnet NAT for every VM on the host.
-  Detection is granted and sufficient to fail closed; holding a reference is a further decision.
+- **Reboot itself** — asserted, never performed (see above).
+- **Enforcement on tart under this pool form.** tart pf enforcement *was* measured, three times, in a
+  flat anchor (`pf-main-run.txt` P1b and two reruns). The slot pool has been run on apple only.
+- **Renewal after a subnet re-pick.** Steady-state renewal does not move tart's address — five
+  renewals counted over 28 minutes — but renewal *following* a re-pick is untested, and apple has no
+  `dhcpd_leases` record so it does not renew through bootpd at all.
+- **Host/guest resolution parity.** `dst` holds resolved addresses and resolution moves to the host;
+  where the two resolve a domain differently, the guest is blocked while allowlisted. apple only —
+  tart and seatbelt never had in-guest resolution. `resolve_domains` is one-shot, so CDN rotation
+  already breaks long-lived sandboxes today; inherited, not caused.
+- **Pool size and exhaustion behaviour** are undecided.
+- **Whether yoloAI should hold its own `pfctl -E` reference.** Deliberately untested: getting `-X`
+  wrong drops the count and breaks vmnet NAT for every VM on the host.
 
-## Rejected alternative: a fixed slot pool
+## Sweep surfaces
 
-Static rules loaded once, referencing pf tables, with per-sandbox work reduced to
-`pfctl -T add|delete <address>` — a much narrower grant (one IP per call). Measured working: 32
-rules load, order preserved, membership add/delete works, teardown by delete alone restores egress.
+Per AGENTS.md rule 2, landing this changes shipped text that nothing typechecks:
+`internal/cli/helpcmd/help/security.md` (says tart/seatbelt have no isolation),
+`internal/cli/lifecycle/new.go` (the `--network-isolated` flag help), plus `flags.md`, `topics.md`,
+`docs/GUIDE.md` and `docs/README.md`.
 
-Rejected because it caps concurrent isolated sandboxes at the pool size, and because its grant is
-*too* narrow to run the design: `-T show` is absent from the validated table regex, so the capability
-probe and reconciliation are both refused by it. Recorded here so the tradeoff is not rediscovered.
+## Rejected alternative: per-sandbox sub-anchors
+
+A filter-only parent (`anchor "*"`) with each sandbox's rules loaded from stdin into
+`com.apple/yoloai/<instance>`. It works: sub-anchor filter rules enforce and stay scoped, `rdr`
+inside them is inert while it is evaluated one level up, `load anchor` is inert under `-a`, `set
+skip` is not honored from a sub-anchor, and `-s Anchors` enumerates them. It has no slot cap.
+
+Rejected on two measured grounds:
+
+1. **Its grant can void all filtering.** `pass in quick all` in any writable sub-anchor takes another
+   sandbox from blocked to reachable. The table grant cannot express this.
+2. **Its reaping must identify orphans by anchor name**, which is the ambiguous
+   `yoloai-<principal>-<name>` form `runtime/orphan.go` forbids (DF19/DF115/DF125). Table membership
+   is identified by address, so the problem does not arise.
+
+Its supposed advantage — per-sandbox allowlists — is not unique to it: two slots give two sandboxes
+independent policy. The cap is the only real difference.
+
+## Not in scope
+
+The `apple`/`podman`/`containerd` `NET_ADMIN` grant on Linux (DF179's own problem, different fix per
+backend), and closing DF104.
