@@ -36,11 +36,28 @@ call, a crash sweep. A teardown that cannot run unattended strands rules. So `NO
 which makes the authorized command set the security boundary. Confirmed: `sudo -n` succeeds with no
 controlling tty, including with a **ruleset on stdin**.
 
-**Why not `sudo yoloai …` with a privilege drop.** Mechanically available (`syscall.Setuid` returns
-EPERM not ENOTSUP on darwin, and `fileutil.HostUID`/`ChownIfSudo` already exist). It dies on
-credentials: sudo strips `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN`, and
-`fileutil.SudoParentEnv` recovers them by reading `/proc/<ppid>/environ`, which does not exist on
-macOS. `sudo yoloai new` would launch an agent that cannot authenticate.
+**Why not `sudo yoloai …` with a privilege drop.** Mechanically available: `syscall.Setuid` returns
+EPERM not ENOTSUP on darwin, `fileutil.HostUID`/`ChownIfSudo` already exist, and `HOME` survives
+sudo on macOS (measured), so the layout root resolves correctly. Two reasons, in order of weight:
+
+1. **It cannot run unattended, which is the same wall the prompt hits.** Under this model *every*
+   lifecycle command that touches pf must be invoked as `sudo yoloai …`, including `stop`. Teardown
+   runs from scripts, signal handlers, MCP calls and crash-recovery sweeps, none of which have a tty
+   or a warm credential cache. The sudoers-line model needs privilege for one `pfctl` call and
+   leaves yoloAI itself unprivileged.
+2. **The blast radius is the whole process tree.** The agent-facing process would run as root, so a
+   sandbox escape escapes to root rather than to the user. Elevating one `pfctl` invocation does not.
+
+> **Correction.** An earlier version of this plan rejected the wrapper on credentials — sudo strips
+> `ANTHROPIC_API_KEY` and `CLAUDE_CODE_OAUTH_TOKEN` (measured), and `fileutil.SudoParentEnv`
+> recovers them by reading `/proc/<ppid>/environ`, which does not exist on macOS. That fact is
+> right; the conclusion was not. `sudo -E`, or a `Defaults env_keep +=` line, surmounts it — and
+> **`sudo -E yoloai` is already an established invocation in this project** (`podman.go:340`, and
+> throughout the archived VM-isolation work). Citing it as fatal was wrong. It is a papercut on a
+> model rejected for the two reasons above.
+
+None of this bears on the chosen design, where yoloAI never runs under sudo at all — only `pfctl`
+is elevated, so the environment its own process sees is untouched.
 
 **Why not authorize a yoloAI subcommand.** `/opt/homebrew/bin` is user-writable — Homebrew's Apple
 Silicon default — so a `NOPASSWD` grant on the yoloAI binary is passwordless root for anything
