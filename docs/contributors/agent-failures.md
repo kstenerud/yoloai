@@ -821,6 +821,94 @@ is known, is probably not the *writing* of an entry but the **format** — a "Ca
 cannot be omitted, so pattern 4 stays computable. Revisit at ~20 specimens, or when an entry appears
 whose class already has three siblings.
 
+### A28 — wrote the vacuity guards, then wrote ten verdicts that could not have come out otherwise (2026-08-04)
+
+- **What happened:** across the macOS `pf` workstream I produced ten measurements whose "PASS" was
+  unreachable by any other value. The family is one shape: a shell idiom for *supply a default on
+  failure* colliding with a command that **already emits a value on failure**. `cmd | head` reported
+  head's exit status. `grep -c X || echo 0` printed `0` *and* exited 1, so the fallback appended a
+  second line, `"0\n0"` failed `[ -gt ]` with "integer expected", and the non-zero status fell into
+  the not-honored branch — unconditionally. `curl -w '%{http_code}' || echo 000` yielded `"000000"`,
+  which `!= "000"`, so a **blocked** destination read as reachable and inverted a correct result into
+  a reported failure. An interface name taken from `ifconfig`'s `$1` carried a trailing colon, making
+  the rule a syntax error that never loaded — and "no effect" was published as "inert". A `set skip`
+  detector grepped for a literal tab that never appears, so a grep that cannot match and a true
+  negative were the same reading. A `rdr` placed after filter rules violated pf's mandatory rule
+  order, so nothing loaded. A refusal detector scored **any** non-zero exit as "refused by policy",
+  so a `pfctl` parse error counted as a sudoers denial — which is how a row testing a file that was
+  neither user-writable nor a valid ruleset passed while testing nothing.
+- **Source of the false belief:** the idioms are correct-looking and near-universal, and each one
+  fails only in the presence of a *second* signal channel — a command that reports failure through
+  both its exit status and its stdout. Reading the line does not reveal it; running the line does.
+  Every one of these survived my own review because reviewing shell means reading it.
+- **What makes this specific:** I had written the guard against exactly this. `pf_authz.sh` carries
+  the comment *"a load that silently no-ops is indistinguishable from one that worked (A22)"*, and
+  the harness containing it then measured `rdr` inertness from a rule that never loaded. The
+  correction after each discovery was also consistently too narrow — fixing the colon, not the
+  missing load-gate; fixing the arithmetic, not the detector that had never been shown to fire.
+- **Caught by:** three independent audit agents, and the discriminating behaviour is worth naming:
+  they **reproduced the idioms in a shell** rather than reading them. The `load anchor` finding is
+  the cleanest case — `pfctl` silently ignores that directive under `-a`, so a containment test
+  concluded "the parent was not written" from a file that was never opened, and the auditor
+  established it with a three-line experiment (`include` under `-a` errors on a bad file;
+  `load anchor` under `-a` does not; without `-a` it does). Nothing in reading the harness would
+  have shown that.
+- **Cost:** two published results files carried vacuous PASSes into a design document, one of them
+  the *only* evidence for the design's sole security property. Two more sat unretracted in files
+  whose siblings had already been corrected for the same bug. Two harnesses still carried a live
+  instance on a branch that had never executed — one of which would have reported FAIL-OPEN for a
+  sandbox that was in fact stranded.
+- **Class:** `llm-shaped-repos.md` Part 7 — the asymmetry between *producing* an artifact and
+  *verifying* it, here at its sharpest, because the artifact's whole purpose was verification.
+- **Gated now?** Partially, and only by convention. Each harness now gates an effect measurement on
+  the rule having **loaded**, pairs every denial with a positive control **in the same run**, and
+  separates `refuse-by-policy` from `ran-but-failed` by reading stderr. None of that is enforced.
+  The transferable rule is narrower than "be careful" and is the one thing that actually worked:
+  **before trusting a verdict, construct the input that should produce the opposite one.** Where
+  that is impossible — a detector that has never returned anything but zero — the verdict is not
+  evidence, whatever it says.
+
+### A29 — asserted facts about this codebase without reading it, in a document whose value is being right (2026-08-04)
+
+- **What happened:** five load-bearing claims in a design plan, each stated flatly, each false or
+  unsupported. "Nothing in the repo configures a second enforcement path" — `LivePatchNetwork` does.
+  "A conformance case gated on `NetworkIsolation` has an empty backend set" — apple sets it `true`,
+  and apple is the backend the plan targets. "tart's pf enforcement has not been run" — it had been,
+  three times, with controls, in results files I had already cited for other things. "No concurrency
+  controls exist" — taken from an `UNSPECIFIED` plan, while `store.AcquireLock` has shipped a
+  per-sandbox `flock` used in five call sites. And an apple guest's ULA was called a "global-scope
+  IPv6 address" with an inference built on top of it, when `runtime/apple/apple.go` says *"vmnet
+  hands the guest a ULA"* twelve lines from code I had read that day.
+- **Source of the false belief:** three distinct provenances, which is why it is one pattern and not
+  five accidents. Two came from **prose** — a stale plan's status line, and my own earlier summary of
+  a results file rather than the file. Two came from **partial reading** — I had opened the file for
+  another purpose and generalised from the part I needed. One came from **an inference presented as a
+  measurement**: `/etc/pf.conf` declares `nat-anchor "com.apple/*"`, so I wrote that translation rules
+  in a sub-anchor "are evaluated", and only later measured it. That one happened to be true, which is
+  worse than if it had been false.
+- **What makes this specific:** the counter-habit was available and I applied it inconsistently. In
+  the same workstream I refused to test `pfctl -E`/`-X` because a wrong `-X` would break the host's
+  networking, and I re-ran a harness rather than accept a verdict I had produced. The discipline was
+  present for *measurements* and absent for *claims about code*, which is exactly backwards: a
+  measurement announces its own uncertainty, a grep does not.
+- **Caught by:** independent audit agents that opened the files, and — for the one the auditors
+  missed — the owner asking a one-line question ("can't a user just call `sudo -E`?") about an
+  argument I had used to kill a design alternative. That argument was wrong, and the repo contained
+  `sudo -E yoloai` in a comment and throughout an archived plan.
+- **Cost:** the claims survived one full plan rewrite. Two of them were used to *reject a design
+  alternative*, and the correct comparison — reached only after three audits — reversed the
+  recommendation.
+- **Class:** `llm-shaped-repos.md` Part 7 — prose read as fact. A26 is the same row for a *finding's*
+  prose; this is it for a *plan's*, and for my own summaries, which is the harder case because a
+  summary in context is indistinguishable from a source that was read. `scripts/check_citation_provenance.py`
+  exists because of exactly this asymmetry, and it is scoped to `research/*.md`, so none of these
+  were in range.
+- **Gated now?** No. The provenance checker's scope could be widened, but the honest reading is that
+  four of the five were *code* claims, which no citation gate reaches. The rule that would have
+  caught all five: **a claim about what the code does gets a file:line, or it gets hedged.** The plan
+  now carries line references for every code assertion, which at least makes the unsourced ones
+  visible.
+
 ### A20 — accepted a skip reason as a constraint, then engineered around the defect it was hiding (2026-07-30)
 
 - **Claimed:** that the conformance mount section could not run on seatbelt or tart, because it binds
