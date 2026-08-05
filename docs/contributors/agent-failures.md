@@ -59,10 +59,12 @@ next entry, and nothing enforces it. The IDs don't drift, and a reader who wants
 see it.
 
 **1. Execution catches my errors. Reading does not — and A8/A10 show reading can make it worse.**
-Every specimen where the agent caught itself by *running something* (A4, A5, A6, A10) — a probe, a
-measurement, a comparison, or being forced to turn a claim into code — held. Every specimen that
+Every specimen where the agent caught itself by *running something* (A4, A5, A6, A10, A31) — a probe,
+a measurement, a comparison, or being forced to turn a claim into code — held. Every specimen that
 reached a durable artifact uncaught (A1, A2, A3, A8) was written from something read: grep output, a
-subagent's report, a comment, an error string, a summary line.
+subagent's report, a comment, an error string, a summary line. A31 sharpens what "running something"
+has to be: the check that disagreed was the one **not derived from the reading that produced the
+claim**, and it only ran because a task step happened to re-invoke it.
 
 **A8 looked like the exception and A10 proved it was not.** A8 was "caught by reading the primary
 source", and its conclusion was still wrong — because the read answered the question being asked
@@ -755,7 +757,9 @@ itself worth knowing when reading pattern 4.
   — drawn from a *truncated* listing. A truncation can only ever support a positive claim about what
   it shows; it is silent on what it omits, and it does not say that it omitted anything. The rule is
   narrow enough to act on: never assert absence from a `head`/`tail`/`grep -m` view. Ask for the
-  thing by name, and let the empty result be the evidence.
+  thing by name, and let the empty result be the evidence. **A31 widens this**: the same defect sinks
+  a *count* or a *scope*, not only an absence, and A31's specimen shows the widened form is the one
+  that actually recurs.
 - **Caught by:** the owner opening the GitHub releases page and saying he saw 0.10.0. Nothing in the
   repo would have caught it — `make check` has no opinion about tags, and the write-up was internally
   consistent, cited real commits, and proposed sensible remedies for a problem that did not exist. It
@@ -1190,3 +1194,47 @@ as scarce as the failures and twice as useful.
   bypassing the capability gate. The general shape is not gateable. The habit is: **build the
   fixture the way the caller builds it, and if a test hands the code a dependency, check the caller
   actually has one.**
+
+### A31 — sized a fix from a diff I had truncated at 60 lines, and put the number in the commit (2026-08-05)
+
+- **What happened:** during the local branch cleanup, `layering-refactor` was the one branch whose
+  content had only partly reached `main`. To find the residue I ran
+  `git show 0f0b77f9 -- scripts/smoke_test.py | head -60`, read the four hunks it printed, and
+  reported to the owner that the branch held **three** unmerged `stdin=subprocess.DEVNULL` call
+  sites — one of the four having already landed. I then wrote the fix, the tests, and a commit whose
+  subject was *"detach stdin on the three yoloai calls that still inherit it"*. The branch commit had
+  fixed **ten** sites, not four; only `Test.run` had landed. Nine were missing, and five further
+  sites had been added to the harness after the branch was cut, for thirteen in total.
+- **Source of the false belief:** my own `head -60`. The hunks it showed were real, the reading of
+  each was correct, and nothing in the output announced that it had been cut — `head` closes the pipe
+  and the remaining six hunks simply never existed as far as the transcript was concerned. The
+  truncated view is indistinguishable from a complete one, because completeness has no marker; only
+  incompleteness would have needed one, and that is the marker `head` cannot emit.
+- **What made it feel checked:** the same command printed `git show --stat`'s
+  `15 insertions(+), 8 deletions(-)` a few lines above. The four hunks I read account for about nine.
+  The refutation was in my own output, six lines from the claim, and I never did the subtraction —
+  because I was not looking for a discrepancy, I was reading hunks. **A number that contradicts the
+  claim is inert if nothing makes you compare them.**
+- **The shape, which is the reusable part:** this generalises A23. A23's rule was *never assert
+  absence from a `head`/`tail`/`grep -m` view*. This was not an absence claim — it was a **count**,
+  which fails identically and less visibly. Any claim about a *complete set* drawn from a truncated
+  view has the same defect: the view is evidence only for what it displays, never for the size or
+  boundary of what it was drawn from. So the rule widens: **do not assert absence, a count, a scope,
+  or "that's all of them" from a truncated view.** For a diff specifically, `--stat` first and make
+  the hunk count agree with it, or drop the pipe — `git show` on one file is not large.
+- **Caught by:** execution, not review. After committing I re-ran the containment check
+  (`git merge-tree --write-tree main layering-refactor`), which still reported the branch as not
+  contained. I had assumed that step was a formality. An AST pass over the harness then produced the
+  real inventory. Note the counterfactual: had the branch been deleted straight after the commit —
+  which is what the cleanup task was for — nothing would ever have re-run that check, and the wrong
+  scope would have been the permanent record.
+- **Cost:** a wrong scope stated to the owner in a summary table, and a commit subject and body
+  asserting "three" twice. Amended before it was pushed, so nothing left the machine. The unamended
+  version would have been a durable, confident, and specific lie about how much of a branch had been
+  recovered — in the one commit whose entire purpose was to make that branch safe to delete.
+- **Gated now?** No, and probably not gateable — `head` in a Bash call is not something `make check`
+  can see. The mechanism that did the work was the **independent re-verification**: the containment
+  check was computed from the repo rather than from my belief, so it disagreed. The transferable
+  habit is to keep one check in the loop that is not derived from the reading that produced the
+  claim. For this specific class the test now carries a completeness guard that walks the harness's
+  AST instead of a human reading call sites, so the count is machine-derived from here on.
