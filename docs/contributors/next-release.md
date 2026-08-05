@@ -4,10 +4,7 @@
 
 # Next release
 
-**Next release version: `v0.11.0`** — escalated from `v0.10.1`: the sandbox image moved from
-Node.js 20 to Node.js 22 LTS, and the sandbox directory became three access tiers (`host/`, `ro/`,
-`rw/`), changing the on-disk layout and requiring a migration. Both are user-visible (see
-`BREAKING-CHANGES.md`, Unreleased).
+**Next release version: `v0.11.1`**
 
 ## How this works
 
@@ -58,88 +55,15 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
-- [DF149](design/findings-resolved.md) — `reset` stranded `files/`, `cache/` and `agent-runtime/` at
-  deleted inodes, silently breaking the agent's artifact channel
-- [DF156](design/findings-resolved.md) — a `yoloai-base` rebuild did not invalidate profile images
-  built on the old base
-- [DF157](design/findings-resolved.md) — on the restart path every line of launch progress was
-  rendered as a warning
-- [DF158](design/findings-resolved.md) — the base image pinned Node 20 on an unverified gVisor
-  claim, capping Claude Code and shipping an EOL runtime **(the breaking change: Node 20 → 22)**
-- [DF160](design/findings-unresolved.md) — `dind/podman-priv` times out on macOS, and the smoke
-  harness turns a slow teardown into a crash (harness half fixed; the timeout is not)
-- [DF159](design/findings-unresolved.md) — `exec start: ttrpc: closed` on containerd-vmenhanced
-  during `apply`, once in 38 runs (filed, not fixed — listed because its docs correction ships)
-- [sandbox-share-tiering.md](archive/plans/sandbox-share-tiering.md) — sandbox directory share
-  tiering (host-only / read-only / read-write), closing DF136 and DF148
-- [DF161](design/findings-resolved.md) — mount conformance was skipped on the only two backends
-  whose mounts are unusual, over one hardcoded path
-- [DF168](design/findings-resolved.md) — `system migrate` plans the framework migrators before the
-  sealed ladder runs, so an install with pre-v3 records cannot be upgraded by any release since
-  v0.6.0
-- [DF162](design/findings-resolved.md) — seatbelt's `:ro` mounts were not read-only whenever a
-  broader rule granted write **(the second breaking change: `:ro` is now enforced)**
-- [DF175](design/findings-unresolved.md) — `yoloai files put --overwrite` silently delivers
-  fabricated content to a running tart sandbox
-- [DF181](design/findings-unresolved.md) — the DF175 repair gives up inside one revalidation tick,
-  so `files put` fails on a guest that is about to be correct
-- [DF177](design/findings-unresolved.md) — `yoloai files put --overwrite <dir>` nests the directory
-  instead of replacing it
-- [DF180](design/findings-unresolved.md) — apple's `Inspect` reports "not found" for a daemon it
-  cannot reach, so `destroy` claims success and leaks the container
-- [DF178](design/findings-unresolved.md) — apple's vmnet bridge is created by the first container,
-  not by the system service, so the injector is unbindable on a fresh host
-- [DF164](design/findings-unresolved.md) — the pre-v6 migrators address the sandbox layout through
-  the live path builders, so tiering silently breaks them and their tests hide it
-- [DF169](design/findings-resolved.md) — a legal sandbox name can exceed the seatbelt tmux socket's
-  104-byte path limit, and tiering narrowed the margin by three characters
-- [DF170](design/findings-unresolved.md) — the seatbelt host tier was readable from inside the
-  sandbox, because the deny covered writes only
-- [DF172](design/findings-unresolved.md) — the vmnet subnet re-pick strands apple sandboxes too, and
-  apple has no net-health detector
-- [DF183](design/findings-unresolved.md) — the tiering sweep updated the contributor docs and missed
-  the user-facing ones, on the one path a user is told to look at
-- [DF184](design/findings-unresolved.md) — "breaking" is measured against the last published
-  release, and that rule is written down nowhere
-- [DF185](design/findings-unresolved.md) — `system migrate` says "stop it", `stop` says "run system
-  migrate", and every blocked op was answered with advice to downgrade
-- [DF186](design/findings-unresolved.md) — `fileutil.MkdirAll` chowns only the leaf under sudo, so
-  the new tier directories were born root-owned and every rootless-podman smoke tier failed
+*Nothing yet.*
 
 ## Candidates — undecided
 
-- [upgrade-coverage.md](design/plans/upgrade-coverage.md) — automated coverage for upgrading an
-  existing install
-- [host-controlled-agent-launch.md](design/plans/host-controlled-agent-launch.md) — yoloAI decides when the
-  agent starts (the enabler for an untamperable firewall)
-- [tamper-resistant-network-isolation.md](design/plans/tamper-resistant-network-isolation.md) —
-  the network allowlist enforced outside the agent's reach, on every backend or with evidence why
-  not
-- [DF171](design/findings-unresolved.md) — gVisor is excluded from agent-free launch by a
-  username-resolution bug the codebase already fixed elsewhere
+*Nothing yet.*
 
 ## In flight — started, not finished
 
-*Nothing.* `sandbox-share-tiering` **merged into this branch 2026-08-02** (`026c7650`) — complete,
-green on both platforms, and deliberately still off `main`, because the migration it carries lands
-last in the release and stays revisable until then.
-
-**Unmerged branches, surveyed 2026-08-02 — all six resolved.** Five are absorbed or archaeology and
-can be deleted; one (`testing/backend-conformance`) held a finding nobody had filed, now recovered.
-Verified by *content* on the release branch, not by whether the commit was merged, because four of
-the six landed their work through a different path than the branch that started it:
-
-| Branch | Ahead | What it is |
-| --- | --- | --- |
-| `sandbox-share-tiering` | — | **Merged into this branch.** |
-| `microvm-backend` | 16 | The QEMU-microvm spike, **superseded by D104** (retired: custom-kernel-only, no isolation gain over Kata). Archaeology, and the only branch not verified line-by-line — D104 is the decision that covers it. Delete or leave; not pending work. |
-| `base-trixie` | 2 | **Absorbed — verified 2026-08-02.** Both halves are on `main`: the Dockerfile carries `debian:trixie-slim` and `binutils-gold`, and both idiosyncrasies sections are present. Safe to delete. |
-| `broker-podman-rootless` | 2 | **Absorbed — verified 2026-08-02, and it was the one I expected to hold real work.** The research shipped *fuller* than the branch (main names the implemented `runtime/podman/reach.go`; the branch predates it), DF56 is filed and resolved, and the `wip(broker)` `AgentFreeLaunch` flip is explicitly declared moot by [egress-proxy-build.md](design/plans/egress-proxy-build.md) — "podman just needs its slirp `InjectorReach`", which is what shipped. Safe to delete. |
-| `sandbox-hostname` | 2 | **Absorbed — verified 2026-08-02.** `runtime.InstanceConfig.Hostname` and its backends are on `main`, and DF142 is filed *and resolved*. Safe to delete. |
-| `testing/backend-conformance` | 1 | **Content recovered 2026-08-02**, not cherry-picked: DF28 was unfiled anywhere, and its pointers named the pre-D99 `internal/runtime/…` paths. Re-filed with paths corrected and its relationship to DF159/DF160 named. Branch safe to delete. |
-
-**And one piece of debris:** a `release-prep` branch still exists from the v0.6.0 era — 0 ahead of
-`main`, 408 behind. It is why this branch is named for its version instead.
+*Nothing.*
 
 The items are not what gets lost — **the stack is**. Fixing A reveals B, C and D; D is urgent so we
 jump; A is never resumed, and nothing records that it was interrupted or by what. **When you jump,

@@ -33,6 +33,8 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+## v0.11.0
+
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running
 
 **Previous behavior:** `yoloai files <box> rm f` followed by `yoloai files <box> put f` succeeded and
