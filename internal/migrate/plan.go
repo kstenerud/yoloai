@@ -39,6 +39,14 @@ type Op struct {
 	Auth Auth
 	// Sandbox, when set, is the sandbox the op concerns (for per-sandbox passes).
 	Sandbox string
+	// NeedsOlderRelease marks a block whose only remedy is to go back to a
+	// release that can still read this sandbox, recover the work, and return.
+	// Most blocks are not that: "stop it", "start the backend", "free some
+	// space" are all cleared where the operator already stands, and telling
+	// them to downgrade and recreate sandboxes instead would be advice that
+	// destroys work to fix a full disk. False is the safe default — it withholds
+	// the drastic remedy rather than volunteering it.
+	NeedsOlderRelease bool
 }
 
 // Destructive reports whether the op needs approval (i.e. mutates or discards

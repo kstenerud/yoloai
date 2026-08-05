@@ -389,6 +389,7 @@ yoloai new task ./project --abandon-unapplied
 yoloai new task ./project -- --allowedTools "Edit,Write,Bash"
 
 # Network isolation (allow only agent API traffic; IPv4 only — IPv6 is not filtered)
+# Tamper-resistant on docker only; elsewhere the sandbox can remove its own rules ('yoloai help security')
 yoloai new task ./project --network-isolated
 
 # Allow extra domains in network-isolated mode
@@ -620,7 +621,7 @@ Proxy flags: `--agent <name>` (default: `idle`), `--model`, `--profile`, `-d`/`-
 
 ## How It Works
 
-1. **`yoloai new`** copies your project into `~/.yoloai/library/sandboxes/<name>/work/`, creates a git baseline commit, and launches a Docker container running the agent.
+1. **`yoloai new`** copies your project into `~/.yoloai/library/sandboxes/<name>/rw/work/`, creates a git baseline commit, and launches a Docker container running the agent.
 
 2. **The agent works inside the container** on the copy. Your original files are never touched.
 
@@ -727,20 +728,32 @@ You can also edit the config files directly — `config set` preserves comments 
 
 ## Sandbox State
 
-All sandbox state lives on the host at `~/.yoloai/library/sandboxes/<name>/`:
+All sandbox state lives on the host at `~/.yoloai/library/sandboxes/<name>/`, split into
+three tiers by who is allowed to reach the file:
 
 ```
 ~/.yoloai/library/sandboxes/<name>/
-  environment.json   # sandbox config (paths, mode, baseline SHA, backend)
-  sandbox-state.json # per-sandbox state (agent_files_initialized, etc.)
-  runtime-config.json # container entrypoint config
-  prompt.txt         # initial prompt (if provided)
-  log.txt            # tmux session log
-  agent-runtime/     # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
-  files/             # bidirectional file exchange (mounted at /yoloai/files/)
-  cache/             # agent cache — HTTP responses, cloned repos (mounted at /yoloai/cache/)
-  work/              # isolated copy of your project
+  host/                # never shared into a sandbox, on any backend
+    environment.json   # sandbox config (paths, mode, baseline SHA, backend)
+    sandbox-state.json # per-sandbox state (agent_files_initialized, etc.)
+    agent.json         # resolved agent config
+    netpolicy.json     # network policy
+  ro/                  # the agent reads these and cannot write them
+    runtime-config.json # container entrypoint config
+    prompt.txt         # initial prompt (if provided)
+    resume-prompt.txt  # prompt for a resumed session
+  rw/                  # the agent's read-write region
+    log.txt            # tmux session log
+    agent-runtime/     # agent's persistent state (e.g., ~/.claude/, ~/.gemini/)
+    files/             # bidirectional file exchange (mounted at /yoloai/files/)
+    cache/             # agent cache — HTTP responses, cloned repos (mounted at /yoloai/cache/)
+    work/              # isolated copy of your project
 ```
+
+The agent still sees one flat directory — each backend assembles that view over the tiers, so
+no path inside a sandbox changed. The tiers exist so that a file's reachability is decided by
+*where it sits* rather than by a list somewhere, which is what stops a sandbox rewriting its own
+`environment.json`. Sandboxes created before v0.11.0 need `yoloai system migrate`.
 
 Containers are ephemeral — if removed, `yoloai start` recreates them from `environment.json`. Your work and agent state persist.
 
@@ -892,7 +905,7 @@ Isolation modes are silently ignored on non-container backends (tart, seatbelt).
 
 - **Requires macOS 26 (Tahoe) or newer on Apple Silicon.** yoloAI gates on `macOS ≥ 26`; on older macOS the `--isolation vm` error explains the upgrade path. Some features (e.g. Rosetta-backed amd64) want **M3 or newer**.
 - **Strong isolation, fast.** Each container gets a real VM boundary (the host kernel isn't shared), yet VMs start sub-second.
-- **Network isolation works** the same as on Linux — the in-VM Linux kernel enforces the `--network-isolated` allowlist.
+- **Network isolation is enforced by the in-VM Linux kernel.** The sandbox installs the rules itself, so it holds `NET_ADMIN` and an agent that tries can flush them. Same mechanism as podman and containerd. Docker is the one backend that installs the rules from outside the sandbox and withholds `NET_ADMIN`, so only there does the allowlist hold against an agent that works at it. Treat it here as a guardrail against careless egress, and use `--network-none` when you need a guarantee.
 - **No suspend/resume and no VS Code "Attach to Running Container".** `container` has no checkpoint or docker-compat API; `exec`-based attach (`yoloai attach`) works normally.
 - **Memory is not released back to the host** until the VM stops (virtio-balloon) — minor for ephemeral sandboxes.
 - **Profile Dockerfiles are built via Apple's own builder** (`container build`, same as `docker build`/`podman build`) — a profile's `yoloai-cli-<profile>` image is built and cached automatically, no manual step needed. One gap versus Docker/Podman: no `--secret` build-secret support, so an auto-detected secret (e.g. `~/.npmrc`) is reported and dropped rather than passed into the build.

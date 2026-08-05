@@ -6,6 +6,7 @@ package yoloai
 import (
 	"bytes"
 	"context"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -44,10 +45,7 @@ func writeIsolatedSandbox(t *testing.T, c *System, name, agentName string, allow
 	// PatchConfigAllowedDomains reads + writes runtime-config.json.
 	// A minimal `{}` is enough — the patch helper inserts the
 	// allowed_domains field.
-	require.NoError(t, os.WriteFile(
-		filepath.Join(sandboxDir, store.RuntimeConfigFile),
-		[]byte("{}\n"), 0600,
-	))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), []byte("{}\n"))
 }
 
 // writeNoNetworkSandbox creates a sandbox dir with NetworkMode:"none"

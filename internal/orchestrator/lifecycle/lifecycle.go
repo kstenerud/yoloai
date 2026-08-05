@@ -7,7 +7,6 @@ import (
 	"context"
 	"log/slog"
 	"os"
-	"path/filepath"
 
 	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
@@ -81,7 +80,7 @@ func destroy(ctx context.Context, d state.Deps, name string) (*DestroyResult, er
 // syncLifecycleMarker checks for the Python on-create-done marker file and
 // persists the flag to sandbox-state.json if found and not yet recorded.
 func syncLifecycleMarker(sandboxDir string) {
-	markerPath := filepath.Join(sandboxDir, "lifecycle-on-create-done")
+	markerPath := store.CreateDoneMarkerPath(sandboxDir)
 	if _, markerErr := os.Stat(markerPath); markerErr != nil {
 		return
 	}

@@ -2,7 +2,7 @@
 package orchestrator
 
 import (
-	"os"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"path/filepath"
 	"testing"
 
@@ -32,7 +32,7 @@ func TestReadStoredPrompt_Missing(t *testing.T) {
 
 func TestReadStoredPrompt_Empty(t *testing.T) {
 	layout, name := promptLayout(t)
-	require.NoError(t, os.WriteFile(store.PromptFilePath(layout.SandboxDir(name)), []byte(""), 0600))
+	testutil.WriteSandboxRecord(t, store.PromptFilePath(layout.SandboxDir(name)), []byte(""))
 
 	text, configured, err := ReadStoredPrompt(layout, name)
 	require.NoError(t, err)
@@ -42,7 +42,7 @@ func TestReadStoredPrompt_Empty(t *testing.T) {
 
 func TestReadStoredPrompt_Present(t *testing.T) {
 	layout, name := promptLayout(t)
-	require.NoError(t, os.WriteFile(store.PromptFilePath(layout.SandboxDir(name)), []byte("do the thing"), 0600))
+	testutil.WriteSandboxRecord(t, store.PromptFilePath(layout.SandboxDir(name)), []byte("do the thing"))
 
 	text, configured, err := ReadStoredPrompt(layout, name)
 	require.NoError(t, err)

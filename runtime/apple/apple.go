@@ -273,8 +273,16 @@ func (r *Runtime) Stop(ctx context.Context, name string) error {
 
 // Remove deletes a container (force, so a running one is removed too). Returns
 // nil if it's already gone.
+//
+// "Already gone" now means the daemon said so. Before DF180 this concluded it
+// from any Inspect failure, so with the service stopped `yoloai destroy` printed
+// success, dropped the store entry, and left the container behind — recoverable
+// only by `yoloai system prune`, and only by someone who suspected it.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
 	if _, err := r.runContainer(ctx, "delete", "--force", name); err != nil {
+		if isContainerNotFound(err) {
+			return nil
+		}
 		if _, ierr := r.Inspect(ctx, name); errors.Is(ierr, runtime.ErrNotFound) {
 			return nil
 		}
@@ -283,12 +291,40 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 	return nil
 }
 
+// isContainerNotFound reports whether a `container` CLI error means the daemon
+// answered "no such container", as opposed to the daemon not answering at all.
+//
+// The two are indistinguishable by exit code — both exit 1 — so the message is
+// the only discriminator the CLI offers. Measured on macOS 26.5.1
+// (`design/research/macos-isolation-spike/results/apple-daemon-states.txt`):
+//
+//	daemon up, name absent: Error: container not found: <name>
+//	daemon stopped:         Error: internalError: "failed to list containers"
+//	                        (cause: "…XPC connection error: Connection invalid")
+//
+// Matching on text is fragile, so the fallback direction is chosen deliberately:
+// an unrecognised message is NOT treated as not-found. If Apple rewords this, a
+// missing container starts reporting a wrapped error instead of a clean absence —
+// noisy, and safe. The reverse default is what DF180 was: `destroy` exiting 0 over
+// a container that still exists.
+func isContainerNotFound(err error) bool {
+	return err != nil && strings.Contains(err.Error(), "container not found")
+}
+
 // Inspect returns the container's running state. The `container inspect` JSON is
 // an array; state lives at [0].status.state (AC6: status is nested, not flat).
+//
+// A failure to reach the daemon is reported as an error, not as ErrNotFound.
+// Conflating them made `yoloai ls` render every intact sandbox as `removed`
+// whenever the service was down — which is its state after every reboot, since it
+// is not registered with launchd (DF180).
 func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
 	out, err := r.runContainer(ctx, "inspect", name)
 	if err != nil {
-		return runtime.InstanceInfo{}, runtime.ErrNotFound
+		if isContainerNotFound(err) {
+			return runtime.InstanceInfo{}, runtime.ErrNotFound
+		}
+		return runtime.InstanceInfo{}, fmt.Errorf("inspect container %q: %w", name, err)
 	}
 	var arr []struct {
 		Status struct {

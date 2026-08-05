@@ -749,8 +749,14 @@ swift() {
                 log_info("seatbelt.swift_wrapper_error", f"failed to update {rcfile}: {e}", path=rc_path, error=str(e))
 
     def get_tmux_socket(self) -> str | None:
-        """Seatbelt uses a per-sandbox socket in the sandbox directory."""
-        return os.path.join(self.yoloai_dir, "tmux", "tmux.sock")
+        """Seatbelt uses a per-sandbox socket at the sandbox root.
+
+        At the root, not under tmux/ beside the config: a Unix socket path is
+        capped at 104 bytes on macOS and the sandbox directory path is spent
+        against that cap, so the depth here is load-bearing (DF169). Must stay
+        in step with config.TmuxSocketPath on the Go side.
+        """
+        return os.path.join(self.yoloai_dir, "tmux.sock")
 
     def get_working_dir(self) -> str | None:
         """Seatbelt needs explicit cd to the working directory."""

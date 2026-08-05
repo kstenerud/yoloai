@@ -1,0 +1,23 @@
+===================================================================
+ vmnet DHCP lease duration and address-binding stability
+ host: 26.5.1   started: 10:35:49
+===================================================================
+
+== L1: how long is a vmnet DHCP lease? ==
+   UNKNOWN  no lease record found for 192.168.64.22 (apple may not use bootpd's lease file)
+
+== L2: does the address survive a stop/start (same MAC, re-requested lease)? ==
+   before stop: 192.168.64.22
+   after start: 192.168.64.23
+   FAIL  address CHANGED 192.168.64.22 -> 192.168.64.23 across a stop/start. Table entries must be
+         rewritten on every start, and any cached address is a fail-open hazard
+
+== L3: is tart's address knowable before 'yoloai new' returns? ==
+   tart address 192.168.65.3 appeared after 8s
+   'yoloai new' returned after 39s
+   PASS  knowable before creation returns, same as apple — the ordering claim
+         holds on both address-keyed backends
+
+== cleanup ==
+   sandboxes remaining: 0
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/lease-binding.txt

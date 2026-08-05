@@ -1,0 +1,42 @@
+=== host/guest DNS parity on the apple backend ===
+date   : 2026-08-04 14:25:33
+sandbox: dns-parity
+rounds : 3 per side
+
+== resolvers (the explanation for anything below) ==
+  guest /etc/resolv.conf : nameserver 192.168.64.1 
+  host scutil            : 100.100.100.100 192.168.0.1 192.168.111.1 
+
+== per-domain comparison ==
+
+  api.anthropic.com
+    host : 160.79.104.10 
+    guest: 160.79.104.10 
+    ==> every guest address is in the host set
+
+  registry.npmjs.org
+    host : 104.16.0.34 104.16.1.34 104.16.10.34 104.16.11.34 104.16.2.34 104.16.3.34 104.16.4.34 104.16.5.34 104.16.6.34 104.16.7.34 104.16.8.34 104.16.9.34 
+    guest: 104.16.0.34 104.16.1.34 104.16.10.34 104.16.11.34 104.16.2.34 104.16.3.34 104.16.4.34 104.16.5.34 104.16.6.34 104.16.7.34 104.16.8.34 104.16.9.34 
+    ==> every guest address is in the host set
+
+  github.com
+    host : 140.82.121.4 
+    guest: 140.82.121.4 
+    ==> every guest address is in the host set
+
+  objects.githubusercontent.com
+    host : 185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133 
+    guest: 185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133 
+    ==> every guest address is in the host set
+
+  example.com
+    host : 104.20.23.154 172.66.147.243 
+    guest: 104.20.23.154 172.66.147.243 
+    ==> every guest address is in the host set
+
+== TOTALS ==
+  domains=5  diverged(guest-only present)=0  agreed=5  unresolved=0
+  ==> no divergence observed here. Note example.com is the control: if it were the ONLY
+      agreement, the comparison would be suspect. Re-read the resolver lines above.
+
+Cleanup: yoloai destroy dns-parity --abandon-unapplied

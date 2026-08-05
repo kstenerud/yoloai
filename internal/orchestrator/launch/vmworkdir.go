@@ -6,11 +6,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"strings"
 	"time"
 
-	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/store"
 )
@@ -61,7 +59,7 @@ func ExecuteVMWorkDirSetup(ctx context.Context, rt runtime.Backend, name, sandbo
 // setupVMCopyDir runs the VM-side setup for a single :copy directory at index i
 // in meta.Dirs: copies from VirtioFS staging, baselines, and records the SHA.
 func setupVMCopyDir(ctx context.Context, rt runtime.Backend, setupIntf runtime.WorkDirSetup, instance, name string, meta *store.Environment, i int) error {
-	vfsPath := filepath.Join("/Volumes/My Shared Files/yoloai/work", config.EncodePath(meta.Dirs[i].HostPath))
+	vfsPath := setupIntf.WorkDirStagingPath(meta.Dirs[i].HostPath)
 	vmLocalPath := runtime.ResolveCopyMountFor(rt, name, meta.Dirs[i].HostPath)
 
 	cmds := setupIntf.SetupWorkDirInVM(vfsPath, vmLocalPath)

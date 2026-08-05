@@ -1,0 +1,11 @@
+=== reboot test, PRE half — 2026-08-04 12:11:37 ===
+host: 26.5.1 | A=rb-a(192.168.64.4) B=rb-b(192.168.64.3)
+
+== baseline ==
+        A: allow=301 deny=301
+   PASS    baseline reachable
+
+== install the full arrangement ==
+   PASS    sudoers grant installed
+
+== verify enforcement works BEFORE the reboot (or the after-comparison is meaningless) ==

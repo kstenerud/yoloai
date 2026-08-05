@@ -1,0 +1,138 @@
+>>> POST-HOC ANALYSIS — added after the run. Everything below the divider is the raw
+>>> captured output, unedited. Read these four points before trusting any verdict in it.
+>>>
+>>> [1] Q1's "PASS" IS INVALID. IGNORE IT. The harness computed the lo0 skip flag with
+>>>     `grep -c skip || echo 0`. `grep -c` PRINTS "0" and EXITS 1 when nothing matches,
+>>>     so the `|| echo 0` appended a SECOND line and the value became "0\n0" — visible in
+>>>     the raw output as the split `before=0 / 0` line and the
+>>>     "[: 0\n0: integer expected" error. A failed `[` returns non-zero, which fell
+>>>     through to the else branch, so Q1 printed "NOT honored" UNCONDITIONALLY. It would
+>>>     have printed exactly that had `set skip` been fully honored. Whether `set skip`
+>>>     is honored inside an anchor REMAINS UNMEASURED. Bug fixed in pf_authz.sh (now
+>>>     `|| true`); a re-run would settle it. Same bug made the cleanup line print "0\n0".
+>>>
+>>> [2] Q1 IS MOOT ANYWAY — Q2 already condemns the `-f -` form, and more concretely.
+>>>     nat and rdr rules ARE installed into the anchor (both FAIL lines), and
+>>>     /etc/pf.conf references com.apple/* as `nat-anchor`, `rdr-anchor`, `scrub-anchor`,
+>>>     `dummynet-anchor` and `anchor`. So translation rules placed in a com.apple/
+>>>     sub-anchor are EVALUATED BY THE MAIN RULESET, not inert. A NOPASSWD grant for
+>>>     `pfctl -a <anchor> -f -` therefore lets anyone who can invoke it redirect or NAT
+>>>     host traffic — e.g. point outbound port 80 at a local listener. That is a traffic-
+>>>     interception primitive, and it is enough to rule out the stdin form on its own.
+>>>
+>>> [3] THE TABLE DESIGN IS CONFIRMED, and its authorization is tight. Q3 all PASS: static
+>>>     table-referencing rules load into a nested anchor, membership add is visible,
+>>>     delete works without a rule reload. Q4 is 7/7 on the escape matrix (main-ruleset
+>>>     load, disable pf, flush all, other anchor, stdin ruleset, table-from-file, table
+>>>     kill) plus both intended commands permitted — AND the cache control passed, so
+>>>     those refusals reflect policy rather than a warm sudo timestamp. Q5 confirms
+>>>     `sudo -n` succeeds with no tty and stdin closed, which is the unattended-teardown
+>>>     property the whole authorization design exists to satisfy.
+>>>
+>>> [4] Q6 CONFIRMS THE SUDO-WRAPPER MODEL IS DEAD ON macOS. Both ANTHROPIC_API_KEY and
+>>>     CLAUDE_CODE_OAUTH_TOKEN are stripped, and sudo's env_keep list here preserves
+>>>     HOME/MAIL/EDITOR/TZ/SSH_AUTH_SOCK but neither credential. There is no /proc to
+>>>     recover them from, so fileutil.SudoParentEnv cannot help. `sudo yoloai new` would
+>>>     launch an agent that cannot authenticate. HOME itself IS preserved
+>>>     (/Users/karlstenerud), so the layout root would have been fine — the credentials
+>>>     are the blocker, not the paths.
+>>>
+>>> The "No ALTQ support in kernel" lines throughout are normal on macOS and unrelated;
+>>> pfctl emits them on every anchor load.
+>>> ---------------------------------------------------------------------------------
+
+host: 26.5.1 | pf: Status: Enabled for 55 days 12:02:24          Debug: Urgent | sudo: Sudo version 1.9.17p2
+invoking user: karlstenerud
+
+== Q0 positive control: a plain block rule loads into the anchor and is visible ==
+        pfctl: No ALTQ support in kernel
+        pfctl: ALTQ related functions disabled
+   PASS    anchor accepts and retains rules (count=1) — later verdicts are meaningful
+
+== Q1 DECISIVE: is 'set skip' honored when loaded into a nested anchor? ==
+        pfctl: No ALTQ support in kernel
+        pfctl: ALTQ related functions disabled
+        lo0 skip flag before=0
+0 after=0
+0
+docs/contributors/design/research/macos-isolation-spike/pf_authz.sh: line 111: [: 0
+0: integer expected
+   PASS    'set skip' parsed but NOT honored in anchor context — the -f - grant stays anchor-scoped
+
+== Q2: do nat / rdr / include / load-anchor take effect from inside an anchor? ==
+        pfctl: No ALTQ support in kernel
+        pfctl: ALTQ related functions disabled
+   FAIL    nat rules ARE installed in the anchor (count=1) — the grant can redirect traffic
+        pfctl: No ALTQ support in kernel
+        pfctl: ALTQ related functions disabled
+   FAIL    rdr rules ARE installed in the anchor (count=1) — the grant can redirect traffic
+        pfctl: No ALTQ support in kernel
+        pfctl: ALTQ related functions disabled
+        main ruleset count before=4 after=4; anchor=1
+   PASS    include pulled rules into the anchor only; main ruleset unchanged
+
+== Q3: the table design — static rules, per-sandbox membership, no stdin ==
+        pfctl: No ALTQ support in kernel
+        pfctl: ALTQ related functions disabled
+   PASS    static table-referencing ruleset loaded (rules=1)
+   PASS    table membership add works and is visible (192.0.2.77)
+   PASS    table membership delete works (teardown needs no rule reload)
+
+== Q4: does an anchored-regex sudoers grant permit the intended set and refuse escapes? ==
+   PASS    policy validated and installed
+   (permit/refuse matrix as karlstenerud, credential cache invalidated, -k on every probe)
+   PASS    intended add -> permit
+   PASS    intended delete -> permit
+   PASS    ESCAPE main ruleset load -> refuse
+   PASS    ESCAPE disable pf -> refuse
+   PASS    ESCAPE flush all -> refuse
+   PASS    ESCAPE other anchor -> refuse
+   PASS    ESCAPE stdin ruleset -> refuse
+   PASS    ESCAPE table from file -> refuse
+   PASS    ESCAPE table kill -> refuse
+   PASS    CONTROL: unlisted command refused, so refusals above reflect policy not cache
+
+== Q5: unattended teardown — does the grant work with no tty? ==
+   PASS    sudo -n succeeds with stdin closed and no controlling tty
+
+== Q6: what sudo does to the environment on macOS (the wrapper model) ==
+   HOME under sudo:        /Users/karlstenerud
+   SUDO_USER/UID/GID:      karlstenerud/501/20
+   FAIL    ANTHROPIC_API_KEY STRIPPED by sudo (no /proc to recover it on macOS)
+   FAIL    CLAUDE_CODE_OAUTH_TOKEN STRIPPED by sudo (no /proc to recover it on macOS)
+   env_reset / env_keep in effect:
+        Environment variables to remove:
+        	*=()*
+        	RUBYOPT
+        	RUBYLIB
+        	PYTHONUSERBASE
+        	PYTHONINSPECT
+        	PYTHONPATH
+        	PYTHONHOME
+        	TMPPREFIX
+        	ZDOTDIR
+        	READNULLCMD
+        	NULLCMD
+        	FPATH
+        --
+        Environment variables to preserve:
+        	MAIL
+        	HOME
+        	VISUAL
+        	EDITOR
+        	TZ
+        	SSH_AUTH_SOCK
+        	LSCOLORS
+        	COLUMNS
+        	LINES
+
+== TOTALS ==
+   pass=18 fail=4 unknown=0
+
+== cleanup ==
+   anchor rules remaining: 0
+   /etc/sudoers.d/yoloai-authz-probe present: no
+   pf status: Status: Enabled for 55 days 12:02:24          Debug: Urgent
+   lo0 skip flag: 0
+0
+   results written to: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-authz-privileged.txt

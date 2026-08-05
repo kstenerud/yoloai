@@ -1,0 +1,24 @@
+host: 26.5.1 | A=enf-a(192.168.64.27) on bridge101 | deny=1.0.0.1
+pf.conf translation anchors: 2 declared for com.apple/*
+
+== R1 rdr loaded DIRECTLY into com.apple/yoloai_rdr ==
+        rule: rdr on bridge101 proto tcp from 192.168.64.27 to 1.0.0.1 port 80 -> 127.0.0.1 port 9
+        loaded into com.apple/yoloai_rdr: 1 translation rule(s)
+        A->deny before=301 after=000
+   RESULT  rdr IS EVALUATED here — traffic was redirected to a dead port
+
+== R2 rdr loaded into a SUB-anchor of a filter-only parent ==
+        rule: rdr on bridge101 proto tcp from 192.168.64.27 to 1.0.0.1 port 80 -> 127.0.0.1 port 9
+        loaded into com.apple/yoloai_rdr/s1: 1 translation rule(s)
+        A->deny before=301 after=301
+   RESULT  rdr is INERT here — loaded, but the packet path ignored it
+
+== VERDICT ==
+   Evaluated directly, INERT in a filter-only sub-anchor.
+   => Dynamic per-sandbox sub-anchors are safe. The concurrent-sandbox cap can go,
+      provided the parent declares only a filter anchor and never nat/rdr.
+
+== cleanup ==
+   anchor rules: 0 / nat: 0
+   A egress restored: 301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-rdr.txt

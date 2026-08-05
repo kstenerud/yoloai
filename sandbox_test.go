@@ -102,10 +102,10 @@ func TestSandbox_ExchangePaths(t *testing.T) {
 	sb, err := c.Sandbox("box")
 	require.NoError(t, err)
 
-	assert.Equal(t, filepath.Join(state, "files"), sb.Files().Path())
-	assert.Equal(t, filepath.Join(state, "cache"), sb.CacheDir())
-	assert.Equal(t, filepath.Join(state, "runtime-config.json"), sb.RuntimeConfigPath())
-	assert.Equal(t, filepath.Join(state, "environment.json"), sb.EnvironmentPath())
+	assert.Equal(t, store.FilesDir(state), sb.Files().Path())
+	assert.Equal(t, store.CacheDir(state), sb.CacheDir())
+	assert.Equal(t, store.RuntimeConfigFilePath(state), sb.RuntimeConfigPath())
+	assert.Equal(t, filepath.Join(state, "host", "environment.json"), sb.EnvironmentPath())
 }
 
 func TestSandbox_LogPaths(t *testing.T) {
@@ -120,11 +120,11 @@ func TestSandbox_LogPaths(t *testing.T) {
 	require.NoError(t, err)
 
 	logs := sb.LogPaths()
-	assert.Equal(t, filepath.Join(state, "logs", "cli.jsonl"), logs.CLI)
-	assert.Equal(t, filepath.Join(state, "logs", "sandbox.jsonl"), logs.Sandbox)
-	assert.Equal(t, filepath.Join(state, "logs", "monitor.jsonl"), logs.Monitor)
-	assert.Equal(t, filepath.Join(state, "logs", "agent-hooks.jsonl"), logs.Hooks)
-	assert.Equal(t, filepath.Join(state, "agent-status.json"), logs.AgentStatus)
+	assert.Equal(t, filepath.Join(store.LogsPath(state), "cli.jsonl"), logs.CLI)
+	assert.Equal(t, filepath.Join(store.LogsPath(state), "sandbox.jsonl"), logs.Sandbox)
+	assert.Equal(t, filepath.Join(store.LogsPath(state), "monitor.jsonl"), logs.Monitor)
+	assert.Equal(t, filepath.Join(store.LogsPath(state), "agent-hooks.jsonl"), logs.Hooks)
+	assert.Equal(t, store.AgentStatusFilePath(state), logs.AgentStatus)
 }
 
 // TestSandbox_Unlock_Noop verifies that unlocking a sandbox with no lock
@@ -278,7 +278,7 @@ func TestSandbox_LiveHandle_PassesGuard(t *testing.T) {
 func TestSandbox_Reset_RefusesUnappliedWork(t *testing.T) {
 	c := vscodeClient(t, nil) // backend-less; the guard must short-circuit before any IO
 	sbDir := c.layout.SandboxDir("box")
-	workDir := filepath.Join(sbDir, "work", "proj")
+	workDir := filepath.Join(store.WorkBasePath(sbDir), "proj")
 	require.NoError(t, os.MkdirAll(workDir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "agent-wrote-this.txt"), []byte("unreviewed"), 0o600))
 
@@ -299,7 +299,7 @@ func TestSandbox_Reset_RefusesUnappliedWork(t *testing.T) {
 func TestSandbox_Reset_AbandonUnappliedWorkPassesTheGuard(t *testing.T) {
 	c := vscodeClient(t, nil)
 	sbDir := c.layout.SandboxDir("box")
-	workDir := filepath.Join(sbDir, "work", "proj")
+	workDir := filepath.Join(store.WorkBasePath(sbDir), "proj")
 	require.NoError(t, os.MkdirAll(workDir, 0o750))
 	require.NoError(t, os.WriteFile(filepath.Join(workDir, "agent-wrote-this.txt"), []byte("unreviewed"), 0o600))
 

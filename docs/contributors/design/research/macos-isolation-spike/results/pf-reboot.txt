@@ -1,0 +1,56 @@
+host: 26.5.1 | A=enf-a(192.168.64.33) | pf: Status: Enabled for 56 days 08:16:58          Debug: Urgent
+
+== R0 BASELINE + a working parent/sub-anchor pair ==
+   PASS    baseline egress works (301)
+        /etc/yoloai: drwxr-xr-x root:wheel
+        /etc/yoloai/pf-parent.conf: -rw-r--r-- root:wheel
+   PASS    parent file and directory are root-owned and NOT user-writable
+        parent loaded from file, sub-anchor loaded: A->deny=000
+   PASS    enforcement works with the parent loaded FROM THE FILE (not stdin)
+
+== R3 REBOOT SIMULATION — does restoring the parent alone revive live sandboxes? ==
+        parent emptied: sub-anchor still holds 1 rule(s), A->deny=301
+   PASS    confirms the S5 fail-open: rules present, parent gone, sandbox unfiltered
+        parent restored from file: A->deny=000
+   PASS    restoring the parent ALONE revives a running sandbox — recovery needs no restart
+
+== R4 CAN WE SEE pf's ENABLE STATE? (read-only; -E/-X deliberately untested) ==
+        pfctl -s info head: Status: Enabled for 56 days 08:17:11          Debug: Urgent
+        pfctl -s References: TOKENS:
+PID      Process Name                 TOKEN                    TIMESTAMP
+42671    pfd                          11605101605051758694     56 days 08:17:11
+   PASS    '-s info' reports enable state, so a grant row for it makes the state observable
+
+== R1/R2 THE PINNED-PATH GRANT — does it permit restore and refuse everything else? ==
+        candidate policy:
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s -f /etc/yoloai/pf-parent\.conf$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s -s (Anchors|rules)$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-s info$
+          karlstenerud ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai_s/[A-Za-z0-9][A-Za-z0-9._-]* -f -$
+   PASS    policy validated and installed
+   PASS    restore parent from pinned file -> permit
+   PASS    read pf enable state -> permit
+   PASS    enumerate sub-anchors -> permit
+   PASS    load a sandbox sub-anchor -> permit
+   PASS    ESCAPE parent from a DIFFERENT file same dir -> refuse
+   PASS    ESCAPE parent from a user-writable path -> refuse
+   PASS    ESCAPE parent from stdin -> refuse
+   PASS    ESCAPE pinned file into ANOTHER anchor -> refuse
+   PASS    ESCAPE main ruleset from pinned file -> refuse
+   PASS    ESCAPE disable pf -> refuse
+   PASS    ESCAPE flush all -> refuse
+   PASS    CONTROL: unlisted command refused — refusals reflect policy, not cache
+        unattended recovery: before=301 after=000
+   PASS    UNATTENDED REBOOT RECOVERY WORKS — no password, no parent-write grant, content fixed
+
+== TOTALS ==
+   pass=20 fail=0 unknown=0
+
+== cleanup ==
+   parent rules=0
+   /etc/yoloai present: no
+   sudoers probe present: no
+   pf before: Status: Enabled for 56 days 08:16:58          Debug: Urgent
+   pf after : Status: Enabled for 56 days 08:17:17          Debug: Urgent
+   A egress restored: 301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-reboot.txt

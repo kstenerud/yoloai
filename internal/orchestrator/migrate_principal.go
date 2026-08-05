@@ -10,10 +10,10 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"path/filepath"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/config/pretier"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/migrate"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
@@ -37,6 +37,12 @@ import (
 // running one is refused until the user stops it. Modeled on OverlayFlatten: it
 // reads sandboxes off disk, contacts a backend only when there is work, and
 // stamps v5 LAST (guarded) so the stamp is never ahead of the data.
+//
+// Every environment.json it touches is addressed through internal/config/pretier,
+// never the live builders: a v4 sandbox's record is flat, and since the v6 tier
+// move the builders resolve into host/. Routing this migrator through them would
+// have it scan a realm full of unmigrated sandboxes, find no records at all, and
+// stamp v5 over every one of them (DF164).
 type PrincipalRename struct {
 	// runtimeFor builds a runtime for a specific backend on demand — called only
 	// when unmigrated sandboxes are present, once per distinct backend.
@@ -82,7 +88,7 @@ func (p *PrincipalRename) Plan(ctx context.Context) (migrate.Plan, error) {
 		if err != nil {
 			return migrate.Plan{}, err
 		}
-		st, err := status.DetectStatus(ctx, rt, store.LegacyCLIInstanceName(name), p.layout.SandboxDir(name))
+		st, err := p.detectStatus(ctx, rt, name)
 		if err != nil {
 			return migrate.Plan{}, err
 		}
@@ -113,6 +119,23 @@ func (p *PrincipalRename) Apply(ctx context.Context, d migrate.Decision) (migrat
 	return report, nil
 }
 
+// detectStatus probes one sandbox's live status under its OLD instance name.
+//
+// The sandbox dir it passes is the sandbox root, which no tier move relocates —
+// but DetectStatus reads agent-status.json from it through the LIVE path
+// builders, and this migrator's subject is the pre-tier layout. That is DF164's
+// shape, and it is left standing deliberately, because here it cannot change an
+// outcome: the file is consulted only for an instance already known to be
+// running, every status it can yield (active/idle/done/failed) is one
+// isInstanceUp treats as up, and so is StatusActive, the value returned when the
+// file is missing. Reading the wrong path therefore lands on the same
+// classification as reading the right one. If a future status is ever *not* up,
+// or a caller starts reading a record rather than a liveness hint, this must
+// take a pretier path like everything else here.
+func (p *PrincipalRename) detectStatus(ctx context.Context, rt runtime.Backend, name string) (status.Status, error) {
+	return status.DetectStatus(ctx, rt, store.LegacyCLIInstanceName(name), p.layout.SandboxDir(name))
+}
+
 // classifyPrincipalRename maps a sandbox to the operation (and approval) the
 // migration would perform, from its backend's capabilities and current status.
 // Pure, so it is exhaustively unit-tested.
@@ -139,7 +162,10 @@ func classifyPrincipalRename(name string, bt runtime.BackendType, st status.Stat
 	case isUnauditable(st):
 		return migrate.Op{Description: fmt.Sprintf("cannot audit sandbox %s (start the %s backend or repair it, then re-run migrate)", name, bt), Auth: migrate.AuthBlocked, Sandbox: name}
 	case isInstanceUp(st):
-		return migrate.Op{Description: fmt.Sprintf("stop sandbox %s, then re-run migrate — %s cannot rename a running instance and recreating it would kill the running agent", name, bt), Auth: migrate.AuthBlocked, Sandbox: name}
+		// Naming the route matters here: every command but `system migrate`
+		// refuses an out-of-date data directory, so the obvious `yoloai stop`
+		// sends the operator straight back to this refusal.
+		return migrate.Op{Description: fmt.Sprintf("stop sandbox %s, then re-run migrate — %s cannot rename a running instance and recreating it would kill the running agent. `yoloai stop` will not do it from this build (it refuses an out-of-date data directory); use the release you were running before the upgrade, or stop the instance directly with %s", name, bt, bt), Auth: migrate.AuthBlocked, Sandbox: name}
 	default: // stopped / removed
 		return migrate.Op{Description: fmt.Sprintf("recreate sandbox %s under its new name (%s cannot rename; the container's writable layer is dropped, the work copy is preserved)", name, bt), Auth: migrate.AuthConfirm, Sandbox: name}
 	}
@@ -158,7 +184,7 @@ func (p *PrincipalRename) migrateOne(ctx context.Context, name string, d migrate
 	newName := store.InstanceName(p.layout.Principal, name)
 
 	if backendHasInstance(rt) {
-		st, err := status.DetectStatus(ctx, rt, oldName, p.layout.SandboxDir(name))
+		st, err := p.detectStatus(ctx, rt, name)
 		if err != nil {
 			return migrate.Report{}, err
 		}
@@ -218,21 +244,26 @@ func (p *PrincipalRename) applyBackendOp(ctx context.Context, rt runtime.Backend
 // no longer produces. BaseImage is left alone — it is deliberately unscoped
 // (DF126 "Scope note").
 //
-// Written last, and durably: SaveEnvironment goes through AtomicWriteFile, so
+// Written last, and durably: SaveEnvironmentTo goes through AtomicWriteFile, so
 // this record reaches stable storage before Apply stamps the realm, and the
 // stamp cannot certify a conversion that did not survive. That is D110's truth
 // invariant, and it needs both halves — until 2026-07-17 this comment claimed
 // "durable" while the write underneath was a plain os.WriteFile with no fsync
 // and no atomic rename, which is the whole of what made the gap invisible.
+//
+// Read and written at the same flat path. Reading flat and writing tiered would
+// leave the record unmigratedSandboxNames re-reads untouched, so the sandbox
+// would be re-migrated on every run forever — and worse here than in the v2->v3
+// migrator, since each of those runs performs a backend rename (DF164).
 func (p *PrincipalRename) restampPrincipal(name string) error {
-	sandboxDir := p.layout.SandboxDir(name)
-	env, err := store.LoadEnvironment(sandboxDir)
+	path := pretier.EnvironmentPath(p.layout.SandboxDir(name))
+	env, err := store.LoadEnvironmentFrom(path)
 	if err != nil {
 		return fmt.Errorf("load environment for %q: %w", name, err)
 	}
 	env.Principal = p.layout.Principal
 	env.ImageRef = restampedImageRef(p.layout, env.ImageRef)
-	if err := store.SaveEnvironment(sandboxDir, env); err != nil {
+	if err := store.SaveEnvironmentTo(path, env); err != nil {
 		return fmt.Errorf("re-stamp principal for %q: %w", name, err)
 	}
 	return nil
@@ -284,10 +315,10 @@ func (p *PrincipalRename) unmigratedSandboxNames() ([]string, error) {
 			continue
 		}
 		sandboxDir := p.layout.SandboxDir(e.Name())
-		if _, err := os.Stat(filepath.Join(sandboxDir, store.EnvironmentFile)); errors.Is(err, fs.ErrNotExist) {
+		if _, err := os.Stat(pretier.EnvironmentPath(sandboxDir)); errors.Is(err, fs.ErrNotExist) {
 			continue // not a sandbox dir at all — nothing here claims to be one
 		}
-		env, err := store.LoadEnvironment(sandboxDir)
+		env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(sandboxDir))
 		if err != nil {
 			// A dir that HAS an environment.json we cannot read is never
 			// skippable. Skipping it drops it from the unit of work while Apply
@@ -310,7 +341,7 @@ func (p *PrincipalRename) unmigratedSandboxNames() ([]string, error) {
 
 // backendType reads the backend that created name from its environment.
 func (p *PrincipalRename) backendType(name string) runtime.BackendType {
-	env, err := store.LoadEnvironment(p.layout.SandboxDir(name))
+	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(p.layout.SandboxDir(name)))
 	if err != nil {
 		return ""
 	}

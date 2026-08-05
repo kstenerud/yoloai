@@ -28,13 +28,28 @@ const defaultNetwork = "default"
 // process binds 192.168.64.1 and the guest curls it successfully, while the
 // guest's own 127.0.0.1 does NOT reach the host (so a loopback bind would fail).
 //
-// Unlike tart's per-VM bridge, the shared vmnet bridge persists while the
-// `container` system service runs, so the gateway is host-bindable BEFORE any of
-// our VMs is created — the broker can start the injector ahead of the sandbox,
-// independent of the launch path. On a host where the bridge is not up (the
-// system service stopped, or it has never run) the gateway is assigned to no
-// interface; InjectorReach then returns ErrInjectorUnsupported so brokering safely
-// degrades to direct delivery rather than failing to bind.
+// Unlike tart's per-VM bridge, the shared vmnet bridge persists once it exists —
+// it outlives the container that created it, and further containers reuse it.
+//
+// It is NOT up merely because the system service is running. The bridge is created
+// by the FIRST container start, so on a freshly started service the gateway is
+// assigned to no interface (DF178, measured: `container system start` with no
+// container ever run leaves 192.168.64.1 unassigned). An earlier version of this
+// comment claimed the opposite and drew a conclusion from it — that the broker
+// could start the injector ahead of the sandbox, independent of the launch path.
+// That is the part that was false, and it is the only part anything depended on.
+//
+// What saves brokering today is ordering, not the bridge being early: the reach
+// check runs after the container exists, by which point the bridge is up.
+// Measured end to end on a bridgeless service with a credential present — an
+// explicit `--broker` succeeded and left a live injector.json, so no silent
+// degradation occurs on this path. **Anything that moves the injector earlier
+// re-opens it**, which is exactly what the old comment invited.
+//
+// When the bridge genuinely is absent, InjectorReach returns ErrInjectorUnsupported
+// and brokering degrades to direct delivery rather than failing to bind — the
+// agent's key is then handed into the sandbox, so that path is a silent security
+// downgrade and must stay unreachable on ordinary timing.
 func (r *Runtime) InjectorReach(ctx context.Context) (runtime.InjectorReach, error) {
 	gw, err := r.vmnetGateway(ctx)
 	if err != nil {

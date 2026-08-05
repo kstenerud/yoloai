@@ -17,6 +17,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -46,6 +48,27 @@ type InterfaceBackend struct {
 	SkipMounts string
 	SkipStdio  string
 
+	// SandboxTiers supplies the two paths the sandbox-tier section needs for a
+	// running instance: the sandbox directory as the host sees it, and the flat
+	// view as the guest sees it. Nil → the section skips, and SkipSandboxTiers
+	// must say why.
+	//
+	// It is a fixture field rather than a runtime.Backend method because only
+	// the two backends that hand a guest a whole directory can answer it, and
+	// adding an interface method for them would put a test's question into the
+	// production contract of four backends that have no answer to give.
+	SandboxTiers func(name string) (hostDir, guestView string)
+
+	// SkipSandboxTiers names why a backend does not run the tier section. The
+	// honest reason for the four bind-per-file backends is that they never share
+	// the sandbox directory at all: they bind each needed file individually, so
+	// the tiers are not reachable from the guest by any path and the section
+	// would assert nothing. Declaring that is the point — the whole workstream
+	// exists because tart and seatbelt are the two that share a directory, and a
+	// suite that reported six greens here would be hiding that difference rather
+	// than certifying it.
+	SkipSandboxTiers string
+
 	// SharesReadOnlyInstance opts an expensive-to-boot backend (the VM backends)
 	// into serving every read-only subtest from ONE shared running instance
 	// instead of booting a fresh one per subtest — the dominant cost on tart,
@@ -65,6 +88,19 @@ type InterfaceBackend struct {
 	// cannot shut down, rather than a hard-coded literal.
 	MaxConcurrentInstances int
 }
+
+// mountTargetBase is where the mount section asks for its bind, with a per-subtest
+// suffix appended.
+//
+// Under /tmp rather than /mnt, and the choice is load-bearing rather than
+// cosmetic: /mnt is absent and uncreatable on a macOS guest (SIP-sealed root
+// volume) and not writable on a macOS host without root, so it excluded the two
+// backends whose mount semantics differ most from the container norm — the exact
+// population the suite exists to compare. /tmp is writable on a macOS host,
+// present in a macOS guest, and present in every container image. The section is
+// not about where a mount lands, so it has no reason to insist on a path only
+// Linux containers can honour (DF161).
+const mountTargetBase = "/tmp/yoloai-conformance-mnt"
 
 // instanceGate bounds how many instances boot concurrently. A nil tokens channel
 // means unbounded. It is the one place the per-backend concurrency policy — a
@@ -202,6 +238,14 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 			"every backend must confine work-copy git (SandboxSide filesystem or GitExecInConfinement); the unconfined fallback was removed in DF119")
 		_, isGitExecer := b.Runtime.(runtime.GitExecer)
 		assert.True(t, isGitExecer, "a confining backend must implement runtime.GitExecer (git runs in the sandbox)")
+	})
+
+	// A backend whose guest can serve stale data for a host-rewritten path must
+	// offer the operation that repairs it, or the capability is a claim with
+	// nothing behind it: every host-side write would be gated on a check that
+	// silently never runs, which is the DF175 failure mode restored in full.
+	t.Run("StaleGuestReadsImplyARefresher", func(t *testing.T) {
+		assertStaleGuestReadsImplyARefresher(t, probe.Runtime)
 	})
 
 	// A SandboxSide backend additionally keeps its work copy inside the sandbox,
@@ -421,12 +465,32 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 			t.Skip(b.SkipMounts)
 		}
 
+		// Where the guest sees a mount is the backend's answer, not the suite's:
+		// tart re-roots every mount under /Users/admin/host/... So ask, through the
+		// same interface production asks through (setupAuxDir does this so the
+		// recorded MountPath is one that exists in the guest). Exec'ing the
+		// requested container path instead would test the suite's assumption about
+		// the backend rather than the backend. It is the identity for /tmp on every
+		// backend today — and deliberately still routed through the call, because a
+		// suite that certifies mount behaviour while bypassing the mount-path
+		// interface is how this drifted in the first place (DF161).
+		guestPath := func(containerPath string) string {
+			return runtime.ResolveGuestMountPathFor(b.Runtime, containerPath)
+		}
+
+		// Per-subtest targets: a host-side backend materialises a mount as a
+		// symlink at this literal path on the host, and seatbelt's mountSymlinks
+		// skips a target that already exists — so two parallel subtests sharing one
+		// path would leave the second silently unmounted, passing for the wrong
+		// reason or failing for an unrelated one.
+		rwTarget, roTarget := mountTargetBase+"-rw", mountTargetBase+"-ro"
+
 		t.Run("ReadWrite", func(t *testing.T) {
 			hostDir := t.TempDir()
 			name := boot(t, b, runtime.InstanceConfig{
-				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: false}},
+				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: rwTarget, ReadOnly: false}},
 			})
-			_, err := b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo hello > /mnt/test/output.txt"}, "")
+			_, err := b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo hello > " + guestPath(rwTarget) + "/output.txt"}, "")
 			require.NoError(t, err)
 			content, err := os.ReadFile(filepath.Join(hostDir, "output.txt")) //nolint:gosec // G304: test suite writes under t.TempDir(); no sudo chown concern
 			require.NoError(t, err)
@@ -437,14 +501,126 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 			hostDir := t.TempDir()
 			require.NoError(t, os.WriteFile(filepath.Join(hostDir, "readonly.txt"), []byte("original"), 0o600)) //nolint:forbidigo // test suite writes under t.TempDir(); no sudo chown concern
 			name := boot(t, b, runtime.InstanceConfig{
-				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: "/mnt/test", ReadOnly: true}},
+				Mounts: []runtime.MountSpec{{HostPath: hostDir, ContainerPath: roTarget, ReadOnly: true}},
 			})
-			res, err := b.Runtime.Exec(b.Ctx, name, []string{"cat", "/mnt/test/readonly.txt"}, "")
+			res, err := b.Runtime.Exec(b.Ctx, name, []string{"cat", guestPath(roTarget) + "/readonly.txt"}, "")
 			require.NoError(t, err)
 			assert.Equal(t, "original", res.Stdout)
 
-			_, err = b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo modified > /mnt/test/readonly.txt"}, "")
+			// Note for a host-side backend: hostDir is under the per-user temp tree,
+			// which seatbelt's profile grants read+write wholesale. This assertion
+			// therefore only holds because a read-only mount now emits an explicit
+			// deny; it was the failure that exposed that it did not (DF161).
+			_, err = b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "echo modified > " + guestPath(roTarget) + "/readonly.txt"}, "")
 			assert.Error(t, err, "write to a read-only mount must fail")
 		})
 	})
+
+	// --- Sandbox-tier section (gated: SandboxTiers; one instance, one invariant) ---
+
+	t.Run("SandboxTiers", func(t *testing.T) {
+		parallelize(t)
+		assertSandboxTiers(t, probe, boot)
+	})
+}
+
+// assertSandboxTiers is the sandbox-tier section's body, split out of the suite
+// so the suite itself stays under the complexity budget.
+//
+// The tier invariant, asserted from inside the guest: host/ is unreachable,
+// ro/ is readable and not writable, rw/ is writable. It is one instance and
+// one subtest because it is one property — a guest that can reach host/ is
+// DF136 whichever of these steps notices.
+//
+// Every path is spelled relative to the guest's flat view, which is what
+// makes one assertion serve two backends that reach the invariant by
+// different mechanisms: <view>/../host is a directory that does not exist in
+// a tart guest (no --dir names it) and a denied path on seatbelt, and the
+// guest cannot tell the difference — which is the point.
+func assertSandboxTiers(t *testing.T, b InterfaceBackend, boot func(*testing.T, InterfaceBackend, runtime.InstanceConfig) string) {
+	t.Helper()
+	if b.SandboxTiers == nil {
+		require.NotEmpty(t, b.SkipSandboxTiers,
+			"a backend that does not run the tier section must say why")
+		t.Skip(b.SkipSandboxTiers)
+	}
+
+	name := boot(t, b, runtime.InstanceConfig{})
+	hostDir, view := b.SandboxTiers(name)
+
+	// Plant a host-tier record and a read-only-tier file, then surface the
+	// read-only tier in the view the way a launch does.
+	record := filepath.Join(config.HostTierDir(hostDir), config.EnvironmentFileName)
+	require.NoError(t, fileutil.MkdirAll(filepath.Dir(record), 0o750))
+	require.NoError(t, os.WriteFile(record, []byte(`{"HostPath":"/real"}`), 0o600)) //nolint:forbidigo // the suite's own sandbox dir
+	probeFile := filepath.Join(config.ReadOnlyTierDir(hostDir), "tier-probe.txt")
+	require.NoError(t, fileutil.MkdirAll(filepath.Dir(probeFile), 0o750))
+	require.NoError(t, os.WriteFile(probeFile, []byte("original"), 0o600)) //nolint:forbidigo // the suite's own sandbox dir
+	require.NoError(t, config.AssembleGuestView(hostDir))
+
+	// Paths are single-quoted into every shell command: a tart guest sees the
+	// tiers under "/Volumes/My Shared Files", and an unquoted path with a
+	// space fails as a *parse* error that assert.Error accepts happily — the
+	// denial assertions below would then pass without anything being denied.
+	// The paths are backend-supplied and contain no quotes, so single-quoting
+	// is sufficient (the same argument tart's hostnameSetCommand makes).
+	write := func(path, content string) error {
+		_, err := b.Runtime.Exec(b.Ctx, name,
+			[]string{"sh", "-c", "echo " + content + " > '" + path + "'"}, "")
+		return err
+	}
+	// Reads go through argv with no shell at all, so there is nothing to quote.
+	read := func(path string) (runtime.ExecResult, error) {
+		return b.Runtime.Exec(b.Ctx, name, []string{"cat", path}, "")
+	}
+
+	// host/ — neither readable nor writable. The write is DF136's primitive:
+	// rewriting environment.json's HostPath redirects a host-side apply to
+	// any path the user can write.
+	hostRecord := view + "/../" + config.HostTierName + "/" + config.EnvironmentFileName
+	_, err := read(hostRecord)
+	assert.Error(t, err, "the guest must not be able to read a host-tier record (DF136)")
+	assert.Error(t, write(hostRecord, "tampered"),
+		"the guest must not be able to write a host-tier record (DF136)")
+	onDisk, err := os.ReadFile(record) //nolint:gosec // G304: the suite's own sandbox dir
+	require.NoError(t, err)
+	assert.Equal(t, `{"HostPath":"/real"}`, string(onDisk), "the record must be byte-identical after the denied write")
+
+	// ro/ — readable through the flat view, and not writable through it.
+	// Reading it flat is half the invariant: a tier the guest cannot reach
+	// is not read-only, it is broken, and the guest scripts join every path
+	// from this one root.
+	res, err := read(view + "/tier-probe.txt")
+	require.NoError(t, err, "the read-only tier must be readable at the flat view path")
+	assert.Contains(t, res.Stdout, "original")
+	assert.Error(t, write(view+"/tier-probe.txt", "tampered"),
+		"the guest must not be able to write the read-only tier through the view (DF148)")
+	after, err := os.ReadFile(probeFile) //nolint:gosec // G304: the suite's own sandbox dir
+	require.NoError(t, err)
+	assert.Equal(t, "original", string(after), "the read-only tier's contents must be unchanged")
+
+	// rw/ — writable, and landing on the host where the host expects it.
+	// Without this the section would pass on a backend that shared nothing,
+	// and — the case that actually happened — on a shell that could not
+	// parse any of the paths above.
+	require.NoError(t, write(view+"/tier-canary.txt", "ok"),
+		"the read-write tier must be writable from the guest")
+	canary, err := os.ReadFile(filepath.Join(config.ReadWriteTierDir(hostDir), "tier-canary.txt"))
+	require.NoError(t, err, "a guest write to the view must land in the read-write tier on the host")
+	assert.Contains(t, string(canary), "ok")
+}
+
+// assertStaleGuestReadsImplyARefresher pins the capability to the operation that
+// honors it. A backend whose guest can serve stale data for a host-rewritten path
+// must offer the repair, or the capability is a claim with nothing behind it:
+// every host-side write would be gated on a check that silently never runs, which
+// is the DF175 failure mode restored in full.
+func assertStaleGuestReadsImplyARefresher(t *testing.T, rt runtime.Backend) {
+	t.Helper()
+	if !rt.Descriptor().Capabilities.HostWritesNeedGuestRefresh {
+		t.Skip("backend delivers host writes to a running guest live")
+	}
+	_, isRefresher := rt.(runtime.GuestFileRefresher)
+	assert.True(t, isRefresher,
+		"a backend setting HostWritesNeedGuestRefresh must implement runtime.GuestFileRefresher (DF175)")
 }

@@ -63,6 +63,6 @@ func (f *Files) ReadFile(rel string) ([]byte, error) {
 // the content-oriented counterpart to Import (which copies an existing host
 // file): use it when the caller already holds the content in memory. rel is
 // validated to stay within the exchange dir (same containment as ReadFile).
-func (f *Files) WriteFile(rel string, data []byte) error {
-	return f.engine.WriteFile(f.name, rel, data)
+func (f *Files) WriteFile(ctx context.Context, rel string, data []byte) error {
+	return f.engine.WriteFile(ctx, f.name, rel, data)
 }

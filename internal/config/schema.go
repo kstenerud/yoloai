@@ -28,12 +28,32 @@ import (
 // never ahead of the data (the truth invariant). MigrateLibrary must NOT advance
 // the stamp past libraryFrozenVersion, or it would green the gate over
 // un-migrated sandboxes.
-const LibrarySchemaVersion = SchemaPrincipalRenamed
+const LibrarySchemaVersion = SchemaTiered
 
 // libraryFrozenVersion is the ceiling of the sealed MigrateLibrary +
 // MigrateAgentConfigs ladder (the v2->v3 agent.json split and earlier). Framework
 // migrations take the realm from here to LibrarySchemaVersion.
 const libraryFrozenVersion = 3
+
+// FrameworkPlanDerivable reports whether the framework migrators can be planned
+// against a realm currently stamped onDiskSchema.
+//
+// They cannot, below the frozen ceiling. A framework migrator plans by reading
+// per-sandbox records, and a realm below the ceiling still holds records the
+// sealed ladder has not raised to the current record version — which every
+// reader correctly refuses (D61: no write on read). So the plan is not merely
+// inconvenient to derive there, it is not yet defined: the ladder has to run
+// first, and only then does "what would the framework migrators do" have an
+// answer.
+//
+// The caller this exists for is `system migrate`'s pre-flight refusal, which
+// wants to reject a blocked sandbox BEFORE mutating anything. Above the ceiling
+// it still can, and does. Below it, that guarantee is unavailable, and asking
+// for it anyway is DF168: the guard refused every pre-v3 install by planning
+// against records that only the migration it was guarding could fix.
+func FrameworkPlanDerivable(onDiskSchema int) bool {
+	return onDiskSchema >= libraryFrozenVersion
+}
 
 // Framework-migration target versions past libraryFrozenVersion. Each framework
 // migrator advances the realm one step and stamps its OWN target LAST — after
@@ -47,6 +67,12 @@ const (
 	// the CLI adopts the "cli" principal and existing "yoloai-<name>" instances
 	// are renamed/recreated to "yoloai-cli-<name>" (D126).
 	SchemaPrincipalRenamed = 5
+	// SchemaTiered is the target of the v5->v6 tier move: a sandbox directory
+	// stops being flat and becomes exactly three subdirectories — host/, ro/ and
+	// rw/ — so a file's guest-access class is the directory it sits in rather
+	// than a list that can drift (DF136, DF148). It runs LAST, which is what lets
+	// every migrator below it address a flat sandbox (DF164).
+	SchemaTiered = 6
 )
 
 // LaunchPrefixResolver maps a sandbox's stored backend type (the "backend"
@@ -284,8 +310,8 @@ func backfillSandboxLaunchPrefix(sandboxDir string, prefixFor LaunchPrefixResolv
 		return nil // no environment.json: can't classify; leave untouched
 	}
 
-	rcPath := filepath.Join(sandboxDir, "runtime-config.json")
-	rcData, err := os.ReadFile(rcPath) //nolint:gosec // G304: trusted sandbox subpath
+	rcPath := filepath.Join(sandboxDir, "runtime-config.json") // flat: pre-tier sealed-ladder migration (v1->v2)
+	rcData, err := os.ReadFile(rcPath)                         //nolint:gosec // G304: trusted sandbox subpath
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return nil // no runtime-config.json: nothing to wrap
@@ -319,6 +345,9 @@ func backfillSandboxLaunchPrefix(sandboxDir string, prefixFor LaunchPrefixResolv
 // environment.json. The bool reports whether the file exists; a missing file
 // returns ("", false, nil) so the caller can skip an unclassifiable directory.
 func readSandboxBackend(sandboxDir string) (backend string, exists bool, err error) {
+	// flat: pre-tier sealed-ladder migration (v1->v2), like its rcPath sibling.
+	// Do NOT route this through EnvironmentPath — it must keep reading the
+	// layout that existed when these sandboxes were written.
 	data, err := os.ReadFile(filepath.Join(sandboxDir, "environment.json")) //nolint:gosec // G304: trusted sandbox subpath
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {

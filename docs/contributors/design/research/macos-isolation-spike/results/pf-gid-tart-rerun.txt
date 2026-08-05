@@ -1,0 +1,84 @@
+===================================================================
+ macOS isolation spike — privileged half
+ pf: Status: Enabled for 55 days 07:01:13          Debug: Urgent
+===================================================================
+
+== CONTROL 0 — are rules in the nested anchor even evaluated?
+   baseline host -> 1.0.0.1 : 301   (expect 301)
+
+   blocked  host -> 1.0.0.1 : 000   (expect 000 => anchor IS evaluated)
+   control  host -> 1.1.1.1: 301  (expect 301 => rule is scoped)
+   flushed  host -> 1.0.0.1 : 301   (expect 301)
+
+== P2 — the ACTUAL dedicated-gid design (not borrowed admin/staff)
+   created group yoloaispike gid=700 (deleted on exit)
+   NOTE: karlstenerud is deliberately NOT a member — a sandbox gid should not be one the user holds.
+   baseline gid=yoloaispike(700) -> 1.0.0.1 : [301]  (expect 301)
+   baseline gid=staff(20)   -> 1.0.0.1 : [301]  (expect 301)
+
+   allowlist gid=yoloaispike -> 1.1.1.1 : [301]  (want 301)
+   allowlist gid=yoloaispike -> 1.0.0.1  : [000]   (want 000)
+   unaffected gid=staff -> 1.0.0.1: [301]  (want 301)
+
+== P2b — can a process in that gid shed it? (the whole design rests on 'no')
+      inside: rgid=700 egid=700
+      setgid(20) -> refused errno=1(Operation not permitted)
+      setegid(20) -> refused errno=1(Operation not permitted)
+      setgid(0) -> refused errno=1(Operation not permitted)
+      setegid(0) -> refused errno=1(Operation not permitted)
+
+== P3 — the ICMP hole: does 'group' filter non-TCP/UDP at all?
+   man 5 pf.conf: 'Only TCP and UDP packets can be associated with users; for other
+   protocols these parameters are ignored.' Three outcomes discriminate what 'ignored' means.
+   ping setuid? -r-xr-xr-x root  (a setuid-root ping would confound this)
+   baseline ping as gid=yoloaispike : REACHED   (expect REACHED; 'blocked' here means the probe is broken)
+
+   icmp+group rule loaded:  gid=yoloaispike -> REACHED    gid=staff -> REACHED
+     both REACHED  => the rule never matches ICMP: gid allowlists leak ICMP entirely
+     both blocked  => 'group' is ignored and the rule hits EVERY process (over-blocks)
+     only yoloaispike blocked => group works for ICMP, contradicting the man page
+   the shape a real gid allowlist would use: block rule with NO protocol qualifier
+
+     tcp -> 1.0.0.1  as gid=yoloaispike : [000]   (000 = the block bites TCP)
+     tcp -> 1.1.1.1 as gid=yoloaispike : [301]  (301 = the pass still works)
+     OVER-BLOCK CONTROL, tcp -> 1.0.0.1 as gid=staff : [301]
+       301 => the rule is correctly scoped to gid 700
+       000 => 'group' is being IGNORED and the rule hits EVERY process — which would make
+              the whole mechanism unusable, and is the outcome this control exists to catch
+     ICMP -> 1.0.0.1 as gid=yoloaispike : REACHED
+       REACHED => group never matches ICMP; a gid allowlist leaks every non-TCP/UDP protocol
+       blocked => group DOES constrain ICMP, contradicting man 5 pf.conf
+
+== P1b — tart (run last: the handoff restarts tart, which can re-lease apple's subnet)
+   restarting tart so it holds a live lease (they can coexist; see DF172)...
+   tart = 192.168.65.3 via bridge101
+   BASELINE tart -> 1.0.0.1 = 301   (expect 301)
+
+   blocked  tart -> 1.0.0.1 = 000   (want 000)
+   control  host  -> 1.0.0.1 = 301  (want 301, host unaffected)
+
+   allowlist tart -> 1.1.1.1 = 301 (want 301)   -> 1.0.0.1 = 000 (want 000)
+   flushed  tart -> 1.0.0.1 = 301   (expect 301)
+   [TAMPER] baseline: guest -> 1.1.1.2 = 301  (need 301, else 1.1.1.2 is useless as a control)
+     guest installs its OWN pf rule blocking 1.1.1.2, to prove a tamper can be detected
+      pfctl: Use of -f option, could result in flushing of rules
+      present in the main ruleset added by the system at startup.
+      No ALTQ support in kernel
+      ALTQ related functions disabled
+     guest -> 1.1.1.2 with its own rule loaded: 000  (need 000)
+
+     host pf loaded: guest -> 1.0.0.1 = 000  (want 000)
+     guest now disables its own pf:
+      No ALTQ support in kernel
+      ALTQ related functions disabled
+     CONTROL  guest -> 1.1.1.2 = 000  (301 = the guest really did tear down its own pf)
+     RESULT   guest -> 1.0.0.1  = 000   (000 = the host rule survived that)
+     alive    guest -> 1.1.1.1 = 301  (301 = still on the network)
+     VERDICT: INCONCLUSIVE — the tamper had no observable effect; nothing follows.
+
+== FINAL
+   host -> 1.0.0.1 : 301  (expect 301)
+done.
+
+[restore] anchor flushed; group yoloaispike deleted; main ruleset untouched.
+  verified: group yoloaispike is gone

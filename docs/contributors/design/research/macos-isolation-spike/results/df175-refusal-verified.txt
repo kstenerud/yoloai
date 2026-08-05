@@ -1,0 +1,32 @@
+DF175 residual gap — the v0.11.0 refusal, verified end to end on hardware
+Run 2026-08-04, macOS 26.5.1, tart, sandbox df175-refusal. Shipped binary, shipped commands.
+
+  host: files put r.txt (20 bytes AAAA…)
+  guest: cat r.txt                      -> AAAAAAAAAAAAAAAAAAAA   (guest caches the path)
+  host: files rm r.txt
+  host: files put r.txt (5 bytes QQQQQ) -> REFUSED, rc=1
+
+    yoloai: "r.txt" was removed from this sandbox's exchange directory while it was
+    running, and this backend's guest can keep serving the removed file's contents for
+    that name — writing it again would deliver bytes the sandbox cannot read correctly.
+    Use a different name, or restart the sandbox to clear it
+    (yoloai stop df175-refusal && yoloai start df175-refusal)
+
+  BEFORE this change the same sequence exited 0 and the guest served the ORIGINAL 20 bytes
+  at stat size 20 while the host held 5 (results/df175-rmput-tart.txt).
+
+REMEDY 1 — a different name (the operation Apple lists as SUPPORTED, and the cheap one)
+  host: files put r2.txt (QQQQQ)        -> rc=0
+  guest: cat r2.txt                     -> QQQQQ                  CORRECT
+
+REMEDY 2 — restart, which is what the message promises
+  host-tier record before restart:  ["r.txt"]
+  yoloai stop && yoloai start
+  host-tier record after restart:   <absent — cleared by start>
+  host: files put r.txt (QQQQQ)         -> rc=0
+  guest: cat r.txt                      -> QQQQQ                  CORRECT
+  host:      cat r.txt                  -> QQQQQ                  host and guest agree
+
+So both remedies in the error message work, and the record is real state that start clears
+rather than advice. The record lives in the HOST tier (host/guest-stale-names.json), which the
+guest cannot reach — deliberately, since the guest is the component whose view is untrusted.

@@ -61,10 +61,17 @@ var descriptor = runtime.BackendDescriptor{
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalitySandboxSide,
 		KeepAliveModel:     runtime.KeepAliveGuestOSInit,
-		// Tart VMs use a VirtioFS share at "/Volumes/My Shared Files/yoloai"
-		// (path contains spaces). The setup script creates a symlink
-		// /Users/admin/.yoloai → /Volumes/My Shared Files/yoloai so that
-		// shell commands inside the VM can reference state without quoting.
+		// A macOS guest's VirtioFS client keeps cached pages for a vnode it
+		// never reclaims, so a host rewrite of a path the guest has read is
+		// invisible to it — old bytes, new size, no error (DF175). No host-side
+		// write pattern avoids it, so host writes into a running sandbox are
+		// verified and repaired through RefreshGuestFiles.
+		HostWritesNeedGuestRefresh: true,
+		// Tart VMs reach yoloai state through two VirtioFS shares, one per
+		// guest-facing tier, under "/Volumes/My Shared Files" (a path with
+		// spaces). The setup script symlinks each mount under
+		// /Users/admin/.yoloai so shell commands inside the VM can reference
+		// state without quoting.
 		VMRuntimeDir: "/Users/admin/.yoloai",
 	},
 	// Tart VMs boot in ~60s+, then sandbox-setup.py runs xcode-select and
@@ -122,19 +129,9 @@ const (
 	// tartConfigFileName stores the instance config for Start to use.
 	tartConfigFileName = "instance.json"
 
-	// backendDir holds backend-specific files within the sandbox directory.
-	backendDir = config.BackendDirName
-
-	// binDir holds executable scripts within the sandbox directory.
-	binDir = config.BinDirName
-
-	// tmuxDir holds tmux configuration within the sandbox directory.
-	tmuxDir = config.TmuxDirName
-
-	// sharedDirName is the VirtioFS share name used for yoloai state.
-	sharedDirName = "yoloai"
-
 	// sharedDirVMPath is where VirtioFS shares appear inside the macOS VM.
+	// Every --dir lands as a sibling directory under this one path, which is
+	// what lets a relative symlink in one share resolve into another.
 	sharedDirVMPath = "/Volumes/My Shared Files"
 
 	// tartVMLimitSubstr is the fixed prefix Tart writes to stderr when Apple's
@@ -152,6 +149,7 @@ type Runtime struct {
 	hostMajor         func() (int, error)   // host macOS major version; seam for tests
 	execEnv           []string              // explicit subprocess env (DEV §12); from layout, never inherited
 	bridgeNets        func() []bridgeSubnet // host bridge* interface subnets; seam for tests (see netcheck.go)
+	settle            func(time.Duration)   // wait between guest-refresh passes; seam for tests (see guestrefresh.go)
 }
 
 // Compile-time check.
@@ -168,6 +166,17 @@ var _ runtime.GitExecer = (*Runtime)(nil)
 var _ runtime.WorkDirSetup = (*Runtime)(nil)
 
 // Descriptor returns a BackendDescriptor with the static facts for this backend.
+
+// sandboxDirForName returns the sandbox directory for an instance name.
+//
+// Converged on containerd's helper of the same name (GEN §18) rather than left
+// as 13 inline joins: the sandbox dir is the root every tier hangs off, so it
+// needs exactly one construction site per backend for a tier move to be a
+// one-place change.
+func (r *Runtime) sandboxDirForName(name string) string {
+	return filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+}
+
 func (r *Runtime) Descriptor() runtime.BackendDescriptor {
 	return descriptor
 }
@@ -203,6 +212,14 @@ func (r *Runtime) SetupWorkDirInVM(virtiofsStagingPath, vmLocalPath string) []st
 		fmt.Sprintf("rsync -a '%s/' '%s/'", virtiofsStagingPath, vmLocalPath),
 		fmt.Sprintf("cd '%s' && git init && git config user.email yoloai@localhost && git config user.name yoloai && git add -A && git commit --allow-empty -m 'baseline'", vmLocalPath),
 	}
+}
+
+// WorkDirStagingPath returns where the guest sees a host-staged work copy: under
+// work/ in the flat view, which resolves into the read-write tier's share. The
+// work copy is staged by the host and then rsync'd to VM-local storage, so it
+// has to be reachable and it has to be the same file the host wrote.
+func (r *Runtime) WorkDirStagingPath(hostPath string) string {
+	return filepath.Join(vmGuestViewDir(), config.WorkDirName, config.EncodePath(hostPath))
 }
 
 // New creates a Runtime after verifying that tart is installed and the
@@ -273,16 +290,16 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 	slog.Debug("tart Create: clone succeeded", "name", cfg.Name)
 
 	// Save instance config so Start can read mounts/network/ports
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(cfg.Name))
+	sandboxPath := r.sandboxDirForName(cfg.Name)
 	cfgData, err := json.Marshal(cfg)
 	if err != nil {
 		return fmt.Errorf("marshal instance config: %w", err)
 	}
 	// Ensure backend dir exists
-	if err := fileutil.MkdirAll(filepath.Join(sandboxPath, backendDir), 0750); err != nil {
+	if err := fileutil.MkdirAll(config.BackendPath(sandboxPath), 0750); err != nil {
 		return fmt.Errorf("create backend dir: %w", err)
 	}
-	if err := fileutil.WriteFile(filepath.Join(sandboxPath, backendDir, tartConfigFileName), cfgData, 0600); err != nil {
+	if err := fileutil.WriteFile(filepath.Join(config.BackendPath(sandboxPath), tartConfigFileName), cfgData, 0600); err != nil {
 		return fmt.Errorf("write instance config: %w", err)
 	}
 
@@ -312,7 +329,7 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 // giving the agent a clean process state.
 func (r *Runtime) Start(ctx context.Context, name string) error {
 	slog.Debug("tart Start", "name", name)
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+	sandboxPath := r.sandboxDirForName(name)
 
 	// Check if already running
 	if r.isRunning(ctx, name) {
@@ -321,17 +338,29 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 
 	// Record whether the VM is suspended before tart run resumes it.
 	// Used after boot to decide whether to kill the stale tmux session.
-	wasSuspended := r.vmState(ctx, name) == "suspended"
+	// An unreadable inventory means "not known to be suspended", which is the
+	// conservative answer: the stale-tmux cleanup below is skipped rather than
+	// run against a VM whose state was never established.
+	priorState, _ := r.vmState(ctx, name)
+	wasSuspended := priorState == "suspended"
 
 	// Load instance config saved by Create
 	var cfg runtime.InstanceConfig
-	cfgPath := filepath.Join(sandboxPath, backendDir, tartConfigFileName)
+	cfgPath := filepath.Join(config.BackendPath(sandboxPath), tartConfigFileName)
 	cfgData, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if err != nil {
 		return fmt.Errorf("read instance config: %w", err)
 	}
 	if err := json.Unmarshal(cfgData, &cfg); err != nil {
 		return fmt.Errorf("parse instance config: %w", err)
+	}
+
+	// Assemble the flat guest view before the shares are named on the command
+	// line. Both tiers have to exist by then — `tart run --dir` on a path that
+	// does not exist fails the boot — and a bare runtime instance has no sandbox
+	// layer to have created them.
+	if err := config.AssembleGuestView(sandboxPath); err != nil {
+		return fmt.Errorf("assemble guest view: %w", err)
 	}
 
 	// Build tart run arguments. When resuming from a suspended state, the VM
@@ -346,7 +375,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	}
 
 	// Open log file for stderr capture
-	logPath := filepath.Join(sandboxPath, backendDir, vmLogFileName)
+	logPath := filepath.Join(config.BackendPath(sandboxPath), vmLogFileName)
 	logFile, err := fileutil.OpenFile(logPath, os.O_CREATE|os.O_WRONLY|os.O_TRUNC, 0600)
 	if err != nil {
 		return fmt.Errorf("open VM log: %w", err)
@@ -379,7 +408,7 @@ func (r *Runtime) Start(ctx context.Context, name string) error {
 	slog.Debug("tart run started", "name", name, "pid", cmd.Process.Pid)
 
 	// Write PID file
-	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	pidPath := filepath.Join(config.BackendPath(sandboxPath), pidFileName)
 	if err := fileutil.WriteFile(pidPath, []byte(strconv.Itoa(cmd.Process.Pid)), 0600); err != nil {
 		// Kill the process we just started if we can't track it
 		_ = cmd.Process.Kill()
@@ -465,14 +494,14 @@ func (r *Runtime) Rename(ctx context.Context, oldName, newName string) error {
 // Uses a hard stop (not suspend) before deleting — suspending before an
 // immediate delete would waste time writing RAM state to disk.
 func (r *Runtime) Remove(ctx context.Context, name string) error {
-	sandboxPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(name))
+	sandboxPath := r.sandboxDirForName(name)
 
 	// Hard stop first (don't suspend — state is about to be deleted)
 	r.stopVM(ctx, name)
 
 	if !r.vmExists(ctx, name) {
 		// Clean up stale PID file
-		_ = os.Remove(filepath.Join(sandboxPath, backendDir, pidFileName))
+		_ = os.Remove(filepath.Join(config.BackendPath(sandboxPath), pidFileName))
 		return nil
 	}
 
@@ -480,15 +509,18 @@ func (r *Runtime) Remove(ctx context.Context, name string) error {
 		return fmt.Errorf("delete VM: %w", err)
 	}
 
-	_ = os.Remove(filepath.Join(sandboxPath, backendDir, pidFileName))
-	_ = os.RemoveAll(filepath.Join(sandboxPath, "secrets"))
+	_ = os.Remove(filepath.Join(config.BackendPath(sandboxPath), pidFileName))
+	_ = os.RemoveAll(config.SecretsPath(sandboxPath))
 
 	return nil
 }
 
 // Inspect returns the current state of the VM instance.
 func (r *Runtime) Inspect(ctx context.Context, name string) (runtime.InstanceInfo, error) {
-	state := r.vmState(ctx, name)
+	state, err := r.vmState(ctx, name)
+	if err != nil {
+		return runtime.InstanceInfo{}, fmt.Errorf("inspect VM %q: %w", name, err)
+	}
 	if state == "" {
 		return runtime.InstanceInfo{}, runtime.ErrNotFound
 	}
@@ -636,7 +668,7 @@ func (r *Runtime) Close() error {
 
 // DiagHint returns a Tart-specific hint for checking logs.
 func (r *Runtime) DiagHint(instanceName string) string {
-	logPath := filepath.Join(r.layout.SandboxesDir(), r.sandboxName(instanceName), backendDir, vmLogFileName)
+	logPath := filepath.Join(config.BackendPath(r.sandboxDirForName(instanceName)), vmLogFileName)
 	return fmt.Sprintf("check VM log at %s", logPath)
 }
 
@@ -700,13 +732,25 @@ func (r *Runtime) instanceName(name string) string {
 
 // buildRunArgs constructs the arguments for tart run.
 // Only directories outside the sandbox path get their own VirtioFS share;
-// everything under sandboxPath is already accessible via the yoloai share.
+// everything under sandboxPath is already accessible via the tier shares.
 // System paths (Xcode, iOS Simulators) are auto-detected at every start.
 func (r *Runtime) buildRunArgs(vmName, sandboxPath string, mounts []runtime.MountSpec) []string {
 	args := []string{"run", "--no-graphics"}
 
-	// Share the sandbox directory into the VM
-	args = append(args, "--dir", fmt.Sprintf("%s:%s", sharedDirName, sandboxPath))
+	// Share the guest-facing tiers, one share each, and the sandbox root not at
+	// all. VirtioFS shares a whole subtree with no way to exclude a file, so the
+	// single root share this replaces handed the guest host/ — an agent could
+	// rewrite environment.json and redirect a host-side apply (DF136). The
+	// host-only tier is now simply the part with no --dir.
+	//
+	// The share names are the tier directory names, deliberately: the guest sees
+	// them as siblings under sharedDirVMPath, so the relative links that
+	// assemble the flat view (rw/x -> ../ro/x) resolve to the same file on the
+	// host and in the guest. Renaming a share here breaks the view silently.
+	args = append(args,
+		"--dir", fmt.Sprintf("%s:%s:ro", config.ReadOnlyTierName, config.ReadOnlyTierDir(sandboxPath)),
+		"--dir", fmt.Sprintf("%s:%s", config.ReadWriteTierName, config.ReadWriteTierDir(sandboxPath)),
+	)
 
 	// Build merged mount list: Xcode system paths + user-specified mounts
 	// Deduplication: user-specified mounts take precedence over system paths
@@ -812,29 +856,40 @@ func (r *Runtime) runTart(ctx context.Context, args ...string) (string, error) {
 
 // vmState returns the tart state string for the named VM: "running",
 // "suspended", "stopped", or "" if the VM does not exist.
-func (r *Runtime) vmState(ctx context.Context, vmName string) string {
+//
+// An error means the inventory could not be READ, which is a different fact from
+// the VM being absent from it. Returning "" for both is the shape DF180 found in
+// the apple backend, where it made `destroy` report success over a container it
+// never removed; tart carried the identical conflation and this is the sibling
+// half of that fix. Callers that only need "does it exist" can still ignore the
+// error, but they have to say so.
+func (r *Runtime) vmState(ctx context.Context, vmName string) (string, error) {
 	out, err := r.runTart(ctx, "list", "--format", "json")
 	if err != nil {
-		return ""
+		return "", fmt.Errorf("list tart VMs: %w", err)
 	}
 	var entries []struct {
 		Name  string `json:"Name"`
 		State string `json:"State"`
 	}
 	if err := json.Unmarshal([]byte(out), &entries); err != nil {
-		return ""
+		return "", fmt.Errorf("parse tart VM list: %w", err)
 	}
 	for _, e := range entries {
 		if e.Name == vmName {
-			return e.State
+			return e.State, nil
 		}
 	}
-	return ""
+	return "", nil
 }
 
 // vmExists checks whether a VM with the given name exists in tart's inventory.
+// An unreadable inventory answers "no", which is this predicate's historical
+// behaviour and is safe for its callers: they use it to decide whether to create,
+// and creating over a VM tart cannot see fails loudly on its own.
 func (r *Runtime) vmExists(ctx context.Context, vmName string) bool {
-	return r.vmState(ctx, vmName) != ""
+	state, err := r.vmState(ctx, vmName)
+	return err == nil && state != ""
 }
 
 // isRunning checks if the VM is running by attempting a trivial exec.
@@ -930,7 +985,7 @@ const dockerHomeDir = "/home/yoloai"
 
 // patchConfigWorkingDir reads runtime-config.json, remaps working_dir for macOS, and writes it back.
 func (r *Runtime) patchConfigWorkingDir(sandboxPath string) error {
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if os.IsNotExist(err) {
 		return nil // no sandbox config → bare runtime instance, nothing to patch
@@ -1071,7 +1126,7 @@ func waitForExit(pids []int, timeout time.Duration) []int {
 
 // killByPID reads the PID file and kills the process.
 func (r *Runtime) killByPID(sandboxPath string) {
-	pidPath := filepath.Join(sandboxPath, backendDir, pidFileName)
+	pidPath := filepath.Join(config.BackendPath(sandboxPath), pidFileName)
 	data, err := os.ReadFile(pidPath) //nolint:gosec // G304: path is within ~/.yoloai/
 	if err != nil {
 		return
@@ -1161,7 +1216,7 @@ func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.Mount
 	}
 
 	// Read existing runtime-config.json
-	cfgPath := filepath.Join(sandboxPath, "runtime-config.json")
+	cfgPath := config.RuntimeConfigPath(sandboxPath)
 	data, err := os.ReadFile(cfgPath) //nolint:gosec // G304: path within sandbox dir
 	if os.IsNotExist(err) {
 		// No sandbox config → no monitor to consume the mount_map (a bare runtime
@@ -1191,7 +1246,7 @@ func (r *Runtime) addMountMapToConfig(sandboxPath string, mounts []runtime.Mount
 
 // copySecretsToSandbox copies secret files from mount specs into the sandbox secrets directory.
 func copySecretsToSandbox(sandboxPath string, mounts []runtime.MountSpec) error {
-	secretsDir := filepath.Join(sandboxPath, "secrets")
+	secretsDir := config.SecretsPath(sandboxPath)
 	if err := fileutil.MkdirAll(secretsDir, 0700); err != nil {
 		return fmt.Errorf("create secrets dir: %w", err)
 	}

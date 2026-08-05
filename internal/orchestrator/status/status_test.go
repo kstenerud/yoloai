@@ -228,7 +228,7 @@ func TestDetectStatus_Done(t *testing.T) {
 	dir := t.TempDir()
 	exitCode := 0
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":%d,"timestamp":%d}`, exitCode, time.Now().Unix())
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile), []byte(statusData), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(dir), []byte(statusData))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -244,7 +244,7 @@ func TestDetectStatus_Failed(t *testing.T) {
 	dir := t.TempDir()
 	exitCode := 1
 	statusData := fmt.Sprintf(`{"status":"done","exit_code":%d,"timestamp":%d}`, exitCode, time.Now().Unix())
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile), []byte(statusData), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(dir), []byte(statusData))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -304,8 +304,7 @@ func statusJSONBytes(status string, exitCode *int, ts int64) []byte {
 
 func TestDetectStatus_StatusJSON_Active(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
-		statusJSONBytes("active", nil, time.Now().Unix()), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(dir), statusJSONBytes("active", nil, time.Now().Unix()))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -319,8 +318,7 @@ func TestDetectStatus_StatusJSON_Active(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_Idle(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
-		statusJSONBytes("idle", nil, time.Now().Unix()), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(dir), statusJSONBytes("idle", nil, time.Now().Unix()))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -334,8 +332,7 @@ func TestDetectStatus_StatusJSON_Idle(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_Done(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
-		statusJSONBytes("done", new(0), time.Now().Unix()), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(dir), statusJSONBytes("done", new(0), time.Now().Unix()))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -349,8 +346,7 @@ func TestDetectStatus_StatusJSON_Done(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_Failed(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
-		statusJSONBytes("done", new(1), time.Now().Unix()), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(dir), statusJSONBytes("done", new(1), time.Now().Unix()))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -364,8 +360,7 @@ func TestDetectStatus_StatusJSON_Failed(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_Stale(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
-		statusJSONBytes("active", nil, time.Now().Add(-30*time.Second).Unix()), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(dir), statusJSONBytes("active", nil, time.Now().Add(-30*time.Second).Unix()))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -382,8 +377,7 @@ func TestDetectStatus_StatusJSON_Stale(t *testing.T) {
 
 func TestDetectStatus_StatusJSON_StaleDone(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, store.AgentStatusFile),
-		statusJSONBytes("done", new(0), time.Now().Add(-30*time.Second).Unix()), 0600))
+	testutil.WriteSandboxRecord(t, store.AgentStatusFilePath(dir), statusJSONBytes("done", new(0), time.Now().Add(-30*time.Second).Unix()))
 
 	mock := &fakeRuntime{
 		inspectFn: func(_ context.Context, _ string) (runtime.InstanceInfo, error) {
@@ -455,14 +449,14 @@ func TestProbeWorkData_NoWorkDir(t *testing.T) {
 
 func TestProbeWorkData_EmptyWorkDir(t *testing.T) {
 	dir := t.TempDir()
-	require.NoError(t, os.Mkdir(filepath.Join(dir, "work"), 0o750))
+	require.NoError(t, os.MkdirAll(store.WorkBasePath(dir), 0o750))
 	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)
 	assert.Equal(t, WorkDataNone, st)
 }
 
 func TestProbeWorkData_CopyCleanIsAmbiguous(t *testing.T) {
 	dir := t.TempDir()
-	work := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"))
+	work := filepath.Join(store.WorkBasePath(dir), store.EncodePath("/home/u/proj"))
 	require.NoError(t, os.MkdirAll(work, 0o750))
 	testutil.InitGitRepo(t, work)
 	testutil.WriteFile(t, work, "file.txt", "hello")
@@ -476,7 +470,7 @@ func TestProbeWorkData_CopyCleanIsAmbiguous(t *testing.T) {
 
 func TestProbeWorkData_CopyDirtyIsPresent(t *testing.T) {
 	dir := t.TempDir()
-	work := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"))
+	work := filepath.Join(store.WorkBasePath(dir), store.EncodePath("/home/u/proj"))
 	require.NoError(t, os.MkdirAll(work, 0o750))
 	testutil.InitGitRepo(t, work)
 	testutil.WriteFile(t, work, "file.txt", "hello")
@@ -491,7 +485,7 @@ func TestProbeWorkData_CopyDirtyIsPresent(t *testing.T) {
 
 func TestProbeWorkData_OverlayUpperNonEmptyIsPresent(t *testing.T) {
 	dir := t.TempDir()
-	upper := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"), "upper")
+	upper := filepath.Join(store.WorkBasePath(dir), store.EncodePath("/home/u/proj"), "upper")
 	require.NoError(t, os.MkdirAll(upper, 0o750))
 	testutil.WriteFile(t, upper, "changed.txt", "diff")
 
@@ -503,7 +497,7 @@ func TestProbeWorkData_OverlayUpperNonEmptyIsPresent(t *testing.T) {
 func TestProbeWorkData_OverlayUpperEmptyIsAmbiguous(t *testing.T) {
 	dir := t.TempDir()
 	// Overlay scaffolding present (upper/ exists) but no captured changes.
-	upper := filepath.Join(dir, "work", store.EncodePath("/home/u/proj"), "upper")
+	upper := filepath.Join(store.WorkBasePath(dir), store.EncodePath("/home/u/proj"), "upper")
 	require.NoError(t, os.MkdirAll(upper, 0o750))
 
 	st, _ := ProbeWorkData(context.Background(), git.NewTestHostWithEnv(testutil.GitEnv()), dir)

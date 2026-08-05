@@ -25,7 +25,7 @@ func createCopySandbox(t *testing.T, tmpDir, name, hostPath string) string {
 	t.Helper()
 
 	sandboxDir := filepath.Join(tmpDir, ".yoloai", "sandboxes", name)
-	workDir := filepath.Join(sandboxDir, "work", store.EncodePath(hostPath))
+	workDir := filepath.Join(store.WorkBasePath(sandboxDir), store.EncodePath(hostPath))
 	require.NoError(t, os.MkdirAll(workDir, 0750))
 
 	// Init git repo and create baseline

@@ -1,0 +1,98 @@
+===================================================================
+ macOS isolation spike — privileged half
+ pf: Status: Enabled for 55 days 00:29:47          Debug: Urgent
+===================================================================
+
+== CONTROL 0 — are rules in the nested anchor even evaluated?
+   baseline host -> 1.0.0.1 : 301   (expect 301)
+
+   blocked  host -> 1.0.0.1 : 000   (expect 000 => anchor IS evaluated)
+   control  host -> 1.1.1.1: 301  (expect 301 => rule is scoped)
+   flushed  host -> 1.0.0.1 : 301   (expect 301)
+
+== P1a — apple: per-VM scoping and the allowlist shape
+   appleA = 192.168.64.4 via bridge101
+   BASELINE appleA -> 1.0.0.1 = 301   (expect 301)
+
+   blocked  appleA -> 1.0.0.1 = 000   (want 000)
+   control  host  -> 1.0.0.1 = 301  (want 301, host unaffected)
+   scoping  appleB -> 1.0.0.1 = 301  (want 301 = per-VM, not per-backend)
+
+   allowlist appleA -> 1.1.1.1 = 301 (want 301)   -> 1.0.0.1 = 000 (want 000)
+   flushed  appleA -> 1.0.0.1 = 301   (expect 301)
+
+== P4 — can a guest that genuinely HOLDS NET_ADMIN defeat the host rule?
+   isolated sandbox mac-iso-apple = 192.168.64.5 via bridge101
+   PRECONDITION: guest really is privileged (must succeed, else the test is vacuous):
+      iptables readable -> guest HAS NET_ADMIN
+   baseline iso -> 1.0.0.1 = 000   (expect 301)
+
+   with host pf rule: iso -> 1.0.0.1 = 000  (want 000)
+   guest now flushes ALL its own firewall state:
+      (flush attempted)
+   after guest flush: iso -> 1.0.0.1 = 000  (want 000 = host rule survived)
+   positive control : iso -> 1.1.1.1 = 301 (want 301 = path alive, not a dead VM)
+
+== REAPING — what happens to an address-keyed rule when the sandbox dies?
+
+   rule installed for 192.168.64.4; destroying the sandbox out from under it...
+   anchor contents after the sandbox is gone:
+        block drop in quick on bridge101 inet from 192.168.64.4 to any
+   ^ nothing reaped it. A later sandbox issued 192.168.64.4 inherits this silently.
+   (that is the per-sandbox-lifetime cost the plans name as undesigned)
+
+== P2 — the ACTUAL dedicated-gid design (not borrowed admin/staff)
+   created group yoloaispike gid=700 (deleted on exit)
+   NOTE: karlstenerud is deliberately NOT a member — a sandbox gid should not be one the user holds.
+   baseline gid=yoloaispike(700) -> 1.0.0.1 : [301]  (expect 301)
+   baseline gid=staff(20)   -> 1.0.0.1 : [301]  (expect 301)
+
+   allowlist gid=yoloaispike -> 1.1.1.1 : [301]  (want 301)
+   allowlist gid=yoloaispike -> 1.0.0.1  : [000]   (want 000)
+   unaffected gid=staff -> 1.0.0.1: [301]  (want 301)
+
+== P2b — can a process in that gid shed it? (the whole design rests on 'no')
+      inside: rgid=700 egid=700
+      setgid(20) -> refused errno=1(Operation not permitted)
+      setegid(20) -> refused errno=1(Operation not permitted)
+      setgid(0) -> refused errno=1(Operation not permitted)
+      setegid(0) -> refused errno=1(Operation not permitted)
+
+== P3 — the ICMP hole: does 'group' filter non-TCP/UDP at all?
+   man 5 pf.conf: 'Only TCP and UDP packets can be associated with users; for other
+   protocols these parameters are ignored.' Three outcomes discriminate what 'ignored' means.
+   ping setuid? -r-xr-xr-x root  (a setuid-root ping would confound this)
+   baseline ping as gid=yoloaispike : REACHED   (expect REACHED; 'blocked' here means the probe is broken)
+
+   icmp+group rule loaded:  gid=yoloaispike -> REACHED    gid=staff -> REACHED
+     both REACHED  => the rule never matches ICMP: gid allowlists leak ICMP entirely
+     both blocked  => 'group' is ignored and the rule hits EVERY process (over-blocks)
+     only yoloaispike blocked => group works for ICMP, contradicting the man page
+   now the sharper version — a gid allowlist that blocks all TCP, does ICMP still escape?
+
+   tcp to 1.0.0.1 (should be blocked): [000]
+   ICMP to 1.0.0.1 under the same policy: REACHED  (REACHED = the hole is real)
+
+== P1b — tart (run last: taking its bridge kills apple's network)
+   handing the vmnet bridge to tart...
+   tart = 192.168.65.2 via bridge101
+   BASELINE tart -> 1.0.0.1 = 301   (expect 301)
+
+   blocked  tart -> 1.0.0.1 = 000   (want 000)
+   control  host  -> 1.0.0.1 = 301  (want 301, host unaffected)
+
+   allowlist tart -> 1.1.1.1 = 301 (want 301)   -> 1.0.0.1 = 000 (want 000)
+   flushed  tart -> 1.0.0.1 = 301   (expect 301)
+   guest-side tamper (tart guest is macOS with sudo):
+
+No ALTQ support in kernel
+      (guest disabled its OWN pf)
+   after tamper: tart -> 1.0.0.1 = 000 (want 000)   -> 1.1.1.1 = 301 (want 301)
+   VERDICT: host rule SURVIVED the tamper attempt, and the guest is still on the network.
+
+== FINAL
+   host -> 1.0.0.1 : 301  (expect 301)
+done.
+
+[restore] anchor flushed; group yoloaispike deleted; main ruleset untouched.
+  verified: group yoloaispike is gone

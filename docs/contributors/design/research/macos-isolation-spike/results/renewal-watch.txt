@@ -1,0 +1,45 @@
+===================================================================
+ lease renewal watch + guest IPv6 inventory
+ host: 26.5.1   started: 14:53:32
+===================================================================
+
+== R2: what IPv6 do the guests actually have? ==
+   host (for reference):
+     bridge100: fd07:b51a:cc66:0:a617:db5e:ab7:e9f1
+     utun4: fd7a:115c:a1e0::332:d067
+   apple (192.168.64.25):
+         inet6 fd96:9d70:8059:3047:f0d9:11ff:febc:2ff7/64 scope global tentative dynamic mngtmpaddr proto kernel_ra 
+     total inet6 addrs (incl link-local): 3
+     IPv6 egress: 000000
+
+   tart (192.168.65.2):
+     (none)
+     IPv6 egress: 000000
+
+== R1: lease duration, then a watch across renewals ==
+   tart ip=192.168.65.2 mac=1,32:fe:6e:e3:40:2e
+   lease has 559s (~9m) remaining, measured just after issue
+   watching for 1677s (~27m), sampling every 30s
+
+   t=120s steady  ip=192.168.65.2 lease_remaining=439s
+   t=241s steady  ip=192.168.65.2 lease_remaining=318s
+   t=361s steady  ip=192.168.65.2 lease_remaining=498s
+   t=482s steady  ip=192.168.65.2 lease_remaining=377s
+   t=602s steady  ip=192.168.65.2 lease_remaining=556s
+   t=723s steady  ip=192.168.65.2 lease_remaining=435s
+   t=843s steady  ip=192.168.65.2 lease_remaining=315s
+   t=963s steady  ip=192.168.65.2 lease_remaining=494s
+   t=1084s steady  ip=192.168.65.2 lease_remaining=373s
+   t=1204s steady  ip=192.168.65.2 lease_remaining=552s
+   t=1325s steady  ip=192.168.65.2 lease_remaining=431s
+   t=1445s steady  ip=192.168.65.2 lease_remaining=311s
+   t=1566s steady  ip=192.168.65.2 lease_remaining=489s
+   t=1686s steady  ip=192.168.65.2 lease_remaining=369s
+
+   RESULT  address held for 1677s across 3 lease lifetimes
+           with no restart. Renewal does NOT move the address on tart, so the
+           remaining fail-open path is closed for this backend on this host.
+
+== cleanup ==
+   sandboxes remaining: 0
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/renewal-watch.txt

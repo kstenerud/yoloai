@@ -1,0 +1,44 @@
+DF175 exposure test — `yoloai files put --overwrite` on a running tart sandbox
+Run 2026-08-03, macOS 26.5.1 (25F80), tart 2.32.1, sandbox mac-coh-tart.
+Every step uses the shipped CLI; nothing pokes the share directly except the
+rm+recreate probe, which models a candidate fix.
+
+  host: printf 'AAAAAAAAAAAAAAAAAAAA' (20 bytes) > payload.txt
+  host: yoloai files mac-coh-tart put payload.txt --overwrite
+  guest: cat payload.txt            -> AAAAAAAAAAAAAAAAAAAA        (correct; caches the path)
+
+  host: printf 'ZZZ' (3 bytes) > payload.txt
+  host: yoloai files mac-coh-tart put payload.txt --overwrite
+  host: cat <exchange>/payload.txt  -> ZZZ                          (host side is correct)
+  guest: cat payload.txt            -> AAA        <-- FABRICATED
+  guest: stat payload.txt           -> size=3     <-- correct size, wrong bytes
+
+  after 60s:                        -> AAA        (does not converge)
+  fresh process in guest:           -> AAA        (not per-process; the guest kernel's
+                                                   page cache for that dentry)
+
+CANDIDATE FIXES
+  new filename (payload2.txt, 'ZZZ')          -> ZZZ    WORKS
+  host rm + recreate same name ('QQQQQ')      -> AAA    DOES NOT WORK
+  another files put --overwrite ('WWWWWWWW')  -> AAA    DOES NOT WORK
+
+  Note the last two still return the ORIGINAL 20-byte file's first bytes, after the
+  path was deleted and rewritten twice with different content and lengths. The stale
+  mapping survives unlink. Only a name never before read by the guest is safe.
+
+CONTROL — apple `container`, identical sequence via the same CLI
+  guest v1 -> AAAAAAAAAAAAAAAAAAAA
+  guest v2 -> ZZZ                                CORRECT
+
+So: tart-specific, reachable through a shipped command, silent at every layer.
+
+RESET — tested 2026-08-03, does NOT reproduce
+  host: README.md = 'ORIGINAL-CONTENT-LONG'; yoloai reset; guest reads -> ORIGINAL-CONTENT-LONG
+  host: README.md = 'NEW';                   yoloai reset; guest reads -> NEW      CORRECT
+
+  So the defect is not "any host write into a live tart share". `reset` replaces content
+  at a path the guest had already read, and lands correctly, while `files put --overwrite`
+  at a path the guest had already read does not. The difference is the WRITE PATTERN, and
+  that is the lead for the fix: whatever reset does to the tree (it re-copies rather than
+  overwriting in place, so the parent dentry is replaced) invalidates the guest's mapping,
+  and files put should do the same thing.

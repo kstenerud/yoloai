@@ -10,8 +10,9 @@ import (
 	"context"
 	"fmt"
 	"os"
-	"path/filepath"
 	"strings"
+
+	"github.com/kstenerud/yoloai/internal/config"
 )
 
 // Logs returns the last n lines of a container's log output.
@@ -19,7 +20,7 @@ import (
 // log API. Returns empty string if the log file does not exist.
 func (r *Runtime) Logs(_ context.Context, name string, tail int) string {
 	sandboxDir := r.sandboxDirForName(name)
-	logPath := filepath.Join(sandboxDir, "log.txt")
+	logPath := config.ContainerLogPath(sandboxDir)
 
 	data, err := os.ReadFile(logPath) //nolint:gosec // G304: path is always a trusted sandbox subpath
 	if err != nil {

@@ -1,0 +1,12 @@
+### --settle 0.05
+SHAPE                rounds      read_ms    stat_ms readdir_ms
+create               2               n/a        995         64
+### --settle 0.2
+SHAPE                rounds      read_ms    stat_ms readdir_ms
+create               2               n/a        998        215
+### --settle 0.5
+SHAPE                rounds      read_ms    stat_ms readdir_ms
+create               2               n/a        997        510
+### --settle 0.9
+SHAPE                rounds      read_ms    stat_ms readdir_ms
+create               2               n/a       1517        912

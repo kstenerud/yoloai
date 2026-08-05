@@ -87,6 +87,39 @@ func TestDowngradeGuidance(t *testing.T) {
 	}
 }
 
+// The downgrade route is offered for the blocks that need it and no others.
+// Every blocked op used to get it, which meant a refusal over a full disk, a
+// stopped backend or a running sandbox was answered with "go back a release,
+// recover your changes, then destroy and recreate those sandboxes" — advice
+// that costs work to fix something clearable where the operator stands, and
+// that contradicts the remedy the op's own Description had just given.
+func TestNeedsOlderRelease_OnlyForBlocksThatCannotBeClearedInPlace(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		ops  []yoloai.MigrationOp
+		want bool
+	}{
+		{"running sandbox — stop it, no downgrade", []yoloai.MigrationOp{
+			{Description: `sandbox "box" is running — stop it and re-run migrate`, Blocked: true}}, false},
+		{"not enough free space — no downgrade", []yoloai.MigrationOp{
+			{Description: "not enough free space: needs 4 GB", Blocked: true}}, false},
+		{"unreachable overlay state — downgrade is the only route", []yoloai.MigrationOp{
+			{Description: "sandbox state is owned by host subuids", Blocked: true, NeedsOlderRelease: true}}, true},
+		{"mixed — one op that needs it is enough", []yoloai.MigrationOp{
+			{Description: "running", Blocked: true},
+			{Description: "subuid-owned", Blocked: true, NeedsOlderRelease: true}}, true},
+		{"the flag alone does not qualify an unblocked op", []yoloai.MigrationOp{
+			{Description: "ordinary work", NeedsOlderRelease: true}}, false},
+		{"no ops at all", nil, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := needsOlderRelease(yoloai.MigrationPlan{Ops: tc.ops}); got != tc.want {
+				t.Errorf("needsOlderRelease = %v, want %v", got, tc.want)
+			}
+		})
+	}
+}
+
 func TestResolveApproval_ConfirmAccepted(t *testing.T) {
 	opts := planApplyOpts{in: strings.NewReader("y\n"), out: &bytes.Buffer{}, errw: &bytes.Buffer{}}
 	unmet := []yoloai.MigrationOp{{Description: "quarantine X", Destructive: true}}

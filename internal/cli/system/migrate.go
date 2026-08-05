@@ -82,14 +82,31 @@ func runSystemMigrate(cmd *cobra.Command) error {
 	// Refuse BEFORE any mutation if a sandbox can't be migrated (e.g. a rootless
 	// backend's host-unmanageable state): an irreversible schema bump would strand
 	// the user, unable to downgrade to a version that can fix the blocker.
-	if err := refuseIfBlocked(cmd.Context()); err != nil {
-		return err
+	//
+	// That refusal reads per-sandbox records, so it can only run first on a realm
+	// whose records the sealed ladder has already raised — which is every realm at
+	// the frozen ceiling or above, i.e. every install since v0.6.0. Below it the
+	// guard has nothing it can read, and running it there refused the migration on
+	// the grounds that the migration had not run yet (DF168). There the ladder goes
+	// first and the guard follows it, still ahead of every framework migrator and
+	// so still ahead of anything irreversible; what is conceded is only that the
+	// sealed ladder itself has already run when the refusal lands.
+	guardBeforeLadder := config.FrameworkPlanDerivable(cliutil.CurrentLibrarySchema())
+	if guardBeforeLadder {
+		if err := refuseIfBlocked(cmd.Context()); err != nil {
+			return err
+		}
 	}
 
 	// Frozen v0->v3 ladder, then the crash-safe framework (v3->v4 overlay flatten),
 	// plan/apply-gated, which stamps the realm to v4 last.
 	if err := applyFrozenLadder(cmd, sys); err != nil {
 		return err
+	}
+	if !guardBeforeLadder {
+		if err := refuseIfBlocked(cmd.Context()); err != nil {
+			return err
+		}
 	}
 	report, err := runPlanApply(cmd.Context(), opts)
 	if err != nil {

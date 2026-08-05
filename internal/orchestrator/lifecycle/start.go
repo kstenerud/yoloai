@@ -9,7 +9,6 @@ import (
 	"io"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"slices"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -177,7 +176,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Env
 	}
 
 	// Overwrite prompt.txt with new prompt; save old content for rollback.
-	promptPath := filepath.Join(sandboxDir, "prompt.txt")
+	promptPath := store.PromptFilePath(sandboxDir)
 	oldPrompt, _ := os.ReadFile(promptPath) //nolint:gosec // G304: promptPath is constructed from a validated sandbox name
 	if writeErr := fileutil.WriteFile(promptPath, []byte(promptText), 0600); writeErr != nil {
 		return "", false, fmt.Errorf("write prompt.txt: %w", writeErr)
@@ -384,6 +383,13 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 
 	meta, err := store.LoadEnvironment(sandboxDir)
 	if err != nil {
+		return err
+	}
+
+	// A booting guest holds no page cache from the previous one, so every name the
+	// old guest may have been caching is safe again. Clearing here is what makes
+	// "restart the sandbox" the real remedy the refusal message promises (DF175).
+	if err := store.ClearStaleNames(sandboxDir); err != nil {
 		return err
 	}
 

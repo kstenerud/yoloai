@@ -55,7 +55,7 @@ func Teardown(ctx context.Context, d state.Deps, name string) (warnings []string
 	// the name for reuse: Create keys "already exists" off the metadata, not the
 	// directory, so a leftover (e.g. root-owned overlay/VM state we can't delete)
 	// won't block re-creating with the same name.
-	_ = os.Remove(filepath.Join(sandboxDir, store.EnvironmentFile))
+	_ = os.Remove(store.EnvironmentFilePath(sandboxDir))
 
 	// Remove sandbox directory. Some files (e.g. Go module cache) are
 	// read-only, so make everything writable first.

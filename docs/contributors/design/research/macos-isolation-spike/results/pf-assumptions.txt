@@ -1,0 +1,70 @@
+host: 26.5.1 | A=enf-a(192.168.64.41) B=enf-b(192.168.64.42) | slots=32 | main=4
+
+== D0 BASELINE ==
+        six paths: 301 301 301 301 301 301 
+   PASS    all six reachable
+
+== D1 SCALE — a 32-slot pool, enforcing at a HIGH slot index (17) ==
+        loaded 64 filter rule(s), expected 64
+        A(slot 17): allow=301 deny=000 | B(unassigned): deny=301
+   PASS    32 slots load and a high slot index enforces; an unassigned sandbox is untouched
+
+== D2 CRITICAL — does reloading the ruleset FLUSH populated tables? ==
+        src_17 before reload: 192.168.64.41,
+        src_17 after reload : 192.168.64.41,   A->deny=000
+   PASS    table contents SURVIVE a ruleset reload and enforcement continues — a pool resize or
+           repair does not de-isolate running sandboxes
+
+== D3 CRITICAL — a stale entry in ANOTHER slot: does the sandbox inherit the wrong allowlist? ==
+        CONTROL, B in its own slot only: own=301 other=000
+   PASS    control holds: B has its own policy before the stale entry is introduced
+        with a stale entry in slot 0: own=000 other(A's allowlist)=301
+   FAIL    INHERITS THE WRONG ALLOWLIST: B lost its own policy and gained slot 0's. A stale entry
+           WIDENS a sandbox's reachable set, not merely blocks it — worse than documented
+
+== D4 EMPTY ALLOWLIST must fail CLOSED ==
+        B with an EMPTY dst table: allow=000 deny=000
+   PASS    empty allowlist fails CLOSED — no egress at all
+
+== D6 MISSING RULESET, POPULATED TABLES — Shape B's fail-open mode ==
+        rules flushed, src_1 still holds '192.168.64.42,': B->deny=301
+   PASS    confirms Shape B fails open the same way: membership without rules is unenforced, and
+           nothing distinguishes it from working isolation. VERIFY must check the RULES.
+
+== D7 REBOOT RESTORE at pool size, from a root-owned pinned file, unattended ==
+        rules before restore=0 after=64 (want 64)
+   PASS    the full 32-slot ruleset restores unattended from the pinned file
+
+== D5 GRANT COMPLETENESS — -T show, and multiple addresses in one call ==
+   PASS    -T show (reaping needs it) -> permit
+   PASS    single address add -> permit
+   PASS    THREE addresses in one call -> permit
+   PASS    read own rules -> permit
+   PASS    restore from pinned file -> permit
+   PASS    slot 31 (top of pool) -> permit
+   PASS    ESCAPE slot 32 (out of pool) -> refuse-by-policy
+   PASS    ESCAPE arbitrary table -> refuse-by-policy
+   PASS    ESCAPE ruleset from stdin -> refuse-by-policy
+   PASS    ESCAPE ruleset from another file -> refuse-by-policy
+   PASS    ESCAPE address list with a flag -> refuse-by-policy
+   PASS    ESCAPE table kill -> refuse-by-policy
+   PASS    ESCAPE disable pf -> refuse-by-policy
+   PASS    CONTROL: unlisted refused by policy
+        dst_1 after the multi-address add: 192.0.2.1,192.0.2.2,192.0.2.3,192.0.2.4,
+   PASS    multiple addresses in one call landed — a 40-IP allowlist is not 40 sudo calls
+
+== D8 SHAPE A — does '-s Anchors' actually enumerate sub-anchors? ==
+        -s Anchors output:   com.apple/yoloai_probe/kid1   com.apple/yoloai_probe/kid2 
+   PASS    '-s Anchors' lists sub-anchors — Shape A's reaping enumeration works as assumed
+   PASS    main ruleset unchanged (4)
+
+== TOTALS ==
+   pass=24 fail=1 unknown=0
+
+== cleanup ==
+   anchor rules=0
+   main ruleset: before=4 after=4
+   sudoers probe present: no
+   A restored: allow=301 deny=301
+   B restored: allow=301 deny=301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-assumptions.txt

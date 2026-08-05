@@ -38,11 +38,16 @@ func runYoloaiInDir(t *testing.T, dir string, args ...string) (stdout, stderr st
 	return outBuf.String(), errBuf.String(), exitCode
 }
 
-// sandboxLogsDir returns the logs directory for a sandbox using the current HOME env var.
+// sandboxLogsDir returns the logs directory for a sandbox using the current HOME
+// env var. It is spelled out rather than composed from the path builders,
+// deliberately: this is an end-to-end test driving the real binary, so it should
+// state where the logs are expected to be and fail if they move, not follow the
+// production code wherever it goes. It is the read-write tier — logs are
+// guest-written.
 func sandboxLogsDir(t *testing.T, name string) string {
 	t.Helper()
 	home := os.Getenv("HOME")
-	return filepath.Join(home, ".yoloai", "library", "sandboxes", name, "logs")
+	return filepath.Join(home, ".yoloai", "library", "sandboxes", name, "rw", "logs")
 }
 
 // TestE2E_Debug_WritesCLIJSONL verifies that --debug causes debug-level entries in cli.jsonl.

@@ -21,7 +21,146 @@ so a tag left the *shipped* version's section on top, reading exactly like an op
 separate agents filed an entry into a frozen section that way, and neither hit a merge
 conflict — a misfile lands cleanly and silently.
 
+**A break is measured against the last *published release*, never against `main` and never
+against an earlier commit on your own branch.** This is what decides whether an entry belongs
+here at all, so it is the first question, not a detail. A behaviour introduced and then changed
+again before the release ships was never promised to anyone: no user ran it, so nothing was
+withdrawn and there is no entry to write. The same applies to the commit subject's `!` — mark it
+against what users have, not against what the branch had an hour ago. Getting this wrong in the
+cautious direction still costs something real: it inflates the release's apparent breakage,
+escalates the version on a promise nobody lost, and makes `git log --grep '!:'` stop being a
+usable index of what actually broke (DF184).
+
 ## Unreleased
+
+## v0.11.0
+
+### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running
+
+**Previous behavior:** `yoloai files <box> rm f` followed by `yoloai files <box> put f` succeeded and
+exited 0. On the **tart** backend, if the sandbox had already read `f`, the guest then served the
+**removed file's** contents for that name — the agent operated on bytes that were on nobody's disk,
+with every layer reporting success.
+
+**New behavior:** on backends whose guest caches the shared directory (tart today), the second `put`
+is **rejected** with an error naming both remedies: use a different name, or restart the sandbox.
+The same guard covers the MCP file-write tool. `start` clears the record, so a restart genuinely
+releases the name. Other backends are unaffected, and an ordinary in-place overwrite still works
+everywhere.
+
+**Who this affects:** anyone scripting a remove-then-replace of the same exchange filename against a
+tart sandbox. Write to a new name instead — that is the operation Apple documents as supported — or
+restart between the two.
+
+**Why it changed:** DF175. Apple lists both "modify in place, host → guest" and "delete, host →
+guest" as unsupported for virtiofs shares (Feedback FB22905515), and no host-side repair reaches
+it — two were built and measured before this. Rejecting an operation the platform cannot perform
+correctly beats performing it and being wrong in silence.
+
+### `yoloai files put --overwrite <dir>` replaces the directory instead of merging into it
+
+**Previous behavior:** re-importing a directory copied the source *inside* the existing one, because
+`cp -rp src dst` treats an existing directory dst as a destination to copy into. A second
+`files put --overwrite bundle/` produced `files/bundle/bundle/…` while `files/bundle/*` kept the
+**old** content — and exited 0. The flag did not overwrite.
+
+**New behavior:** an existing directory is removed before the copy, so the result is the source
+tree and nothing else. Files the source no longer contains are gone rather than left behind.
+Single files are unaffected (`cp` already truncated those in place).
+
+**Who this affects:** anyone relying on the merge — accumulating files in a sandbox's exchange
+directory by repeatedly putting the same directory name. That now discards anything not in the
+source. Put the individual files, or use distinct directory names.
+
+**Why it changed:** DF177. "Overwrite" that silently merges and nests is not a behaviour anyone
+chose; it was `cp` semantics leaking through a flag that promises the opposite.
+
+### macOS: a backend that cannot be reached is an error, not a "removed" sandbox
+
+**Previous behavior:** on the `apple` and `tart` backends, *any* failure to inspect an instance was
+reported as "no such instance". So with the apple `container` service stopped, `yoloai ls` listed
+every intact sandbox as `removed`, and `yoloai destroy <name>` printed `Destroyed <name>`, exited 0
+and dropped the store entry — while the container was still there when the service came back.
+
+**New behavior:** "the daemon says no such container" and "the daemon could not be asked" are
+distinguished. Only the first still reads as removed. The second surfaces the backend's own error,
+so `yoloai ls` and `yoloai destroy` now **fail loudly** where they previously succeeded with a
+wrong answer.
+
+**Who this affects:** anyone running the apple backend with the `container` service stopped — which
+is its state after **every reboot**, because the service is not registered with launchd. If you
+have scripted around `removed` appearing after a restart, that reading was never true; the fix is
+`container system start` before the command. Scripts that parse `yoloai ls --json` should expect a
+non-zero exit instead of a `removed` row when the backend is down.
+
+**Why it changed:** DF180. The old behaviour lost containers silently, and it corrupted this
+project's own reboot research before it was caught — a test run recorded both sandboxes as
+destroyed by a reboot when the daemon was simply not running.
+
+### `Files.WriteFile` takes a `context.Context` (Go embedding surface)
+
+**Previous behavior:** `func (f *Files) WriteFile(rel string, data []byte) error` — a pure
+host-filesystem write, needing no backend and therefore no context.
+
+**New behavior:** `func (f *Files) WriteFile(ctx context.Context, rel string, data []byte) error`.
+Writing into the exchange directory is no longer purely host-side: when the write **replaces** an
+existing entry, it now verifies the bytes actually reached a running sandbox and repairs the
+guest's view if they did not (DF175 — a tart guest can serve the OLD bytes at the NEW size, with a
+successful read and no error at any layer). That check execs into the guest, so it needs a context
+to be cancellable and to carry a deadline. `Import` and `Export` already took one; this brings the
+third writer into line.
+
+**Who this affects:** embedders calling `Files.WriteFile` directly. The migration is mechanical —
+pass the context you already have, or `context.Background()`. A caller that passes an already-
+cancelled context now gets an error where the write would previously have succeeded; that is the
+point of the parameter. No behavior changes for any backend other than tart, where a replacement
+write into a *stopped* sandbox also remains an unconditional no-op.
+
+
+### `store.OverlayLowerDir` is removed (Go embedding surface)
+
+**Previous behavior:** the `store` package exported `OverlayLowerDir(sandboxDir, hostPath)`,
+returning `<sandboxDir>/work/<caret-encoded-path>/lower/` — where an `:overlay` sandbox
+bind-mounted the user's original workdir read-only.
+
+**New behavior:** the function is gone. `:overlay` was removed as a mount mode in v0.6.0, and
+this helper survived only because `yoloai system migrate`'s v3→v4 flatten still read that
+directory to rebuild an abandoned overlay sandbox from its pristine lower. The migrator now
+resolves it through `internal/config/pretier`, which freezes the pre-tier on-disk layout, so
+nothing addresses an overlay path through the live layout builders any more — the point being
+that an overlay path is frozen twice over (pre-`:overlay`-retirement *and* pre-tiering) and must
+never follow a layout that has since moved.
+
+**Who this affects:** embedders that called it directly. Nothing else in the public surface
+changes, and no on-disk data is touched — the directory it named still exists inside any
+un-migrated overlay sandbox, and `yoloai system migrate` still reads it.
+
+**If you need it:** it is one `filepath.Join`, and it addresses a layout no supported sandbox
+has been written in since v0.6.0. Spell it literally rather than deriving it from a current
+path builder, for the reason above.
+
+### On Seatbelt, a `:ro` directory is now genuinely read-only
+
+**Previous behavior:** `--dir <path>:ro` on the Seatbelt backend granted the agent
+read *and write* whenever `<path>` fell inside a broader rule that granted write —
+`/tmp`, `/private/tmp`, the per-user temp tree (`/private/var/folders`),
+`~/Library/Caches/org.swift.swiftpm`, `~/Library/Developer/Xcode`, the sandbox
+directory, or any enclosing `:rw` directory. Elsewhere `:ro` behaved correctly, so
+the difference was invisible unless you tested it on one of those paths. Every other
+backend was, and is, unaffected.
+
+**New behavior:** the generated SBPL profile emits an explicit write deny for each
+read-only directory, so `:ro` is enforced regardless of what else the profile grants.
+Nesting still resolves most-specific-first: a `:rw` directory inside a `:ro` one stays
+writable, and a `:ro` directory inside a `:rw` one is now genuinely read-only.
+
+**Why this is listed as a break:** writes that previously succeeded now fail. If a
+workflow depended — knowingly or not — on writing into a `:ro` directory on one of the
+paths above, it stops working. The old behavior was a defect (DF162), but it was
+observable, so the change is called out rather than filed silently as a fix.
+
+**If you need write access:** declare the directory `:rw`, which is what the previous
+behavior was silently giving you.
 
 ### The sandbox image ships Node.js 22 LTS instead of Node.js 20
 
@@ -53,6 +192,51 @@ sandboxes on that profile.
 that Dockerfile to `<data-dir>/defaults/base-image.Dockerfile` (refreshed whenever a
 sandbox is created). It is a reference only — its own header says so — because the
 build reads the embedded copy, never the disk.
+### A sandbox directory is now three tiers: `host/`, `ro/` and `rw/`
+
+**Previous behavior:** a sandbox directory was flat. `environment.json`,
+`sandbox-state.json`, `agent.json`, `netpolicy.json`, `network-diag.txt`,
+`context.md`, the injector's `injector.json` / `injector.log` / `injector-token`,
+and the `backend/` directory (SBPL profile, pid files, VM and CNI state) all sat
+at `<dataDir>/sandboxes/<name>/`, alongside everything the in-sandbox agent needs.
+On tart and Seatbelt the whole sandbox directory is shared into the guest
+read-write, so those four records were agent-writable — the root of DF136
+(rewrite `environment.json`'s `HostPath` and a host-side `apply` writes wherever
+that path points) and DF148.
+
+**New behavior:** they all live under `<dataDir>/sandboxes/<name>/host/`, the
+host-only access tier, which is never shared into a guest on any backend. The tier is a
+physical directory, so a record's guest-access class is determined by where it
+sits rather than by a list that has to be maintained. Nothing in any guest ever
+read these files, so no in-sandbox behavior changes.
+
+**And the other two tiers move with them.** `runtime-config.json`, `bin/`,
+`prompt.txt`, `resume-prompt.txt`, `machine-id`, `home-seed/` and `secrets/` go to
+`ro/`, which the guest reads and must not write; `logs/`, `work/`, `files/`,
+`cache/`, `agent-runtime/`, `agent-status.json`, `log.txt`, `tmux/`, `vscode-cli/`,
+`lifecycle-on-create-done`, the guest's `home/`, and tart's `setup.log` and
+`xcodebuild-firstlaunch.log`/`.started` go to `rw/`. A sandbox root now holds
+exactly those three directories and nothing else, so there is no un-tiered place
+to put a new file. (`internal/config`'s `entryTiers` is the authoritative table,
+and `architecture/host-layout.md` draws the whole tree.)
+
+**The guest still sees one flat root.** Each backend assembles the flat view the
+in-sandbox scripts already expect, so nothing inside a sandbox changes — no agent
+command, path or script is affected.
+
+**Impact:** the on-disk layout changed, so sandboxes created by an earlier version
+must be migrated. `yoloai system migrate` does it, and it is not a per-file
+shuffle in place: it duplicates the whole `sandboxes/` tree, verifies the copy,
+and swaps it in, so a failure leaves the original untouched. **That needs free
+space equal to twice your sandboxes tree**, which `system migrate --check`
+reports up front, and it leaves the displaced copy in `<dataDir>/trash/` until you
+delete it. An entry nobody has classified is moved to `host/` — the direction that
+can only remove guest access rather than grant it — and named in the plan.
+
+`Sandbox.EnvironmentPath()` returns the new location; embedders that build any
+per-sandbox path themselves rather than calling the accessor must be updated, and
+that now includes anything reaching into `backend/` (`profile.sb`, `pid`,
+`instance.json`), `work/`, or `logs/`.
 
 ## v0.10.0
 

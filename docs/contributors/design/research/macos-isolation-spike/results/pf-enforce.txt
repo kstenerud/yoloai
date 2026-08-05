@@ -1,0 +1,70 @@
+>>> POST-HOC ANALYSIS — added after the run. Raw output below the divider is unedited.
+>>>
+>>> [1] E6's SECOND verdict — "rdr in a sub-anchor is INERT" — WAS VACUOUS WHEN PRINTED.
+>>>     The interface name came from ifconfig's $1, which carries a trailing colon
+>>>     ("bridge101:"), so the rdr rule was a syntax error and NEVER LOADED. E5 caught this
+>>>     and said UNKNOWN; E6 piped the same error to /dev/null and measured "no effect" from
+>>>     a rule that did not exist. This is the A22 trap — a load that silently no-ops is
+>>>     indistinguishable from one that is inert — walked into by a harness whose sibling
+>>>     carries a comment warning about it.
+>>>     The claim was re-tested properly in pf-rdr.txt, which asserts the rule LOADED before
+>>>     measuring any effect. It came out TRUE, but for reasons this run did not establish:
+>>>     rdr is EVALUATED when loaded directly into com.apple/yoloai_* (301 -> 000) and INERT
+>>>     in a sub-anchor of a filter-only parent (301 -> 301). Cite pf-rdr.txt, never this.
+>>>
+>>> [2] E6's FIRST verdict is sound — sub-anchor filter rules loaded (rules=2) and enforced
+>>>     with B unaffected. That is what makes dynamic per-sandbox rules viable.
+>>>
+>>> [3] E1's FAIL on the OUT form is the test working, not a defect: pf NATs outbound, so a
+>>>     rule filtering `out` sees the host's address as source and matches nothing. Recorded
+>>>     because an earlier draft of the plan proposed exactly that form.
+>>>
+>>> [4] E0-E4 are all sound and are the core enforcement proof for the design.
+>>> ---------------------------------------------------------------------------------
+
+host: 26.5.1 | pf: Status: Enabled for 55 days 17:38:27          Debug: Urgent
+A=enf-a(192.168.64.27)  B=enf-b(192.168.64.28)  allow=1.1.1.1 deny=1.0.0.1
+
+== E0 BASELINE — both sandboxes reach both destinations with no rules loaded ==
+        A: allow=301 deny=301 | B: allow=301 deny=301
+   PASS    baseline egress works everywhere — later 'blocked' readings are meaningful
+
+== E1 WHICH RULE FORM ACTUALLY FILTERS? ==
+        [IN+quick (proposed)] rules=2  A->allow=301  A->deny=000
+   PASS    IN+quick (proposed) ENFORCES: deny blocked, allow still passes (the pass override works)
+        [OUT+last-match (earlier draft)] rules=2  A->allow=301  A->deny=301
+   FAIL    OUT+last-match (earlier draft) matches nothing — sandbox fully unfiltered (fail-open)
+
+== E2 PER-SANDBOX SCOPING — B must be untouched while A is filtered ==
+        A->deny=000 | B->deny=301 B->allow=301
+   PASS    scoped to A only — B on the same bridge is unaffected
+
+== E3 TEARDOWN — removing A from the table restores it, with no rule reload ==
+        after table delete: A->deny=301
+   PASS    table delete alone restores egress — teardown needs no rule reload
+
+== E4 STALE-ENTRY HAZARD — an orphaned address blocks whoever inherits it ==
+        B with a stale entry naming its address: B->deny=000
+   PASS    confirmed: an orphaned entry silently denies its next occupant — reaping is correctness
+
+== E5 IS rdr IN OUR ANCHOR ACTUALLY EVALUATED? (the stdin form's condemnation) ==
+        A is on host interface: bridge101:
+        pfctl: stdin:1: syntax error
+        pfctl: pfctl: Syntax error in config file: pf rules not loaded
+        rdr rules in anchor=0 | A->deny before=301 after=301
+   UNKNOWN inconclusive (pre=301 post=301 loaded=0)
+
+== E6 NESTED FILTER-ONLY SUB-ANCHOR — dynamic rules without the slot cap? ==
+        sub-anchor rules=2 | A->allow=301 A->deny=000 | B->deny=301
+   PASS    sub-anchor filter rules ENFORCE and stay scoped — dynamic per-sandbox rules are viable
+        after rdr into sub-anchor: A->allow=301 (was 301)
+   PASS    rdr in a sub-anchor is INERT — a filter-only parent contains the stdin grant
+
+== TOTALS ==
+   pass=7 fail=1 unknown=1  winner=IN
+
+== cleanup ==
+   anchor rules remaining: 0
+   pf status: Status: Enabled for 55 days 17:39:00          Debug: Urgent
+   A egress restored: allow=301 deny=301
+   results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-enforce.txt

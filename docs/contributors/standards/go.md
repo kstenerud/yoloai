@@ -357,6 +357,61 @@ func (mgr *Manager) StartWithOptions(ctx context.Context, name string, opts Star
 
 Keep both layers in the same package. Don't split them into separate packages — that forces callers to import two packages for one concept.
 
+### Readers do not mutate
+
+A function that reads state writes nothing — no file, no directory, no backfill, no repair. `Load*`,
+`Read*`, `Get*`, `*Status`, `Detect*` and their kin observe; `Save*`, `Write*`, `Ensure*`,
+`Create*`, `Migrate*` change things. A caller must be able to tell which it is from the name, at the
+call site, without opening the function.
+
+This generalizes D61's no-write-on-read rule, which so far has been stated only for migration
+(`store.LoadEnvironment` balks with `ErrNeedsMigration` rather than migrating a stale record, and
+`config.RealmStatus` inspects without touching). The rule is not really about migration. It is about
+being able to point a reader at a directory — a scratch tree, a backup, another user's realm, a
+read-only mount — and know the directory is the same afterwards.
+
+Two consequences worth stating, because both are easy to violate by accident:
+
+- **Directory creation counts as mutation.** `config.EnsureHostTier` belongs in `Save*` paths only;
+  today every call site is one, and that is a property to keep rather than a coincidence.
+- **Get-or-create is legitimate, but must be named for it.** `broker.PlaceholderToken` generates and
+  persists a token on first call. The behaviour is right and its docstring says so, but the name
+  reads as a pure accessor, which is the failure this rule is trying to prevent. New code in that
+  shape gets an `Ensure`-style name.
+
+Why it earns a standard rather than a habit: a reader that quietly writes turns "inspect this tree"
+into "modify this tree", and the callers who care most — audits, dry-runs, `--check`, and the
+pre-commit verification in
+[migration-by-duplication.md](../archive/plans/migration-by-duplication.md) — are exactly the ones
+that have no way to notice.
+
+### A migrator addresses the layout of its own era
+
+A migrator never builds a path with the live path builders (`store.EnvironmentFilePath`,
+`store.WorkDir`, `config.*Path`). It reads and writes the layout of the version it is migrating
+*from*, which by definition is not the layout the current build uses. The frozen forms live in
+[`internal/config/pretier`](../../../internal/config/pretier/pretier.go) — literal paths, deliberately
+not expressed in terms of the live builders, because their whole job is to keep pointing where the
+current layout no longer does.
+
+Reads and writes are pinned **together**. A migrator that reads the old location and writes the new
+one leaves the record its own version check re-reads untouched, so the sandbox re-migrates on every
+run, forever — and a migrator with an external side effect (`PrincipalRename` renames containers)
+repeats that side effect every time.
+
+The failure this prevents is silent in both directions. A migrator pointed at the wrong layout does
+not error: it finds nothing, reports "nothing to migrate", and lets the realm stamp the new schema
+over sandboxes it never converted — after which the gate reads the realm as current and never routes
+back to `system migrate`, which is the only thing that could have fixed it.
+
+**And the tests are half the rule: a migrator's fixtures are literals too.** A fixture built with the
+same builder the migrator reads with cannot fail, whatever the layout does — the two agree with each
+other while both disagree with every sandbox on disk. That is not hypothetical: the v5→v6 tier move
+broke all three pre-v6 migrators with the entire suite green, because a well-meaning commit had
+updated the fixtures to follow the move (DF164). Fixtures do not use `pretier` either; pinning them
+to the module the code reads with re-closes the same loop, and the literals are what would catch
+`pretier` itself being "helpfully" rewritten in terms of the live builders.
+
 ## Code Organization Patterns
 
 - **Accept interfaces, return structs** — define interfaces at the point of consumption, not alongside the implementation

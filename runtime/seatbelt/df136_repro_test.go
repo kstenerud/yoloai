@@ -1,7 +1,7 @@
 //go:build integration
 
-// ABOUTME: DF136 reproduction — proves end-to-end that a process confined by the
-// ABOUTME: REAL seatbelt profile can rewrite environment.json to redirect apply.
+// ABOUTME: DF136 regression guard — proves end-to-end that a process confined by
+// ABOUTME: the REAL seatbelt profile can no longer rewrite the environment record.
 
 package seatbelt
 
@@ -27,21 +27,30 @@ import (
 // environment, per DEV §12 (mirrors gitProfileTestEnv).
 var sandboxExecEnv = []string{"PATH=/usr/bin:/bin"}
 
-// TestDF136_ConfinedAgentRedirectsApplyTarget executes the full DF136 chain
-// against real production code, not a hand-rolled model of it:
+// TestDF136_ConfinedAgentCannotRedirectApplyTarget was the DF136 reproduction and
+// is now its regression guard: same chain, same real production code, opposite
+// verdict at link A.
 //
-//	Link A (guest can write the record): a process launched under the REAL
-//	  seatbelt profile (GenerateProfile) overwrites environment.json, choosing a
-//	  new HostPath. Proves the confinement permits it at runtime — not merely
-//	  that the profile text grants write.
-//	Link B (host trusts it verbatim): store.LoadEnvironment reads the tampered
-//	  record with no integrity check, and git.NewHost().ApplyPatch writes the
-//	  patch to the attacker-chosen HostPath. Proves the redirect reaches the
-//	  filesystem via the exact host-apply call copyflow.ApplyAll makes.
+//	Link A (was: guest can write the record): a process under the REAL seatbelt
+//	  profile tries to overwrite the environment record and is now DENIED by the
+//	  host-tier deny (writeProfileHostTierDeny). Until 2026-07-30 this write
+//	  succeeded, which is what the finding was.
+//	Link B (host trusts the record verbatim): unchanged and still true —
+//	  store.LoadEnvironment performs no integrity check. That is deliberately
+//	  still exercised, because it is the reason link A has to hold: the host will
+//	  act on whatever the record says, so the whole defence is that the record
+//	  cannot be edited. The apply now lands in the legit dir and the victim dir is
+//	  untouched.
+//
+// Two controls keep the pass honest, since "everything is denied" would satisfy
+// link A on its own: a write outside the sandbox dir must still be denied
+// (confinement is real), and a write to a non-host-tier path inside the sandbox
+// dir must still succeed (the deny is scoped to the tier, and sandbox-exec is
+// not simply broken).
 //
 // The one thing it does NOT spin up is the copyflow orchestration wrapper and a
 // live guest work copy; those only sequence the two real calls exercised here.
-func TestDF136_ConfinedAgentRedirectsApplyTarget(t *testing.T) {
+func TestDF136_ConfinedAgentCannotRedirectApplyTarget(t *testing.T) {
 	if !isMacOS() {
 		t.Skip("seatbelt requires macOS; structurally impossible on this platform")
 	}
@@ -55,7 +64,7 @@ func TestDF136_ConfinedAgentRedirectsApplyTarget(t *testing.T) {
 	require.NoError(t, os.MkdirAll(home, 0o750))
 
 	sandboxDir := filepath.Join(root, "sandbox")
-	require.NoError(t, os.MkdirAll(filepath.Join(sandboxDir, config.BackendDirName), 0o750))
+	require.NoError(t, os.MkdirAll(config.BackendPath(sandboxDir), 0o750))
 
 	// legitDir is where the sandbox was legitimately created against; victimDir
 	// is an unrelated host path the agent has no business writing (stand-in for
@@ -88,38 +97,50 @@ func TestDF136_ConfinedAgentRedirectsApplyTarget(t *testing.T) {
 	tamperedSrc := filepath.Join(root, "tampered.json")
 	stageTamperedEnvironment(t, tamperedSrc, victimDir)
 
-	envPath := filepath.Join(sandboxDir, store.EnvironmentFile)
+	envPath := store.EnvironmentFilePath(sandboxDir)
+	before := readFile(t, envPath)
 	out, err := sysexec.Command(sandboxExecEnv, sbExec,
 		"-f", profilePath, "/bin/cp", tamperedSrc, envPath).CombinedOutput()
-	require.NoErrorf(t, err, "confined write should succeed (DF136); output: %s", out)
+	require.Errorf(t, err, "the confined write into the host tier must be DENIED (DF136); output: %s", out)
+	assert.Equal(t, before, readFile(t, envPath), "the record must be byte-identical after the denied write")
 
-	// Control: the confinement is genuinely enforcing. Under the SAME real
-	// profile, a direct write to the victim dir is denied — so the only lever
-	// the attack has is that environment.json sits inside the writable grant.
+	// Control 1: the confinement is genuinely enforcing. Under the SAME real
+	// profile, a direct write to the victim dir is denied.
 	err = sysexec.Command(sandboxExecEnv, sbExec,
 		"-f", profilePath, "/bin/cp", tamperedSrc, filepath.Join(victimDir, "proof")).Run()
 	require.Error(t, err, "direct write outside the sandbox dir must be denied (confinement is real)")
 	assert.NoFileExists(t, filepath.Join(victimDir, "proof"))
 
-	// --- Link B: the host loads the tampered record with no integrity check. ---
-	meta, err := store.LoadEnvironment(sandboxDir)
-	require.NoError(t, err, "LoadEnvironment accepts the tampered record without complaint")
-	require.Equal(t, victimDir, meta.Dir("").HostPath,
-		"the loaded workdir HostPath is now the attacker's choice")
+	// Control 2: the deny is scoped to the tier, not to the sandbox dir. Without
+	// this, a profile that denied everything would satisfy the assertion above.
+	// The read-write tier, not the sandbox root: since tiering, the root is
+	// granted nothing and only the tiers carry access, so a control that wrote
+	// to the root would be asserting a property the profile no longer states.
+	allowed := config.AgentStatusPath(sandboxDir)
+	require.NoError(t, os.MkdirAll(filepath.Dir(allowed), 0o750))
+	err = sysexec.Command(sandboxExecEnv, sbExec,
+		"-f", profilePath, "/bin/cp", tamperedSrc, allowed).Run()
+	require.NoError(t, err, "the read-write tier must stay writable — the deny covers host/ only")
 
-	// --- Link B: the host apply writes to that attacker-chosen path. ---
-	patch := buildPatch(t, victimDir, "original victim\n", "OWNED by the sandbox agent\n")
+	// --- Link B: the host still trusts the record verbatim, which is WHY link A
+	// has to hold. LoadEnvironment has no integrity check; it simply reads what
+	// is there — and what is there is still the legitimate path.
+	meta, err := store.LoadEnvironment(sandboxDir)
+	require.NoError(t, err)
+	require.Equal(t, legitDir, meta.Dir("").HostPath,
+		"the loaded workdir HostPath must be the one create wrote, not the attacker's")
+
+	// --- Link B: the host apply therefore lands where it should. ---
+	patch := buildPatch(t, legitDir, "hello legit\n", "applied to the legit dir\n")
 
 	hostGit := git.NewHost(config.NewLayout(filepath.Join(root, ".yoloai")))
 	target := meta.Dir("").HostPath
 	require.NoError(t, hostGit.ApplyPatch(context.Background(), patch, target, git.IsGitRepo(target)))
 
-	got := readFile(t, filepath.Join(victimDir, "file.txt"))
-	assert.Equal(t, "OWNED by the sandbox agent\n", got,
-		"the patch landed in the victim dir the confined agent redirected to")
-
-	// And the legit dir the sandbox was created against is untouched.
-	assert.Equal(t, "hello legit\n", readFile(t, filepath.Join(legitDir, "file.txt")))
+	assert.Equal(t, "applied to the legit dir\n", readFile(t, filepath.Join(legitDir, "file.txt")),
+		"the patch landed in the dir the sandbox was created against")
+	assert.Equal(t, "original victim\n", readFile(t, filepath.Join(victimDir, "file.txt")),
+		"the victim dir the attack aimed at is untouched")
 }
 
 func writeEnvironment(t *testing.T, sandboxDir, workdirHostPath string) {
@@ -142,9 +163,9 @@ func stageTamperedEnvironment(t *testing.T, path, victimHostPath string) {
 	// the confined process just copies pre-formed content.
 	tmpDir := t.TempDir()
 	writeEnvironment(t, tmpDir, victimHostPath)
-	data, err := os.ReadFile(filepath.Join(tmpDir, store.EnvironmentFile)) //nolint:gosec // test path in temp dir
+	data, err := os.ReadFile(store.EnvironmentFilePath(tmpDir))
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(path, data, 0o600)) //nolint:gosec // test path in temp dir
+	require.NoError(t, os.WriteFile(path, data, 0o600)) //nolint:gosec // G703: path is this test's own staging file under t.TempDir
 
 }
 

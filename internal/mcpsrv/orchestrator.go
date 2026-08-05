@@ -156,12 +156,12 @@ func (cs *clientService) ReadFile(_ context.Context, name, rel string) ([]byte, 
 
 // WriteFile writes data to a file in the sandbox's file-exchange directory.
 // Path containment is enforced by the library.
-func (cs *clientService) WriteFile(_ context.Context, name, rel string, data []byte) error {
+func (cs *clientService) WriteFile(ctx context.Context, name, rel string, data []byte) error {
 	sb, err := cs.client.Sandbox(name)
 	if err != nil {
 		return err
 	}
-	return sb.Files().WriteFile(rel, data)
+	return sb.Files().WriteFile(ctx, rel, data)
 }
 
 // CacheDir returns the host-side path to the sandbox's cache directory.

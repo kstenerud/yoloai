@@ -82,6 +82,21 @@ func refuseIfBlocked(ctx context.Context) error {
 // prior yoloai release that still reads the data dir at its current schema, fix
 // them there, then upgrade again. It names concrete release tags when the schema
 // is known (see config.PriorReleaseRange).
+// needsOlderRelease reports whether any blocked op in plan can only be cleared
+// from an older release. The audit offers that route for those and no others:
+// most blocks name their own fix in the op's Description ("stop it", "start the
+// backend", "free some space"), and appending "go back a version, then destroy
+// and recreate those sandboxes" underneath a full-disk refusal is advice that
+// costs work to fix something the operator can clear where they stand.
+func needsOlderRelease(plan yoloai.MigrationPlan) bool {
+	for _, op := range plan.Ops {
+		if op.Blocked && op.NeedsOlderRelease {
+			return true
+		}
+	}
+	return false
+}
+
 func downgradeGuidance(onDiskSchema int) string {
 	from, to, ok := config.PriorReleaseRange(onDiskSchema)
 	var target string
@@ -143,6 +158,12 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 	// on an un-relocated flat v0 install the sandboxes are still at TOP/sandboxes,
 	// not the namespaced location opts.sys is rooted at. (The apply path relocates
 	// first, so its plan read via opts.sys is already correct.)
+	// A realm below the frozen ceiling has no framework plan yet — see
+	// config.FrameworkPlanDerivable. Reporting that is the audit's honest answer;
+	// deriving it anyway is what made --check fail on the oldest installs (DF168).
+	if !config.FrameworkPlanDerivable(cliutil.CurrentLibrarySchema()) {
+		return previewDeferredPlan(opts, cliSt, libSt)
+	}
 	planSys, err := cliutil.MigratePreviewSystem()
 	if err != nil {
 		return err
@@ -151,7 +172,7 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 	if err != nil {
 		return err
 	}
-	blocked := len(plan.BlockedDescriptions()) > 0
+	blocked := needsOlderRelease(plan)
 	if opts.json {
 		payload := map[string]any{
 			"cli_realm":      statusString(cliSt),
@@ -166,7 +187,7 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 	if _, err := fmt.Fprintf(opts.out, "CLI realm:     %s\nLibrary realm: %s\n", statusString(cliSt), statusString(libSt)); err != nil {
 		return err
 	}
-	if err := renderPlanHuman(opts, plan); err != nil {
+	if err := renderPlanHuman(opts, plan, emptyPlanNote(cliSt, libSt)); err != nil {
 		return err
 	}
 	if blocked {
@@ -175,6 +196,32 @@ func previewMigration(ctx context.Context, opts planApplyOpts, cliSt, libSt conf
 		}
 	}
 	return nil
+}
+
+// deferredPlanNote explains why --check has no framework plan to show. It is a
+// statement about ordering, not a warning: the migration itself runs both halves
+// in one command, so nothing is asked of the reader.
+const deferredPlanNote = "not yet derivable — the sealed v0->v3 ladder runs first, and the " +
+	"framework migrators plan against the records it produces. `yoloai system migrate` runs both, " +
+	"in that order."
+
+// previewDeferredPlan renders the --check/--dry-run audit for a realm below the
+// frozen ceiling: realm status, and the reason the framework half of the plan is
+// absent rather than empty. An empty plan would read as "nothing to do", which is
+// the one thing it does not mean here.
+func previewDeferredPlan(opts planApplyOpts, cliSt, libSt config.LayoutStatus) error {
+	if opts.json {
+		return cliutil.WriteJSON(opts.out, map[string]any{
+			"cli_realm":              statusString(cliSt),
+			"library_realm":          statusString(libSt),
+			"framework_plan":         nil,
+			"framework_plan_pending": deferredPlanNote,
+		})
+	}
+	_, err := fmt.Fprintf(opts.out,
+		"CLI realm:     %s\nLibrary realm: %s\nFramework plan: %s\n",
+		statusString(cliSt), statusString(libSt), deferredPlanNote)
+	return err
 }
 
 func statusString(s config.LayoutStatus) string {
@@ -190,17 +237,35 @@ func statusString(s config.LayoutStatus) string {
 	}
 }
 
+// noPendingOpsNote is the empty-plan wording when nothing about the realms'
+// state qualifies it — the apply path, where the outcome line follows anyway.
+const noPendingOpsNote = "No pending framework migrations."
+
+// emptyPlanNote says what an empty plan means for THESE realms, because the two
+// meanings are opposite and the reader cannot tell them apart. With every realm
+// current it means "nothing to do"; with a realm out of date it means the realm
+// is raised by a version stamp alone, no sandbox tree needing restructuring —
+// and printing the unqualified wording directly beneath "Library realm: needs
+// migration" reads as a contradiction in the one command whose whole job is to
+// tell an operator what is about to happen.
+func emptyPlanNote(cliSt, libSt config.LayoutStatus) string {
+	if cliSt != config.LayoutMigrate && libSt != config.LayoutMigrate {
+		return noPendingOpsNote
+	}
+	return "No sandbox needs restructuring — the realm is brought up to date by a schema version stamp alone."
+}
+
 // renderPlan prints the plan (JSON or human), destructive ops flagged.
 func renderPlan(opts planApplyOpts, plan yoloai.MigrationPlan) error {
 	if opts.json {
 		return cliutil.WriteJSON(opts.out, plan)
 	}
-	return renderPlanHuman(opts, plan)
+	return renderPlanHuman(opts, plan, noPendingOpsNote)
 }
 
-func renderPlanHuman(opts planApplyOpts, plan yoloai.MigrationPlan) error {
+func renderPlanHuman(opts planApplyOpts, plan yoloai.MigrationPlan, emptyNote string) error {
 	if len(plan.Ops) == 0 {
-		_, err := fmt.Fprintln(opts.out, "No pending framework migrations.")
+		_, err := fmt.Fprintln(opts.out, emptyNote)
 		return err
 	}
 	for _, op := range plan.Ops {

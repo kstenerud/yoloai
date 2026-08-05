@@ -1,0 +1,48 @@
+=== DF175 residual gap: files rm + files put of the same name ===
+date    : 2026-08-04 15:50:26
+backend : tart
+sandbox : gate-removed
+creating tart sandbox gate-removed (this takes a few minutes)
+Warning: using OAuth credentials from ~/.claude/.credentials.json
+  These tokens expire after ~30 minutes and may fail in long-running sessions.
+  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.
+
+Sandbox gate-removed created
+  Agent:    claude
+  Workdir:  /var/folders/h8/p75r4zq95d59q622q33pngzr0000gn/T/tmp.aSkr4AvDMc (copy)
+
+Run 'yoloai attach gate-removed' to start working (Ctrl-b d to detach)
+host dir: /Users/karlstenerud/.yoloai/library/sandboxes/gate-removed/rw/files
+guest dir: /Volumes/My Shared Files/rw/files
+run id  : 155108 (probe names are suffixed with it; poisoned paths are single-use)
+
+== P0  control: is this host still capable of serving stale guest reads at all?
+        (provoked by writing into the share DIRECTLY — the CLI path is repaired now,
+         so using it here would test the fix and report a broken harness)
+  ok      guest reads v1 (caches the path)               AAAAAAAAAAAAAAAAAAAA
+  ok      host side is correct                           ZZZ
+  ok      guest reads STALE bytes (the mechanism)        AAA
+
+== P1  control: does the DF175 fix still repair a REPLACEMENT? (put --overwrite over a read path)
+  ok      guest reads v1 (caches the path)               AAAAAAAAAAAAAAAAAAAA
+  ok      guest reads the NEW bytes (repaired)           ZZZ
+
+== P2  THE GAP: files rm, then files put of the SAME name — no replacement, so no repair
+  ok      guest reads v1 (caches the path)               AAAAAAAAAAAAAAAAAAAA
+  ok      host side: the file is gone after rm           gone
+  ?       guest immediately after rm                     
+  ok      host side holds the new content                QQQQQ
+  ?       put exit code                                  1
+  ?       GUEST READS                                    <empty>
+  ?       guest stat size                                20
+  ==> REFUSED on tart: the put exits non-zero rather than delivering content the guest
+      cannot read. Not silent corruption, and not a delivery either — the invalidation
+      cannot repair a path whose dentry still resolves to the unlinked inode. The error
+      names a restart, which does clear it. Message: yoloai: p2-155108.txt was written to the exchange directory, but the sandbox still reads stale content for p2-155108.txt and it could not be refreshed; the sandbox would act on content that never existed. Restart the sandbox (yoloai stop gate-removed && yoloai start gate-removed) to clear it
+
+== P3  control: a path the guest has NEVER read must arrive correctly
+  retry   files put p3-155108.txt failed (rc=1): yoloai: p3-155108.txt was written to the exchange directory, but the sandbox still reads stale content for p3-155108.txt and it could not be refreshed; the sandbox would act on content that never existed. Restart the sandbox (yoloai stop gate-removed && yoloai start gate-removed) to clear it
+Run 'yoloai files -h' for help
+
+ABORT: files put failed for p3-155108.txt after a retry (rc=1): yoloai: p3-155108.txt was written to the exchange directory, but the sandbox still reads stale content for p3-155108.txt and it could not be refreshed; the sandbox would act on content that never existed. Restart the sandbox (yoloai stop gate-removed && yoloai start gate-removed) to clear it
+Run 'yoloai files -h' for help

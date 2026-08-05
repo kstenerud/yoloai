@@ -6,6 +6,7 @@ package sandboxcmd
 
 import (
 	"encoding/json"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"os"
 	"path/filepath"
 	"testing"
@@ -51,7 +52,7 @@ func createNetworkSandbox(t *testing.T, name, networkMode string, domains []stri
 	}
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	require.NoError(t, err)
-	require.NoError(t, os.WriteFile(filepath.Join(sandboxDir, store.RuntimeConfigFile), data, 0600))
+	testutil.WriteSandboxRecord(t, store.RuntimeConfigFilePath(sandboxDir), data)
 
 	return sandboxDir
 }

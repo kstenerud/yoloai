@@ -1,0 +1,94 @@
+=== restart control (NO reboot) — 2026-08-04 10:27:07 ===
+uptime: 12 mins
+
+== rb-a (apple) ==
+   before: state=active ip=192.168.64.3 mac=fa:4a:29:d5:93:1e
+   after : state=active ip=192.168.64.5 mac=fe:63:57:d5:3e:19   (stop rc=0 start rc=0)
+   MOVED    192.168.64.3 -> 192.168.64.5 with NO reboot involved
+   MAC CHANGED fa:4a:29:d5:93:1e -> fe:63:57:d5:3e:19
+
+== rb-b (apple) ==
+   before: state=active ip=192.168.64.4 mac=f6:bd:7c:3b:60:f0
+   after : state=active ip=192.168.64.6 mac=f2:53:a7:a7:4c:b1   (stop rc=0 start rc=0)
+   MOVED    192.168.64.4 -> 192.168.64.6 with NO reboot involved
+   MAC CHANGED f6:bd:7c:3b:60:f0 -> f2:53:a7:a7:4c:b1
+
+== rb-t (tart) ==
+   before: state=idle ip=192.168.65.3 mac=fa:71:58:f0:c3:85
+   after : state=idle ip=192.168.65.2 mac=da:86:c1:09:b2:13   (stop rc=0 start rc=0)
+   MOVED    192.168.65.3 -> 192.168.65.2 with NO reboot involved
+   MAC CHANGED fa:71:58:f0:c3:85 -> da:86:c1:09:b2:13
+
+== leases now ==
+   [the run printed all 253 records for 192.168.65.x, .2 through .254. The first line and the
+   last are kept here; the middle 251 are one record per address in descending order and carry
+   no information the census below does not. Every other line in this file is verbatim.]
+   192.168.65.2 1,da:86:c1:9:b2:13
+   ...
+   192.168.65.3 1,fa:71:58:f0:c3:85
+
+
+=== REPLICATION: is the MAC rewrite systematic, or was it reboot residue? ===
+A second stop/start of the same tart VM, run immediately afterwards. This is the run that
+establishes WHEN the rewrite happens: the MAC is unchanged by `stop` and different after
+`start`, so `tart run` is what writes it.
+
+mac now:      da:86:c1:09:b2:13
+ip now:       192.168.65.2
+mac stopped:  da:86:c1:09:b2:13
+mac restart2: b2:f5:76:a9:08:f2
+ip restart2:  192.168.65.4
+
+
+=== LEASE CENSUS (/var/db/dhcpd_leases) ===
+total lease records: 253
+  192.168.65.x : 253
+  65.x range 2..254, distinct=253, free in 2..254 = 0
+
+apple's subnet holds ZERO records in this file:
+  $ container network inspect default
+    "ipv4Subnet" : "192.168.64.0/24",  "ipv4Gateway" : "192.168.64.1"
+    "plugin" : "container-network-vmnet"
+  ...and 0 of the 253 records are 192.168.64.x. Apple's vmnet plugin runs a separate
+  allocator; the two backends do not share this pool and do not share its exhaustion.
+
+
+=== yoloAI PASSES NO MAC FLAG ===
+$ grep -rniE "macaddress|mac-address|--mac|randomMAC" --include=*.go internal/ runtime/
+runtime/apple/netcheck_test.go:31:          "macAddress" : "fa:e4:be:67:3c:f0",     <- a test fixture
+
+The only match in the whole tree is a fixture. `tart set --random-mac` exists and is never
+used; `buildRunArgs` (runtime/tart/tart.go) builds `run --no-graphics` plus `--dir` shares.
+So the regeneration is tart's default behaviour, not something yoloAI asks for.
+
+
+=== PRIOR ART IN THIS SAME DIRECTORY — READ BEFORE CITING THIS FILE AS NEW ===
+Most of the headline here was already measured and is already in the plan.
+
+  lease-binding.txt L2  apple .22 -> .23 across a stop/start, with the conclusion already drawn:
+                        "Table entries must be rewritten on every start, and any cached address
+                        is a fail-open hazard". That run is where the plan's "addresses recycle
+                        on every start" line comes from.
+  lease-binding.txt L1  "no lease record found for 192.168.64.22 (apple may not use bootpd's
+                        lease file)" — recorded as UNKNOWN.
+  addr-stability.txt U15 the address does NOT move while a sandbox keeps running, across ~240s of
+                        induced bridge churn. Restarting is the thing that moves it, not churn.
+
+So this run REPLICATES L2 (on both backends, n=2 for tart) rather than discovering it. What is
+actually new here:
+  - the MECHANISM: `tart run` rewrites macAddress in the VM's own config.json at START (unchanged
+    by stop), and yoloAI passes no MAC flag — so it is tart's default and not ours to fix.
+  - the POOL IS EXHAUSTED: 253/253, zero free, and the file survives reboots. Past that point
+    recycling is not a possibility, it is the only option left. Nothing recorded this before.
+  - L1's UNKNOWN resolved to a measured zero: apple holds no records in that file at all.
+
+=== WHAT THIS FILE DOES AND DOES NOT SETTLE ===
+Settles: an address moves on an ordinary restart on BOTH backends, with a fresh MAC each
+time; the tart lease pool is exhausted on this host; apple does not use that pool. Two
+consecutive restarts for tart, one each for the apple guests — so the tart leg is n=2 and
+the apple leg n=1 per guest.
+
+Does NOT settle: whether the address is determined by START ORDER. Every guest here was
+restarted in place, one at a time, in the same order — which is also the order round 2's
+post-reboot half used. That is the confound this control was written to expose and cannot
+itself remove; `reboot_post.sh` reverses the order (P10) to answer it.

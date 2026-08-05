@@ -29,38 +29,61 @@ func ListExchangeFiles(layout config.Layout, name string, patterns []string) ([]
 	return collectExchangeGlobs(FilesDir(layout, name), patterns)
 }
 
+// ImportResult describes one completed import into the exchange directory.
+type ImportResult struct {
+	Name string // base name placed in the exchange directory
+	Path string // absolute host path of the placed entry
+	// Replaced reports that an entry of that name already existed. Callers use
+	// it to decide whether a running guest may be holding a stale view of the
+	// path: a name the guest has never read is always delivered correctly, so
+	// only a replacement is worth the cost of checking (DF175).
+	Replaced bool
+}
+
 // ImportFile copies a single host file or directory into the exchange directory,
-// creating the exchange directory if needed. Returns the base name placed.
-// Without force, an existing entry of the same name is an error.
-func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string, force bool) (string, error) {
+// creating the exchange directory if needed. Without force, an existing entry of
+// the same name is an error.
+func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string, force bool) (ImportResult, error) {
 	filesDir := FilesDir(layout, name)
 	if err := fileutil.MkdirAll(filesDir, 0750); err != nil {
-		return "", fmt.Errorf("create files directory: %w", err)
+		return ImportResult{}, fmt.Errorf("create files directory: %w", err)
 	}
 
 	absSrc, err := filepath.Abs(hostPath)
 	if err != nil {
-		return "", fmt.Errorf("resolve path %s: %w", hostPath, err)
+		return ImportResult{}, fmt.Errorf("resolve path %s: %w", hostPath, err)
 	}
 	info, err := os.Stat(absSrc)
 	if err != nil {
-		return "", fmt.Errorf("source %s: %w", hostPath, err)
+		return ImportResult{}, fmt.Errorf("source %s: %w", hostPath, err)
 	}
 
 	dst, err := resolveExchangePath(filesDir, info.Name())
 	if err != nil {
-		return "", err
+		return ImportResult{}, err
 	}
-	if !force {
-		if _, statErr := os.Stat(dst); statErr == nil {
-			return "", fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
+	dstInfo, statErr := os.Stat(dst)
+	existed := statErr == nil
+	if !force && existed {
+		return ImportResult{}, fmt.Errorf("target already exists: %s (use --overwrite to replace it)", info.Name())
+	}
+	// A directory has to be removed before the copy, because `cp -rp src dst`
+	// copies src INSIDE an existing directory dst rather than over it. Without
+	// this, a second `--overwrite` of somedir/ produced files/somedir/somedir/…
+	// while files/somedir/* kept the OLD content, and the command exited 0
+	// (DF177). Single files are left alone: cp truncates those in place, and
+	// removing them first would turn every overwrite into an unlink+recreate,
+	// which is the one shape a tart guest cannot be made to re-read (DF175).
+	if existed && dstInfo.IsDir() {
+		if err := os.RemoveAll(dst); err != nil {
+			return ImportResult{}, fmt.Errorf("replace directory %s: %w", info.Name(), err)
 		}
 	}
 	cpEnv := layout.Env().EnvForHostTool()
 	if err := copyTree(ctx, cpEnv, absSrc, dst); err != nil {
-		return "", fmt.Errorf("copy %s: %w", hostPath, err)
+		return ImportResult{}, fmt.Errorf("copy %s: %w", hostPath, err)
 	}
-	return info.Name(), nil
+	return ImportResult{Name: info.Name(), Path: dst, Replaced: existed}, nil
 }
 
 // ExportFile copies one exchange entry (rel, relative to the exchange dir) to dst
@@ -121,19 +144,25 @@ func ReadExchangeFile(layout config.Layout, name, rel string) ([]byte, error) {
 // exchange dir), creating the exchange directory and any parent directories as
 // needed. rel is validated to stay within the exchange directory. Files are
 // written 0600 (owner-only), matching the prior file-exchange write path.
-func WriteExchangeFile(layout config.Layout, name, rel string, data []byte) error {
+//
+// Returns the same ImportResult ImportFile does, for the same reason: this lands
+// bytes in the very share whose guest can serve stale content for a path it has
+// already read, so the caller has to know whether it replaced something (DF175).
+func WriteExchangeFile(layout config.Layout, name, rel string, data []byte) (ImportResult, error) {
 	filesDir := FilesDir(layout, name)
 	target, err := resolveExchangePath(filesDir, rel)
 	if err != nil {
-		return err
+		return ImportResult{}, err
 	}
 	if err := fileutil.MkdirAll(filepath.Dir(target), 0750); err != nil {
-		return fmt.Errorf("create files directory: %w", err)
+		return ImportResult{}, fmt.Errorf("create files directory: %w", err)
 	}
+	_, statErr := os.Stat(target)
+	existed := statErr == nil
 	if err := fileutil.WriteFile(target, data, 0600); err != nil {
-		return fmt.Errorf("write %s: %w", rel, err)
+		return ImportResult{}, fmt.Errorf("write %s: %w", rel, err)
 	}
-	return nil
+	return ImportResult{Name: filepath.Base(target), Path: target, Replaced: existed}, nil
 }
 
 // copyTree copies src to dst preserving mode and recursing into directories,

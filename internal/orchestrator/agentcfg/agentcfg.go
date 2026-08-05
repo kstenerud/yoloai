@@ -6,13 +6,13 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
-	"path/filepath"
 
+	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 )
 
 // AgentConfigFile is the filename for the per-sandbox inside-process config.
-const AgentConfigFile = "agent.json"
+const AgentConfigFile = config.AgentConfigFileName
 
 const schemaVersion = 1
 
@@ -27,25 +27,34 @@ type AgentConfig struct {
 
 // Save writes agent.json to the given sandbox directory.
 func Save(sandboxDir string, cfg *AgentConfig) error {
+	if err := config.EnsureHostTier(sandboxDir); err != nil {
+		return fmt.Errorf("create host tier: %w", err)
+	}
+	return SaveTo(config.AgentConfigPath(sandboxDir), cfg)
+}
+
+// SaveTo writes the record to an explicit path, stamping and serializing it
+// exactly as Save does but resolving nothing: the caller supplies the path and
+// owns the directory's existence. It exists for migrators, which must address
+// the layout of the era they are migrating FROM (internal/config/pretier,
+// DF164). Everything else calls Save.
+func SaveTo(path string, cfg *AgentConfig) error {
 	cfg.Version = schemaVersion
 
 	data, err := json.MarshalIndent(cfg, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", AgentConfigFile, err)
 	}
-
-	path := filepath.Join(sandboxDir, AgentConfigFile)
 	if err := fileutil.AtomicWriteFile(path, data, 0600); err != nil {
 		return fmt.Errorf("write %s: %w", AgentConfigFile, err)
 	}
-
 	return nil
 }
 
 // Load reads agent.json from the given sandbox directory.
 // Returns a zero-value AgentConfig if the file does not exist.
 func Load(sandboxDir string) (*AgentConfig, error) {
-	path := filepath.Join(sandboxDir, AgentConfigFile)
+	path := config.AgentConfigPath(sandboxDir)
 
 	data, err := os.ReadFile(path) //nolint:gosec // path is constructed from sandbox dir
 	if err != nil {

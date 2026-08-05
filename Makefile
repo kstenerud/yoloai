@@ -168,13 +168,29 @@ hadolint:
 		exit 1; \
 	fi
 
-## shellcheck: lint every tracked shell script. Required, not optional (D112) —
-## runtime/monitor/*.sh and the docker entrypoint ship inside the binary, and
-## shell.md asserts these pass clean. Before D117 that assertion was ungated
-## prose: true when written, with nothing to keep it true. Prefers a local
-## shellcheck; falls back to Docker.
+## shellcheck: lint every shell script in the working tree — tracked, and untracked
+## but not ignored. Required, not optional (D112) — runtime/monitor/*.sh and the
+## docker entrypoint ship inside the binary, and shell.md asserts these pass clean.
+## Before D117 that assertion was ungated prose: true when written, with nothing to
+## keep it true. Prefers a local shellcheck; falls back to Docker.
+##
+## Scope includes untracked files (`--others --exclude-standard`), not `git ls-files`
+## alone: a script is at its least reviewed before it is first staged, which is exactly
+## when tracked-only scope reports nothing wrong with it. A new script authored under
+## docs/ passed a full `make check` this way, and its one real defect surfaced only
+## when it was linted by hand.
+##
+## Two consequences of that scope, both intended:
+##   * a scratch .sh left anywhere in the tree WILL fail this gate. Delete it, or add
+##     it to .gitignore — an ignored file is out of scope by design.
+##   * `--exclude-standard` honours core.excludesFile, so a developer with a global
+##     gitignore can lint a narrower set than CI does (CI has a clean tree and no
+##     global excludes). CI is the authority when the two disagree.
+## $$scripts_list is deliberately unquoted so the list word-splits into arguments;
+## a path containing whitespace would therefore break it. Repo scripts have none,
+## and an untracked file with a space in its name is the case to watch.
 shellcheck:
-	@scripts_list="$$(git ls-files '*.sh')"; \
+	@scripts_list="$$(git ls-files --cached --others --exclude-standard '*.sh')"; \
 	if command -v shellcheck >/dev/null 2>&1; then \
 		shellcheck $$scripts_list; \
 	elif docker info >/dev/null 2>&1; then \

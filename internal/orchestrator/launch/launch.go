@@ -243,7 +243,7 @@ func deliverRuntimeScripts(d state.Deps, st *state.State) ([]runtime.MountSpec, 
 	if !ok {
 		return nil, nil
 	}
-	dir := filepath.Join(st.SandboxDir, config.BinDirName)
+	dir := config.BinPath(st.SandboxDir)
 	if err := provider.WriteRuntimeScripts(dir); err != nil {
 		return nil, fmt.Errorf("deliver runtime scripts: %w", err)
 	}
@@ -330,7 +330,7 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	// Clear any stale marker from a prior boot so the wait below observes
 	// only this launch's signal (the marker file lives in the persistent
 	// sandbox dir and survives restarts).
-	markerPath := filepath.Join(st.SandboxDir, store.SecretsConsumedMarker)
+	markerPath := store.SecretsConsumedMarkerPath(st.SandboxDir)
 	if hasSecrets {
 		_ = os.Remove(markerPath)
 	}
@@ -373,19 +373,26 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	}
 
 	// Signal keepalive_only to the entrypoint via an env var as well, not only the
-	// patched runtime-config.json. The file patch is an atomic rename (new inode)
-	// immediately before Create; Docker Desktop's gRPC-FUSE serves the stale
-	// pre-patch content for that single-file bind mount when the entrypoint reads
-	// it at container start, so the box silently takes the legacy inline path and
-	// never writes .substrate-ready (waitForReady then times out). An env var is
-	// baked into the container config at create, immune to mount-propagation lag,
-	// and the entrypoint treats it as authoritative. The file patch remains as the
+	// patched runtime-config.json. The file patch lands immediately before Create,
+	// and Docker Desktop's gRPC-FUSE serves the stale pre-patch content for that
+	// single-file bind mount when the entrypoint reads it at container start — so
+	// the box silently takes the legacy inline path and never writes
+	// .substrate-ready (waitForReady then times out). An env var is baked into the
+	// container config at create, immune to mount-propagation lag, and the
+	// entrypoint treats it as authoritative. The file patch remains as the
 	// Linux/OrbStack-side record and a backstop. See backend-idiosyncrasies.md.
+	//
+	// This comment used to attribute the staleness to the patch being "an atomic
+	// rename (new inode)". It is not: patchKeepaliveOnly calls fileutil.WriteFile,
+	// an in-place truncate that keeps the inode, and it has done so since the
+	// function was introduced — so the reproduced symptom was always an in-place
+	// write, and the rename premise never described this code (DF173). What the
+	// cache actually keys on is not established; do not reason from either story.
 	instanceCfg.ContainerEnv = append(instanceCfg.ContainerEnv, "YOLOAI_KEEPALIVE_ONLY=1")
 
 	// Clear any stale readiness marker from a prior boot so the wait below sees
 	// only this launch's signal (it lives in the persistent sandbox dir).
-	readyPath := filepath.Join(st.SandboxDir, store.SubstrateReadyMarker)
+	readyPath := store.SubstrateReadyMarkerPath(st.SandboxDir)
 	_ = os.Remove(readyPath)
 
 	if err := createWithImageRecovery(ctx, rt, st, instanceCfg); err != nil {
@@ -546,7 +553,7 @@ func runNetnsSidecarWithRetry(ctx context.Context, runner runtime.NetnsSidecarRu
 // runtime-config.json — the composed agent-floor + user allowlist written at
 // create time and kept current by network allow/deny.
 func loadAllowedDomains(sandboxDir string) ([]string, error) {
-	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
+	configPath := store.RuntimeConfigFilePath(sandboxDir)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return nil, fmt.Errorf("read runtime-config.json: %w", err)
@@ -650,7 +657,7 @@ func applyWorkdirTrust(st *state.State) error {
 		return nil
 	}
 	wt := st.Agent.WorkdirTrust
-	path := filepath.Join(st.SandboxDir, store.AgentRuntimeDir, wt.RelPath)
+	path := store.AgentRuntimeFilePath(st.SandboxDir, wt.RelPath)
 	current, err := os.ReadFile(path) //nolint:gosec // path from the sandbox dir + agent-declared RelPath
 	if err != nil && !os.IsNotExist(err) {
 		return fmt.Errorf("read workdir-trust file %s: %w", wt.RelPath, err)
@@ -695,7 +702,7 @@ func applyDirectCredential(st *state.State, secretEnv map[string]string) error {
 	if err != nil {
 		return fmt.Errorf("render direct-credential file %s: %w", dc.RelPath, err)
 	}
-	path := filepath.Join(st.SandboxDir, store.AgentRuntimeDir, dc.RelPath)
+	path := store.AgentRuntimeFilePath(st.SandboxDir, dc.RelPath)
 	if err := fileutil.MkdirAll(filepath.Dir(path), 0750); err != nil {
 		return fmt.Errorf("create dir for direct-credential file %s: %w", dc.RelPath, err)
 	}
@@ -717,7 +724,7 @@ func applyDirectCredential(st *state.State, secretEnv map[string]string) error {
 // port, so the persisted values stay valid without a rewrite.
 func patchBrokerConfigFiles(sandboxDir string, bc *agent.BrokerConfig, endpoint, placeholderToken string) error {
 	for _, cf := range bc.ConfigFiles {
-		path := filepath.Join(sandboxDir, store.AgentRuntimeDir, cf.RelPath)
+		path := store.AgentRuntimeFilePath(sandboxDir, cf.RelPath)
 		current, err := os.ReadFile(path) //nolint:gosec // path from the sandbox dir + agent-declared RelPath
 		if err != nil && !os.IsNotExist(err) {
 			return fmt.Errorf("read broker config file %s: %w", cf.RelPath, err)
@@ -944,7 +951,7 @@ func startLegacy(ctx context.Context, rt runtime.Backend, st *state.State, cname
 // the keepalive_only field, and writes it back atomically. Called before
 // rt.Create so the entrypoint reads the updated config on first boot.
 func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
-	configPath := filepath.Join(sandboxDir, store.RuntimeConfigFile)
+	configPath := store.RuntimeConfigFilePath(sandboxDir)
 	data, err := os.ReadFile(configPath) //nolint:gosec // path is sandbox-controlled
 	if err != nil {
 		return fmt.Errorf("read runtime-config.json: %w", err)
@@ -1334,9 +1341,9 @@ func verifyInstanceRunning(ctx context.Context, rt runtime.Backend, st *state.St
 
 	var parts []string
 	// Try sandbox.jsonl first — written by entrypoint.sh and entrypoint.py.
-	if tail := readLogTail(filepath.Join(st.SandboxDir, "logs", "sandbox.jsonl"), 20); tail != "" {
+	if tail := readLogTail(store.SandboxJSONLPath(st.SandboxDir), 20); tail != "" {
 		parts = append(parts, tail)
-	} else if tail := readLogTail(filepath.Join(st.SandboxDir, store.AgentLogFile), 20); tail != "" {
+	} else if tail := readLogTail(store.AgentLogPath(st.SandboxDir), 20); tail != "" {
 		// Try agent log file (written after tmux setup).
 		parts = append(parts, tail)
 	}

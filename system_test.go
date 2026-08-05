@@ -13,6 +13,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
+	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
@@ -111,7 +112,7 @@ func mkSandboxDir(t *testing.T, c *System, name string) string {
 // writeEnv writes environment.json content into a sandbox dir.
 func writeEnv(t *testing.T, dir, content string) {
 	t.Helper()
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "environment.json"), []byte(content), 0o600))
+	testutil.WriteSandboxRecord(t, filepath.Join(dir, "host", "environment.json"), []byte(content))
 }
 
 // TestLiveInjectorPIDs_ProtectsOnlyLiveSandboxes guards the keep-set that scopes
@@ -122,11 +123,11 @@ func TestLiveInjectorPIDs_ProtectsOnlyLiveSandboxes(t *testing.T) {
 
 	good := mkSandboxDir(t, c, "good")
 	writeEnv(t, good, `{"version":3}`)
-	require.NoError(t, os.WriteFile(filepath.Join(good, "injector.json"), []byte(`{"pid":111,"addr":"127.0.0.1:1"}`), 0o600))
+	require.NoError(t, os.WriteFile(config.InjectorRecordPath(good), []byte(`{"pid":111,"addr":"127.0.0.1:1"}`), 0o600))
 
 	broken := mkSandboxDir(t, c, "broken")
 	writeEnv(t, broken, `{not json`)
-	require.NoError(t, os.WriteFile(filepath.Join(broken, "injector.json"), []byte(`{"pid":222,"addr":"127.0.0.1:2"}`), 0o600))
+	require.NoError(t, os.WriteFile(config.InjectorRecordPath(broken), []byte(`{"pid":222,"addr":"127.0.0.1:2"}`), 0o600))
 
 	keep := c.liveInjectorPIDs()
 
@@ -185,8 +186,8 @@ func TestPrune_ClassifiesSandboxDirs(t *testing.T) {
 
 	// data-bearing: overlay upper/ with content (host-side, no container needed).
 	dirty := mkSandboxDir(t, c, "dirty")
-	require.NoError(t, os.MkdirAll(filepath.Join(dirty, "work", "proj", "upper"), 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(dirty, "work", "proj", "upper", "f"), []byte("x"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(config.WorkBasePath(dirty), "proj", "upper"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(config.WorkBasePath(dirty), "proj", "upper", "f"), []byte("x"), 0o600))
 
 	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: true})
 	require.NoError(t, err)
@@ -216,8 +217,8 @@ func TestPrune_ExecutesClassifications(t *testing.T) {
 	corrupt := mkSandboxDir(t, c, "corrupt")
 	writeEnv(t, corrupt, `{bad`)
 	dirty := mkSandboxDir(t, c, "dirty")
-	require.NoError(t, os.MkdirAll(filepath.Join(dirty, "work", "proj", "upper"), 0o750))
-	require.NoError(t, os.WriteFile(filepath.Join(dirty, "work", "proj", "upper", "f"), []byte("x"), 0o600))
+	require.NoError(t, os.MkdirAll(filepath.Join(config.WorkBasePath(dirty), "proj", "upper"), 0o750))
+	require.NoError(t, os.WriteFile(filepath.Join(config.WorkBasePath(dirty), "proj", "upper", "f"), []byte("x"), 0o600))
 
 	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: false})
 	require.NoError(t, err)

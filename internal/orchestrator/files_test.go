@@ -78,7 +78,8 @@ func TestImportExportRemove_RoundTrip(t *testing.T) {
 
 	placed, err := ImportFile(ctx, layout, name, src, false)
 	require.NoError(t, err)
-	assert.Equal(t, "hello.txt", placed)
+	assert.Equal(t, "hello.txt", placed.Name)
+	assert.False(t, placed.Replaced, "a first import replaces nothing")
 	assert.FileExists(t, filepath.Join(FilesDir(layout, name), "hello.txt"))
 
 	// Importing again without force is rejected.
@@ -109,15 +110,19 @@ func TestWriteReadExchangeFile_RoundTrip(t *testing.T) {
 	layout, name := filesTestLayout(t)
 
 	// Write creates the exchange dir and any parent dirs on demand.
-	require.NoError(t, WriteExchangeFile(layout, name, "sub/answer.txt", []byte("42")))
+	_, err := WriteExchangeFile(layout, name, "sub/answer.txt", []byte("42"))
+	require.NoError(t, err)
 	assert.FileExists(t, filepath.Join(FilesDir(layout, name), "sub", "answer.txt"))
 
 	got, err := ReadExchangeFile(layout, name, "sub/answer.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "42", string(got))
 
-	// Overwrite is allowed (content-oriented write, unlike Import).
-	require.NoError(t, WriteExchangeFile(layout, name, "sub/answer.txt", []byte("43")))
+	// Overwrite is allowed (content-oriented write, unlike Import), and reports
+	// that it replaced something — which is what makes the guest-view check run.
+	res, err := WriteExchangeFile(layout, name, "sub/answer.txt", []byte("43"))
+	require.NoError(t, err)
+	assert.True(t, res.Replaced, "an overwrite must report Replaced, or the DF175 check never fires")
 	got, err = ReadExchangeFile(layout, name, "sub/answer.txt")
 	require.NoError(t, err)
 	assert.Equal(t, "43", string(got))
@@ -132,7 +137,7 @@ func TestReadExchangeFile_NotFound(t *testing.T) {
 func TestWriteReadExchangeFile_TraversalBlocked(t *testing.T) {
 	layout, name := filesTestLayout(t)
 
-	err := WriteExchangeFile(layout, name, "../../../etc/passwd", []byte("x"))
+	_, err := WriteExchangeFile(layout, name, "../../../etc/passwd", []byte("x"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "escapes exchange directory")
 
@@ -174,7 +179,7 @@ func TestExchange_PlantedSymlinkRefused(t *testing.T) {
 	assert.Contains(t, err.Error(), "symlink")
 
 	// Write must not follow the symlink (no host overwrite); secret stays intact.
-	err = WriteExchangeFile(layout, name, "answer.json", []byte("clobbered"))
+	_, err = WriteExchangeFile(layout, name, "answer.json", []byte("clobbered"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "symlink")
 	got, rerr := os.ReadFile(secret) //nolint:gosec // test path
@@ -203,7 +208,7 @@ func TestExchange_SymlinkedDirComponentRefused(t *testing.T) {
 	outsideDir := t.TempDir()
 	require.NoError(t, os.Symlink(outsideDir, filepath.Join(filesDir, "sub")))
 
-	err := WriteExchangeFile(layout, name, "sub/pwned.txt", []byte("x"))
+	_, err := WriteExchangeFile(layout, name, "sub/pwned.txt", []byte("x"))
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "symlink")
 	assert.NoFileExists(t, filepath.Join(outsideDir, "pwned.txt"))

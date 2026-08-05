@@ -562,20 +562,27 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 func createSandboxDirs(sandboxDir string, perms store.IsolationPerms) error {
 	for _, dir := range []string{
 		sandboxDir,
-		filepath.Join(sandboxDir, "home-seed"),
-		filepath.Join(sandboxDir, store.BinDir),
-		filepath.Join(sandboxDir, store.TmuxDir),
-		filepath.Join(sandboxDir, store.BackendDir),
+		// All three tiers, named. They are structure, not a by-product of
+		// whichever child happens to be created first — and a tier that exists
+		// only as some other MkdirAll's intermediate is a tier nothing states
+		// the permissions or ownership of (DF186).
+		store.HostTierPath(sandboxDir),
+		store.ReadOnlyTierPath(sandboxDir),
+		store.ReadWriteTierPath(sandboxDir),
+		store.HomeSeedPath(sandboxDir),
+		store.BinPath(sandboxDir),
+		store.TmuxPath(sandboxDir),
+		store.BackendPath(sandboxDir),
 	} {
 		if err := fileutil.MkdirAll(dir, 0750); err != nil {
 			return fmt.Errorf("create directory %s: %w", dir, err)
 		}
 	}
 	for _, dir := range []string{
-		filepath.Join(sandboxDir, "work"),
-		filepath.Join(sandboxDir, store.AgentRuntimeDir),
-		filepath.Join(sandboxDir, "files"),
-		filepath.Join(sandboxDir, "cache"),
+		store.WorkBasePath(sandboxDir),
+		store.AgentRuntimePath(sandboxDir),
+		store.FilesDir(sandboxDir),
+		store.CacheDir(sandboxDir),
 	} {
 		if err := fileutil.MkdirAllPerm(dir, perms.Dir); err != nil {
 			return fmt.Errorf("create directory %s: %w", dir, err)
@@ -772,26 +779,25 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 		return err
 	}
 	if hasPrompt {
-		if err := fileutil.WriteFile(filepath.Join(sandboxDir, "prompt.txt"), []byte(promptText), 0600); err != nil {
+		if err := fileutil.WriteFile(store.PromptFilePath(sandboxDir), []byte(promptText), 0600); err != nil {
 			return fmt.Errorf("write prompt.txt: %w", err)
 		}
 	}
 
 	configPerm := os.FileMode(0644) // always 0644 (no secrets, read-only in container)
 
-	if err := fileutil.MkdirAllPerm(filepath.Join(sandboxDir, store.LogsDir), perms.Dir); err != nil {
+	if err := fileutil.MkdirAllPerm(store.LogsPath(sandboxDir), perms.Dir); err != nil {
 		return fmt.Errorf("create logs dir: %w", err)
 	}
-	for _, logFile := range []string{store.SandboxJSONLFile, store.MonitorJSONLFile, store.HooksJSONLFile} {
-		p := filepath.Join(sandboxDir, logFile)
-		if err := fileutil.WriteFilePerm(p, nil, perms.File); err != nil {
-			return fmt.Errorf("create log file %s: %w", logFile, err)
+	for _, logPath := range store.GuestLogFilePaths(sandboxDir) {
+		if err := fileutil.WriteFilePerm(logPath, nil, perms.File); err != nil {
+			return fmt.Errorf("create log file %s: %w", logPath, err)
 		}
 	}
-	if err := fileutil.WriteFilePerm(filepath.Join(sandboxDir, store.AgentStatusFile), []byte("{}\n"), perms.File); err != nil {
+	if err := fileutil.WriteFilePerm(store.AgentStatusFilePath(sandboxDir), []byte("{}\n"), perms.File); err != nil {
 		return fmt.Errorf("write %s: %w", store.AgentStatusFile, err)
 	}
-	if err := fileutil.WriteFilePerm(filepath.Join(sandboxDir, store.RuntimeConfigFile), configData, configPerm); err != nil {
+	if err := fileutil.WriteFilePerm(store.RuntimeConfigFilePath(sandboxDir), configData, configPerm); err != nil {
 		return fmt.Errorf("write %s: %w", store.RuntimeConfigFile, err)
 	}
 	if err := envsetup.WriteContextFiles(sandboxDir, meta, envspec.BuildEnvSpec(agentDef)); err != nil {

@@ -47,6 +47,7 @@ inclusion test first, then add a row to the index.
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
+| Conformance/integration flaky under load; probe `task <name> not found` → 30s timeout → `instance not running`; or TTY exec `ENOENT` (DF28) | [Kata: guest-readiness race under churn](#kata-guest-readiness-race-under-back-to-back-vm-churn-task-not-found--exec-enoent) |
 | Agent "Not logged in"/idle after `restart` on containerd-vm; guest log `secrets.skip` | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) |
 | Tart: "secrets-consumed marker not observed before timeout" on every run (incl. passing) | [Kata: secrets dir removed before guest read](#kata-secrets-temp-dir-removed-before-the-guest-reads-it) (Tart variant) |
 | `EADDRINUSE` on shim start or `NewTask()` retry | [Kata: /run/kata persists on exit](#runkataname-persists-on-abnormal-exit), [EADDRINUSE on retry](#eaddrinuse-on-newtask-retry), [shim 500ms wait](#after-killing-orphaned-shim-processes-wait-500ms-before-proceeding) |
@@ -55,6 +56,7 @@ inclusion test first, then add a row to the index.
 | `hotplug memory error: ENOENT` in kata-agent logs | [Kata: hotplug ENOENT is normal](#hotplug-memory-error-enoent-is-normal) |
 | `yoloai destroy` hangs; `ctr tasks ls` shows RUNNING but no qemu/firecracker; host CPU 60–80% | [Kata: shim wedge with dead VM](#kata-shim-wedge-with-dead-vm-sigkill-via-containerd-doesnt-release-the-task) |
 | `yoloai destroy` hangs on a Tart sandbox; `tart list` shows VM running but guest unreachable | [Tart: VM process wedge](#tart-vm-process-wedge-tart-stop-and-sigterm-via-pgrep-dont-release-the-host-tart-run) |
+| A Tart VM comes back on a **different IP** after an ordinary stop/start (no reboot, no sleep, guest otherwise healthy); `/var/db/dhcpd_leases` keeps growing | [Tart: a new MAC per `tart run` burns a lease per start](#tart-regenerates-the-vms-mac-on-every-tart-run-so-each-start-burns-a-dhcp-lease-and-the-shared-vmnet-pool-is-consumed-per-start) |
 | Task stays in `Created` after `Start()` returns | [Containerd: task.Start returns early](#taskstart-returns-before-the-vm-is-actually-running) |
 | `OCI runtime exec failed: ... procReady not received` on exec/Launch | [Docker: procReady usually means the container is dying, not broken runc](#docker-procready-not-received-usually-means-the-container-is-exiting-not-a-broken-runtime) |
 | `parent snapshot sha256:... does not exist: not found` | [Containerd: WithNewSnapshot doesn't unpack](#withnewsnapshot-does-not-unpack-image-layers) |
@@ -62,19 +64,19 @@ inclusion test first, then add a row to the index.
 | Containerd socket: no error from `os.Stat` despite permission denied | [Containerd: Stat can't detect EPERM](#osstat-on-the-containerd-socket-does-not-detect-permission-denied) |
 | Containerd GC removes blobs; image becomes unrunnable | [Containerd: GC removes child blobs](#containerd-gc-removes-child-blobs-while-leaving-the-root-manifest-intact) |
 | `already exists` on snapshot create after crash | [Containerd: orphaned snapshots](#kata-orphaned-snapshots-from-crashed-runs-must-be-pre-cleared) |
-| CNI bridge plugin: "netns and CNI_NETNS should not be the same" | [CNI: netns.NewNamed switches OS thread](#netnsnewnamed-switches-the-os-thread-via-unshare-and-never-restores-it) |
+| CNI bridge plugin: "netns and CNI_NETNS should not be the same" | [CNI: netns.NewNamed switches OS thread](#netnsnewnamed-switches-the-os-thread-via-unshareclone_newnet-and-never-restores-it) |
 | `createNetNS` fails with "file exists" (EEXIST) | [CNI: stale netns file](#stale-named-netns-files-at-varrunnetnsname-persist-after-failed-runs) |
 | CNI-FORWARD rules deleted for a running container | [CNI: pre-flight n.Remove deletes live rules](#the-pre-flight-nremove-can-delete-rules-for-running-containers) |
 | CNI ADD succeeds but container has no outbound connectivity (POSTROUTING and/or CNI-FORWARD ACCEPT for the IP missing in host iptables) | [Go: netns.NewNamed without LockOSThread (DF10)](#go-os-thread-netns-leak-from-netnsnewnamed--netnsset-without-runtimelockosthread); secondary: [CNI: firewall plugin silent no-op (DF9)](#firewall-plugin-silent-no-op-when-resultips-is-empty) |
-| IPAM allocates duplicate IP after replace | [CNI: stale IPAM lease](#cnI-results-cache-lives-at-varlibcniresults) |
+| IPAM allocates duplicate IP after replace | [CNI: stale IPAM lease](#cni-results-cache-lives-at-varlibcniresults) |
 | Two concurrent `yoloai new` with same name corrupts networking | [CNI: concurrent creation race](#two-yoloai-new-invocations-for-the-same-container-name-within-1s-will-corrupt-networking) |
 | `--network-isolated` silently unenforced under `--isolation container-enhanced` | [gVisor netstack ignores iptables](#gvisor-netstack-ignores-in-sandbox-iptables-rules) |
 | `docker daemon is not responding` after `docker context use`; stale `/var/run/docker.sock` symlink to a stopped provider | [Docker: Go SDK ignores docker context](#the-docker-go-sdk-ignores-docker-context-clientfromenv-honors-only-docker_host) |
-| dind `exec /hello: invalid argument` (any nested container) under container-privileged on macOS | [Docker: nested fuse-overlayfs can't exec on Docker Desktop / Podman Machine](#docker-in-docker-nested-fuse-overlayfs-cant-exec-on-docker-desktop--podman-machine-macos) |
+| dind `exec /hello: invalid argument` (any nested container) under container-privileged on macOS | [Docker: nested fuse-overlayfs can't exec on Docker Desktop / Podman Machine](#docker-in-docker-nested-fuse-overlayfs-cant-exec-on-docker-desktop--podman-machine-macos--resolved-via-overlay2--real-fs-volume) |
 | `overlayfs mount` fails with `EPERM` inside Docker | [Docker: AppArmor blocks mount](#apparmor-blocks-mount2-even-with-cap_sys_admin) |
-| `sysctl: permission denied on key "net.ipv4.ip_forward"` starting inner Docker daemon | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
-| `mkdir /sys/fs/cgroup/docker: read-only file system` when inner Docker runs containers | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfsgroup-are-read-only-without-systempathsunconfined) |
-| `Seccomp_filters: 1` inside sandbox despite `container-privileged`; proc mount in userns fails | [Docker: Proxmox LXC seccomp survives seccomp=unconfined](#proxmox-lxc-seccomp-survives-secompunconfined-at-the-docker-layer) |
+| `sysctl: permission denied on key "net.ipv4.ip_forward"` starting inner Docker daemon | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfscgroup-are-read-only-without-systempathsunconfined) |
+| `mkdir /sys/fs/cgroup/docker: read-only file system` when inner Docker runs containers | [Docker: /proc/sys and /sys/fs/cgroup read-only without systempaths=unconfined](#procsys-and-sysfscgroup-are-read-only-without-systempathsunconfined) |
+| `Seccomp_filters: 1` inside sandbox despite `container-privileged`; proc mount in userns fails | [Docker: Proxmox LXC seccomp survives seccomp=unconfined](#proxmox-lxc-seccomp-survives-seccompunconfined-at-the-docker-layer) |
 | `git apply` silently fails on overlay patch | [Docker: Exec strips trailing newline](#docker-sdk-exec-strips-the-trailing-newline) |
 | `tmux attach` exits with `EACCES` on `/dev/tty` (gVisor ARM64) | [Docker: gVisor ARM64 TIOCSCTTY](#gvisor-on-arm64-docker-exec--it-does-not-call-tiocsctty) |
 | gVisor `container-enhanced` fails on macOS/OrbStack: `cannot read client sync file: EOF` (boot log: `expected to open /tmp, but found /private/tmp`) | [OrbStack: gVisor /tmp virtiofs symlink](#orbstack-gvisor-runsc-fails-to-start-because-tmp-is-a-virtiofs-symlink-to-the-macos-privatetmp) |
@@ -85,9 +87,9 @@ inclusion test first, then add a row to the index.
 | Docker base image reads ~33 GiB on Linux vs ~5 GiB on macOS; `image rm` frees ~0; prune undercounts reclaim | [Docker: containerd store pins layers via build cache](#docker-containerd-image-store-image-rm-frees-no-disk-until-the-build-cache-is-pruned-sdk-spacereclaimed-undercounts) |
 | `prune` dry-run promises to reclaim "volumes" but reports `reclaimed 0 B`; doctor counts the user's own (non-yoloai) volumes | [Docker/Podman: volume prune is anonymous-only; scope to yoloai volumes](#dockerpodman-volume-prune-default-filter-removes-only-anonymous-volumes-reclaim-accounting-must-be-scoped-to-yoloais-own-volumes) |
 | Apple: `container system df` reports `containers.reclaimable: 0` despite a multi-GB build cache; `prune` seems to free nothing | [Apple: build cache lives inside the running builder container](#apple-build-cache-lives-inside-the-running-builder-container-invisible-to-system-dfs-reclaimable-field) |
-| `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step-build-with-buildkit) |
+| `system prune` finds a different dangling image every run, reclaims 0 B, never converges, even with no builds | [Docker: legacy builder leaves a dangling image per step; build with BuildKit](#docker-legacy-builder-commits-one-dangling-intermediate-image-per-dockerfile-step--build-with-buildkit) |
 | Smoke/`system build` rebuilds `yoloai-base` from scratch every run on Docker Desktop (not OrbStack), though the image is present | [Docker Desktop: ImageInspect transiently NotFounds a present image on the idle containerd store](#docker-desktop-imageinspect-transiently-notfounds-a-present-image-on-the-idle-containerd-store) |
-| Every `new`/`start`/`clone` fails on Docker Desktop (passes on OrbStack/Linux) with `substrate not ready within 30s`; container log skips `entrypoint.keepalive_only`, no `.substrate-ready` | [Docker Desktop: single-file bind mount serves stale content after atomic rename](#docker-desktop-a-single-file-bind-mount-serves-stale-content-after-the-host-atomic-renames-it-keepalive_only-never-reaches-the-entrypoint) |
+| Every `new`/`start`/`clone` fails on Docker Desktop (passes on OrbStack/Linux) with `substrate not ready within 30s`; container log skips `entrypoint.keepalive_only`, no `.substrate-ready` | [Docker Desktop: single-file bind mount serves stale content after a host rewrite](#docker-desktop-a-single-file-bind-mount-serves-stale-content-after-the-host-rewrites-it-keepalive_only-never-reaches-the-entrypoint) |
 | `podman: build cache prune failed: Error response from daemon: Not Found` | [Podman: no build-cache endpoint (404)](#podman-docker-compat-api-has-no-build-cache-endpoint--buildcacheprune-returns-404-not-found) |
 | Long-lived `docker exec` (attached) process dies when the launching CLI exits; status-monitor / marker missing | [Docker: attached exec doesn't outlive its client](#docker-exec-an-attached-exec-does-not-outlive-the-client-that-started-it) |
 | `prune --images` on Podman reports absurd reclaim (e.g. 142 GB freed for a ~5 GiB footprint) | [Podman: `ImagesPrune` `SpaceReclaimed` un-dedup sum](#podman-imagesprune-spacereclaimed-is-the-un-deduplicated-image-size-sum) |
@@ -96,7 +98,7 @@ inclusion test first, then add a row to the index.
 | `system disk` reports 0 containerd image bytes right after a successful `system build --backend containerd` | [containerd: import inconsistently materializes snapshots](#containerd-image-import-inconsistently-materializes-overlayfs-snapshots) |
 | Base layer won't prune (`cannot remove snapshot with child`) but no snapshot claims it as parent in any namespace | [containerd: leftover lease GC-roots an orphaned child](#containerd-a-leftover-lease-gc-roots-an-orphaned-child-blocking-base-layer-removal) |
 | `yoloai exec`/`attach` on Podman returns exit 125 `no such container` under concurrent load though `info`/`Inspect` shows active | [Docker/Podman: interactive exec must use the API socket](#dockerpodman-interactive-execattach-must-use-the-api-socket-not-the-bare-cli-dual-control-plane-divergence) |
-| Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernkeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
+| Wrong uid inside container on macOS Podman | [Podman: macOS keep-id maps VM uid](#macos---usernskeep-id-maps-the-podman-machine-uid-1000-not-the-macos-uid) |
 | Rootless Podman privileged: `sudo dockerd` fails, or agent crashes on `prompt.txt` | [Podman: Linux rootless privileged needs keep-id:uid=1001](#linux-rootless-privileged-dind-plain-keep-id-fails-both-ways-use-keep-iduid1001) |
 | `creating an ID-mapped copy of layer … no space left on device` on rootless Podman | [Podman: separate ID-mapped image copy per userns mapping](#rootless-podman-keeps-a-separate-id-mapped-image-copy-per-userns-mapping) |
 | Podman rejects per-file bind mounts for secrets | [Podman: per-file bind mounts rejected](#per-file-bind-mounts-rejected-by-podmans-docker-compatible-api) |
@@ -119,6 +121,8 @@ inclusion test first, then add a row to the index.
 | Agent on a long-idle Tart sandbox: `ConnectionRefused`/`FailedToOpenSocket` on every API call; `tart ip` finds nothing; guest `en0` is `169.254.x.x` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) |
 | Smoke test: every tart lane fails (sentinel timeout, agent `ConnectionRefused`) on **freshly created** VMs while another long-running tart VM exists; other mac backends pass | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (host-wide contamination; run `yoloai doctor`) |
 | Tart guest has a normal (non-169.254) IP and `tart ip` returns it, but DNS/TCP all fail; guest's gateway pings 0% ; guest subnet matches no host `bridge*` | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (stale-lease variant, DF87) |
+| Apple `container` sandbox shows `running` with a valid IP but zero egress; `yoloai ls` shows no warning (tart would say `net-dead`; apple has no such probe) | [Tart: vmnet session wedges on a long-idle VM](#tart-vmnet-session-wedges-on-a-long-idle-vm-host-sleep--subnet-re-pick--guest-drops-to-a-169254-link-local-address-agent-gets-connectionrefused) (cross-backend correction to (c); apple has no detector, DF172) |
+| Tart guest reads a file the host overwrote and gets the OLD bytes at the NEW length (correct `st_size`, no error); or `stat` keeps finding a file the host deleted | [Tart VirtioFS: the guest can read fabricated file content](#tart-virtiofs-the-guest-can-read-fabricated-file-content--the-old-bytes-at-the-new-length-with-a-correct-st_size-and-no-error) |
 | Swift PM commands fail with sandbox-exec nesting errors on Seatbelt | [Seatbelt: macOS sandbox-exec doesn't nest](#macos-sandbox-exec-doesnt-nest--swift-pm-needs-the-swift-wrapper-sourced) |
 | Agent dies silently/SIGTRAP (exit 133) on Seatbelt at launch; ICU/timezone deny in unified log | [Seatbelt: SBPL subpaths need vnode-resolved paths](#agent-dies-silently-sigtrap--sbpl-subpath-rules-must-use-vnode-resolved-paths) |
 | Confined git under `sandbox-exec` dies (`xcrun_db` / `libxcrun` denied); or a malicious filter still writes to `/tmp`; or git works with `mach-lookup` denied | [Seatbelt: sandbox-exec-wrapping git — escape surfaces + the /usr/bin/git shim](#seatbelt-sandbox-exec-wrapping-git-for-confinement-has-two-escape-surfaces-mach-lookup-process-exec--the-usrbingit-shim-cant-run-confined) |
@@ -152,13 +156,15 @@ inclusion test first, then add a row to the index.
 | `system disk` shows tart `IMAGES: ?` / `CACHE: 0 B` despite GBs in `~/.tart`; `prune --images` reports 0 reclaimed | [Tart: list double-counts OCI tag+digest; sizing/prune must dedup](#tart-list-reports-a-pulled-oci-image-twice-tag--digest-over-one-on-disk-copy-sizing-and-prune-must-dedup-and-remove-both-rows) |
 | macOS `docker` numbers don't match Docker Desktop assumptions (overlay2/btrfs, classic store) | [Docker on macOS may be OrbStack, not Docker Desktop](#docker-on-macos-may-be-orbstack-not-docker-desktop--docker-info-clientinfocontext-tells-you-which) |
 | Podman macOS reports image bytes correctly even though the Linux `LayersSize: 0` workaround exists | [Podman: `/system/df` reports `LayersSize: 0`](#podman-systemdf-reports-layerssize-0) (macOS/version caveat) |
+| `--dir <path>:ro` is writable anyway, on Seatbelt only | [Seatbelt: SBPL has no read-only mount](#sbpl-has-no-read-only-mount--read-only-is-the-absence-of-a-write-grant-so-it-must-be-said-with-an-explicit-deny) |
 | `system disk` shows seatbelt `IMAGES: ?` / `CACHE: 0 B` — is it a gap? | [Seatbelt has no backend image/cache store](#seatbelt-has-no-backend-imagecache-store--cacheusageprunecache-are-correctly-absent) |
-| Apple `container create … --mount …` fails: `path '…' is not a directory` | [Apple: `--mount type=virtiofs` rejects file sources; use `-v`](#apple-mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts) |
-| Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build-silently-drops-a-relative--context-pass-an-absolute-dir) |
+| Apple `container create … --mount …` fails: `path '…' is not a directory` | [Apple: `--mount type=virtiofs` rejects file sources; use `-v`](#apple---mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts) |
+| Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build--silently-drops-a-relative--context-pass-an-absolute-dir) |
+| After a reboot every apple sandbox reads `removed`; `container ls` fails with `XPC connection error: Connection invalid`; `yoloai destroy` says Destroyed but the container is still there afterwards (DF180) | [Apple: the `container` service does not survive a reboot](#apple-the-container-service-does-not-survive-a-reboot-and-every-yoloai-sandbox-reads-removed-until-it-is-restarted) |
 | `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
 | `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
 | `install network-isolation firewall: netns sidecar exited 2: … can't open file '/yoloai/bin/install-firewall.py'` (intermittent, under concurrent churn; file is present in image) | [Docker/OrbStack: ephemeral container transiently exposes an incomplete rootfs](#a-freshly-created-ephemeral-container-can-transiently-expose-an-incomplete-rootfs-under-heavy-concurrent-churn) |
-| Same `install-firewall.py` (or any embedded-resource) error, but **deterministic** on one docker provider while another passes — file genuinely absent from that provider's image | [Docker: base-image staleness marker keyed per backend, not per provider/store](#docker-base-image-staleness-marker-was-keyed-per-backend-not-per-image-store-second-provider-runs-stale) |
+| Same `install-firewall.py` (or any embedded-resource) error, but **deterministic** on one docker provider while another passes — file genuinely absent from that provider's image | [Docker: base-image staleness marker keyed per backend, not per provider/store](#docker-base-image-staleness-marker-was-keyed-per-backend-not-per-image-store--second-provider-runs-stale) |
 | macOS `:overlay` sandbox loses the agent's uncommitted changes after `stop`/`restart`/`kill`; `yoloai diff` showed them while running | [macOS: overlayfs on a VirtioFS bind silently downgrades to a tmpfs upper (changes lost on restart)](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) |
 | `:overlay` create on Podman-macOS crashes the entrypoint (`mount … cannot mount overlay read-only`, exit 32); container `Exited`, incomplete v3 sandbox | [macOS: overlayfs on a VirtioFS bind …](#macos-overlayfs-on-a-virtiofs-bind-mount-silently-downgrades-to-a-container-local-tmpfs-upper-uncommitted-changes-lost-on-restart) (Podman applehv variant) |
 | `system migrate` of a running `:overlay` sandbox fails at dispose: `drop orig: openfdat …/ovlwork/work: permission denied` (rootful Docker) | [Linux: overlay flatten migration and host-side ownership of container-written state](#linux-overlay-flatten-migration-and-host-side-ownership-of-container-written-state) |
@@ -243,6 +249,41 @@ worth revisiting at that point.
 
 ---
 
+### Kata: guest-readiness race under back-to-back VM churn (`task not found` / exec `ENOENT`)
+
+DF8 above is the *network* slice of a broader truth: **`task.Start()` returns
+before the Kata guest is ready.** Each yoloai Kata instance boots a full systemd
+guest, and create→start→exec fires as soon as `task.Start` returns. Two further
+readiness windows open during heavy back-to-back VM churn — a full
+conformance run creates and tears down ~15 VMs on a contended host:
+
+- **Task not queryable yet.** The network probe's in-task exec-create races the
+  task becoming addressable and gets `probe exec create: task <name> not found`.
+  The probe then burns its full 30s budget and warns; a follow-on `Exec` against
+  the same instance sees `instance not running`.
+- **Guest process tree not up yet.** `InteractiveExec` reaches the kata-agent
+  before the guest rootfs and PATH are mounted, and exec-process start returns
+  `rpc status: … INTERNAL … ENOENT: No such file or directory` — a Rust
+  kata-agent backtrace, *not* the benign hotplug ENOENT elsewhere in this file.
+
+**Symptom:** the conformance and integration suites **pass in isolation** but the
+full suite is flaky — a random 2–4 subtests fail per run and the failing set
+shifts, so it is not a contract bug in any one subtest.
+
+**Not resource exhaustion:** measured at failure time — 6.8 GB RAM free, 25 GB
+disk free, zero leftover tasks. The trigger is *concurrency of VM boot and
+teardown*, not memory or disk. Contrast the smoke disk-pressure case, which
+manifests as "agent idle 9s+" from real ENOSPC.
+
+**Status:** not fixed. The durable fix is to gate the first probe/exec on an
+explicit guest-readiness signal rather than trusting `task.Start` returned.
+Until then: run a flaky Kata subtest in isolation to confirm its contract is
+green, and re-run the full suite on a transient failure. Tracked as **DF28**,
+whose entry also records which of the other Kata flakes share this mechanism
+(DF8, fixed) and which only share its symptom profile (DF160 — it does not).
+
+**Code pointer:** `runtime/containerd/lifecycle.go` (`waitForNetworkReady`).
+
 ### `/run/kata/<name>/` persists on abnormal exit
 
 The shim creates `/run/kata/<name>/shim-monitor.sock` at startup. If the shim
@@ -299,6 +340,28 @@ All bind mount targets must pre-exist in the container image:
 - Home seed file placeholders: `.claude.json`, `.opencode.json`, etc.
 
 See commit fc3be64.
+
+**Measured 2026-07-30, and the stated mechanism did not reproduce.** On the current Linux
+box the guest rootfs is mounted **read-write**:
+
+```
+# findmnt -no SOURCE,FSTYPE,OPTIONS /
+kataShared[/passthrough/yoloai-cli-probe/rootfs] virtiofs rw,nodev,relatime
+```
+
+With a writable rootfs, kata-agent *can* create a missing target — and does. The
+conformance mount section binds at `/tmp/yoloai-conformance-mnt-*`, which pre-exists in no
+image, and it passes on containerd/Kata (DF161). `/tmp` is not a separate mount in the
+guest, so this is a rootfs target, i.e. exactly the case the rule above says fails silently.
+
+**Do not act on this by removing the pre-created paths.** Three readings fit and they are not
+distinguished: the rootfs may have been read-only when the rule was written and changed
+since; the original failure may have had a different cause that the read-only-rootfs
+explanation was fitted to; or the behaviour may vary by Kata version, VMM (QEMU vs
+Firecracker) or config. The rule is cheap to keep and the failure it describes is silent,
+which is the worst kind to re-acquire. What is established is narrow: **on this
+configuration, a non-pre-existing rootfs target is created rather than silently skipped.**
+Anyone who knows the original failure's conditions should reconcile this.
 
 ---
 
@@ -981,7 +1044,7 @@ An empty value disables LXC seccomp for that container entirely. The container m
 
 ---
 
-### Docker Desktop: a single-file bind mount serves stale content after the host atomic-renames it (keepalive_only never reaches the entrypoint)
+### Docker Desktop: a single-file bind mount serves stale content after the host rewrites it (keepalive_only never reaches the entrypoint)
 
 **Symptom:** Every `yoloai new`/`start`/`clone` fails on **Docker Desktop** (macOS) with
 `yoloai: substrate not ready within 30s (root provisioning did not complete)`; the
@@ -993,12 +1056,11 @@ in-container `sandbox.jsonl` jumped straight from `entrypoint.python_start` to
 /yoloai/runtime-config.json` seconds later *also* shows `true`.
 
 **Explanation:** The agent-free bring-up (D88 `startViaLaunch`) signals the entrypoint
-by patching `keepalive_only:true` into `runtime-config.json` just before `Create`. That
-patch is an **atomic rename** (write temp + rename), which gives the file a **new
-inode**. `runtime-config.json` is mounted into the container as a **single-file**
-read-only bind mount (`buildSystemMounts`). Docker Desktop's gRPC-FUSE file sharing
-caches the path→inode mapping and serves the **stale pre-patch content** for that
-single file when the entrypoint reads it at container start — so the entrypoint sees
+by patching `keepalive_only:true` into `runtime-config.json` just before `Create`.
+`runtime-config.json` is mounted into the container as a **single-file** read-only bind
+mount (`buildSystemMounts`), and Docker Desktop's gRPC-FUSE file sharing serves the
+**stale pre-patch content** for that single file when the entrypoint reads it at
+container start — so the entrypoint sees
 `keepalive_only` absent, evaluates `cfg.get("keepalive_only", not cfg)` to `False`
 (config is non-empty), takes the **legacy inline** path, runs sandbox-setup.py itself,
 and never writes `.substrate-ready`. The host's `waitForReady` polls for that marker
@@ -1008,6 +1070,17 @@ propagate the new inode immediately, so they never see stale content. **The bug 
 that the host failed to patch the file — it did — but that the patched single file does
 not reach the container in time on Docker Desktop.**
 
+**Corrected 2026-08-03 (DF173).** This entry previously attributed the staleness to the
+patch being an "atomic rename (write temp + rename), which gives the file a new inode",
+with gRPC-FUSE "caching the path→inode mapping". That premise was false: `patchKeepaliveOnly`
+calls `fileutil.WriteFile` — an in-place truncate that **keeps** the inode — and has done so
+since the function was introduced (`722b62ee`), so every reproduction of this symptom was
+against an in-place write. The file-level fact is what was actually observed and it stands;
+the cache-internals story was inferred from the rename premise and does not, so **what
+gRPC-FUSE keys its cache on here is not established**. The repo contains both idioms on this
+one file — the sibling writer `patchRuntimeConfig` *does* use `fileutil.AtomicWriteFile` —
+which is how the two got crossed. Do not reason from either mechanism without re-testing.
+
 **Fix:** Don't rely on the patched single-file bind mount as the only signal.
 `startViaLaunch` also sets `YOLOAI_KEEPALIVE_ONLY=1` in the container's env
 (`InstanceConfig.ContainerEnv` → `containerConfig.Env`), which is baked into the
@@ -1016,7 +1089,12 @@ treats the env var as authoritative (forces `keepalive=True` when set). The file
 stays as the Linux/OrbStack record and a backstop. General rule: **a host-side change to
 a single-file bind mount may not be visible inside a Docker Desktop container promptly;
 deliver create-time signals via env vars (or a bind-mounted *directory*, which
-propagates in real time) rather than by mutating a bind-mounted file.**
+propagates in real time) rather than by mutating a bind-mounted file.** The rule is
+stated in terms of the observation rather than a mechanism, precisely because the
+mechanism here turned out to be misdiagnosed — and it holds either way. Tart's VirtioFS
+punishes the same shape far harder (DF175): a host rewrite of a path the guest has
+already read is served stale indefinitely, and there temp+rename is *worse* than
+in-place, not better.
 
 **Code:** `internal/orchestrator/launch/launch.go` (`startViaLaunch` sets
 `YOLOAI_KEEPALIVE_ONLY=1`), `runtime/docker/resources/entrypoint.py` (env override of
@@ -1587,8 +1665,11 @@ safe because `deleteNetNS` is idempotent (ignores ENOENT). See `cni.go::setupCNI
 by `tart run`, the file simply does not appear inside the VM.
 
 Workaround: copy file contents into a sandbox directory and share the directory
-via VirtioFS. For secrets, copy all secret files into `sandboxDir/secrets/` and
-share `sandboxDir` as the `yoloai` VirtioFS share. See `tart.go::Create`.
+via VirtioFS. For secrets, copy all secret files into the sandbox's `ro/secrets/`
+tier, which is shared as the `ro` VirtioFS share. See `tart.go::Create`.
+
+The sandbox dir itself is never shared: it is three tiers, and only `ro` and `rw`
+get a `--dir`, which is what keeps `host/` out of the guest (DF136).
 
 ---
 
@@ -1597,7 +1678,8 @@ share `sandboxDir` as the `yoloai` VirtioFS share. See `tart.go::Create`.
 Tart mounts VirtioFS shares at `/Volumes/My Shared Files/<share-name>` inside
 the macOS VM. The path contains a space. Any shell command constructing this
 path must quote it. The setup script uses: `'%s/bin/sandbox-setup.py'` with
-`%s = /Volumes/My Shared Files/yoloai`. See `tart.go::runSetupScript`.
+`%s = /Volumes/My Shared Files/rw` — the read-write tier's share, which is also
+the flat view the guest works from. See `tart.go::setupScriptCommand`.
 
 ---
 
@@ -2076,6 +2158,26 @@ the long-lived VM afterwards; (c) other Virtualization.framework VMs
 sessions/bridges — they are not tart orphans, and podman survives a dead
 bridge because it networks over vsock/gvproxy, not vmnet IP.
 
+**Note on (c): the stranding can cross backends, but coexistence is the normal
+case (measured 2026-08-02, macOS 26.5.1, tart 2.32.1, `container` 1.0.0).**
+Clause (c) stands as written. A first pass at this note claimed the opposite —
+that tart and apple "cannot both hold a vmnet bridge" and alternate
+deterministically — and that was **wrong**, retracted the same day by a
+controlled re-run: three bridges coexisted (`bridge100` 192.168.139.3 Docker
+Desktop, `bridge101` 192.168.64.1 apple, `bridge102` 192.168.65.1 tart) with
+both backends at working egress simultaneously across a `container system`
+restart *and* a tart VM restart, indices stable per backend throughout.
+
+What is true is narrower and is the same cross-epoch problem clause (c) already
+implies: a bridge torn down and re-created can return on a **different subnet**,
+and any VM still attached to the old one — *whichever backend owns it* — goes
+silently net-dead while continuing to report its address. The earlier
+"exclusivity" reading came from a host whose container-framework vmnet was
+already wedged (new VMs coming up `NO-CARRIER`), where only two bridges existed
+and index 101 was recycled between backends with a fresh subnet each time. So
+treat "both backends running" as fine, and bridge *re-creation* as the hazard.
+Only tart detects the resulting dead state ([DF172](design/findings-unresolved.md)).
+
 **Second variant — stale lease, false-healthy (DF87, observed 2026-07-14):**
 after a restart, bootpd can re-ACK the guest's old lease out of
 `/var/db/dhcpd_leases` (hundreds of stale entries survive the subnet
@@ -2103,7 +2205,233 @@ wedge (pre-flight abort + in-loop check + its own autopsy fingerprint)
 instead of burning sentinel timeouts. Full design:
 [`archive/plans/tart-network-liveness.md`](archive/plans/tart-network-liveness.md).
 
+### Tart regenerates the VM's MAC on every `tart run`, so each start burns a DHCP lease and the shared vmnet pool is consumed per start
+
+Measured 2026-08-04 (macOS 26.5.1) while separating "the reboot moved this
+guest's address" from "any restart moves it". Raw output:
+[`design/research/macos-isolation-spike/results/restart-control.txt`](design/research/macos-isolation-spike/results/restart-control.txt).
+
+**That an address moves across a stop/start was already known** — the same
+spike's `lease-binding.txt` L2 measured apple `.22`→`.23` and concluded that
+any cached address is a fail-open hazard. What this entry adds is *why*, and
+how much worse it gets over a host's lifetime.
+
+**Symptom:** a Tart VM comes back on a different IP after an ordinary
+`stop`/`start`, with no reboot, no host sleep and no subnet re-pick — so
+none of the wedge symptoms above apply, and the guest is perfectly healthy
+on its new address.
+
+**Why:** `tart run` writes a **new random MAC** into the VM's own
+`~/.tart/vms/<name>/config.json` on every start. yoloAI passes no MAC flag
+(`runtime/tart/tart.go`, `buildRunArgs` — the invocation is `run
+--no-graphics` plus `--dir` shares), and `--random-mac` is an explicit
+`tart set` option we never use, so this is Tart's own default. Verified by
+reading `macAddress` from the VM's config across two consecutive restarts:
+
+| event | MAC | address |
+| --- | --- | --- |
+| running | `fa:71:58:f0:c3:85` | `192.168.65.3` |
+| after `stop` | `fa:71:58:f0:c3:85` (unchanged — the rewrite happens at start) | — |
+| after `start` | `da:86:c1:09:b2:13` | `192.168.65.2` |
+| after another `stop`/`start` | `b2:f5:76:a9:08:f2` | `192.168.65.4` |
+
+To vmnet's DHCP server each start is therefore a **brand-new host**, which
+gets a brand-new lease. Leases are consumed per *start*, not per VM, and
+`/var/db/dhcpd_leases` accumulates a record per start that nothing prunes —
+the file survives reboots, so the accumulation is permanent. On the host
+above it had reached **253 records covering the whole of
+`192.168.65.2`–`.254`, with zero free**, at which point starts recycle
+addresses that previous VMs held. **A reboot does not heal this**: measured
+directly across one, the count read 253 before and 253 after
+(`reboot-post.txt` P11, the round taken 2026-08-04 11:30). A full pool is
+therefore a permanent state of the host, not a condition that clears itself
+overnight, and the only thing that empties the file is deleting it. That is how a VM can come back on a
+*lower* address than it had (`.3` → `.2` above): it is being handed a
+stranger's expired lease, not remembering its own.
+
+**Consequence for anything that keys on a guest address.** An address is
+not an identity here and does not survive a restart. Worse, once the pool
+wraps, an address authorized for sandbox X is eventually handed to sandbox
+Y — so a stale host-side rule naming that address applies to whoever holds
+it next. The host-`pf` design's reaping requirements exist for exactly this
+([`design/plans/macos-pf-privileged-path.md`](design/plans/macos-pf-privileged-path.md),
+"Reaping is a security requirement"); this entry is the mechanism underneath
+them.
+
+**The apple `container` backend does not share any of this.** It holds
+**zero** records in `/var/db/dhcpd_leases` — its vmnet plugin runs a
+separate allocator — so the two backends neither share a pool nor share its
+exhaustion. (`lease-binding.txt` L1 suspected this and left it UNKNOWN for
+want of a census; the count settles it.) Apple's addresses move on restart too (`.3`→`.5`, `.4`→`.6`
+measured, each with a fresh MAC), but the allocation is sequential from its
+own store, and it appears to restart from the low end after a host reboot.
+Do not generalise one backend's address behaviour to the other.
+
+**Across a host reboot, both backends move every guest and regenerate every
+MAC** — the same behaviour as a plain restart, so a reboot buys back nothing.
+Measured over one real reboot with the guests deliberately restarted in
+**reversed** order, which is what distinguishes the two available
+explanations: if addresses were pinned to sandboxes they would not move, and
+if they were purely a function of start order the reversed order would swap
+them. Neither happened. Apple's A went `192.168.64.5`→`.4` and B went
+`.6`→`.3` — B did **not** take A's old `.5` — while tart's guest went
+`192.168.65.4`→`.2`; all three came up with a newly generated MAC. The pool
+simply advances from wherever it stood.
+
+**So an address is not an identity and cannot be persisted.** Anything that
+needs to know which address a sandbox holds must ask the backend at the
+moment it needs to know. A slot→address mapping written before a reboot
+names, after it, either nothing or somebody else — and on tart, where the
+pool has wrapped, "somebody else" is the likely case rather than the
+pathological one.
+
+### The sandbox's tier layout reaches a tart guest but not an apple one, so the same file has different in-guest paths per backend
+
+The host lays a sandbox out in three access tiers — `host/`, `ro/`, `rw/`.
+**tart reproduces that structure inside the guest; apple flattens it away.**
+The exchange directory the host knows as `<sandbox>/rw/files` is:
+
+| backend | path inside the guest |
+| --- | --- |
+| tart | `/Volumes/My Shared Files/rw/files` |
+| apple | `/yoloai/files` — no tier component |
+
+Same for the read-only tier: `/Volumes/My Shared Files/ro/prompt.txt` on tart
+against `/yoloai/prompt.txt` on apple. The reason is visible in tart's
+descriptor: it mounts **one VirtioFS share per guest-facing tier** under
+`/Volumes/My Shared Files` (`runtime/tart/tart.go:70-75`), so the tier name is
+necessarily a path component. apple mounts at literal targets under `/yoloai`
+and the tier is not part of the target.
+
+**Why this is worth writing down:** a probe or script that derives one guest
+path and reuses it across backends does not fail loudly. It reads an absent
+file, gets empty output, and that is indistinguishable from "the guest cannot
+see the content" — which is exactly the symptom every finding in this section
+is about. Deriving `/yoloai/rw/files` for apple by analogy with tart produced a
+clean-looking run in which every probe returned empty
+(`design/research/macos-isolation-spike/df175_rmput.sh`, whose comments record
+it). Ask the guest — `container exec <box> ls /yoloai` — rather than reasoning
+from the host layout or from the other backend.
+
+### Tart VirtioFS: the guest can read fabricated file content — the OLD bytes at the NEW length, with a correct `st_size` and no error
+
+Measured 2026-08-02 (macOS 26.5.1, tart 2.32.1) on a `tart run --dir` share, with the
+apple `container` backend as a control. Harness and raw output:
+[macos-isolation-spike](design/research/macos-isolation-spike/README.md).
+
+**The corruption, first, because it is the part that matters beyond barriers.** The host
+overwrote a 20-byte file containing `AAAA…` with the 3 bytes `ZZZ`. About a second later
+the tart guest reported:
+
+```
+size=3   read()='AAA'      <- new length, OLD bytes. No error, no short read.
+```
+
+The guest picks up the new **size** and keeps serving the **stale page**, so a reader gets
+a plausible-looking file that never existed on either side. Reproduced with a growing file
+too (12 bytes written over 2 → guest reads 2 stale bytes). A guest process cannot detect
+this: the stat is right, the read succeeds, the bytes are wrong.
+
+Deletion has the mirror-image defect: after the host removes a file, `stat()` in the guest
+keeps succeeding **indefinitely** (stale positive dentry) while `readdir()` drops the name
+within milliseconds.
+
+**Per-predicate timings**, guest-side, medians over 3 rounds, including a 200 ms settle
+pause (so subtract 200 for time-after-the-host-acted):
+
+| host action | `read()` | `stat()` | `readdir()` |
+| --- | --- | --- | --- |
+| create a new file | n/a | 993 ms | **214 ms** |
+| mkdir / symlink | n/a | ~994 ms | **~210 ms** |
+| overwrite in place | **NEVER** | 989 ms | n/a |
+| overwrite via temp+rename | **NEVER** | **NEVER** | n/a |
+| delete | n/a | **NEVER** | **212 ms** |
+| append | 992 ms | 992 ms | n/a |
+
+**Read this table by column, not by row.** "NEVER" is a property of the *predicate*, not of
+the change: the overwrite and the delete both reach the guest in about a second — visible
+via `st_size` and `readdir` respectively — while `read()` and `stat()` never catch up. An
+earlier version of this entry reported three rows as "the change never propagates", which
+was an artifact of binding one predicate per action.
+
+**Two clocks, and only one of them is slow.** `readdir` observes a new name ~14 ms after
+the host acts. `stat` runs on a **~1 s revalidation tick anchored to the guest's first
+lookup of that path** — the guest's own clock reads ~1000 ms regardless of when in the
+interval the host acts, and moves to ~2000 ms if the host waits longer than the tick. Any
+figure quoted as "~800 ms" is that 1 s tick minus a settle delay the measuring harness
+inserted; the honest number is **1 s**, quantised.
+
+**apple `container` is the control and behaves differently**: no `NEVER` anywhere, data
+visible in ~5 ms, and only *metadata* (size after a rename, dentry removal after a delete,
+size growth after an append) on the same ~1 s tick. So this is tart's VirtioFS, not virtiofs
+generally.
+
+**The mechanism (measured 2026-08-03).** The guest caches file *pages* and never invalidates
+them on a host write; only attributes refresh, on the ~1 s tick. So a file that **grows**
+looks healthy — bytes past the cached extent are fetched from the host — while a file that
+**shrinks, or is rewritten inside a cached page**, serves stale bytes clamped to the new
+size. That is why the `append` row above reads as working and is not: the harness appended
+to an *empty* file. Appending to a file with content returns stale head plus fresh tail.
+Independently reported and traced to a guest vnode that is never reclaimed, the guest's
+vnode table being saturated and idling at a near-zero recycle rate
+([augur#135](https://github.com/h1d3mun3/augur/issues/135), which also observed a single
+read returning a *mix* of old and new bytes). It affects **every** share, including the
+workspace — not only the exchange directory (DF176).
+
+**What to do.**
+
+- **Signal the guest by creating a new name, and poll with `readdir`.** That is the only
+  combination that is both fast (~14 ms) and correct on tart. `stat`-polling the same file
+  costs ~1 s; `read`-polling a rewritten file never terminates.
+- **No host-side write pattern fixes this.** Not in place, not temp+rename, not a symlink
+  repointed to a fresh blob, not `rm` and recreate. Measured, with controls, in
+  [`results/df175-write-patterns.txt`](design/research/macos-isolation-spike/results/df175-write-patterns.txt).
+  **Temp+rename is strictly worse than in place**: the guest keeps the old bytes *and* the
+  old size, so the one signal an in-place overwrite leaves behind is gone. A symlink repoint
+  leaves an unresolvable link and `EINVAL`. Recreating a *directory* at a seen name hides
+  everything inside it.
+- **To deliver new bytes at a path the guest has read, make the guest drop its cache.**
+  `msync(addr, len, MS_INVALIDATE)` on a `PROT_READ` mapping, from inside the guest — no
+  privilege, no write permission, works on `:ro` shares. That is what
+  `runtime.GuestFileRefresher` does (`runtime/tart/guestrefresh.go`), and
+  `BackendCaps.HostWritesNeedGuestRefresh` is the property that says a backend needs it.
+  Two things about it are not optional: **the host's hash is the only safe stop condition**
+  (in the grow case the guest's size was already correct while its bytes were not, and the
+  first pass produced a settled-looking wrong hash), and **the retry must cross a process
+  boundary** — four invalidate passes inside one guest process did not converge what one
+  pass in a fresh process did.
+- A restart also clears it, which is what `files put` tells the user when the repair fails.
+- Deletion is a usable signal **only** via `readdir`.
+
+**Existing exposure.** `yoloai files put` replacing an existing entry is fixed: it verifies
+and repairs (DF175). The one other host-side rewrite of a shared config, `patchKeepaliveOnly`
+(`internal/orchestrator/launch/launch.go:943-965`), is gated on `AgentFreeLaunch`, which
+only `runtime/docker/docker.go:63` sets — so it never runs on tart. The live path,
+`patchRuntimeConfig` (`internal/orchestrator/lifecycle/runtimeconfig_patch.go:32`, reached
+from `yoloai network allow`), *does* rewrite `runtime-config.json` on a running sandbox, but
+the guest reads that file at boot rather than polling it, so today's exposure is bounded by
+consumption timing rather than by design. Whether any flow rewrites the **workdir** while a
+sandbox runs is open — that is DF176, and it is the one worth checking.
+See [DF175](design/findings-unresolved.md).
+
+
 ## Seatbelt (macOS sandboxing)
+
+### SBPL has no read-only mount — "read-only" is the *absence* of a write grant, so it must be said with an explicit `deny`
+
+**Symptom / question:** a `--dir <path>:ro` sandbox lets the agent write to that path anyway, on seatbelt only. Every other backend refuses.
+
+**Explanation (measured 2026-07-30, macOS 26):** SBPL has no "mount this read-only" primitive, because seatbelt does not mount anything — it grants access to host paths in place. A read-only mount is therefore expressed as *"emit an allow-read and no allow-write"*, and an allow-read **does not revoke** a write permitted by some other rule. SBPL is last-match-wins among rules that *match the operation*, and a rule that only names `file-read*` never matches a write at all, so it cannot override anything.
+
+That makes read-only conditional on nothing else granting write over the same path — and the agent profile grants write broadly in several places: `/tmp`, `/private/tmp` and `/private/var/folders` (`tempPaths`), `~/Library/Caches/org.swift.swiftpm` and `~/Library/Developer/Xcode` (`writeProfileHomeDir`), the sandbox dir, and any enclosing read-write mount. A `:ro` dir under any of them was silently read-write. Reproduced end-to-end through the real `--dir` path: the file came back reading `tampered`.
+
+**The fix, and the rule it generalises to:** `writeProfileTrailingRules` emits an explicit `(deny file-write* (subpath …))` per read-only mount, in a trailing block after every allow. **Any negative permission on seatbelt has to be stated, positioned last, and ordered by specificity** — the trailing block sorts by path depth so the most specific rule matches last, which is what makes a read-write dir nested in a read-only one stay writable and vice versa. Verified against the kernel in both nesting directions, not just in the profile text.
+
+**Contrast with the other backends**, because the asymmetry is the thing to remember: docker/podman/containerd/apple get a real read-only bind, and tart a `:ro` VirtioFS share. Those are unconditional — they hold regardless of what else the config says. Seatbelt's is a statement that can be contradicted. So "grant read on X" means something materially weaker here than the identical sentence means anywhere else, and a design that says it once for several backends is not saying the same thing to each.
+
+**Code:** `runtime/seatbelt/profile.go::writeProfileTrailingRules`; tests `TestSeatbelt_ReadOnlyMountHoldsUnderABroaderGrant`, `TestSeatbelt_NestedMountsEnforceMostSpecific` (kernel), `TestGenerateProfile_NestedMountsResolveMostSpecificLast` (ordering). Origin: DF161, DF162.
+
+---
 
 ### Seatbelt has no backend image/cache store — `CacheUsage`/`PruneCache` are correctly absent
 
@@ -2619,6 +2947,35 @@ prune's honest reclaim figure is measured as the drop in `system df`'s **total**
 prune sequence, not the `reclaimable` field.
 
 **Code:** `runtime/apple/prune.go` (`PruneCache`, `systemDF`, `reclaimDelta`).
+
+### Apple: the `container` service does not survive a reboot, and every yoloAI sandbox reads `removed` until it is restarted
+
+**Symptom:** after a host restart, `yoloai ls` shows every apple sandbox as
+`removed` and `container ls -a` fails with
+`internalError: "failed to list containers" (cause: "interrupted: "XPC connection
+error: Connection invalid"")`. The containers are intact — they come back
+`stopped` the moment the service is started.
+
+**Explanation:** `container system status` reports *"apiserver is not running and
+not registered with launchd"*. The service is started on demand, is not a launchd
+job, and nothing brings it back at boot. So the post-reboot state of the apple
+backend is "unreachable", not "empty", and it stays that way until something runs
+`container system start`.
+
+**Why it bites without warning:** yoloAI renders unreachable as *gone*.
+`runtime/apple/apple.go:289-292` maps every `container inspect` failure to
+`runtime.ErrNotFound`, and `internal/orchestrator/status/status.go:235-237` maps
+that to `StatusRemoved` — so a reboot looks exactly like someone having deleted
+the containers. The same conflation makes `yoloai destroy` report success while
+leaving the container behind (**DF180**). This cost a wrong reading in this
+project's own research before it was noticed: round 1 of the macOS reboot test
+recorded "the apple sandboxes came back `removed`" and reasoned about reboot
+recovery from it.
+
+**Fix:** none in the product yet — DF180 holds it. Anything measuring apple state
+after a reboot must run `container system start` first, which
+`docs/contributors/design/research/macos-isolation-spike/reboot_post.sh` now does
+before reading any sandbox state.
 
 ## Docker: `procReady not received` usually means the container is exiting, not a broken runtime
 

@@ -176,7 +176,7 @@ func TestPatchBrokerConfigFiles(t *testing.T) {
 
 	read := func(t *testing.T, sandboxDir, rel string) string {
 		t.Helper()
-		data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, rel)) //nolint:gosec // test path under t.TempDir()
+		data, err := os.ReadFile(filepath.Join(store.AgentRuntimePath(sandboxDir), rel)) //nolint:gosec // test path under t.TempDir()
 		require.NoError(t, err)
 		return string(data)
 	}
@@ -196,7 +196,7 @@ func TestPatchBrokerConfigFiles(t *testing.T) {
 
 	t.Run("preserves existing user config.toml", func(t *testing.T) {
 		sandboxDir := t.TempDir()
-		dir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+		dir := store.AgentRuntimePath(sandboxDir)
 		require.NoError(t, os.MkdirAll(dir, 0o750))
 		require.NoError(t, os.WriteFile(filepath.Join(dir, "config.toml"), []byte("model = \"gpt-5.3-codex\"\n"), 0o600))
 
@@ -209,7 +209,7 @@ func TestPatchBrokerConfigFiles(t *testing.T) {
 	t.Run("no-op for env-redirected agents", func(t *testing.T) {
 		sandboxDir := t.TempDir()
 		require.NoError(t, patchBrokerConfigFiles(sandboxDir, claudeBrokerConfig(), "172.17.0.1:44115", "tok"))
-		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+		_, err := os.Stat(store.AgentRuntimePath(sandboxDir))
 		assert.True(t, os.IsNotExist(err), "nothing written when ConfigFiles is empty")
 	})
 }
@@ -217,7 +217,7 @@ func TestPatchBrokerConfigFiles(t *testing.T) {
 func TestApplyWorkdirTrust(t *testing.T) {
 	readConfig := func(t *testing.T, sandboxDir string) map[string]any {
 		t.Helper()
-		data, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, "config.toml")) //nolint:gosec // test path under t.TempDir()
+		data, err := os.ReadFile(filepath.Join(store.AgentRuntimePath(sandboxDir), "config.toml"))
 		require.NoError(t, err)
 		var cfg map[string]any
 		require.NoError(t, toml.Unmarshal(data, &cfg))
@@ -261,14 +261,14 @@ func TestApplyWorkdirTrust(t *testing.T) {
 			Workdir:    &state.DirSpec{Path: "/home/karl/proj"},
 		}
 		require.NoError(t, applyWorkdirTrust(st))
-		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+		_, err := os.Stat(store.AgentRuntimePath(sandboxDir))
 		assert.True(t, os.IsNotExist(err), "nothing written when the agent declares no WorkdirTrust")
 	})
 }
 
 func TestApplyDirectCredential(t *testing.T) {
 	authPath := func(sandboxDir string) string {
-		return filepath.Join(sandboxDir, store.AgentRuntimeDir, "auth.json")
+		return filepath.Join(store.AgentRuntimePath(sandboxDir), "auth.json")
 	}
 
 	t.Run("codex writes the real key to auth.json when not brokered", func(t *testing.T) {
@@ -299,7 +299,7 @@ func TestApplyDirectCredential(t *testing.T) {
 		sandboxDir := t.TempDir()
 		st := &state.State{SandboxDir: sandboxDir, Agent: agent.GetAgent("gemini")}
 		require.NoError(t, applyDirectCredential(st, map[string]string{"GEMINI_API_KEY": "real"}))
-		_, err := os.Stat(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+		_, err := os.Stat(store.AgentRuntimePath(sandboxDir))
 		assert.True(t, os.IsNotExist(err), "gemini's env-var credential works directly; nothing written")
 	})
 }

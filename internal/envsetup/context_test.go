@@ -125,6 +125,41 @@ func TestGenerateContext_WorkdirMountPath(t *testing.T) {
 	}
 }
 
+// TestGenerateContext_SeatbeltNamesTheGuestView pins the paths a
+// host-filesystem backend's context text hands the agent. The text is
+// instructions the agent follows literally, and since tiering the sandbox dir
+// has no logs/ or bin/ of its own — those live under the read-write tier, which
+// is also the flat view the guest works from. Naming the sandbox dir would send
+// the agent to paths that no longer exist, and nothing else would notice,
+// because prose is not typechecked and the agent just finds nothing there.
+func TestGenerateContext_SeatbeltNamesTheGuestView(t *testing.T) {
+	meta := &store.Environment{
+		Name:           "test-sb",
+		BackendType:    "seatbelt",
+		HostFilesystem: true,
+		// The runtime-dir paths are written only in the --debug section, which is
+		// also the section that tells the agent where to look when idle detection
+		// misbehaves — i.e. exactly when a wrong path costs the most.
+		Debug: true,
+		Dirs: []store.DirEnvironment{{
+			HostPath:  "/home/user/project",
+			MountPath: "/home/user/project",
+			Mode:      "copy",
+		}},
+	}
+	sandboxDir := "/tmp/yoloai-test-sb/test-sb"
+
+	result := GenerateContext(sandboxDir, meta)
+
+	view := config.GuestViewDir(sandboxDir)
+	if !strings.Contains(result, view+"/"+store.RuntimeConfigFile) {
+		t.Errorf("expected the runtime config named under the guest view %q, got:\n%s", view, result)
+	}
+	if strings.Contains(result, sandboxDir+"/"+store.RuntimeConfigFile) {
+		t.Errorf("the untiered sandbox-dir path must not be named — nothing is there:\n%s", result)
+	}
+}
+
 func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 	meta := &store.Environment{
 		Name:           "test-sb",
@@ -140,14 +175,14 @@ func TestGenerateContext_SeatbeltFilesPath(t *testing.T) {
 	sandboxDir := "/tmp/yoloai-test-sb/test-sb"
 	result := GenerateContext(sandboxDir, meta)
 
-	expectedFilesPath := filepath.Join(sandboxDir, "files") + "/"
+	expectedFilesPath := store.FilesDir(sandboxDir) + "/"
 	if !strings.Contains(result, expectedFilesPath) {
 		t.Errorf("expected seatbelt files path %q in context, got:\n%s", expectedFilesPath, result)
 	}
 	if strings.Contains(result, "/yoloai/files/") {
 		t.Error("seatbelt context should not contain /yoloai/files/")
 	}
-	expectedCachePath := filepath.Join(sandboxDir, "cache") + "/"
+	expectedCachePath := store.CacheDir(sandboxDir) + "/"
 	if !strings.Contains(result, expectedCachePath) {
 		t.Errorf("expected seatbelt cache path %q in context, got:\n%s", expectedCachePath, result)
 	}
@@ -206,7 +241,7 @@ func TestGenerateContext_TartFilesPath(t *testing.T) {
 
 func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	sandboxDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750); err != nil {
+	if err := os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -224,7 +259,7 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	}
 
 	// Check context.md exists and has content
-	contextData, err := os.ReadFile(filepath.Join(sandboxDir, "context.md")) //nolint:gosec // G304: test helper path
+	contextData, err := os.ReadFile(config.ContextPath(sandboxDir))
 	if err != nil {
 		t.Fatalf("read context.md: %v", err)
 	}
@@ -233,7 +268,7 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 	}
 
 	// Check agent instruction file contains full context (inlined, not a pointer)
-	refData, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, "CLAUDE.md")) //nolint:gosec // G304: test helper path
+	refData, err := os.ReadFile(filepath.Join(store.AgentRuntimePath(sandboxDir), "CLAUDE.md"))
 	if err != nil {
 		t.Fatalf("read agent instruction file: %v", err)
 	}
@@ -250,7 +285,7 @@ func TestWriteContextFiles_WritesContextAndRef(t *testing.T) {
 // ContextFile), not just Claude's CLAUDE.md — the agnosticism fix.
 func TestWriteContextFiles_QAProtocolIsAgentAgnostic(t *testing.T) {
 	sandboxDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750); err != nil {
+	if err := os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -263,7 +298,7 @@ func TestWriteContextFiles_QAProtocolIsAgentAgnostic(t *testing.T) {
 		t.Fatalf("WriteContextFiles: %v", err)
 	}
 
-	refData, err := os.ReadFile(filepath.Join(sandboxDir, store.AgentRuntimeDir, "GEMINI.md")) //nolint:gosec // G304: test helper path
+	refData, err := os.ReadFile(filepath.Join(store.AgentRuntimePath(sandboxDir), "GEMINI.md"))
 	if err != nil {
 		t.Fatalf("read GEMINI.md: %v", err)
 	}
@@ -277,7 +312,7 @@ func TestWriteContextFiles_QAProtocolIsAgentAgnostic(t *testing.T) {
 
 func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	sandboxDir := t.TempDir()
-	if err := os.MkdirAll(filepath.Join(sandboxDir, store.AgentRuntimeDir), 0750); err != nil {
+	if err := os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750); err != nil {
 		t.Fatal(err)
 	}
 
@@ -295,12 +330,12 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 	}
 
 	// context.md should exist
-	if _, err := os.Stat(filepath.Join(sandboxDir, "context.md")); err != nil {
+	if _, err := os.Stat(config.ContextPath(sandboxDir)); err != nil {
 		t.Error("context.md should be created")
 	}
 
 	// No agent ref file should be created
-	entries, _ := os.ReadDir(filepath.Join(sandboxDir, store.AgentRuntimeDir))
+	entries, _ := os.ReadDir(store.AgentRuntimePath(sandboxDir))
 	for _, e := range entries {
 		t.Errorf("unexpected file in %s: %s", store.AgentRuntimeDir, e.Name())
 	}
@@ -311,7 +346,7 @@ func TestWriteContextFiles_NoRefWhenEmpty(t *testing.T) {
 // via agent_files), the yoloAI orientation is APPENDED, not overwritten (D92).
 func TestWriteContextFiles_AppendsNotClobbers(t *testing.T) {
 	sandboxDir := t.TempDir()
-	runtimeDir := filepath.Join(sandboxDir, store.AgentRuntimeDir)
+	runtimeDir := store.AgentRuntimePath(sandboxDir)
 	if err := os.MkdirAll(runtimeDir, 0750); err != nil {
 		t.Fatal(err)
 	}

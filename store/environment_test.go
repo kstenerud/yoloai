@@ -78,7 +78,7 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 	err := SaveEnvironment(dir, meta)
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec // test file in temp dir
+	data, err := os.ReadFile(EnvironmentFilePath(dir))
 	require.NoError(t, err)
 
 	var raw map[string]json.RawMessage
@@ -131,7 +131,8 @@ func TestLoadEnvironment_BalksBelowCurrentVersion(t *testing.T) {
 		"model": "opus",
 		"dirs": [{"host_path": "/tmp/proj", "mount_path": "/tmp/proj", "mode": "copy"}]
 	}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(v2JSON), 0600))
+	require.NoError(t, config.EnsureHostTier(dir))
+	require.NoError(t, os.WriteFile(EnvironmentFilePath(dir), []byte(v2JSON), 0600))
 
 	_, err := LoadEnvironment(dir)
 	require.ErrorIs(t, err, ErrNeedsMigration)
@@ -216,7 +217,8 @@ func TestMeta_FutureVersionReturnsError(t *testing.T) {
 
 	futureJSON := `{"version": 9999, "name": "future",
 		"dirs": [{"host_path": "/tmp", "mount_path": "/tmp", "mode": "copy"}]}`
-	require.NoError(t, os.WriteFile(filepath.Join(dir, EnvironmentFile), []byte(futureJSON), 0600))
+	require.NoError(t, config.EnsureHostTier(dir))
+	require.NoError(t, os.WriteFile(EnvironmentFilePath(dir), []byte(futureJSON), 0600))
 
 	_, err := LoadEnvironment(dir)
 	require.Error(t, err)
@@ -240,7 +242,7 @@ func TestMeta_ResourcesOmittedWhenNil(t *testing.T) {
 	err := SaveEnvironment(dir, meta)
 	require.NoError(t, err)
 
-	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec
+	data, err := os.ReadFile(EnvironmentFilePath(dir))
 	require.NoError(t, err)
 
 	var raw map[string]json.RawMessage
@@ -301,7 +303,7 @@ func TestMeta_MigrateV1ToV2(t *testing.T) {
 	// Re-save and verify no legacy keys, current version stamped.
 	dir := t.TempDir()
 	require.NoError(t, SaveEnvironment(dir, loaded))
-	data, err := os.ReadFile(filepath.Join(dir, EnvironmentFile)) //nolint:gosec // test file in temp dir
+	data, err := os.ReadFile(EnvironmentFilePath(dir))
 	require.NoError(t, err)
 	var raw map[string]json.RawMessage
 	require.NoError(t, json.Unmarshal(data, &raw))
@@ -320,4 +322,25 @@ func TestEnvironment_MountPaths(t *testing.T) {
 
 	// Empty environment yields an empty (non-nil is fine) slice.
 	assert.Empty(t, (&Environment{}).MountPaths())
+}
+
+// TestSaveEnvironmentTo_WritesExactlyWhereTold pins the property that makes the
+// path-taking writer usable by a migrator: it resolves nothing. It writes at the
+// path given — not at the tier location the current layout would pick — and it
+// creates no host/ tier, because the record it is writing belongs to an era that
+// had none. LoadEnvironmentFrom reads it back from the same explicit path.
+func TestSaveEnvironmentTo_WritesExactlyWhereTold(t *testing.T) {
+	dir := t.TempDir()
+	flat := filepath.Join(dir, "environment.json") // literal: a pre-tier record (DF164)
+
+	require.NoError(t, SaveEnvironmentTo(flat, &Environment{Name: "box", BackendType: runtime.BackendDocker}))
+
+	require.FileExists(t, flat, "the record must land at the path given, not at the tier path")
+	_, err := os.Stat(filepath.Join(dir, "host"))
+	assert.True(t, os.IsNotExist(err), "a path-taking writer must not create the host/ tier")
+	assert.NoFileExists(t, EnvironmentFilePath(dir), "nothing may be written at the live layout's path")
+
+	meta, err := LoadEnvironmentFrom(flat)
+	require.NoError(t, err)
+	assert.Equal(t, "box", meta.Name)
 }

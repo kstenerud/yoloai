@@ -1,0 +1,80 @@
+===================================================================
+ vmnet alternation instrumentation
+ Reading: 301 = working egress, 000 = stranded, n/a = no guest reachable
+===================================================================
+
+--- T0 baseline (as found)
+    bridges : bridge100:=192.168.139.3 bridge101:=192.168.64.1 bridge102:=192.168.65.1 
+    apple   : ip=192.168.64.5/24  egress=301
+    tart    : ip=192.168.65.2     egress=301
+
+>>> restarting APPLE's network (container system stop/start)
+
+--- T1 after apple takes the bridge
+    bridges : bridge100:=192.168.139.3 bridge102:=192.168.65.1 bridge101:=192.168.64.1 
+    apple   : ip=192.168.64.2/24  egress=301
+    tart    : ip=192.168.65.2     egress=301
+
+>>> restarting the TART VM (this is the step DF172 says strands apple)
+
+--- T2 after tart takes the bridge
+    bridges : bridge100:=192.168.139.3 bridge101:=192.168.64.1 bridge102:=192.168.65.1 
+    apple   : ip=192.168.64.2/24  egress=301
+    tart    : ip=192.168.65.3     egress=301
+
+>>> restarting APPLE again — does it reverse? (a one-way result would refute
+    'most-recent-start wins' and point at something tart-specific instead)
+
+--- T3 after apple takes it back
+    bridges : bridge100:=192.168.139.3 bridge102:=192.168.65.1 bridge101:=192.168.64.1 
+    apple   : ip=192.168.64.2/24  egress=301
+    tart    : ip=192.168.65.3     egress=301
+
+=== bridge lifecycle events from the system log since 2026-08-02 22:21:01 ===
+    (who actually detaches the bridge — configd? the vmnet helper? tart?)
+    2026-08-02 22:22:54.047 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:SPS] NetWakeInterface: interface -- ifname: bridge102, address: <mask.hash: 'FAHM2Zcu/CFl2xBXA3k4/Q=='>, supports Wake-On-Lan: no
+    2026-08-02 22:22:54.048 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:SPS] NetWakeInterface: interface -- ifname: bridge101, address: <mask.hash: 'TPWW8KATvXHQrm6za+Urog=='>, supports Wake-On-Lan: no
+    2026-08-02 22:22:54.049 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:SPS] NetWakeInterface: interface -- ifname: bridge101, address: <mask.hash: 'KaCOnvDEQ2+az+pX5hoXGg=='>, supports Wake-On-Lan: no
+    2026-08-02 22:22:54.050 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:SPS] NetWakeInterface: interface -- ifname: bridge101, address: <mask.hash: 'iC7SIrcEVCLNQ4nZZekEvg=='>, supports Wake-On-Lan: no
+    2026-08-02 22:22:54.051 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] Interface already represented in list - ifid: 23, ifname: bridge101, ifaddr: <mask.hash: 'iC7SIrcEVCLNQ4nZZekEvg=='>
+    2026-08-02 22:22:54.051 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:State] SetupActiveInterfaces: Registered bridge101 (23) BSSID <mask.hash: 'KBsgkTjdN4/qeDUIKogeuA=='> Struct addr 0x8e6f44000, primary 0x8e650b000, <mask.hash: 'iC7SIrcEVCLNQ4nZZekEvg=='>/64 (Occulting)
+    2026-08-02 22:22:54.051 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:Default] Joining mcast group ff02::fb on bridge101 (23)
+    2026-08-02 22:22:54.052 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(2d046623, b3545800)] Sent 139-byte IPv4 mDNS response over multicast via bridge101/23 -- id: 0x0000 (0), flags: 0x8400 (R/Query, AA, NoError), counts: 0/1/0/1 <mask.hash: 'EBn7wroF1WFCjqnUhoT/3g=='>
+    2026-08-02 22:22:54.052 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(2d046623, c94fcb4)] Sent a previous IPv6 mDNS response over multicast via bridge101/23
+    2026-08-02 22:22:54.186 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(67c94bec, 16dc7b3f)] Sent 69-byte IPv4 mDNS query over multicast via bridge101/23 -- id: 0x0000 (0), flags: 0x0000 (Q/Query, NoError), counts: 1/0/1/0 <mask.hash: 'cnrHEZewzCdNk3mvX36GPg=='>
+    2026-08-02 22:22:54.186 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(67c94bec, d8d8158b)] Sent a previous IPv6 mDNS query over multicast via bridge101/23
+    2026-08-02 22:22:54.186 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(67c94bec, 82d4b34e)] Received a previous IPv6 mDNS query from <mask.hash: 'KaCOnvDEQ2+az+pX5hoXGg=='> over multicast via bridge101/23
+    2026-08-02 22:22:54.186 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(67c94bec, 19e22af3)] Received a previous IPv4 mDNS query from <mask.hash: 'TPWW8KATvXHQrm6za+Urog=='> over multicast via bridge101/23
+    2026-08-02 22:22:54.186 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(b7305b03, d3a74ce)] Sent 79-byte IPv4 mDNS response to <mask.hash: 'TPWW8KATvXHQrm6za+Urog=='> over unicast via bridge101/23 -- id: 0x0000 (0), flags: 0x8400 (R/Query, AA, NoError), counts: 0/2/0/0 <mask.hash: 'O5M1xmXTSLxFm1ZpjNnuxg=='>
+    2026-08-02 22:22:54.290 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:Default] [Q61645] Sent UDP DNS Message 51 bytes from <mask.hash: 'vJyWalF0NyvcUDvHBwmjNA=='>:53 to <mask.hash: 'LIQ2cOeG7DlN6ymPw4TWmg=='>:32882 via bridge101 (0x17)
+    2026-08-02 22:22:54.290 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:Default] [Q25810] Sent UDP DNS Message 63 bytes from <mask.hash: 'vJyWalF0NyvcUDvHBwmjNA=='>:53 to <mask.hash: 'LIQ2cOeG7DlN6ymPw4TWmg=='>:32882 via bridge101 (0x17)
+    2026-08-02 22:22:54.436 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(9bbf126c, 8099fcbf)] Sent 69-byte IPv4 mDNS query over multicast via bridge101/23 -- id: 0x0000 (0), flags: 0x0000 (Q/Query, NoError), counts: 1/0/1/0 <mask.hash: 'cnrHEZewzCdNk3mvX36GPg=='>
+    2026-08-02 22:22:54.436 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(9bbf126c, ed389c0b)] Sent a previous IPv6 mDNS query over multicast via bridge101/23
+    2026-08-02 22:22:54.436 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(9bbf126c, 3f818ece)] Received a previous IPv6 mDNS query from <mask.hash: 'KaCOnvDEQ2+az+pX5hoXGg=='> over multicast via bridge101/23
+    2026-08-02 22:22:54.436 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(9bbf126c, 32a28573)] Received a previous IPv4 mDNS query from <mask.hash: 'TPWW8KATvXHQrm6za+Urog=='> over multicast via bridge101/23
+    2026-08-02 22:22:54.436 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(1f8f8577, fcd93c34)] Sent 99-byte IPv4 mDNS response over multicast via bridge101/23 -- id: 0x0000 (0), flags: 0x8400 (R/Query, AA, NoError), counts: 0/2/0/1 <mask.hash: '3jM1BBhRj6NivCxBZ1L5ig=='>
+    2026-08-02 22:22:54.437 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(1f8f8577, 627579f0)] Sent a previous IPv6 mDNS response over multicast via bridge101/23
+    2026-08-02 22:22:54.644 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(f341d12, f94f026f)] Sent a previous IPv4 mDNS query over multicast via bridge100/21
+    2026-08-02 22:22:54.644 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(f341d12, ba648bef)] Sent a previous IPv6 mDNS query over multicast via bridge100/21
+    2026-08-02 22:22:54.644 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(47df8e95, d283a740)] Sent 527-byte IPv4 mDNS query over multicast via bridge102/25 -- id: 0x0000 (0), flags: 0x0000 (Q/Query, NoError), counts: 24/3/0/0 <mask.hash: 'oL5TEfBnYst8TC1db5SvuQ=='>
+    2026-08-02 22:22:54.644 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(47df8e95, 7e6139c0)] Sent a previous IPv6 mDNS query over multicast via bridge102/25
+    2026-08-02 22:22:54.645 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(f341d12, fb4f0595)] Sent a previous IPv4 mDNS query over multicast via bridge101/23
+    2026-08-02 22:22:54.645 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [Q(f341d12, bc648f15)] Sent a previous IPv6 mDNS query over multicast via bridge101/23
+    2026-08-02 22:22:54.761 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(a1a16003, f4ba8646)] Sent a previous IPv4 mDNS response over multicast via bridge100/21
+    2026-08-02 22:22:54.761 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(a1a16003, 30344eba)] Sent a previous IPv6 mDNS response over multicast via bridge100/21
+    2026-08-02 22:22:54.761 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(c2df1cf4, 87a9fac9)] Sent a previous IPv4 mDNS response over multicast via bridge102/25
+    2026-08-02 22:22:54.761 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(c2df1cf4, 88c284dd)] Sent a previous IPv6 mDNS response over multicast via bridge102/25
+    2026-08-02 22:22:54.761 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(89b7ac1f, 87dee9bc)] Sent 1439-byte IPv4 mDNS response over multicast via bridge101/23 -- id: 0x0000 (0), flags: 0x8400 (R/Query, AA, NoError), counts: 0/22/0/5 <mask.hash: 'JJLggaAm9lbmmHyEPkR66A=='>
+    2026-08-02 22:22:54.762 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(89b7ac1f, 9f303118)] Sent a previous IPv6 mDNS response over multicast via bridge101/23
+    2026-08-02 22:22:54.996 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(f180e46e, eea8a3c1)] Sent 111-byte IPv4 mDNS response over multicast via bridge101/23 -- id: 0x0000 (0), flags: 0x8400 (R/Query, AA, NoError), counts: 0/2/0/1 <mask.hash: 'yvIDWOyzJQcf6Npsu/0o3Q=='>
+    2026-08-02 22:22:54.996 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(f180e46e, 26cc8509)] Sent a previous IPv6 mDNS response over multicast via bridge101/23
+    2026-08-02 22:22:56.760 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(2d046623, b3545800)] Sent a previous IPv4 mDNS response over multicast via bridge101/23
+    2026-08-02 22:22:56.760 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(2d046623, c94fcb4)] Sent a previous IPv6 mDNS response over multicast via bridge101/23
+    2026-08-02 22:22:57.489 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(f7e049ba, 9703395d)] Sent 1441-byte IPv4 mDNS response over multicast via bridge101/23 -- id: 0x0000 (0), flags: 0x8400 (R/Query, AA, NoError), counts: 0/26/0/0 <mask.hash: 'JJLggaAm9lbmmHyEPkR66A=='>
+    2026-08-02 22:22:57.489 Df mDNSResponder[603:137a] [com.apple.mDNSResponder:mDNS] [A(f7e049ba, 92b6a81d)] Sent a previous IPv6 mDNS response over multicast via bridge101/23
+
+Interpretation guide:
+  * apple 301 at T1/T3 and 000 at T2, with tart the mirror image => alternation confirmed,
+    and it is symmetric (neither backend is the sole aggressor).
+  * both 301 at some step => they CAN coexist and the earlier finding was situational.
+  * a bridge index/subnet change across steps => rules keyed on interface name are unsafe.

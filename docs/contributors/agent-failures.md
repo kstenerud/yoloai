@@ -117,6 +117,17 @@ poka-yoke failing. Worth watching: if a second entry lands where a co-located ru
 applied, the honest conclusion is that prose placement is a *readability* strategy that has been
 doing duty as an enforcement strategy.
 
+**5b. That second entry landed, twice, and both times the rule was in the file being edited.**
+A28's harness carried the comment *"a load that silently no-ops is indistinguishable from one that
+worked (A22)"* and then measured an effect from a rule that never loaded. A30's harness opens by
+declaring *"the snapshot IS the control, so no verdict here can be produced by a test that could not
+have gone the other way"* — and its control was the one input never tested. So the warning above
+should now be read as the result: a rule written into the artifact it governs is **read** reliably
+and **applied** to the case in front of it, not to the artifact stating it. Both were closed by
+making the wrong state unrepresentable instead — a load-gate, and a refusal to render any verdict
+when a control field is empty — which is pattern 5's own preferred answer and still has no
+counter-specimen.
+
 ## Specimens
 
 Newest first. Every entry here is from a single session (2026-07-16/17) — the first sustained
@@ -619,7 +630,7 @@ itself worth knowing when reading pattern 4.
   durable is the record: DF156's remedy (c) now states explicitly that the directory is
   agent-writable and that this is **not** an argument for the mount, so the next contributor who
   notices the permissions does not repeat the inference. Recording a *rejected* rationale is the
-  point; code shows the surviving branch and never the pruned one ([A14](#a14--reimplemented-an-approach-the-repo-had-already-rejected-2026-07-29)).
+  point; code shows the surviving branch and never the pruned one ([A14](#a14--reimplemented-an-approach-the-backend-idiosyncrasies-entry-had-explicitly-rejected-2026-07-29)).
 
 ### A17 — reported a capability as missing that I had built myself, earlier the same day (2026-07-30)
 
@@ -720,6 +731,77 @@ itself worth knowing when reading pattern 4.
   targets compile for `darwin/arm64` but do not run tests. The real gate is the owner's Mac and CI,
   which worked.
 
+### A23 — declared a release had never shipped, from a listing my own command could not show it in (2026-08-02)
+
+- **Claimed:** that `v0.10.0` was prepared but never cut — no tag locally, none on the remote, the
+  newest being `v0.9.0`. Written into `next-release.md` as a section with two resolutions and a
+  ruled-out third, committed, pushed, and reported to the owner as the first thing to decide.
+- **True:** `v0.10.0` is tagged, at exactly the `chore(release): prepare v0.10.0` commit, with 82
+  commits since — an ordinary release followed by ordinary work. Every downstream fact I called
+  wrong was right: the changelog's frozen `## v0.10.0` heading, and "escalated from `v0.10.1`". I
+  corrected a correct file.
+- **Source of the false belief:** `git tag -l | tail -5`. Git sorts refs **lexicographically**, so
+  `v0.10.0` lands directly after `v0.1.1` — near the *start* of that list. `tail` shows the end of an
+  ordering, and I read it as "the newest releases". That reading held for this repo's whole history
+  and stopped holding the moment the minor version crossed from 9 to 10, which is the first release
+  where the two orderings disagree. `git tag -l --sort=v:refname` is the version-ordered view, and
+  `git tag -l 'v0.10*'` was one command away.
+- **What made it feel checked:** I ran it twice — once on local tags, once on `git ls-remote --tags
+  origin` — and treated the agreement as corroboration. Both were `| tail -5` on the same
+  lexicographic sort, so the second check could only ever repeat the first. **Two lookups that share
+  a defect read exactly like two independent confirmations**, and the more careful I was being, the
+  more convincing the wrong answer got.
+- **The shape, which is the reusable part:** this was a **negative existence claim** — "no such tag"
+  — drawn from a *truncated* listing. A truncation can only ever support a positive claim about what
+  it shows; it is silent on what it omits, and it does not say that it omitted anything. The rule is
+  narrow enough to act on: never assert absence from a `head`/`tail`/`grep -m` view. Ask for the
+  thing by name, and let the empty result be the evidence.
+- **Caught by:** the owner opening the GitHub releases page and saying he saw 0.10.0. Nothing in the
+  repo would have caught it — `make check` has no opinion about tags, and the write-up was internally
+  consistent, cited real commits, and proposed sensible remedies for a problem that did not exist. It
+  is DF88's lesson one turn later (*the primary source for a claim about the past is the artifact,
+  not the index of it*), in a session that had read DF88 that same day while reviewing DF160.
+- **Cost:** a wrong section in the release-staging file, a commit and a push carrying it, a memory
+  entry asserting it, and a report to the owner naming it as the release's first decision. Reverted
+  in `next-release.md`; the branch survey in the same commit was independently verified and stands.
+- **Gated now?** No, and a gate looks unpromising: the failure was a shell idiom, not a rule anyone
+  could have restated. What would have caught it is asking `git tag -l 'v0.10*'` — i.e. querying for
+  the specific thing whose absence was the whole claim.
+
+### A24 — grouped four findings into a "family" on their symptom profile, and committed the grouping (2026-08-02)
+
+- **Claimed:** that DF8, DF28, DF159 and DF160 were one problem — four findings on one backend
+  sharing the assumption that `task.Start` returning means the guest is ready, "each patched on its
+  own symptom rather than on the shared cause". Written into DF28 and DF160 as reciprocal
+  cross-links, committed, pushed, and offered to the owner as the case for building one readiness
+  gate instead of a fourth patch.
+- **True:** DF8 and DF28 do share that mechanism. DF160 does not, and its own entry says so. Its
+  recorded evidence is `sandbox.ready` at 16–26s on all three cells, then a ~110s gap with no
+  events and `hook.active` never reached — with the explicit sentence *"the boot was never the
+  problem"* sitting in the bullet directly above where I added my cross-link. A mechanism that
+  fires before readiness cannot explain a stall that starts after it. DF159's relationship is
+  plausible but unproven, and I asserted it flatly.
+- **Source of the false belief:** I grouped on **symptom profile** — heaviest virtualised cells,
+  flaky under churn, green on retry — which all four genuinely share, and then described that
+  grouping in the language of mechanism. The four-way pattern was more satisfying than the true
+  two-way one, and it made a better argument for the work I was already proposing.
+- **What makes this specific rather than "be careful":** AGENTS.md rule 7 asks you to grep for a
+  defect's *shape* and says three of a kind means the architecture is generating them. Following
+  that instruction is what produced the error — I found a shape, and a shape is a symptom. The rule
+  needs a companion: **a family claim has to name the mechanism and a discriminator that would
+  separate its members if they were not related.** Here the discriminator was one field —
+  `sandbox.ready`, present in every autopsy — and checking it takes seconds.
+- **Caught by:** the owner asking to look deeper and "make sure we're not chasing ghosts", which
+  sent me back to DF160's own text. Nothing else would have: the grouping was internally coherent,
+  cited real findings, and the gate it argued for is still worth building for DF8+DF28.
+- **Cost:** two wrong cross-links in the findings file and a commit carrying them; a proposal to the
+  owner that overstated its own evidence by a factor of two. Retracted in place, with DF160
+  repointed at the agent-stall family (DF13) as a **hypothesis**, with the log events that would
+  confirm it named.
+- **Gated now?** No. What would have caught it is asking, of each member, *what would have to be
+  true for this to be the same bug* — and for a timing family that question has a mechanical answer:
+  do the failures fall on the same side of a known checkpoint.
+
 ## How an entry gets written
 
 This is the honest weak point, and pretending otherwise would make the file another instance of
@@ -750,6 +832,173 @@ is known, is probably not the *writing* of an entry but the **format** — a "Ca
 cannot be omitted, so pattern 4 stays computable. Revisit at ~20 specimens, or when an entry appears
 whose class already has three siblings.
 
+### A28 — wrote the vacuity guards, then wrote ten verdicts that could not have come out otherwise (2026-08-04)
+
+- **What happened:** across the macOS `pf` workstream I produced ten measurements whose "PASS" was
+  unreachable by any other value. The family is one shape: a shell idiom for *supply a default on
+  failure* colliding with a command that **already emits a value on failure**. `cmd | head` reported
+  head's exit status. `grep -c X || echo 0` printed `0` *and* exited 1, so the fallback appended a
+  second line, `"0\n0"` failed `[ -gt ]` with "integer expected", and the non-zero status fell into
+  the not-honored branch — unconditionally. `curl -w '%{http_code}' || echo 000` yielded `"000000"`,
+  which `!= "000"`, so a **blocked** destination read as reachable and inverted a correct result into
+  a reported failure. An interface name taken from `ifconfig`'s `$1` carried a trailing colon, making
+  the rule a syntax error that never loaded — and "no effect" was published as "inert". A `set skip`
+  detector grepped for a literal tab that never appears, so a grep that cannot match and a true
+  negative were the same reading. A `rdr` placed after filter rules violated pf's mandatory rule
+  order, so nothing loaded. A refusal detector scored **any** non-zero exit as "refused by policy",
+  so a `pfctl` parse error counted as a sudoers denial — which is how a row testing a file that was
+  neither user-writable nor a valid ruleset passed while testing nothing.
+- **Source of the false belief:** the idioms are correct-looking and near-universal, and each one
+  fails only in the presence of a *second* signal channel — a command that reports failure through
+  both its exit status and its stdout. Reading the line does not reveal it; running the line does.
+  Every one of these survived my own review because reviewing shell means reading it.
+- **What makes this specific:** I had written the guard against exactly this. `pf_authz.sh` carries
+  the comment *"a load that silently no-ops is indistinguishable from one that worked (A22)"*, and
+  the harness containing it then measured `rdr` inertness from a rule that never loaded. The
+  correction after each discovery was also consistently too narrow — fixing the colon, not the
+  missing load-gate; fixing the arithmetic, not the detector that had never been shown to fire.
+- **Caught by:** three independent audit agents, and the discriminating behaviour is worth naming:
+  they **reproduced the idioms in a shell** rather than reading them. The `load anchor` finding is
+  the cleanest case — `pfctl` silently ignores that directive under `-a`, so a containment test
+  concluded "the parent was not written" from a file that was never opened, and the auditor
+  established it with a three-line experiment (`include` under `-a` errors on a bad file;
+  `load anchor` under `-a` does not; without `-a` it does). Nothing in reading the harness would
+  have shown that.
+- **Cost:** two published results files carried vacuous PASSes into a design document, one of them
+  the *only* evidence for the design's sole security property. Two more sat unretracted in files
+  whose siblings had already been corrected for the same bug. Two harnesses still carried a live
+  instance on a branch that had never executed — one of which would have reported FAIL-OPEN for a
+  sandbox that was in fact stranded.
+- **Class:** `llm-shaped-repos.md` Part 7 — the asymmetry between *producing* an artifact and
+  *verifying* it, here at its sharpest, because the artifact's whole purpose was verification.
+- **Gated now?** Partially, and only by convention. Each harness now gates an effect measurement on
+  the rule having **loaded**, pairs every denial with a positive control **in the same run**, and
+  separates `refuse-by-policy` from `ran-but-failed` by reading stderr. None of that is enforced.
+  The transferable rule is narrower than "be careful" and is the one thing that actually worked:
+  **before trusting a verdict, construct the input that should produce the opposite one.** Where
+  that is impossible — a detector that has never returned anything but zero — the verdict is not
+  evidence, whatever it says.
+
+### A29 — asserted facts about this codebase without reading it, in a document whose value is being right (2026-08-04)
+
+- **What happened:** five load-bearing claims in a design plan, each stated flatly, each false or
+  unsupported. "Nothing in the repo configures a second enforcement path" — `LivePatchNetwork` does.
+  "A conformance case gated on `NetworkIsolation` has an empty backend set" — apple sets it `true`,
+  and apple is the backend the plan targets. "tart's pf enforcement has not been run" — it had been,
+  three times, with controls, in results files I had already cited for other things. "No concurrency
+  controls exist" — taken from an `UNSPECIFIED` plan, while `store.AcquireLock` has shipped a
+  per-sandbox `flock` used in five call sites. And an apple guest's ULA was called a "global-scope
+  IPv6 address" with an inference built on top of it, when `runtime/apple/apple.go` says *"vmnet
+  hands the guest a ULA"* twelve lines from code I had read that day.
+- **Source of the false belief:** three distinct provenances, which is why it is one pattern and not
+  five accidents. Two came from **prose** — a stale plan's status line, and my own earlier summary of
+  a results file rather than the file. Two came from **partial reading** — I had opened the file for
+  another purpose and generalised from the part I needed. One came from **an inference presented as a
+  measurement**: `/etc/pf.conf` declares `nat-anchor "com.apple/*"`, so I wrote that translation rules
+  in a sub-anchor "are evaluated", and only later measured it. That one happened to be true, which is
+  worse than if it had been false.
+- **What makes this specific:** the counter-habit was available and I applied it inconsistently. In
+  the same workstream I refused to test `pfctl -E`/`-X` because a wrong `-X` would break the host's
+  networking, and I re-ran a harness rather than accept a verdict I had produced. The discipline was
+  present for *measurements* and absent for *claims about code*, which is exactly backwards: a
+  measurement announces its own uncertainty, a grep does not.
+- **Caught by:** independent audit agents that opened the files, and — for the one the auditors
+  missed — the owner asking a one-line question ("can't a user just call `sudo -E`?") about an
+  argument I had used to kill a design alternative. That argument was wrong, and the repo contained
+  `sudo -E yoloai` in a comment and throughout an archived plan.
+- **Cost:** the claims survived one full plan rewrite. Two of them were used to *reject a design
+  alternative*, and the correct comparison — reached only after three audits — reversed the
+  recommendation.
+- **Class:** `llm-shaped-repos.md` Part 7 — prose read as fact. A26 is the same row for a *finding's*
+  prose; this is it for a *plan's*, and for my own summaries, which is the harder case because a
+  summary in context is indistinguishable from a source that was read. `scripts/check_citation_provenance.py`
+  exists because of exactly this asymmetry, and it is scoped to `research/*.md`, so none of these
+  were in range.
+- **Gated now?** No. The provenance checker's scope could be widened, but the honest reading is that
+  four of the five were *code* claims, which no citation gate reaches. The rule that would have
+  caught all five: **a claim about what the code does gets a file:line, or it gets hedged.** The plan
+  now carries line references for every code assertion, which at least makes the unsourced ones
+  visible.
+
+### A30 — built the harness whose control was the whole point, then let three of its verdicts run against a control that never loaded (2026-08-04)
+
+- **What happened:** `reboot_post.sh` opens by saying *"every question is answered by comparison
+  against a recorded pre-reboot value, so no verdict here can be produced by a test that could not
+  have gone the other way — the snapshot IS the control."* `reboot_pre.sh` then wrote that snapshot
+  with **unquoted** values, so the four carrying spaces did not survive being sourced: `PRE_DATE`,
+  `PF_STATUS` and `SANDBOXES` failed to assign, and `BRIDGES` truncated to its first token in
+  silence. The run rendered a verdict for each anyway. P6 concluded *"bridges differ across reboot"*
+  by comparing a one-token remnant against a host that had **no vmnet bridges at all** because
+  nothing was running. Two more printed empty `before:` lines and carried on. Separately, P8 reported
+  **PASS "tart address preserved across reboot"** for a VM in state `stopped`, on a host where its
+  bridge did not exist — `tart ip` resolves through `/var/db/dhcpd_leases`, and the lease file
+  survives a reboot. And the live half of the experiment measured an idle machine throughout: the
+  one thing a reboot guarantees is that nothing is running, and the harness never restarted anything,
+  so three of nine questions went unmeasured and now need a second reboot.
+- **Source of the false belief:** the three `command not found` lines sat at the **top of the results
+  file**, above every verdict, in the file I read to write the summary. They are shell noise of the
+  kind that precedes working output constantly, and I read past them to get to the section headers.
+  The truncation produced no line at all.
+- **What makes this specific:** A28 — written two days earlier, in this same workstream — says
+  *"before trusting a verdict, construct the input that should produce the opposite one."* I applied
+  it to every **probe** in this harness and not once to the **control**, which is the input that
+  decides what every probe means. The header quoted above is the tell: the design was explicitly
+  built around the control, and the control was the only part never tested.
+- **Caught by:** A8's second trigger — opening the primary source. The owner ran the test and said
+  so; nothing was contradicted. Reading the raw output rather than summarising it surfaced the
+  `command not found` lines, and the tart PASS fell to re-running the harness's own command four
+  minutes later, where `tart ip yoloai-cli-rb-t` answered *"no IP address found, is your VM
+  running?"* with rc=1. Neither needed review of the script.
+- **Cost:** one wrong published verdict (P6), one withdrawn PASS, three questions unmeasured, and a
+  second reboot of the owner's machine to get them. The five verdicts that matter most — anchor
+  survival, pf's own state, the main ruleset, the files, unattended restore — used single-token
+  controls, loaded correctly, and stand.
+- **Class:** `llm-shaped-repos.md` Part 7, and the third sibling of A22/A28 — a check that passes
+  because it never ran. That is the threshold this file names for revisiting the gating question.
+- **Gated now?** Partially, and the split is worth keeping. `reboot_pre.sh` now single-quotes every
+  value; `reboot_post.sh` refuses to render any verdict unless all twenty snapshot fields loaded
+  non-empty, and its numeric fields default to empty rather than `0` so a plausible-looking default
+  cannot sail through. Run against the snapshot that actually shipped, that guard names three of the
+  four — **not** `BRIDGES`, which loaded truncated rather than empty, so the quoting is the fix and
+  the guard is only the backstop. `ipof` now refuses to read an address for a guest that is not
+  running. The transferable rule: **the control is an input too — corrupt it deliberately and
+  confirm the harness refuses rather than reports.**
+
+### A20 — accepted a skip reason as a constraint, then engineered around the defect it was hiding (2026-07-30)
+
+- **Claimed:** that the conformance mount section could not run on seatbelt or tart, because it binds
+  at `/mnt/test` and neither macOS-family backend can create `/mnt`. Reported it as a fixed cost and
+  designed around it — a new `TierIsolation` conformance section with a new fixture field, so the
+  tiering invariant would have somewhere to live that did not need the skipped section.
+- **True:** `/mnt/test` was an arbitrary literal in two subtests. Moving it under `/tmp` un-skips both
+  backends, and all four other backends are unaffected. The skip had concealed a **second** and worse
+  fact: seatbelt's read-only mounts were not read-only whenever a broader rule granted write over the
+  same path ([DF162](design/findings-resolved.md)), which is user-reachable via `--dir <path>:ro` and
+  needed no compromised agent. Neither skip was hiding a capability gap; one was hiding a security
+  defect.
+- **Source of the false belief:** both skip strings are *well-written*. They name a real mechanism
+  (SIP-sealed root volume; `/mnt` unwritable without root), cite the unit tests that cover the gap,
+  and one explicitly says it is "the conformance's container-path assumption, not a capability gap".
+  I read them as a diagnosis and inherited it. They are a diagnosis — of the symptom. Nothing in
+  either says "and this literal is arbitrary", because the person writing a skip is explaining why
+  the test cannot run, not auditing whether the test had to ask for that path.
+- **Caught by:** the owner, in one line — *"why do we need /mnt/test? Isn't there another way?"* Note
+  what it is not: it is not a correction of a fact. Every fact I had reported was true. It questions
+  whether the constraint was a constraint, which is the one move that was unavailable from inside a
+  frame where the skip reason was the premise.
+- **The second half is the sharper one.** After un-skipping, seatbelt's `ReadOnly` subtest failed. I
+  diagnosed it correctly — the profile's broad temp grant covers `t.TempDir()` — and then wrote a
+  plan to give the suite a fixture root outside that grant, and filed the constraint as "a trap for
+  whoever fixes this". That is engineering *around* a defect, having already found it. The failing
+  test was not telling me its fixture was in the wrong place; it was telling me `:ro` did not work.
+  One is a test problem and one is a product bug, and I picked the reading that kept the scope small.
+- **Cost:** none shipped — both were caught inside the session, the second by the owner's standing
+  "do it properly" rather than a specific correction. But the workaround was fully designed, written
+  into a finding as advice to the next person, and would have shipped a permanent fixture-placement
+  rule enshrining a security bug as an environment property.
+- **Class:** new, and it is the inverse of [A14](#a14--reimplemented-an-approach-the-backend-idiosyncrasies-entry-had-explicitly-rejected-2026-07-29). There I re-derived a decision the repo had already made because I read the code and not the record. Here I read the record — the skip strings — and treated it as settled *because* it was well-argued. **A written rationale is evidence about what someone concluded, never about what they checked.** The tell is specific: a skip, a `nolint`, a `t.Skip`, a "known limitation" comment is a place where someone stopped, and the reason they stopped is the part least likely to have been re-examined since.
+- **Gated now?** No, and the useful habit is narrow enough to state: **when a test is disabled, check what it would assert if enabled, before accepting why it is disabled.** Two questions, in this order — *is the obstacle essential or incidental?* and, if you get past it and the test fails, *is this a test problem or a product problem?* The second is the one that pays: a newly-enabled test that fails is reporting on the product by default, and treating its failure as a fixture problem needs positive evidence, not convenience. Both skips here were years-cheap to keep and one of them was hiding a HIGH-severity defect the whole time.
+
 **One thing is ready ahead of that, though** (pattern 4b): the repo-relative-citation rule for
 findings. It has two specimens (A1, A8), needs no new mechanism, and turns an existing hook's known
 hole into coverage. That is a lower bar than "gate this file" and should not wait for it.
@@ -757,3 +1006,187 @@ hole into coverage. That is a lower bar than "gate this file" and should not wai
 **When in doubt about whether something belongs: does it have a Caught-by that is not "the owner"?**
 If yes, it is evidence a mechanism worked and belongs here for that reason alone — the successes are
 as scarce as the failures and twice as useful.
+
+### A21 — audited a design correctly, then recommended against it on a criterion I had invented (2026-07-31)
+
+- **Claimed:** that the v5→v6 tier move should be built as an in-place rename shuffle rather than the
+  staged copy-and-promote the plan described. The supporting audit was sound and every fact in it
+  checked out — `repopulate` deep-copies (`promote.go:356`) so tree-level promotion costs 2× the
+  sandboxes dir; the migrators are not "parameterised on the root"; scratch resumability contradicts
+  `scratch.go`'s own invariant. From those I concluded that staging was "much larger than the
+  disease" and proposed the cheap alternative.
+- **True:** the cheap alternative is the one design that cannot satisfy the requirement. The owner,
+  in one sentence — *"If the migration fails, then the user will be stuck halfway, unable to
+  downgrade and unable to run the current version"* — named the criterion: what matters is the state
+  a **failed** migration leaves the user in. Under it, an in-place shuffle is strictly worst (a
+  deterministic failure bricks both directions), and the duplication I had costed as the objection
+  is the entire point. My follow-up was no better: I proposed hardlinks to recover the cost, and got
+  *"hardlinks are fine until you encounter a fs that doesn't support it"*.
+- **Source of the error, and it is not a factual one.** I evaluated the designs on the axis I could
+  measure — resource cost on the success path — and treated the failure state as a residual
+  probability to minimize. The owner's axis was the failure state itself, with cost as the free
+  variable: *migration is rare, therefore it can be heavy*. Both axes are defensible; only one was
+  the owner's, and I never asked which. Every fact in the audit stayed true when the axis flipped;
+  the recommendation inverted completely.
+- **Caught by:** the owner, in one line, twice. Note what neither line was: a correction of a fact.
+  The audit was not wrong, which is exactly why nothing internal to it could have flagged the
+  problem — a fact-check on my own analysis returns clean.
+- **The cost, and the shape of it.** Nothing shipped; it was a design conversation and the plan was
+  rewritten afterwards to the corrected design. But the correction also *deleted* most of what I had
+  been elaborating — the staged ladder, the `Requires` axis, the `repopulate` opt-out, the
+  hardlink/reflink tier — because once "heavy is fine" is on the table the machinery collapses.
+  Roughly: I had been optimizing a constraint the owner would have relaxed for free if asked.
+- **Class:** new, and the inverse of the A14/A20 pair. Those are failures to check a *premise* I
+  inherited from the repo. This is a failure to check a premise I supplied myself — an evaluation
+  criterion, which is the least visible kind because it never appears as a claim, only as the shape
+  of the recommendation. **A20's lesson was that a written rationale is evidence about what someone
+  concluded, never about what they checked. This one's is narrower: an audit is evidence about the
+  facts, never about which of them matter.**
+- **Gated now?** No, but the habit is cheap and states in one line: **when a recommendation trades
+  safety against cost, the acceptable failure state and the resource budget are the owner's to set —
+  ask for both before recommending, not after.** The tell is a design comparison where one option
+  wins on effort and another wins on what happens when it breaks. That is not a technical tie to be
+  broken by judgement; it is a question with an owner.
+
+### A22 — wrote the guard for a security invariant, and it passed on a shell parse error (2026-08-01)
+
+- **Claimed:** that the new `SandboxTiers` conformance section verified the tier invariant. It ran
+  green on seatbelt — `host/` unreadable and unwritable, `ro/` not writable through the view — and I
+  moved on to run it against tart.
+- **True:** on seatbelt every one of those denial assertions passed *without anything being denied*.
+  The section built its write commands as `sh -c "echo x > " + path`, unquoted. A tart guest reaches
+  the tiers under `/Volumes/My Shared Files`, so the shell split the path on the space and failed
+  with `sh: /Volumes/My: Permission denied` — and `assert.Error` accepts a shell parse failure
+  exactly as happily as a kernel denial. The seatbelt paths have no spaces, so *there* the commands
+  parsed and the assertions were real; the bug was invisible on the backend I checked first.
+- **Source of the false belief:** a green test I had just written, on the backend where the defect
+  does not manifest. Nothing was read second-hand here — this is the failure mode of `assert.Error`
+  itself, which asserts that *something* went wrong and never that the thing I care about did.
+  AGENTS.md rule 10 states this exact trap one case over ("asserting only *that* an error was
+  wrapped tests the wrapping, not the fix"); I had read it that morning and still wrote the
+  negative-space version of it.
+- **Caught by:** running it on the second backend, where the path has a space in it. Pure luck of
+  the platform — had tart's share been at a space-free path, or had I taken the seatbelt green as
+  sufficient for a "backend-agnostic" section, the branch would carry a security guard that passes
+  on any machine where the command cannot run at all. The fix was to quote the paths and route reads
+  through argv with no shell, and the thing that makes the section trustworthy now is not the
+  quoting but the **positive control**: a write to `rw/` that must *succeed*. That one assertion
+  fails loudly whenever the mechanism is broken rather than the permission — which is the only
+  reason a future regression of this shape gets noticed.
+- **Cost:** none shipped; caught within the hour, before the commit. Filed because it would have:
+  the green was on the backend I would have called representative, and the artifact is a guard for
+  DF136, where a vacuous pass is worth less than no test at all — it converts an open question into
+  a settled one.
+- **Class:** the A15 family (a test that certifies nothing while looking exactly like one that
+  certifies something), but by a different mechanism. A15's tests could not reach the code; these
+  reached it and mistook the *transport* failing for the *policy* holding. Generalised: **a negative
+  assertion is only as good as the proof that the action was attempted.** Any test whose pass
+  condition is "this failed" needs a sibling whose pass condition is "the same machinery succeeded",
+  or it is asserting that the test harness works.
+- **Gated now?** No, and it is not obvious what would gate it — a linter cannot tell an intended
+  denial from an accidental one. The transferable defence is the positive control, which is a review
+  question, not a check: *for every assert-it-fails, what asserts it was even tried?*
+
+### A25 — reported that a lint gate had silently skipped, inferring "did not run" from "printed nothing" (2026-08-02)
+
+- **Claimed:** to the owner, that `make check`'s shellcheck target had not run over four new shell
+  scripts because "it runs shellcheck only `if command -v shellcheck`; it isn't installed here, so
+  the target passed by doing nothing" — offered as an instance of the exact hazard `CLAUDE.md`
+  warns about ("a target that *skips* rather than fails reports that into a void"). The owner
+  replied "yes I want that hole closed", authorising work on the strength of it.
+- **True:** the target does not skip. It falls back to Docker — which was running — and `exit 1`s
+  if neither shellcheck nor Docker is available. It had run, cleanly, over the tracked scripts.
+  The real gap was narrower and had nothing to do with skipping: `git ls-files '*.sh'` lists only
+  **tracked** files, and the new scripts were untracked, so they were out of scope rather than
+  unlinted-because-nothing-ran.
+- **Source of the false belief:** I grepped the `make check` log for "shellcheck", got zero hits,
+  and read that as "the target did not execute". A clean shellcheck prints nothing, and the recipe
+  is `@`-prefixed so the command is not echoed either — so zero hits is exactly what *success*
+  looks like. I then found the `if command -v` line, which fitted the story, and stopped reading
+  four lines above the `elif docker info` branch that refutes it.
+- **What makes this specific rather than "read more carefully":** it is [A22](#a22--wrote-the-guard-for-a-security-invariant-and-it-passed-on-a-shell-parse-error-2026-08-01)
+  inverted, and I had re-derived A22's own rule from scratch that same session. A22: a *failure* you
+  did not prove was attempted is not evidence. A25: an *absence of output* you did not prove was
+  reachable is not evidence either. Both are the same missing question — **what would this look
+  like if the thing had worked?** — and for a silent-on-success tool the answer is "identical",
+  which is checkable in one command (`make shellcheck; echo $?`) and I never ran it.
+- **Caught by:** going to fix the hole. Reading the target in order to change it showed the Docker
+  fallback in the first ten seconds. Nothing else would have — the claim was plausible, cited a real
+  line of the Makefile, and matched a hazard the project documents.
+- **Cost:** a false statement to the owner, and a work request authorised on it. The work itself
+  turned out to be worth doing for the *other* reason, so the artifact survives; the justification
+  in the first commit message would have been wrong. Corrected to the owner before any of it
+  landed, and the Makefile comment now states the real scope rule.
+- **Contrast worth recording:** in the same message the owner also asked me to verify every place I
+  had claimed "this needs higher privileges". Those claims **held** — `/dev/pf` is root-only, a
+  non-root anchor load fails, `setegid()` to a supplementary group returns `EPERM` even for a
+  member. So the corrective instinct was right and the specific target of it was not the one that
+  was wrong, which is an argument for the owner's habit of asking rather than against it.
+- **Gated now?** Partly, and only for this instance: `TestRepoHygiene_ShellcheckScope_CoversUntrackedScripts`
+  reads the argv out of the Makefile and fails if the scope regresses. Nothing gates the general
+  shape — "agent infers a tool did not run from an empty log" — and a linter cannot. The
+  transferable defence is a habit, not a check: **before reporting that something did not happen,
+  run the thing and look at its exit code.**
+
+### A26 — recorded a fix lead that a measurement in the same workstream had already refuted (2026-08-03)
+
+- **What happened:** DF175 shipped with a stated lead — *"have `files put` write a new path and move
+  it into place, rather than overwriting the existing one"* — and that lead went into
+  `next-release.md` as the blocking item for v0.11.0. It was wrong. The spike's own coherence matrix,
+  written by me two days earlier and committed in the same directory, records
+  `overwrite_rename` on tart as `read NEVER, stat NEVER`. Temp+rename is not merely ineffective:
+  re-measured directly, the guest keeps the old bytes **and** the old size, where an in-place
+  overwrite at least updates `st_size`. Shipping it would have removed the last signal a guest has
+  that anything changed.
+- **Source of the false belief:** a narrative built from one comparison that was not a comparison.
+  `reset` did not reproduce the corruption, so I asked what `reset` does differently, answered
+  "it re-copies rather than truncating in place, so the parent dentry is replaced", and wrote that
+  down as the lead. The reasoning is plausible and the sentence reads like a finding. But `reset`
+  changed a file in the **workdir**, which `workcopy.Materialize(..., WipeAndCopy, ...)` replaces
+  wholesale — a different share, a different mechanism, and nothing `files/` can imitate, since
+  `clearCacheAndFiles` empties it in place by design (DF149).
+- **What makes this specific rather than "check your work":** the refuting evidence was not missing,
+  hard to obtain, or in someone else's repo. It was a table I had produced, in a file I had written,
+  cited two paragraphs above the lead in the same finding. The failure is not ignorance of the
+  measurement; it is that **prose and measurement were never put in the same room**. A lead composed
+  by reasoning about a mechanism reads exactly like one derived from data, and DF175 contained both
+  with nothing marking which was which.
+- **Caught by:** going to implement it. The first thing the work needed was the guest path for the
+  rename, which meant opening the coherence results, which showed the row.
+- **Cost:** none shipped — but the lead was the stated plan for a release blocker, and the owner had
+  approved fixing DF175 on the strength of it. One directed experiment would have been spent
+  confirming a refuted hypothesis.
+- **Gated now?** No, and this one resists a gate: nothing can diff a paragraph against a table. The
+  transferable habit is narrow enough to state — **when a finding proposes a fix, name the
+  measurement that supports it, or mark it as untested.** DF175 now separates the two explicitly,
+  and the retraction is left in place rather than edited away.
+
+### A27 — wrote a fix, watched every test pass, and shipped something that did nothing (2026-08-03)
+
+- **What happened:** the DF175 repair (verify a host write reached the tart guest, repair it with
+  `msync`) was implemented, unit-tested from both sides, mutation-checked 7/7, and `make check` was
+  green. Run against the real sandbox, the guest still read the fabricated bytes. `refreshGuestView`
+  began `rt := e.Runtime()`, and the `files` command builds a **backend-less** Engine — the handle's
+  own docstring says file exchange "needs no container backend" — so `rt` was `nil` on the only path
+  that mattered and the function returned immediately, every time.
+- **Source of the false belief:** the tests supplied a runtime, because I wrote them to. Each one
+  constructed an Engine *with* a mock backend and asserted the refresh behaved correctly given one.
+  Every assertion was true. None of them asked the question the product asks, which is whether a
+  backend is there at all.
+- **What makes this specific:** this is precisely the hazard AGENTS.md rule 10 spells out —
+  *"red-on-revert proves a test is wired to the code, never that the code is wired to the
+  program"* — and I hit it while following the rest of that rule carefully. The mutation checks were
+  real and they all passed, because mutating a function nothing reaches still turns its tests red.
+  The gap was never in the function; it was in the fixture, which quietly granted a capability the
+  caller does not have.
+- **Caught by:** running the shipped binary against real hardware with an unpatched control. Nothing
+  else would have. The corrected tests now build the Engine the way the CLI does — backend-less,
+  resolving the backend from the sandbox's `environment.json` — and re-introducing `e.Runtime()`
+  turns three of them red.
+- **Cost:** one build-and-verify cycle. It would have been a shipped no-op fix for a HIGH-severity
+  data-integrity defect, with a green gate and a confident commit message behind it.
+- **Gated now?** For this instance, yes — the tests construct the Engine the real caller constructs,
+  and a registered test backend goes through `runtime.Descriptor`/`runtime.New` rather than
+  bypassing the capability gate. The general shape is not gateable. The habit is: **build the
+  fixture the way the caller builds it, and if a test hands the code a dependency, check the caller
+  actually has one.**

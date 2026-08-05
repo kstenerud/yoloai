@@ -1,0 +1,34 @@
+=== DF181: is the STALE verdict premature, or is the invalidation insufficient? ===
+date   : 2026-08-04 14:17:50
+trials : 5
+sandbox: df181-timing
+creating tart sandbox df181-timing (this takes a few minutes)
+Warning: using OAuth credentials from ~/.claude/.credentials.json
+  These tokens expire after ~30 minutes and may fail in long-running sessions.
+  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.
+
+Sandbox df181-timing created
+  Agent:    claude
+  Workdir:  /var/folders/h8/p75r4zq95d59q622q33pngzr0000gn/T/tmp.oWWXG03r9r (copy)
+
+Run 'yoloai attach df181-timing' to start working (Ctrl-b d to detach)
+
+== P0  control: a replacement written DIRECTLY (never repaired) must not self-heal
+  guest v1                      : AAAAAAAAAAAAAAAAAAAA
+  guest after 3s, unrepaired    : AAA
+  ok: unrepaired stays stale, so self-healing below is attributable to the repair passes
+
+== trials: put v1, guest reads it, then replace and watch what the verdict was worth
+trial 1: put rc=0 (repair succeeded first time)
+trial 2: put rc=0 (repair succeeded first time)
+trial 3: put rc=1 | guest at verdict: <empty>                | after 3s idle: ZZZ
+trial 4: put rc=1 | guest at verdict: <empty>                | after 3s idle: ZZZ
+trial 5: put rc=0 (repair succeeded first time)
+
+== VERDICT ==
+  trials=5  puts that reported STALE=2
+  of those: self-healed while idle=2   needed further passes=0
+  ==> H1 PREMATURE VERDICT: invalidation had already worked and the re-digest read too
+      early. Fix is a delay before re-digesting, not a higher attempt bound.
+
+Cleanup: yoloai destroy df181-timing --abandon-unapplied
