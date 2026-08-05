@@ -16,6 +16,14 @@ func TestPriorReleaseRange(t *testing.T) {
 		{"schema 1 -> up to schema 2", 1, "v0.3.0", "v0.4.0", true},
 		{"schema 2 -> up to schema 4 (v0.4.0–v0.5.2)", 2, "v0.4.0", "v0.6.0", true},
 		{"schema 3 never published -> no named 'from'", 3, "", "v0.6.0", false},
+		{"schema 4 -> up to schema 5", 4, "v0.6.0", "v0.9.0", true},
+		// v0.11.0 shipping schema 6 closed this range. While 5 was the newest
+		// schema the upper bound was open, and the guidance said "v0.9.0 or
+		// newer" — which after v0.11.0 would name a release that cannot read a
+		// v5 directory at all, sending someone upgrading FROM v5 to downgrade
+		// INTO the version they are upgrading to.
+		{"schema 5 -> bounded once v0.11.0 shipped schema 6", 5, "v0.9.0", "v0.11.0", true},
+		{"schema 6 -> newest, so open-ended", 6, "v0.11.0", "", true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			from, to, ok := PriorReleaseRange(tc.onDisk)
