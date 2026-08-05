@@ -79,7 +79,19 @@ landed — verified-stale doc claims not to "finish". Scoped to one release cycl
 
 1. **`releasetest` on Linux and macOS** — three backends are platform-locked, so neither host alone
    is evidence.
-2. On the owner's go-ahead:
+2. **CI must be green on the exact commit being tagged**, checked on GitHub, not inferred from a
+   local `make check`. The two answer different questions: `make check` says "it passes on this
+   machine with these tool versions," and only CI says "it passes on the versions the project
+   pins." v0.11.0 was tagged on a commit whose CI run then failed — seven `shellcheck` findings
+   that a green local gate could not have produced, because the container fallback was pulling a
+   newer shellcheck than the runner had ([DF187](design/findings-unresolved.md)). The tool is
+   pinned now; the class is not. **Nothing is tagged on an unverified head** — if the head moves
+   while you are preparing, re-check the new head.
+3. **Check for open Dependabot PRs and bring them to the owner**, each with what it updates and why
+   it matters — a security fix, a bug affecting a path yoloAI uses, or routine currency. The owner
+   decides whether each rides this tag or waits. They are easy to miss because their branches are
+   the one kind the cleanup sweep deliberately leaves alone, so nothing else surfaces them.
+4. On the owner's go-ahead:
    - Drain `## Unreleased` into a `## vX.Y.Z` heading; leave the marker (D117). `release.yml` fails
      the tag if it is non-empty.
    - If a schema shipped, add `{Schema: N, Tag: "vX.Y.Z"}` to `LibrarySchemaReleases`
@@ -89,7 +101,9 @@ landed — verified-stale doc claims not to "finish". Scoped to one release cycl
      call. *(Nothing due until 2026-09-12.)*
    - **Reset this file** to the initial state below, with the version field assuming the point
      release after the one just cut.
-3. Commit, push, tag, release.
+5. Commit, push, **wait for CI to go green on that pushed head**, then tag and release. The drain
+   commit is a change like any other, so the head you verified in step 2 is not the head you are
+   tagging until CI has passed on it too.
 
 ## Initial state
 
