@@ -25,9 +25,28 @@ content on `main`?", which git does not answer. A prefix does not fix that on it
 separates "this followed the process and is disposable once merged" from everything else, and
 everything else is then small enough to look at.
 
+**One exception to "merges back into `main`": migration-bearing work does not** (D131). The moment
+a change is known to need a migration — the moment `LibrarySchemaVersion` would move — a
+`release-vX.Y.Z` branch is cut at the escalated version and that work merges *there*. `main` stays
+at the last **released** schema until the tag.
+
+The reason is a specific person: someone tracking `main` pulls, builds, is told by the binary to
+run `yoloai system migrate`, and does. Their realm is now stamped at schema N. If we then change
+the migration before release — a wrong tier row found in review, a defect found by rehearsal, both
+of which happened in v0.11.0 — their data sits at a version no released binary understands, written
+by a migrator that no longer exists in that form. `PriorReleaseRange` cannot name them a release to
+downgrade to, because there is not one. They are orphaned for doing exactly what the tool said.
+
+Landing the migration *last* was the old rule and does not close this: it shortens the window and
+a short window is still open, for a duration set by whoever happens to pull rather than by us —
+v0.11.0's would have been three days. The cost of the exception is that non-migration work keeps
+flowing to `main` and has to be kept merged into the release branch or the final merge conflicts.
+That is real, it is bounded by the time between "we know" and the tag, and it buys the guarantee.
+
 Two names are deliberately outside the scheme, because they are not work:
 
-- **`release-vX.Y.Z`** — a release staging branch. Named for its version so it is obviously not
+- **`release-vX.Y.Z`** — a release staging branch, cut when a release is being assembled *or* as
+  soon as a migration is known to be coming (above). Named for its version so it is obviously not
   a topic, and drained and deleted at the tag.
 - **`dependabot/…`** — created and owned by GitHub, tied to an open PR. Deleting one closes its
   PR, so leave them to the dependency-update flow.

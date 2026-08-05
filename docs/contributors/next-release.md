@@ -19,6 +19,11 @@ the inverse: once the field says a breaking release, *slipping in more breakage 
 they are not already paying*, which is the only argument for pulling work forward. The test for
 anything below is therefore **"would this wait for the next point release?"** If yes, it waits.
 
+**A migration escalates the version *and* opens the branch** (D131). The moment work is known to
+need one, `release-vX.Y.Z` is cut at the escalated version and that work merges there instead of
+`main` — so `main` never carries a migration that has not shipped, and nobody tracking `main` can
+be stamped at a schema that never ships in that form. This file is then staged on that branch.
+
 **This file points; it does not track.** Every item's own finding, decision or plan owns its status
 and progress. A checkbox here would be a second copy of that state and would drift (D121), so there
 are none. **"What's left for this release?"** is answered by following the links and reading each

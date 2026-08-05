@@ -123,6 +123,7 @@ the newest and belongs about third.
    old form, on the day it lands. Same for any compatibility reader, alias, or shim. The entry
    costs three lines and is the only thing that will ever make retiring it possible — the
    register's own audit found 16 such mechanisms, of which **0** recorded a date.
+   **And it does not go to `main`** — see rule 12.
 10. **Every behavior change in the PR carries a test that fails when that change is reverted**
    (D128, D129). *Every* is the load-bearing word: count the behavior changes, then count the
    tests that would go red on revert, and make the numbers match. Not "the package has tests",
@@ -151,6 +152,15 @@ the newest and belongs about third.
    one that started it, so "is it merged?" was not even the right question. Outside the scheme
    and not work: `release-vX.Y.Z` (release staging, deleted at the tag) and `dependabot/…`
    (GitHub's, tied to a PR — deleting one closes it).
+12. **A migration never reaches `main` unreleased** (D131). The moment work is known to need one —
+   the moment `LibrarySchemaVersion` would move — cut `release-vX.Y.Z` at the escalated version and
+   merge the migration work **there**. `main` stays at the last *released* schema, so building
+   `main` at any commit gives a binary whose migrations are all already published. Otherwise
+   someone tracking `main` pulls, is told to run `system migrate`, gets stamped at a schema that
+   never ships in that form, and is left with on-disk state no released binary can read — orphaned
+   for doing what the tool told them. "Merge the migration last" does not fix this: it shortens the
+   window, and a short window is still open. Non-migration work keeps going to `main` and must be
+   kept merged into the release branch, which is the real cost and is the price of the guarantee.
 
 ## The quality gate
 

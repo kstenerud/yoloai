@@ -1562,3 +1562,19 @@ Two things make this worth an entry rather than a cleanup.
 **A near-miss worth keeping.** Reading the archive's out-of-order D118 as a defect, the first move was to relocate it into the live log's D117→D119 gap, which even looked confirmed by a real gap at that spot. `git log -S` on the entry showed the placement was deliberate and the gap unrelated. Append-only history is exactly where "this looks wrong" is most often a record of something that happened, and the cost of checking was one command.
 
 **Owed.** Nothing. The gate was confirmed to fail on real drift: moving the last entry to the top reports `DF13 appears after DF152` at the exact line.
+
+## D131 — a migration never lands on `main` unreleased; it goes to a `release-vX.Y.Z` branch from the moment it is known to be needed
+
+**Date:** 2026-08-05. **Status:** Active. **Strengthens** the prior "a migration-bearing branch merges last in a release" practice, which governed *ordering* and left the hazard open.
+
+**The hazard, stated as the person who hits it.** Someone tracks `main` — a contributor, a CI job, an agent building from source. They pull, build, and run. The binary sees an out-of-date data directory and points at `yoloai system migrate`; they run it, and their library realm is now stamped at schema N. Then we change the migration before release — because a review found a wrong tier row, or a rehearsal found a defect, both of which happened in v0.11.0. Now their on-disk state is at a version **no released binary understands**, produced by a migrator that no longer exists in the form that wrote it. `PriorReleaseRange` cannot name a release to downgrade to, because there isn't one. They are orphaned by having done exactly what the tool told them to do.
+
+**Why "merge it last" did not close this.** Landing the migration last shortens the window between the migration reaching `main` and the tag, but a window that is short is still open, and its length is not something we control — v0.11.0's held for three days across a full audit and a release-blocking podman regression. The exposure is not proportional to our care; it is proportional to whether anyone pulled `main` in the interim, which we cannot see.
+
+**Decision.** The moment work is known to require a migration — the moment `LibrarySchemaVersion` would move — cut `release-vX.Y.Z` at the escalated version and merge that work **there**, not to `main`. `main` stays at the last released schema until the release is cut, so building `main` at any commit yields a binary whose migrations are all already published. The release branch merges to `main` as part of the tag, and the two become one event rather than two.
+
+**What this costs, honestly.** Non-migration work continues to `main` and must be kept merged into the release branch, or the branch drifts and the eventual merge is a conflict. That is real overhead, and it is the price of the guarantee. It is bounded: the branch exists only between "we know a migration is coming" and the tag.
+
+**What it does not change.** The version field still escalates on its own as a consequence of what landed (that is a fact about the work, not a plan). `work/<topic>` branches are unchanged for everything else; only the *target* of the merge moves for migration-bearing work.
+
+**Precedent.** This is what v0.11.0 actually did — `release-v0.11.0` was opened specifically so the tiering migration would not sit on `main` — but it was done by the owner's instinct in the moment rather than by rule, and the reasoning was never written down. Writing it down is the whole change.
