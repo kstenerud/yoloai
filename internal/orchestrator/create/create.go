@@ -562,7 +562,13 @@ func replaceSandboxIfNeeded(ctx context.Context, d state.Deps, opts Options, san
 func createSandboxDirs(sandboxDir string, perms store.IsolationPerms) error {
 	for _, dir := range []string{
 		sandboxDir,
+		// All three tiers, named. They are structure, not a by-product of
+		// whichever child happens to be created first — and a tier that exists
+		// only as some other MkdirAll's intermediate is a tier nothing states
+		// the permissions or ownership of (DF186).
 		store.HostTierPath(sandboxDir),
+		store.ReadOnlyTierPath(sandboxDir),
+		store.ReadWriteTierPath(sandboxDir),
 		store.HomeSeedPath(sandboxDir),
 		store.BinPath(sandboxDir),
 		store.TmuxPath(sandboxDir),

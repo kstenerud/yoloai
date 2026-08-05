@@ -15,6 +15,7 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
+	"slices"
 	"strconv"
 	"strings"
 )
@@ -133,11 +134,50 @@ func ChownRecursiveIfSudo(path string) error {
 }
 
 // MkdirAll wraps os.MkdirAll and fixes ownership when running under sudo.
+//
+// Ownership is fixed for every level this call creates, not just the leaf.
+// os.MkdirAll conjures missing intermediates too, and under sudo each of those
+// is born root-owned; one left behind is a directory the invoking user cannot
+// traverse, which is invisible to yoloAI (still root) and fatal to anything
+// running as that user — a rootless podman daemon asked to bind-mount a path
+// underneath it cannot even see the path exists (DF186).
+//
+// The missing levels are collected BEFORE the create, so a directory that
+// already existed is never re-owned. Chowning the leaf stays unconditional, as
+// it has always been: that is existing behaviour for a path that already exists.
 func MkdirAll(path string, perm fs.FileMode) error {
+	var conjured []string
+	if SudoUID() != -1 {
+		conjured = missingAncestors(path)
+	}
 	if err := os.MkdirAll(path, perm); err != nil {
 		return err
 	}
+	for _, dir := range conjured {
+		if err := ChownIfSudo(dir); err != nil {
+			return err
+		}
+	}
 	return ChownIfSudo(path)
+}
+
+// missingAncestors returns the strict ancestors of path that do not exist,
+// outermost first. Path itself is excluded — its caller chowns it either way —
+// and the walk stops at the first ancestor that does exist, so nothing already
+// on disk is ever named.
+func missingAncestors(path string) []string {
+	var missing []string
+	for dir := filepath.Dir(filepath.Clean(path)); ; dir = filepath.Dir(dir) {
+		if _, err := os.Stat(dir); err == nil {
+			break
+		}
+		missing = append(missing, dir)
+		if parent := filepath.Dir(dir); parent == dir {
+			break // reached the root; there is no further ancestor
+		}
+	}
+	slices.Reverse(missing) // outermost first: create order, so chown order
+	return missing
 }
 
 // WriteFile wraps os.WriteFile and fixes ownership when running under sudo.

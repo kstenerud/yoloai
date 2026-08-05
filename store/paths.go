@@ -166,6 +166,16 @@ func HostTierPath(sandboxDir string) string {
 	return config.HostTierDir(sandboxDir)
 }
 
+// ReadOnlyTierPath returns the guest-readable tier directory within a sandbox.
+func ReadOnlyTierPath(sandboxDir string) string {
+	return config.ReadOnlyTierDir(sandboxDir)
+}
+
+// ReadWriteTierPath returns the guest-writable tier directory within a sandbox.
+func ReadWriteTierPath(sandboxDir string) string {
+	return config.ReadWriteTierDir(sandboxDir)
+}
+
 // BackendPath returns the backend-specific directory within a sandbox.
 func BackendPath(sandboxDir string) string {
 	return config.BackendPath(sandboxDir)

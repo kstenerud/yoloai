@@ -103,6 +103,8 @@ finding or decision first, and lands here only if it should block the release.
   release, and that rule is written down nowhere
 - [DF185](design/findings-unresolved.md) — `system migrate` says "stop it", `stop` says "run system
   migrate", and every blocked op was answered with advice to downgrade
+- [DF186](design/findings-unresolved.md) — `fileutil.MkdirAll` chowns only the leaf under sudo, so
+  the new tier directories were born root-owned and every rootless-podman smoke tier failed
 
 ## Candidates — undecided
 
