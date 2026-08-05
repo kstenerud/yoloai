@@ -89,6 +89,20 @@ finding or decision first, and lands here only if it should block the release.
   cannot reach, so `destroy` claims success and leaks the container
 - [DF178](design/findings-unresolved.md) — apple's vmnet bridge is created by the first container,
   not by the system service, so the injector is unbindable on a fresh host
+- [DF164](design/findings-unresolved.md) — the pre-v6 migrators address the sandbox layout through
+  the live path builders, so tiering silently breaks them and their tests hide it
+- [DF169](design/findings-resolved.md) — a legal sandbox name can exceed the seatbelt tmux socket's
+  104-byte path limit, and tiering narrowed the margin by three characters
+- [DF170](design/findings-unresolved.md) — the seatbelt host tier was readable from inside the
+  sandbox, because the deny covered writes only
+- [DF172](design/findings-unresolved.md) — the vmnet subnet re-pick strands apple sandboxes too, and
+  apple has no net-health detector
+- [DF183](design/findings-unresolved.md) — the tiering sweep updated the contributor docs and missed
+  the user-facing ones, on the one path a user is told to look at
+- [DF184](design/findings-unresolved.md) — "breaking" is measured against the last published
+  release, and that rule is written down nowhere
+- [DF185](design/findings-unresolved.md) — `system migrate` says "stop it", `stop` says "run system
+  migrate", and every blocked op was answered with advice to downgrade
 
 ## Candidates — undecided
 
