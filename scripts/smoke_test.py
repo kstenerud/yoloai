@@ -679,7 +679,7 @@ class Test:
         try:
             r = subprocess.run(
                 [self.ctx.yoloai_bin, "sandbox", sandbox_name, "info", "--json"],
-                capture_output=True, text=True, timeout=15,
+                capture_output=True, text=True, timeout=15, stdin=subprocess.DEVNULL,
             )
             data = json.loads(r.stdout)
             return str(data.get("status", "unknown"))
@@ -1161,7 +1161,7 @@ def _capture_terminal_snapshot(
     ):
         cmd = [yoloai_bin, "sandbox", sandbox_name, "terminal-snapshot", *flag_args]
         try:
-            r = subprocess.run(cmd, capture_output=True, timeout=10)
+            r = subprocess.run(cmd, capture_output=True, timeout=10, stdin=subprocess.DEVNULL)
         except (subprocess.TimeoutExpired, OSError) as e:
             if log_file is not None:
                 with log_file.open("a") as f:
@@ -1800,6 +1800,7 @@ def _destroy_named_sandboxes(ctx: RunContext, names: list[str]) -> None:
                 [ctx.yoloai_bin, "destroy", "--abandon-unapplied", name],
                 capture_output=True,
                 timeout=30,
+                stdin=subprocess.DEVNULL,
             )
             destroyed.append(name)
         except subprocess.TimeoutExpired:
@@ -1916,7 +1917,7 @@ def _destroy_store_smoke(ctx: RunContext, which: str) -> list[str]:
     try:
         listed = subprocess.run(
             [ctx.yoloai_bin, "ls", "--json"],
-            capture_output=True, timeout=30, text=True,
+            capture_output=True, timeout=30, text=True, stdin=subprocess.DEVNULL,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return []
@@ -1932,7 +1933,7 @@ def _destroy_store_smoke(ctx: RunContext, which: str) -> list[str]:
         try:
             r = subprocess.run(
                 [ctx.yoloai_bin, "destroy", "--abandon-unapplied", name],
-                capture_output=True, timeout=90, text=True,
+                capture_output=True, timeout=90, text=True, stdin=subprocess.DEVNULL,
             )
         except subprocess.TimeoutExpired:
             print(f"  TIMEOUT destroy {name} (>90s); Tart backstop may still remove its VM")
@@ -2095,7 +2096,7 @@ def fetch_doctor_json(ctx: RunContext) -> Optional[dict[str, Any]]:
     try:
         result = subprocess.run(
             [ctx.yoloai_bin, "doctor", "--json"],
-            capture_output=True, timeout=30, text=True,
+            capture_output=True, timeout=30, text=True, stdin=subprocess.DEVNULL,
         )
     except (subprocess.TimeoutExpired, FileNotFoundError):
         return None
@@ -2147,7 +2148,7 @@ def _prerun_prune(ctx: RunContext) -> None:
     try:
         result = subprocess.run(
             [ctx.yoloai_bin, "system", "prune", "--yes"],
-            capture_output=True, timeout=60, text=True,
+            capture_output=True, timeout=60, text=True, stdin=subprocess.DEVNULL,
         )
     except subprocess.TimeoutExpired:
         print("pre-run prune: TIMEOUT (>60s); continuing — per-test prereqs will catch real blockers")
@@ -2690,7 +2691,7 @@ def _run_system_check(ctx: RunContext, daemon: str, isolation: str) -> tuple[boo
     if isolation:
         cmd += ["--isolation", isolation]
     try:
-        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+        r = subprocess.run(cmd, capture_output=True, text=True, timeout=30, stdin=subprocess.DEVNULL)
         data: dict[str, object] = json.loads(r.stdout)
         ok = bool(data.get("ok", False))
         note = ""
@@ -2891,7 +2892,10 @@ def _warm_up_vm_backends(
             "--agent", "idle", "--allow-dirty", *spec.new_args(),
         ]
         try:
-            r = subprocess.run(new_cmd, capture_output=True, text=True, timeout=BASE_BUILD_TIMEOUT)
+            r = subprocess.run(
+                new_cmd, capture_output=True, text=True,
+                timeout=BASE_BUILD_TIMEOUT, stdin=subprocess.DEVNULL,
+            )
         except subprocess.TimeoutExpired:
             print(f"  WARNING: {spec.label} warm-up create timed out; matrix run will retry cold.")
             _destroy_named_sandboxes(ctx, [name])
@@ -2935,7 +2939,7 @@ def cleanup(ctx: RunContext) -> None:
             try:
                 subprocess.run(
                     [ctx.yoloai_bin, "destroy", "--abandon-unapplied", name],
-                    capture_output=True, timeout=60,
+                    capture_output=True, timeout=60, stdin=subprocess.DEVNULL,
                 )
             except subprocess.TimeoutExpired:
                 timed_out.append(name)
@@ -2949,7 +2953,7 @@ def cleanup(ctx: RunContext) -> None:
             try:
                 result = subprocess.run(
                     [ctx.yoloai_bin, "system", "prune", "--yes"],
-                    capture_output=True, timeout=180, text=True,
+                    capture_output=True, timeout=180, text=True, stdin=subprocess.DEVNULL,
                 )
                 if result.returncode != 0:
                     print(f"  prune exit {result.returncode}: {result.stderr.strip()}")
@@ -3290,7 +3294,7 @@ def binary_version_info(yoloai_bin: str) -> dict[str, str]:
     try:
         r = subprocess.run(
             [yoloai_bin, "version", "--json"],
-            capture_output=True, text=True, timeout=10,
+            capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL,
         )
         parsed = json.loads(r.stdout)
         for k in info:
