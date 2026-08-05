@@ -978,7 +978,15 @@ Only then the **mechanical move**: `runtime` first/with `store`, repoint the fen
 
 ## D104 — retire the hand-rolled QEMU `-M microvm` backend; libkrun is the tech if a light VM tier is ever added (E1)
 
-**Date:** 2026-06-28. **Status:** Active. **Supersedes** the E1 microvm plan ([archived](../archive/plans/microvm-backend.md)); parks branch `microvm-backend` (unmerged; spike preserved at `73cfe338`).
+**Date:** 2026-06-28. **Status:** Active. **Supersedes** the E1 microvm plan ([archived](../archive/plans/microvm-backend.md)); parked branch `microvm-backend` (unmerged; spike was at `73cfe338`).
+
+**Addendum (2026-08-05) — the spike itself is gone; this record is the artifact.** The
+`microvm-backend` branch was deleted local and remote in the branch cleanup, on the owner's call,
+so `73cfe338` is unreachable and will be garbage-collected. That is deliberate and costs nothing
+recoverable: what the spike established is enumerated above as six sourced facts, the plan is
+archived, and the revival triggers name **libkrun**, not this code — so a revival would not start
+from a QEMU `-M microvm` tree that cannot boot a stock distro kernel anyway. Recorded because the
+line above used to promise the branch, and a pointer to a deleted ref is worse than no pointer.
 
 **Context.** E1 (post-merge-roadmap) was a greenfield Linux/KVM `runtime/microvm/` backend booting OCI-profile images as QEMU `-M microvm` VMs directly — the pitch was VM isolation *without* Kata's containerd/CNI/nerdctl stack. The spike and a full agent-launch increment were built (lifecycle, QGA client, OCI→ext4 conversion, baked systemd launcher, `MicrovmBackend` in sandbox-setup.py, virtiofs workdir+state shares). Real-boot validation then exposed a structural problem, and a four-thread sourced research pass reframed the whole question.
 

@@ -13,8 +13,10 @@
 > backend and no boot benefit for long interactive sessions. If a light VM tier is
 > ever added it will be **libkrun** (bundled Red-Hat kernel, virtio-fs, OCI-native,
 > macOS HVF), not QEMU-microvm — but not now (see D104 for triggers). The
-> implementation spike is preserved on the unmerged `microvm-backend` branch
-> (`73cfe338`). The text below is the original plan, kept for history.
+> implementation spike was on the unmerged `microvm-backend` branch (`73cfe338`);
+> that branch was **deleted 2026-08-05** and the spike no longer exists anywhere.
+> D104's six sourced facts are what it established, and a revival would start from
+> libkrun rather than this code. The text below is the original plan, kept for history.
 
 **Status:** RETIRED (was: Planned, greenfield). Original research:
 [[reference_pve_microvm]] (https://github.com/rcarmo/pve-microvm).
