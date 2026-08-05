@@ -167,7 +167,10 @@ ok()  { printf '   PASS    %s\n' "$*"; }
 bad() { printf '   FAIL    %s\n' "$*"; }
 
 A_IP=$(ipof "$A_SB"); B_IP=$(ipof "$B_SB")
-[ -n "$A_IP" ] && [ -n "$B_IP" ] || { echo "could not resolve both sandbox IPs (A=$A_IP B=$B_IP)"; exit 2; }
+if [ -z "$A_IP" ] || [ -z "$B_IP" ]; then
+  echo "could not resolve both sandbox IPs (A=$A_IP B=$B_IP)"
+  exit 2
+fi
 T_IP=""
 if [ -n "$T_SB" ]; then
   [ "$(bk "$T_SB")" = tart ] || { echo "$T_SB is backend '$(bk "$T_SB")', expected tart"; exit 2; }

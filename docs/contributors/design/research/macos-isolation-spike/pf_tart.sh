@@ -81,7 +81,10 @@ BK_A=$(bk "$A_SB"); BK_T=$(bk "$T_SB")
 [ "$BK_A" = apple ] || { echo "$A_SB is backend '$BK_A', expected apple"; exit 2; }
 [ "$BK_T" = tart ]  || { echo "$T_SB is backend '$BK_T', expected tart"; exit 2; }
 A_IP=$(ipof "$A_SB"); T_IP=$(ipof "$T_SB")
-[ -n "$A_IP" ] && [ -n "$T_IP" ] || { echo "could not resolve both IPs (apple=$A_IP tart=$T_IP)"; exit 2; }
+if [ -z "$A_IP" ] || [ -z "$T_IP" ]; then
+  echo "could not resolve both IPs (apple=$A_IP tart=$T_IP)"
+  exit 2
+fi
 trap cleanup EXIT
 
 echo "host: $(sw_vers -productVersion)"

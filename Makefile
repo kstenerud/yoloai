@@ -189,12 +189,24 @@ hadolint:
 ## $$scripts_list is deliberately unquoted so the list word-splits into arguments;
 ## a path containing whitespace would therefore break it. Repo scripts have none,
 ## and an untracked file with a space in its name is the case to watch.
+##   * the VERSION is pinned, and the container tag is not `:stable`. shellcheck
+##     0.11.0 narrowed SC2015, so a CI runner on 0.10.x and a developer pulling
+##     `:stable` disagree about whether the same tree passes — a divergence that
+##     reports a clean tree locally and fails the build (DF187). A locally
+##     INSTALLED shellcheck still wins, because it is what the developer will run
+##     by hand; its version is printed so a mismatch is visible rather than silent.
+SHELLCHECK_VERSION := v0.11.0
+
 shellcheck:
 	@scripts_list="$$(git ls-files --cached --others --exclude-standard '*.sh')"; \
 	if command -v shellcheck >/dev/null 2>&1; then \
+		installed="$$(shellcheck --version | awk '/^version:/ {print "v" $$2}')"; \
+		if [ "$$installed" != "$(SHELLCHECK_VERSION)" ]; then \
+			echo "note: using installed shellcheck $$installed; CI pins $(SHELLCHECK_VERSION)"; \
+		fi; \
 		shellcheck $$scripts_list; \
 	elif docker info >/dev/null 2>&1; then \
-		docker run --rm -v "$(CURDIR)":/mnt -w /mnt koalaman/shellcheck:stable $$scripts_list; \
+		docker run --rm -v "$(CURDIR)":/mnt -w /mnt koalaman/shellcheck:$(SHELLCHECK_VERSION) $$scripts_list; \
 	else \
 		echo "ERROR: shellcheck is required (shell scripts ship in the binary; D112)."; \
 		echo "       Install shellcheck (https://www.shellcheck.net/) or start Docker."; \

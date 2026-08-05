@@ -85,7 +85,10 @@ egress() {
 flushA() { pfctl -a "$ANCHOR" -F all >/dev/null 2>&1; }
 
 A_IP=$(ipof "$A_SB"); B_IP=$(ipof "$B_SB")
-[ -n "$A_IP" ] && [ -n "$B_IP" ] || { echo "could not resolve both sandbox IPs (A=$A_IP B=$B_IP)"; exit 2; }
+if [ -z "$A_IP" ] || [ -z "$B_IP" ]; then
+  echo "could not resolve both sandbox IPs (A=$A_IP B=$B_IP)"
+  exit 2
+fi
 trap cleanup EXIT
 
 echo "host: $(sw_vers -productVersion) | pf: $(pfctl -s info 2>/dev/null | head -1)"

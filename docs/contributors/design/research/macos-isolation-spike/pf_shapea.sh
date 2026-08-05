@@ -95,7 +95,10 @@ cleanup() {
 }
 
 A_IP=$(ipof "$A_SB"); B_IP=$(ipof "$B_SB")
-[ -n "$A_IP" ] && [ -n "$B_IP" ] || { echo "could not resolve sandbox IPs (A=$A_IP B=$B_IP)"; exit 2; }
+if [ -z "$A_IP" ] || [ -z "$B_IP" ]; then
+  echo "could not resolve sandbox IPs (A=$A_IP B=$B_IP)"
+  exit 2
+fi
 MAIN_BEFORE=$(pfctl -s rules 2>/dev/null | grep -c . || true)
 APPLE_NAT_BEFORE=$(pfctl -a com.apple -s nat 2>/dev/null | grep -c . || true)
 trap cleanup EXIT
