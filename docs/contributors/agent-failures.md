@@ -43,6 +43,16 @@ file imply the interesting moments are the failures; on the evidence so far they
   the honest conclusion is that the mechanisms are absent, not weak.
 - **Cost** — how far it travelled.
 - **Class** — the `llm-shaped-repos.md` Part 7 row, or a new one this file is proposing.
+- **Tool-surface** — present only when the false belief was made *possible* by the shape of the
+  tools the agent works through, rather than by the reasoning on top of them: a view that truncated
+  without saying so, an exit code standing in for a structured error, an output whose silence is
+  indistinguishable from success. It names the property a file-and-command surface would need for
+  the failure to be impossible or self-announcing. **Deliberately distinct from "Gated now?"**,
+  which asks what *this repo* can enforce — a tool-surface answer is normally something no
+  `make check` can ever reach, because the defect is in the interface the agent reasons through and
+  not in the code under review. Kept separate because collapsing them loses the distinction: A31's
+  "not gateable" is true of a repo gate and false of a tool surface, and writing only the first
+  would have recorded the failure as unaddressable when it is merely not addressable *here*.
 - **Gated now?** — what, if anything, would catch it today.
 
 ## Patterns so far
@@ -760,6 +770,10 @@ itself worth knowing when reading pattern 4.
   thing by name, and let the empty result be the evidence. **A31 widens this**: the same defect sinks
   a *count* or a *scope*, not only an absence, and A31's specimen shows the widened form is the one
   that actually recurs.
+- **Tool-surface:** a result that states its own completeness — a window onto a larger set marked as
+  a window, rather than one that looks exactly like the whole. Also a declared ordering: `tail` was
+  read as "newest" because the sort was inferred, and lexicographic vs. version order is precisely
+  the kind of thing a surface can state and a pipe cannot.
 - **Caught by:** the owner opening the GitHub releases page and saying he saw 0.10.0. Nothing in the
   repo would have caught it — `make check` has no opinion about tags, and the write-up was internally
   consistent, cited real commits, and proposed sensible remedies for a problem that did not exist. It
@@ -967,6 +981,12 @@ whose class already has three siblings.
   the guard is only the backstop. `ipof` now refuses to read an address for a guest that is not
   running. The transferable rule: **the control is an input too — corrupt it deliberately and
   confirm the harness refuses rather than reports.**
+- **Tool-surface:** three separate properties, which is why this entry is the densest specimen here.
+  Values that survive a write-then-read round trip without a quoting layer — `BRIDGES` lost its tail
+  to word-splitting on `source`, which is a data-model failure wearing shell syntax. A truncation
+  that announces itself, since that loss was silent. And errors delivered as records rather than
+  interleaved into the same stream as results, because the three `command not found` lines were not
+  hidden — they were *adjacent to* the output, which is how they got read past.
 
 ### A20 — accepted a skip reason as a constraint, then engineered around the defect it was hiding (2026-07-30)
 
@@ -1087,6 +1107,10 @@ as scarce as the failures and twice as useful.
   assertion is only as good as the proof that the action was attempted.** Any test whose pass
   condition is "this failed" needs a sibling whose pass condition is "the same machinery succeeded",
   or it is asserting that the test harness works.
+- **Tool-surface:** an interface where *failed to execute* and *executed and refused* are different
+  structured outcomes rather than the same non-zero exit. The guard could not tell a shell parse
+  error from a denied write because the shell gives both the same shape, and no amount of care at
+  the call site recovers a distinction the transport discarded.
 - **Gated now?** No, and it is not obvious what would gate it — a linter cannot tell an intended
   denial from an accidental one. The transferable defence is the positive control, which is a review
   question, not a check: *for every assert-it-fails, what asserts it was even tried?*
@@ -1131,6 +1155,10 @@ as scarce as the failures and twice as useful.
   shape — "agent infers a tool did not run from an empty log" — and a linter cannot. The
   transferable defence is a habit, not a check: **before reporting that something did not happen,
   run the thing and look at its exit code.**
+- **Tool-surface:** an explicit outcome record per operation, so *ran and produced nothing* is a
+  different observation from *never ran*. Silence-on-success is the whole defect: a surface that
+  reports what it did, rather than one whose success condition is the absence of output, makes the
+  inference I drew unavailable rather than merely unwise.
 
 ### A26 — recorded a fix lead that a measurement in the same workstream had already refuted (2026-08-03)
 
@@ -1238,3 +1266,53 @@ as scarce as the failures and twice as useful.
   habit is to keep one check in the loop that is not derived from the reading that produced the
   claim. For this specific class the test now carries a completeness guard that walks the harness's
   AST instead of a human reading call sites, so the count is machine-derived from here on.
+- **Tool-surface:** a result that carries its own completeness, so a truncated view cannot be
+  mistaken for a whole one. `head` cannot supply this — it closes the pipe and the omitted remainder
+  leaves no trace in the output. The property is that incompleteness is a fact *in the result*, not
+  a thing the reader must remember having caused.
+
+### A32 — the loop proving rule 10 was itself running against stale bytecode (2026-08-05)
+
+- **What happened:** A31's fix touched thirteen call sites, so rule 10 needed each one proven
+  red-on-revert. I scripted it: revert one site, run pytest, restore the file from a backup, repeat.
+  The sweep reported every site as covered. It was wrong — reverting site 2
+  (`_capture_terminal_snapshot`) reported site 1's test as the failure. CPython validates a cached
+  `.pyc` against the source's **(mtime-in-seconds, size)** pair (PEP 552 timestamp mode). The
+  revert/restore cycle rewrote `smoke_test.py` several times within the same second, and restoring
+  from backup returned it to byte-identical size — so a `.pyc` compiled during a *different* iteration
+  satisfied the check and pytest executed bytecode for source that was no longer on disk.
+- **Source of the false belief:** the harness's own output. Each iteration printed a real pytest
+  result with a real failing test name; nothing distinguished "compiled from the file I just wrote"
+  from "compiled two iterations ago". The write itself was never in doubt and never wrong — the file
+  on disk was correct every time. What was stale was a consumer's private cache, and its staleness
+  had no representation anywhere in what I could see.
+- **What makes this specific:** it is the [A6](#a6--the-measurement-was-contaminated-by-the-act-of-measuring-2026-07-17)
+  family — the measurement contaminated by the act of measuring — but the contaminating agent is the
+  *verification loop's own file-rewriting*, defeating the staleness detector of the runtime it was
+  measuring with. Rapid identical-size rewrites are not an exotic pattern; they are the natural shape
+  of any revert-and-test sweep, which is to say the shape rule 10 asks for. **The more mechanically
+  you execute rule 10, the more reliably you trip this.**
+- **Caught by:** the failing test having the wrong *name*. I expected site 2's test and got site 1's,
+  and only the specificity of that expectation exposed it. This is luck of the design: had each
+  revert been to code whose failure looked interchangeable — a parametrised suite, or a single test
+  covering all thirteen — every iteration would have gone red for the wrong reason and read as
+  success. The sweep would have "verified" a claim it never tested.
+- **Cost:** none reached an artifact; caught within the step and re-run with `PYTHONDONTWRITEBYTECODE=1`,
+  `__pycache__` cleared between iterations, and `-p no:cacheprovider`. Filed under the "or would have"
+  clause: the next thing I would have written is that all thirteen sites were proven red-on-revert,
+  which is precisely the claim rule 10 exists to make trustworthy, in a commit message, on evidence
+  that had silently measured nothing.
+- **Tool-surface:** identity by **content**, not by a proxy for content. Every mechanism in this
+  failure — the `.pyc` validity check, and my own reliance on it — keys file identity on
+  `(size, timestamp)`, a pair that is cheap, usually right, and silently wrong exactly when a tool
+  rewrites a file quickly. A surface that names files by content digest cannot express this bug. The
+  narrower, more actionable property: a write that changes content but leaves `(mtime-to-the-second,
+  size)` unchanged is a **hazard the writer can compute and report**, since it holds both digests —
+  and every timestamp-based staleness detector downstream (`.pyc`, `make`, `rsync`'s default
+  quick-check, most file watchers) will fail to notice that write.
+- **Gated now?** No. `make check` cannot see a Bash loop's cache hygiene, and the general shape —
+  "a consumer's cache disagreed with the disk" — is not gateable from inside this repo. The habit
+  worth keeping is narrow enough to state: **when a verification loop rewrites the same file
+  repeatedly, disable the caches of whatever runs it, and make each iteration's expected outcome
+  specific enough that the wrong one is recognisable.** A sweep whose iterations all fail
+  identically cannot detect that it stopped measuring.
