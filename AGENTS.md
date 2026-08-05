@@ -143,6 +143,14 @@ the newest and belongs about third.
    fix; a test whose comment explains why the code does the wrong thing has pinned the defect as
    intended behavior; and a change that is invisible in the single-principal CLI — because two
    values coincide there — is exactly the change no manual check will ever catch.
+11. **Multi-commit work goes on a `work/<topic>` branch**, cut from an up-to-date `main`, merged
+   back into `main` when it is done, and **deleted once merged**. A one-commit fix needs no
+   branch. The prefix is there so a branch's name says which procedure it followed — the 2026-08
+   cleanup found 45 local and 29 remote branches where answering that took reading each one's
+   commits against `main`, and four had landed their content through a different branch than the
+   one that started it, so "is it merged?" was not even the right question. Outside the scheme
+   and not work: `release-vX.Y.Z` (release staging, deleted at the tag) and `dependabot/…`
+   (GitHub's, tied to a PR — deleting one closes it).
 
 ## The quality gate
 

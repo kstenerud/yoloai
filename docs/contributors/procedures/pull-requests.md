@@ -7,9 +7,33 @@
 The rules themselves are in [`AGENTS.md`](../../../AGENTS.md); this is the detail behind
 them and the reasoning that makes them stick. Read `AGENTS.md` first.
 
-## Start from an up-to-date `main`
+## Start from an up-to-date `main`, on a `work/` branch
 
 Not from a release tag. A tag is a stale base by definition — you miss whatever landed since.
+
+**Name the branch `work/<topic>`.** Every branch carrying a multi-commit change takes that
+prefix — `work/tamper-resistant-firewall`, `work/upgrade-coverage` — and merges back into `main`
+when the work is done. A one-commit fix needs no branch at all and goes straight to `main`.
+
+The prefix exists so a branch's *name* says which procedure it followed, which is the one thing
+a list of branches otherwise cannot tell you. Before this rule there were 45 local and 29 remote
+branches, and deciding whether any given one was finished, abandoned, superseded, or still owed
+work took reading its commits against `main` one at a time. Four of them turned out to have
+landed their content through a *different* branch than the one that started it, so even "is it
+merged?" — the question git answers directly — was the wrong question; the right one was "is its
+content on `main`?", which git does not answer. A prefix does not fix that on its own, but it
+separates "this followed the process and is disposable once merged" from everything else, and
+everything else is then small enough to look at.
+
+Two names are deliberately outside the scheme, because they are not work:
+
+- **`release-vX.Y.Z`** — a release staging branch. Named for its version so it is obviously not
+  a topic, and drained and deleted at the tag.
+- **`dependabot/…`** — created and owned by GitHub, tied to an open PR. Deleting one closes its
+  PR, so leave them to the dependency-update flow.
+
+**Delete the branch once it is merged.** It is disposable by construction: `main` has the
+content and the merge commit has the history.
 
 It also used to be actively dangerous, which is worth knowing because it explains a convention
 you will meet. Releasing once *renamed* `## Unreleased` to the version being tagged, so a tag's
