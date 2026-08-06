@@ -7,6 +7,7 @@
 - **Status:** PLANNED — mechanism, authorization and enforcement measured on hardware
   2026-08-02/04. Nothing built.
 - **Depends on:** tamper-resistant-network-isolation.md, host-controlled-agent-launch.md
+- **Decision:** [D132](../../decisions/working-notes.md#d132--macos-pf-is-driven-through-a-generated-nopasswd-sudoers-grant-that-authorizes-pf-table-membership-and-nothing-else) — the mechanism and the five rejected alternatives. Cite that, not this file.
 - **Rides:** **any** — the user-visible surface only gains capability. `--network-isolated` becomes
   *accepted* on tart where it is refused today (newly-accepted input is not a break), and on apple
   it becomes stronger without changing its spelling. Seatbelt is unchanged. The `BackendCaps` change
@@ -28,6 +29,10 @@ Evidence for everything below is in
 is [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md) § The macOS half.
 
 ## The decision
+
+**Recorded as [D132](../../decisions/working-notes.md#d132--macos-pf-is-driven-through-a-generated-nopasswd-sudoers-grant-that-authorizes-pf-table-membership-and-nothing-else), which is the citable form.** This section is the working
+statement; D132 is what survives this plan's archival, because the rejected alternatives are the
+answer to "why sudo?" and rule 8 sends a built plan to `archive/`, which is not a specification.
 
 **A generated `NOPASSWD` sudoers grant, authorizing pf *table membership* and nothing else.**
 Installing it is the opt-in — no flag, no isolation mode, no runtime prompt.
