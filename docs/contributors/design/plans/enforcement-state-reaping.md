@@ -137,6 +137,41 @@ emptied as part of claiming it.** A design that allocates a fresh container per 
 reuses one satisfies this for free — which is a point in favour of that shape on Linux, where
 nothing forces a fixed pool.
 
+### 1c. The two clears are orthogonal, and acquisition needs both
+
+They are easy to confuse and neither substitutes for the other:
+
+- **Rule 1 is cross-slot.** It protects against *our address* being stale in **someone else's** slot.
+  Flushing the slot we are claiming does nothing about it — that is D3 exactly: B legitimately holds
+  slot 1 while its address sits stale in slot 0.
+- **Rule 1b is within-slot.** It protects against *this slot's* leftovers. Scrubbing our address
+  everywhere does nothing about it, because the leftovers are someone else's destinations, not our
+  address.
+
+**A slot holds exactly one sandbox**, so its `src` table should hold exactly one address. Flush both
+of the slot's tables rather than only `dst` — that makes the slot's post-condition trivially the
+invariant instead of something argued about, and it removes stale addresses that would otherwise be
+subject to a policy which is *about to change meaning* under them.
+
+**Acquisition sequence, in order — the order is load-bearing:**
+
+1. `-T flush` the claimed slot's `src` **and** `dst`. The slot is now empty; an empty allowlist
+   fails closed (D4), so nothing is reachable through it during the rest of the sequence.
+2. `-T delete <our address>` from **every other** slot's `src`. Cross-slot scrub.
+3. `-T add <our address>` to the claimed slot's `src`.
+4. `-T add <destinations>` to the claimed slot's `dst`.
+
+Steps 2 and 3 must not be reordered: scrubbing after claiming deletes our own entry, and the sandbox
+comes up matching no slot at all. That failure is silent in the dangerous direction — no `src` match
+means no rule matches, and traffic falls through to whatever the main ruleset does.
+
+**The cost this implies, unmeasured.** sudoers matches one table per invocation, so step 2 is one
+`sudo pfctl` call per slot — 31 calls at a 32-slot pool — on top of the flushes and adds, for roughly
+35 per sandbox start. Multiple *addresses* fit in one call (D5) but multiple *tables* do not. Nobody
+has measured what that costs on the start path. If it is material, the fix is not to skip the scrub
+but to reduce the pool to the number of slots actually wanted, since the scrub is O(pool), not
+O(sandboxes).
+
 ### 2. Reconcile — for capacity and hygiene, *not* for security
 
 Rule 1 is what closes the inheritance hazard, and it closes it completely: an address is scrubbed
