@@ -1,0 +1,89 @@
+host: macOS 26.5.1 arm64 | Mac16,12
+date: 2026-08-07 18:58:25 CEST | user=karlstenerud | anchor=com.apple/yoloai_b | slots=32 slot=7
+reference: pf_acquire_cost.sh measured the blind form at 329ms median, 35 calls, 9.3ms/call
+
+== K0 SETUP ==
+   PASS    32-slot pool loaded, shipped grant installed
+
+== K1 DOES ONE CALL REPORT A PER-TABLE ADDRESS COUNT? ==
+        Planting a known distribution, then reading it back. Both directions are checked:
+        occupied slots must read occupied AND empty ones must read empty. A parser that
+        called every table occupied would be safe, useless, and pass a one-sided test.
+        planted: yb_src_3=1 address, yb_src_20=2 addresses, all other src tables empty
+
+        raw statistics block for one table, so the parsed field is visible:
+        | -pa-r-	yb_src_20	com.apple/yoloai_b
+        | 	Addresses:   2
+        | 	Cleared:     Fri Aug  7 18:58:25 2026
+        | 	References:  [ Anchors: 0                  Rules: 2                  ]
+        | 	Evaluations: [ NoMatch: 0                  Match: 0                  ]
+        | 	In/Block:    [ Packets: 0                  Bytes: 0                  ]
+        | 	In/Pass:     [ Packets: 0                  Bytes: 0                  ]
+
+        parsed 64 of 64 tables
+        yb_src_3=1  yb_src_20=2  | every non-empty src table: yb_src_3 yb_src_20 
+   PASS    one call reports every table's address count, and it discriminates: exactly the two planted
+           slots read non-empty, with the right counts, and the other 30 read empty
+
+== K2a IS THE DUMP REACHABLE UNDER THE SHIPPED GRANT? (it must not be, and then we extend it) ==
+        shipped grant: '/sbin/pfctl -a com.apple/yoloai_b -s Tables -vv' is refuse-by-policy
+   PASS    refused today, so the collapse is not free — it needs one added line
+        with the extra line installed: permit
+        the dump, invoked AS THE USER through sudo, reports 64 'Addresses:' lines
+   PASS    the extended grant answers with a full 64-table dump — timings below are real
+
+== K2b WHAT THE COLLAPSE IS WORTH, at k occupied slots ==
+        k is the number of slots holding an address — i.e. the number of sandboxes with
+        live enforcement state. The blind form ignores k; the collapsed form is linear in it.
+
+        the blind form, for a same-run baseline:
+        blind      35 calls/run (31 of them deletes): min= 317  med= 324  max= 348   (n=6, ms)
+        k=0 occupied src tables:
+        collapsed   5 calls/run (0 of them deletes): min=  48  med=  49  max=  53   (n=6, ms)
+             k=0: 49ms against the blind form's 324ms — 6.6x faster, 276ms saved
+        k=1 occupied src tables:
+        collapsed   6 calls/run (1 of them deletes): min=  60  med=  61  max=  63   (n=6, ms)
+             k=1: 61ms against the blind form's 324ms — 5.4x faster, 264ms saved
+        k=2 occupied src tables:
+        collapsed   7 calls/run (2 of them deletes): min=  65  med=  70  max=  72   (n=6, ms)
+             k=2: 70ms against the blind form's 324ms — 4.6x faster, 254ms saved
+        k=4 occupied src tables:
+        collapsed   9 calls/run (4 of them deletes): min=  83  med=  86  max=  98   (n=6, ms)
+             k=4: 86ms against the blind form's 324ms — 3.8x faster, 239ms saved
+        k=8 occupied src tables:
+        collapsed  13 calls/run (8 of them deletes): min= 118  med= 123  max= 155   (n=6, ms)
+             k=8: 123ms against the blind form's 324ms — 2.6x faster, 202ms saved
+   PASS    collapsed sequence measured against a same-run blind baseline at five occupancies
+
+        NOTE the collapsed form's cost tracks RUNNING SANDBOXES, not pool size, so it also
+        removes pool size as a latency knob — the 32-slot cap stops costing anything at rest.
+
+== K3 GRANT SURFACE — what this costs at the security boundary ==
+        measured in K2a, not re-asserted here: shipped grant = refuse-by-policy, extended = permit
+        the collapse costs exactly one new NOPASSWD line:
+             <user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -s Tables -vv$
+        extended line removed mid-run; the dump is now: refuse-by-policy
+   PASS    the extension is the whole difference — removing it restores the refusal, so nothing else
+           in this run's policy was quietly permitting the dump
+
+        WHAT IT REVEALS, against what the grant already reveals:
+          - it is a READ. It cannot add or delete membership, load a ruleset, or touch pf's
+            enable state, so it reaches none of the nine bypasses D132 refused.
+          - it discloses each slot's address COUNT, never an address. The shipped grant
+            already permits '-t <table> -T show', which discloses the addresses themselves,
+            one table per call. So this is strictly LESS informative than 64 calls a holder
+            can already make — it is cheaper, not more revealing.
+          - it is anchor-scoped by the same literal-anchor regex as every other line, so it
+            cannot read another anchor's tables.
+        NOT A RUBBER STAMP: D132's permit/refuse matrix must be re-run against the extended
+        policy before anything relies on this. sudoers matches a concatenated argument
+        string, so a new line is a new place for an argument to be smuggled, and the only
+        thing that has ever caught that here is the matrix.
+
+== cleanup ==
+   anchor rules=0
+   main ruleset: before=4 after=4
+   sudoers probe present:    no
+   sudoers EXTENDED present: no
+
+pass=6 fail=0 unknown=0

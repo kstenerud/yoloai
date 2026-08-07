@@ -1,0 +1,84 @@
+host: macOS 26.5.1 arm64 | Mac16,12 | Apple M4
+date: 2026-08-07 18:21:44 CEST | user=karlstenerud | anchor=com.apple/yoloai_b | slots=32 | claimed slot=7
+main ruleset rules before: 4
+
+== C0 SETUP — load the pool and install the D132 grant ==
+        loaded 64 filter rule(s), expected 64
+   PASS    32-slot pool loaded and the NOPASSWD grant answers unattended
+
+== C1 ONE CALL — cost of a single NOPASSWD sudo pfctl -T invocation ==
+        'first' is the cold call in each batch: cold page cache, cold sudoers parse, no
+        sudo timestamp. Everything after it is warm, which is what a start path sees.
+        show (warm)                        first=  12.5  min=  8.8  med=  9.3  p90= 11.9  max=  13.0  (n=40, ms)
+        delete non-member                  first=  10.8  min=  8.8  med=  9.3  p90= 10.4  max=  14.0  (n=40, ms)
+        add 1 address                      first=  10.4  min=  8.8  med=  9.3  p90=  9.6  max=  10.4  (n=40, ms)
+        flush                              first=  10.6  min=  9.2  med=  9.7  p90= 10.1  max=  10.9  (n=40, ms)
+        delete, timestamp cleared          first=  11.0  min=  9.4  med= 10.2  p90= 11.3  max=  11.4  (n=15, ms)
+        median warm delete=9.289ms  with timestamp cleared each call=10.170ms
+   PASS    single-invocation cost measured (the delete verb is the one repeated 31x)
+
+== C2 ATTRIBUTION — the same pfctl work as root, without sudo ==
+        If sudo dominates, reducing the CALL COUNT is the only lever. If pfctl dominates,
+        no batching scheme helps and the pool size is the only lever.
+        delete, root direct                first=   2.0  min=  1.2  med=  1.4  p90=  1.6  max=   2.0  (n=40, ms)
+        sudo overhead = 7.9ms of 9.3ms (85% of each invocation); pfctl itself = 1.4ms
+   PASS    cost attributed between sudo and pfctl
+
+== C3 THE SEQUENCE — full acquisition per 1c, and the same without the cross-slot scrub ==
+        scrub:   flush src+dst, delete our address from the other 31 src tables, add
+                 our address, add 20 destinations in one call (D5)
+        35 calls/run: first=332  min=319  med=329  max=361  (n=8, ms)
+        noscrub: what a working whole-anchor dump would collapse this to
+        4 calls/run: first=41  min=37  med=38  max=46  (n=8, ms)
+        scrub costs 291ms of the 329ms sequence; collapsing it would leave 38ms (8.7x faster)
+   PASS    acquisition sequence measured at a 32-slot pool
+
+        per-slot marginal cost — what pool size buys, since the scrub is O(pool):
+        pool=8: 11 calls/run: first=102  min=100  med=101  max=102  (n=4, ms)
+        pool=16: 19 calls/run: first=176  min=173  med=175  max=176  (n=4, ms)
+        pool=32: 35 calls/run: first=320  min=318  med=320  max=330  (n=4, ms)
+
+== C4 POLICY SIZE — does sudo's cost scale with the sudoers policy it evaluates? ==
+        delete, +100 sudoers rules         first=  10.4  min=  9.0  med=  9.4  p90= 10.0  max=  10.4  (n=25, ms)
+        delete, +500 sudoers rules         first=  10.5  min=  9.2  med=  9.9  p90= 10.6  max=  11.4  (n=25, ms)
+        baseline=9.289ms  +100 rules=9.405ms  +500 rules=9.862ms
+   PASS    policy-size scaling measured (read the three medians above; the claim is the numbers)
+
+== C5 AGAINST TOTAL START TIME — the sequence as a fraction of 'yoloai new' ==
+        workdir is an empty throwaway git repo, so this is backend start cost and excludes
+        any real project's copy time. n is small; these are latencies, not a distribution.
+        yoloai new --backend apple (#1): 2380ms rc=0 Warning: using OAuth credentials from ~/.claude/.credentials.json   These tokens expire after ~30 minutes and may fail i
+        yoloai new --backend apple (#2): 2144ms rc=0 Warning: using OAuth credentials from ~/.claude/.credentials.json   These tokens expire after ~30 minutes and may fail i
+        yoloai new --backend tart (#1): 40924ms rc=0 Warning: using OAuth credentials from ~/.claude/.credentials.json   These tokens expire after ~30 minutes and may fail i
+        acquisition 329ms against apple start 2380ms = 13.8% of sandbox start
+   PASS    acquisition cost landed as a fraction of real start time
+
+== C6 COLLAPSE HYPOTHESIS — can one call dump every table's CONTENTS in the anchor? ==
+        Marker addresses are planted in two slots first, so a form only passes if its output
+        actually contains them. A form that lists table NAMES is not a collapse: knowing the
+        names is free, the 31 calls exist to learn the contents.
+        planted 198.51.100.77 in yb_src_5, 203.0.113.88 in yb_src_20
+        -s Tables                    rc=0 lines=66    names=yes markers=0/2  
+        -s Tables -v                 rc=0 lines=66    names=yes markers=0/2  
+        -s Tables -vv                rc=0 lines=706   names=yes markers=0/2  
+        -sT -v                       rc=0 lines=66    names=yes markers=0/2  
+        -sT -vv                      rc=0 lines=706   names=yes markers=0/2  
+        -vvsT                        rc=0 lines=706   names=yes markers=0/2  
+        -T show (no -t)              rc=1 lines=6     names=no  markers=0/2  
+        -s all                       rc=0 lines=757   names=yes markers=0/2  
+        -s all -v                    rc=0 lines=1669  names=yes markers=0/2  
+        -t yb_src_5 -T show -v       rc=0 lines=8     names=no  markers=1/2  
+   PASS    no pfctl form dumps table contents anchor-wide — the 31 blind deletes cannot be collapsed
+        this way, and pool size is the only lever on the scrub. (Forms tried are listed
+        above; a form nobody thought of is not excluded by this run.)
+
+== cleanup ==
+   destroyed sandbox cost-apple-1
+   destroyed sandbox cost-apple-2
+   destroyed sandbox cost-tart-1
+   anchor rules=0
+   main ruleset: before=4 after=4
+   sudoers probe present: no
+   sudoers filler present: no
+
+pass=7 fail=0 unknown=0

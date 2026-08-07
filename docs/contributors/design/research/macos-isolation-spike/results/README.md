@@ -28,6 +28,10 @@ the impression that the harness worked first time.
 | `df181-timing.txt` | **pre-fix.** Settles DF181's mechanism: the repair's `STALE` verdict is **premature**, not an invalidation failure. 2 of 5 replacements reported `STALE`; both self-healed while idle, and the control — an unrepaired replacement over the same wait — stayed stale, which is what makes that attributable to the repair rather than to a coherent guest |
 | `df181-timing-postfix.txt` | **post-fix acceptance**, same harness against the shipped delay. A separate filename on purpose: the pre-fix run is the evidence for the mechanism and re-running in place would have destroyed it — which is exactly what happened to the first attempt at this artifact |
 | `df176-prompt.txt` | DF176's loose end, **closed**: negative lookups do not stick on tart, and `reset --no-prompt` restores `prompt.txt` visibly to the running guest. Note the row it closes named an in-place reset, which tart cannot reach at all — see the finding |
+| `pf-acquire-cost.txt` | what § 1c's slot-acquisition sequence costs on the start path: one `sudo pfctl -T` call, the full 35-call form, sudoers policy-size scaling, and both against a real `yoloai new`. Its C2 split is the load-bearing part — **85% of every call is `sudo`, not `pfctl`** — and its C6 refutes the "dump every table's contents in one call" hypothesis across ten forms |
+| `pf-scrub-collapse.txt` | the follow-up C6's own output suggested: `-s Tables -vv` reports every table's **address count** in one call, so provably-empty slots need no delete and the scrub becomes O(running sandboxes). Measured against a same-run blind baseline at five occupancies. **Run 3** — the two invalidated runs below are the same file's earlier attempts |
+| `pf-scrub-collapse-run1-invalidated.txt` | **invalidated, kept.** The K1 parser anchored the table-name pattern to end-of-line; pfctl emits a third column naming the owning anchor, so nothing matched and every table read as empty. K1 failed correctly — but K2 timed a "collapsed" sequence issuing **zero deletes** and reported 7x at every k |
+| `pf-scrub-collapse-run2-invalidated.txt` | **invalidated, kept, and the more instructive of the two.** K1 fixed and passing; K2 still issuing zero deletes, because the sequence invokes the dump through `sudo -n` under the shipped grant — which K3 in that same run proves refuses it. The probe measured the cost of a capability it had simultaneously demonstrated it did not have. Both runs' tell was identical: **a cost that does not move between k=0 and k=8 is not doing per-slot work** |
 | `restart-control.txt` | the **no-reboot** control: a plain stop/start moves every guest's address on both backends, each with a freshly generated MAC. Replicates `lease-binding.txt` L2 and extends it — the new parts are the MAC mechanism, the exhausted lease pool, and a census resolving L1's UNKNOWN. Written to stop the reboot halves attributing to the reboot what an ordinary restart does anyway |
 
 ## What these files do NOT support
@@ -48,6 +52,20 @@ Read this before quoting anything from them.
 - **The ICMP "sharper" test in `pf-main-run.txt` is circular** — its block rule was scoped
   `proto tcp`, so ICMP passing follows from the qualifier. The harness was fixed afterwards to load
   the protocol-agnostic form; that has not been re-run, and it is the case an implementer needs.
+- **The timing files measure one idle M4 MacBook Air and nothing else.** `pf-acquire-cost.txt` and
+  `pf-scrub-collapse.txt` are wall-clock on a host with no competing load; a busy host is not
+  described. More importantly, the 9.3ms/call figure is **85% `sudo`**, and what was varied was
+  policy *size* (+500 rules cost 0.6ms), not policy *source*. A host whose sudoers arrives over
+  LDAP/AD, or whose PAM stack does a network lookup, is a different measurement that nobody has
+  taken — and it is the case where the call count would hurt most.
+- **The start-time fraction is against an empty workdir.** `yoloai new` on a real project also
+  copies it, so 13.8% is the *largest* the acquisition sequence can be as a share of start; a
+  bigger project makes it smaller, never larger.
+- **C6's negative is bounded by the ten forms it tried.** No pfctl invocation it tested dumps table
+  *contents* anchor-wide. A form nobody thought of is not excluded, and the run says so.
+- **`pf-scrub-collapse.txt` measures cost, not correctness.** Skipping provably-empty slots is only
+  sound while slot allocation is under the cross-sandbox lock rule 3 already requires — the run
+  states that argument and tests none of it.
 - **`reboot-post.txt` has been overwritten three times; know which run you are reading.** The three
   reboot files are rewritten in place by each round, so the caveats below are indexed by round and
   only the most recent one describes the file on disk. **Round 1** (`pass=8 fail=0 unknown=3`) is in

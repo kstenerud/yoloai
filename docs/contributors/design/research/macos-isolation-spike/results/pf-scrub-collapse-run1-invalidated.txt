@@ -1,0 +1,77 @@
+host: macOS 26.5.1 arm64 | Mac16,12
+date: 2026-08-07 18:25:46 CEST | user=karlstenerud | anchor=com.apple/yoloai_b | slots=32 slot=7
+reference: pf_acquire_cost.sh measured the blind form at 329ms median, 35 calls, 9.3ms/call
+
+== K0 SETUP ==
+   PASS    32-slot pool loaded, shipped grant installed
+
+== K1 DOES ONE CALL REPORT A PER-TABLE ADDRESS COUNT? ==
+        Planting a known distribution, then reading it back. Both directions are checked:
+        occupied slots must read occupied AND empty ones must read empty. A parser that
+        called every table occupied would be safe, useless, and pass a one-sided test.
+        planted: yb_src_3=1 address, yb_src_20=2 addresses, all other src tables empty
+
+        raw statistics block for one table, so the parsed field is visible:
+        | -pa-r-	yb_src_20	com.apple/yoloai_b
+        | 	Addresses:   2
+        | 	Cleared:     Fri Aug  7 18:25:46 2026
+        | 	References:  [ Anchors: 0                  Rules: 2                  ]
+        | 	Evaluations: [ NoMatch: 0                  Match: 0                  ]
+        | 	In/Block:    [ Packets: 0                  Bytes: 0                  ]
+        | 	In/Pass:     [ Packets: 0                  Bytes: 0                  ]
+
+        parsed 0 of 64 tables
+        yb_src_3=?  yb_src_20=?  | every non-empty src table: <none>
+   FAIL    the listing did not yield a count for every table (got 0) — not a usable dump
+
+== K2 WHAT THE COLLAPSE IS WORTH, at k occupied slots ==
+        k is the number of slots holding an address — i.e. the number of sandboxes with
+        live enforcement state. The blind form ignores k; the collapsed form is linear in it.
+
+        the blind form, for a same-run baseline:
+        blind      35 calls/run: min= 311  med= 315  max= 331   (n=6, ms)
+        k=0 occupied src tables:
+        collapsed   5 calls/run: min=  43  med=  44  max=  57   (n=6, ms)
+             k=0: 44ms against the blind form's 315ms — 7.1x faster, 271ms saved
+        k=1 occupied src tables:
+        collapsed   5 calls/run: min=  44  med=  45  max=  47   (n=6, ms)
+             k=1: 45ms against the blind form's 315ms — 7.1x faster, 270ms saved
+        k=2 occupied src tables:
+        collapsed   5 calls/run: min=  43  med=  44  max=  46   (n=6, ms)
+             k=2: 44ms against the blind form's 315ms — 7.1x faster, 271ms saved
+        k=4 occupied src tables:
+        collapsed   5 calls/run: min=  43  med=  43  max=  45   (n=6, ms)
+             k=4: 43ms against the blind form's 315ms — 7.3x faster, 272ms saved
+        k=8 occupied src tables:
+        collapsed   5 calls/run: min=  43  med=  44  max=  46   (n=6, ms)
+             k=8: 44ms against the blind form's 315ms — 7.1x faster, 271ms saved
+   PASS    collapsed sequence measured against a same-run blind baseline at five occupancies
+
+        NOTE the collapsed form's cost tracks RUNNING SANDBOXES, not pool size, so it also
+        removes pool size as a latency knob — the 32-slot cap stops costing anything at rest.
+
+== K3 GRANT SURFACE — what this costs at the security boundary ==
+        under the SHIPPED grant, '-a <anchor> -s Tables -vv' is: refuse-by-policy
+   PASS    not reachable today — the collapse costs exactly one new NOPASSWD line:
+             <user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -s Tables -vv$
+
+        WHAT IT REVEALS, against what the grant already reveals:
+          - it is a READ. It cannot add or delete membership, load a ruleset, or touch pf's
+            enable state, so it reaches none of the nine bypasses D132 refused.
+          - it discloses each slot's address COUNT, never an address. The shipped grant
+            already permits '-t <table> -T show', which discloses the addresses themselves,
+            one table per call. So this is strictly LESS informative than 64 calls a holder
+            can already make — it is cheaper, not more revealing.
+          - it is anchor-scoped by the same literal-anchor regex as every other line, so it
+            cannot read another anchor's tables.
+        NOT A RUBBER STAMP: D132's permit/refuse matrix must be re-run against the extended
+        policy before anything relies on this. sudoers matches a concatenated argument
+        string, so a new line is a new place for an argument to be smuggled, and the only
+        thing that has ever caught that here is the matrix.
+
+== cleanup ==
+   anchor rules=0
+   main ruleset: before=4 after=4
+   sudoers probe present: no
+
+pass=3 fail=1 unknown=0
