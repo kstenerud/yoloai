@@ -8,9 +8,7 @@
   production code written. The macOS half was already designed inside
   [macos-pf-privileged-path.md](macos-pf-privileged-path.md); this generalises it and settles the
   Linux half, which was named as a cost and never worked out.
-- **Depends on:** [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md)
-  (the enforcement points this reclaims), [macos-pf-privileged-path.md](macos-pf-privileged-path.md)
-  (D132 — the grant that authorises the macOS mutations)
+- **Depends on:** tamper-resistant-network-isolation.md, macos-pf-privileged-path.md
 - **Rides:** **any.** It adds reclamation to a mechanism that does not ship yet; nothing user-visible
   is withdrawn. It is not optional *within* that mechanism — see "Why this is not a tidy-up".
 
@@ -69,19 +67,62 @@ a live address can carry someone else's policy.
 Four rules. The first three are already settled for macOS and carry over unchanged; the fourth is
 what the Linux point needs and macOS gets for free.
 
+### 0. What "address" means, and how one sandbox ends up under another's policy
+
+**The address is the sandbox guest's own IP** — `172.17.0.2` on docker, `192.168.64.22` on apple. It
+is what the enforcement rule matches as the *source*: "traffic **from** this address is subject to
+this policy." So the address is the **join key** between a sandbox and its allowlist, and it is the
+only key available, because it is the only thing the packet carries.
+
+Nothing ever writes sandbox A's address into sandbox B's state. The hazard runs the other way, and
+it needs no mistake by anyone:
+
+1. Sandbox A holds `192.168.64.22`. Its address sits in slot 0's `src` table, paired by a static rule
+   with slot 0's `dst` table — A's allowlist.
+2. A dies without teardown. **Its entry stays.** Slot 0 still says "`.22` is subject to A's policy".
+3. Sandbox B starts and is handed `.22` — recycled, which on docker is immediate and on macOS is
+   inevitable once the lease pool wraps. B is assigned slot 1 and its address is written to slot 1's
+   `src` table, correctly.
+4. `.22` is now in **both** tables. `quick` is first-match, so slot 0 matches B's traffic first and
+   **B runs under A's allowlist**, not its own.
+
+No component behaved incorrectly. The join key was reused while a stale row still referenced it.
+
 ### 1. Clear before claim, at every start
 
-**Before installing a sandbox's own rules, delete its address from every other sandbox's enforcement
-state.** Deleting a non-member is a no-op, so this is deterministic regardless of what teardown did
-or did not manage. It closes the inherited-allowlist case without depending on any previous shutdown
-having succeeded — which matters because the case we most need to survive is the one where nothing
-ran at teardown.
+**Before installing a sandbox's own rules, delete *this one address* from every table that could
+hold it.**
 
-This is the single most important rule, because it makes correctness independent of cleanup.
+This is not an inspection of other sandboxes, and an earlier draft of this section described it in a
+way that read like one. It is a blind delete of a single address across a bounded, fixed set of
+tables — 32 on macOS, one chain scan on Linux — without caring whose the address used to be. Deleting
+a non-member is a no-op.
 
-### 2. Reconcile on every run, keyed on *running*, never on *record-exists*
+**Why blind rather than targeted:** hitting only the right table means knowing which slot the
+address's *previous* holder occupied. That is precisely the stored state established above as
+untrustworthy — a sandbox that crashed may never have recorded anything, and a record that exists may
+name a slot that has since been reused. The address is trustworthy; nothing that claims to describe
+it is.
 
-Any address in enforcement state that **no running sandbox holds** is removed. Two traps:
+This is the single most important rule, because it makes correctness independent of whether cleanup
+ever ran — and the case most needing to survive is the one where nothing ran at teardown.
+
+### 2. Reconcile — for capacity and hygiene, *not* for security
+
+Rule 1 is what closes the inheritance hazard, and it closes it completely: an address is scrubbed
+immediately before it is claimed, so no sandbox can start under someone else's policy no matter what
+was left behind. **The sweep is therefore not on the security path.** What it does is reclaim what
+rule 1 leaves behind — entries for addresses nobody has claimed yet — which matters for two
+non-security reasons: macOS slots are a finite pool (32), and Linux state would otherwise grow
+without bound.
+
+That distinction is worth being firm about, because it sets where the sweep has to run. It does
+**not** have to run on every start; it can be lazy — at `system prune`, and on slot exhaustion, which
+is the moment its absence first costs anything. A sweep that runs rarely also contends rarely, which
+is most of why rule 4 is cheap.
+
+When it does run: any address in enforcement state that **no running sandbox holds** is removed. Two
+traps:
 
 - **Identify orphans by address, never by name.** `runtime/orphan.go` documents why: `yoloai-acme-probe`
   is both principal `acme`'s sandbox `probe` and a legacy sandbox named `acme-probe` (DF19/DF115/DF125).
@@ -149,18 +190,43 @@ no network at all satisfies "the old policy no longer applies" for free — that
 mode, and it silently invalidated the first run of the `pf` research harness (A22). Assert that a
 permitted destination still succeeds, or the test certifies nothing.
 
+## Settled by review (2026-08-07)
+
+**The two platforms diverge, and the divergence is part of the model.** macOS uses a slot pool of
+numbered tables because D132's grant is a static ruleset over fixed table names — that is a
+consequence of the security boundary, not a preference. Linux has no such constraint and gets
+whatever unit fits it, unbounded. Neither is made to resemble the other.
+
+The consequence is **user-visible and must be surfaced rather than hidden**: macOS supports a bounded
+number of concurrently-isolated sandboxes (32 slots, measured to load as 64 rules), and Linux does
+not. So the 33rd concurrent isolated sandbox on macOS fails with an error naming the cap and how to
+free a slot, and `doctor` reports slot usage on the backends that have slots. A capability that
+exists on one platform and not the other belongs in the model as a difference; papering over it would
+mean either an invented cap on Linux or a silent failure on macOS.
+
+**The sweep is capacity and hygiene, not security** — see rule 2. It can be lazy.
+
+**Rule 1's ordering is already available, with room to spare.** It needs the sandbox's address before
+installing rules, which orders address discovery ahead of rule installation. That ordering exists:
+the container is created (address assigned), then the host installs enforcement, and **only then does
+the agent launch** — which is the whole point of
+[host-controlled-agent-launch.md](host-controlled-agent-launch.md). The window between address
+assignment and rules being up is a window in which the thing isolation exists to contain is not
+running.
+
+That slack is already an accepted boundary rather than a new claim: on the agent-free path the
+entrypoint runs `run_setup_commands` and writes `.substrate-ready` *before* the firewall goes up, so
+profile setup commands deliberately run with full network — provisioning is trusted, user-authored
+config, mirroring the Dockerfile build. See
+[tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md) § *Provisioning egress*.
+The requirement is therefore not "rules before the container exists" but **"rules before anything
+runs that isolation is meant to contain"**, and the agent-launch gate is exactly that line.
+
 ## Open questions
 
-1. **What is the Linux per-sandbox unit?** macOS has a slot pool of numbered tables because its grant
-   is a static ruleset over fixed table names. Linux has no such constraint — a chain or ipset per
-   sandbox is expressible — so the two need not have the same shape, and forcing them to would import
-   the slot cap for no reason. Decide before building.
-2. **Where does the sweep run?** `system prune` already reaps host artifacts identity-keyed (D114),
-   which is the obvious home; but reconciliation has to happen on every *start*, not only when an
-   operator prunes. Likely both, sharing one implementation.
-3. **Does rule 1 need the address before the sandbox has it?** On Linux the container's address is
-   assigned at create, so "clear before claim" needs the address first — which orders address
-   discovery before rule installation. Confirm that ordering is available on every backend.
+None blocking. The Linux unit's concrete shape (chain per sandbox, ipset per sandbox, or one chain
+with per-source rules) is an implementation choice to make against the code, not a design fork — all
+three satisfy rules 0–4, and the divergence above means it need not answer to the macOS shape.
 
 ## Related
 
