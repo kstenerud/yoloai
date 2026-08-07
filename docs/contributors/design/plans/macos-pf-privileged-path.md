@@ -90,9 +90,17 @@ loading cleanly** (`pf-enforce.txt` E1 ran both candidates in one pass). An earl
 plan proposed the `out` form.
 
 Measured: 32 slots load (64 rules), a **high** slot index enforces, an unassigned sandbox is
-untouched, two slots give two sandboxes **independent allowlists**, an empty `dst` table fails
-**closed**, and **table contents survive a ruleset reload** — so resizing or repairing the pool does
-not de-isolate running sandboxes (`pf-assumptions.txt` D1/D2/D4, `pf-shapeb.txt` B1/B2).
+untouched, an empty `dst` table fails **closed**, and **table contents survive a ruleset reload** —
+so resizing or repairing the pool does not de-isolate running sandboxes (`pf-assumptions.txt`
+D1/D2/D4, `pf-shapeb.txt` B1/B2).
+
+**Independence is measured at n=8, not n=2.** The original claim came from two slots, which cannot
+distinguish "each sandbox has its own policy" from "each has the union" in the direction that would
+matter. `pf-pool-occupancy.txt` runs eight live sandboxes with eight distinct allowlists and the
+full 64-cell matrix: **every sandbox reached its own destination and all 56 cross-sandbox paths were
+refused.** The same run establishes two things the start path needs — the one-call occupancy dump
+names exactly the occupied slots, which is how a free slot is found, and it reports FULL at
+exhaustion, so a full pool need not be discovered by a failed write.
 
 **Backend-agnostic, measured rather than predicted.** The pool enforces on **tart** as well as
 apple, and an apple guest and a tart guest hold **different allowlists in different slots
@@ -204,6 +212,59 @@ So the start path verifies, all granted and read-only:
 
 Failing any is an error. Note (3) asserts *presence*, not that the address is still the sandbox's
 current lease; comparing against the live address closes the remaining staleness gap and is free.
+
+### Those three are not sufficient, and it is measured (2026-08-07)
+
+**All three pass while the sandbox is completely unfiltered.**
+[`pf-anchor-eval.txt`](../research/macos-isolation-spike/results/pf-anchor-eval.txt) prints them
+beside live egress on a host in that state:
+
+```
+D132 check 1  pf enabled ............ Enabled
+D132 check 2  pool loaded ........... 8 rules (want 8)
+D132 check 3  our address in slot ... 192.168.64.13
+==> all three checks PASS
+ACTUAL egress: allow=301 deny=301
+```
+
+The cause is one line in the **main** ruleset. `/etc/pf.conf` carries `anchor "com.apple/*"`, which
+is what makes pf descend into `com.apple` and evaluate its children. Remove it — `pfctl -F all` does,
+and a backend restart afterwards restores only vmnet's own rules — and the anchor keeps every rule,
+keeps every table, and is never consulted. This is D6's fail-open in its worst form, because D6 at
+least left something to notice; here every yoloAI-visible signal reads healthy.
+
+**The grant cannot see it.** It authorizes `-s info` and `-a com.apple/yoloai -s rules`, and neither
+reveals whether the anchor is reachable from the main ruleset. Reading the main ruleset is not
+granted — deliberately, since it is the object hazard 1 forbids touching. So this is not merely a
+missing check; it is a check **the current security boundary cannot express**.
+
+Three ways out, and the third is the one to take:
+
+1. **Grant a read of the main ruleset** (`pfctl -s rules`, no `-a`). Small, read-only — but it
+   discloses the host's entire filter policy to the grant holder, which is a real widening for a
+   check that would still be a proxy.
+2. **Grant `-s Anchors`** to confirm the anchor is enumerable. Cheaper, and **wrong**: our anchor
+   was enumerable the whole time it was being ignored. It would have passed.
+3. **Probe the behaviour, which needs no grant at all.** Enforcement is a property of packets, and
+   every proxy for it has now been observed passing while the property was false. The pool can
+   carry a permanently-reserved slot whose `dst` is empty and whose `src` holds a canary address,
+   and the start path asserts a connection from it fails. That tests the thing itself, costs no new
+   privilege, and is the only option immune to the next unforeseen way the chain breaks.
+
+**Whatever is chosen, the verification list is wrong as written and must not ship as three checks.**
+The research harness made exactly this mistake in miniature: `pf_pool_occupancy.sh` reported 56 of 56
+cross-sandbox leaks and blamed the slot design, because its gate proved the guest *had* a network
+and never that pf *would* block. It now fires one confirmed block before it trusts anything — which
+is option 3, arrived at by being burned.
+
+### The repair, since a detector implies one
+
+Measured, and the **order matters**: reload `/etc/pf.conf` to restore the anchor reference, *then*
+restart the backend to restore vmnet's NAT. Reloading alone leaves guests with no network;
+restarting alone leaves the anchor unreferenced, which is the broken state itself. A backend restart
+also moves every guest's address, so membership must be rebuilt afterwards — consistent with this
+plan's existing rule that membership is rebuilt from live state and never restored from a stored
+mapping.
 
 ### Reboot
 
@@ -443,10 +504,40 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
   the guest's resolver cannot see at all — is the case most likely to diverge and was not
   exercised; and it says nothing about the *temporal* hazard below, which is the one already
   breaking sandboxes.
-- **Resolution is one-shot, so parity at start says nothing about hour six.** `resolve_domains`
-  runs once, and CDN rotation moves the addresses under a long-lived sandbox regardless of whether
-  the two sides agreed at launch. Inherited, not caused by host `pf` — but host `pf` inherits it,
-  and a table loaded once is exactly as stale as an ipset loaded once. Unmeasured.
+- **Split-horizon: measured 2026-08-07, and it DOES diverge — but not where expected.**
+  [`dns-gaps.txt`](../research/macos-isolation-spike/results/dns-gaps.txt), against a real tailnet,
+  with public domains agreeing on both sides first so a miss is attributable:
+
+  | Name class | Result |
+  | --- | --- |
+  | tailnet FQDN (`host.<tailnet>.ts.net`) | **agree** — the vmnet gateway forwards MagicDNS through |
+  | bare short name relying on a **search domain** | **host-only**; the guest has no such search domain |
+  | **mDNS** `.local` | **host-only**; the guest does not do mDNS |
+
+  So the VPN itself is *not* the hazard — the guess that MagicDNS names would be invisible to the
+  guest was wrong. The hazard is **resolver configuration that is not forwarded**: search domains
+  and mDNS. That generalises well beyond Tailscale, since corporate DHCP hands out search domains
+  routinely, and it produces a silent **fail-closed**: the host resolves, writes an address into
+  `dst`, and the guest — which cannot resolve the name at all — never sends there. The user
+  allowlisted a domain and the sandbox still cannot reach it.
+
+  **And one result is worse than a miss.** The host resolved its own `.local` name to
+  `127.0.0.1 192.168.0.157 192.168.139.3 192.168.64.1` — loopback, and the vmnet gateway itself.
+  Host-side resolution can return **host-relative** addresses, whose meaning changes inside the
+  guest: writing `127.0.0.1` into a guest's `dst` does not allowlist what the user named, it
+  allowlists *the guest itself*. Moving resolution to the host is therefore not a transparent
+  substitution, and the design needs a stated rule — at minimum, refusing to install loopback and
+  link-local answers into a guest's allowlist rather than passing them through.
+- **Resolution is one-shot, so parity at start says nothing about hour six — and the decay is now
+  measured.** `resolve_domains` runs once, and CDN rotation moves the addresses under a long-lived
+  sandbox regardless of whether the two sides agreed at launch. Inherited, not caused by host `pf` —
+  but host `pf` inherits it, and a table loaded once is exactly as stale as an ipset loaded once.
+  `dns-gaps.txt` polled five domains every 5 minutes for an hour: **`github.com` changed address
+  within 10 minutes** (`+1/-1`) and later changed back. One movement in one hour on one resolver is
+  not a rate, but it is enough to settle the question of *whether* — an allowlist resolved at start
+  is not still correct later in an ordinary session, and the design must either re-resolve or state
+  that it accepts the decay. The other four domains, including the 12-address `registry.npmjs.org`
+  set, held steady for the full hour.
 - **Pool size and exhaustion behaviour** are undecided — but pool size is no longer *also* a latency
   decision. Under the blind cross-slot scrub it was: every start paid 9.3 ms per slot whether or not
   anything occupied it (8/16/32 slots = 101/175/320 ms). The address-count dump measured in
@@ -454,16 +545,19 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
   track running sandboxes instead, so an idle pool is free and sizing it is purely a question of how
   many concurrently-isolated sandboxes to support. That collapse costs one added read in the grant
   and is **not** approved here; without it, pool size and start latency stay the same dial.
-- **Whether yoloAI should hold its own `pfctl -E` reference.** Still undecided, but no longer
-  unmeasured on the part that matters. `pf-midlife-wipe.txt` W3 ran another tool's `pfctl -d`
-  followed by `-e`: pf came back Enabled, the anchor's rules and membership were untouched, and
-  **the pre-existing reference token was destroyed** — `References` went from `pfd`, held 3 days, to
-  `No pf starter references held`, with `-e` not restoring it. So the reference another process
-  holds is not something to depend on, and a boot restores it only because `pfd` takes it again.
-  What is still untested is the dangerous half, `-X`, deliberately: getting it wrong drops the count
-  and breaks vmnet NAT for every VM on the host. The same run measured the consequence of pf being
-  off at all, and it is **fail-closed** for VM guests — with pf disabled the sandbox reached
-  nothing, because vmnet's NAT is implemented in pf rather than merely coexisting with it.
+- ~~**Whether yoloAI should hold its own `pfctl -E` reference.**~~ **Answered: it would not help.**
+  `pf-flush-reference.txt` R2 took a real `-E` token, confirmed it in `pfctl -s References`
+  alongside `pfd`'s, and then had another process run `pfctl -d`. pf went **Disabled anyway**, and
+  every token — ours and `pfd`'s — was destroyed: `No pf starter references held`. Reference
+  counting does not defend against `-d`, so **yoloAI cannot protect its own enforcement by holding
+  a reference; it can only detect the state.** That makes the fourth verification check above the
+  whole answer rather than one of two.
+  Two limits. `-X` releasing the *last* reference is still untested: R3 tried and got
+  `token invalid`, because the earlier `-d` had already destroyed the token, so that PASS is
+  vacuous and is recorded as such. And with pf disabled the guest reaches nothing (vmnet's NAT is
+  implemented in pf rather than merely coexisting with it), which is fail-closed — but per
+  `pf-flush-reference.txt` R0 that appearance is exactly what masked the `-F all` fail-open, so it
+  should not be read as safety.
 
 ## Sweep surfaces
 

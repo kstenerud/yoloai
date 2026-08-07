@@ -32,6 +32,8 @@ the impression that the harness worked first time.
 | `pf-scrub-collapse.txt` | the follow-up C6's own output suggested: `-s Tables -vv` reports every table's **address count** in one call, so provably-empty slots need no delete and the scrub becomes O(running sandboxes). Measured against a same-run blind baseline at five occupancies. **Run 3** — the two invalidated runs below are the same file's earlier attempts |
 | `pf-scrub-collapse-run1-invalidated.txt` | **invalidated, kept.** The K1 parser anchored the table-name pattern to end-of-line; pfctl emits a third column naming the owning anchor, so nothing matched and every table read as empty. K1 failed correctly — but K2 timed a "collapsed" sequence issuing **zero deletes** and reported 7x at every k |
 | `pf-scrub-collapse-run2-invalidated.txt` | **invalidated, kept, and the more instructive of the two.** K1 fixed and passing; K2 still issuing zero deletes, because the sequence invokes the dump through `sudo -n` under the shipped grant — which K3 in that same run proves refuses it. The probe measured the cost of a capability it had simultaneously demonstrated it did not have. Both runs' tell was identical: **a cost that does not move between k=0 and k=8 is not doing per-slot work** |
+| `pf-flush-reference.txt` | `pfctl -F all` shown to be a **fail-open** trigger in one run: enforcing → flush → restore only NAT → `allow=301 deny=301` with the anchor still holding correct rules. Corrects `pf-midlife-wipe.txt`, which read the same event as fail-*closed* because NAT death masked it. Also answers the `-E` question: a token we hold does **not** survive another process's `pfctl -d`, so enforcement cannot be defended by reference-counting — only detected |
+| `dns-gaps.txt` | the two gaps `dns-parity.txt` named and left open. Split-horizon **does** diverge, though not where predicted: tailnet FQDNs agree (the vmnet gateway forwards MagicDNS), while **search-domain** and **mDNS** names are host-only — and the host's own `.local` resolves to `127.0.0.1` and the vmnet gateway, i.e. host-relative addresses whose meaning changes inside a guest. Plus an hour of rotation polling in which `github.com` moved within 10 minutes |
 | `pf-anchor-eval.txt` | **the sharpest finding in this directory.** A loaded anchor pf never evaluates, because the main ruleset lost its `anchor "com.apple/*"` line. All three of D132's start-path checks report healthy — pf enabled, pool loaded with the full rule count, address in its slot — and a denied destination answers 301. The deciding state lives in the main ruleset, which the grant deliberately cannot read. Also records the repair, which is two steps in a fixed order |
 | `pf-anchor-eval-run1-predicate-bug.txt` | **invalidated, kept.** Same run with `grep -c 'com\.apple'`, which also matches `anchor "com.apple.internet-sharing"` — a different, top-level anchor a system service re-inserts. It declared the ruleset healthy and skipped the repair while the host was broken. Two anchor names sharing a 9-character prefix; `com.apple/` is the discriminator and `com.apple` is not. Its E2 is still valid and is the first capture of the three-green-checks fail-open |
 | `pf-parent-anchor.txt` | the mid-life candidate family the previous run excluded — rewrites of the **parent** `com.apple` anchor. A direct parent reload, a sibling sub-anchor write, and an Application Firewall toggle: all three left our sub-anchor's rules, membership **and live enforcement** intact, with the slot never re-armed. Its B section is an honest UNKNOWN and its by-product is a fact: restarting a *sandbox* does not make vmnet reinstall the bridge NAT, only restarting the apple *daemon* does |
@@ -69,6 +71,25 @@ Read this before quoting anything from them.
   bigger project makes it smaller, never larger.
 - **C6's negative is bounded by the ten forms it tried.** No pfctl invocation it tested dumps table
   *contents* anchor-wide. A form nobody thought of is not excluded, and the run says so.
+- **`pf-midlife-wipe.txt`'s fail-closed conclusion is SUPERSEDED — read `pf-flush-reference.txt`
+  instead.** It recorded `pfctl -F all` as leaving the guest reaching nothing and that was written
+  up as macOS failing closed. The guest reached nothing because the same flush killed vmnet's NAT;
+  restore NAT alone and the sandbox is unfiltered. The file's readings are all correct, its
+  interpretation of W6 is not, and the run's own "state survival is not enforcement continuity"
+  caveat is what exposed it.
+- **`dns-gaps.txt`'s "guest at end" block is empty, and that is expected.** The pf experiments
+  running alongside it restarted the apple daemon, which stopped that guest. The phase was
+  host-side only for exactly this reason; the empty block is the caveat firing, not a resolver
+  result. Its rotation figure is also one hour on one resolver — enough to settle *whether* a set
+  moves, not how often.
+- **`dns-gaps.txt` is redacted at the output stream.** Tailnet suffix, peer and host short names,
+  and CGNAT addresses are masked, because those are stable identifiers for a private network and
+  this repo is public. What the run is evidence for survives redaction; the literal names are not
+  the finding.
+- **`pf-flush-reference.txt` R3 is a vacuous PASS and is labelled so in the file.** It tried to
+  release our `-E` token and got `token invalid`, because the preceding `-d` had already destroyed
+  it — so "releasing the last reference does not disable pf" is **not** established. `-X` remains
+  untested.
 - **`pf-midlife-wipe.txt`'s negative is exactly as wide as its candidate list, and no wider.** It
   establishes that seven specific actions did not wipe the anchor. It does **not** establish that
   nothing does. Named and *not* tried: a macOS system update, a third-party firewall that writes pf

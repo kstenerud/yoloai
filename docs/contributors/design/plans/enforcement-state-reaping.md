@@ -515,17 +515,38 @@ anchor's rules, its membership, **and** live egress in both directions
 our anchor nests under `com.apple`, present in no file — and it left all 8 rules and the membership
 in place. `pfctl -F all` reported `0 tables deleted` and did not reach into the anchor either.
 
-**But the last two do something else, and it is the opposite failure.** Both destroyed the *main*
+**The last two do something else, and it took a second run to see what.** Both destroyed the *main*
 ruleset (4 → 0 rules), and vmnet's NAT lives there, so the guest lost egress entirely: `allow=000
-deny=000`. That is **fail-closed**. The same mechanism explains the `pfctl -d` window — with pf
-disabled the guest has no network at all, because on macOS the VM's connectivity *depends on* pf
-rather than merely being filtered by it. `pfctl -F all`'s output names it directly: `nat cleared`.
+deny=000`. That was first written up as **fail-closed** — the opposite of Linux, and a comfortable
+conclusion. **It was wrong**, and the caveat recorded alongside it is what caught it: the run
+established *state* survival and never *enforcement* continuity, because a guest with no network
+cannot demonstrate either direction.
 
-**So the platforms diverge here as sharply as they do everywhere else.** On Linux, an ordinary
-`systemctl restart nftables` leaves the sandbox running and reaching denied destinations, silently.
-On macOS, every equivalent action measured either left enforcement alone or took the guest's network
-down — which announces itself immediately and strands the sandbox rather than freeing it. Both were
-repaired without a reboot by restarting the apple daemon and re-arming the slot.
+**`pfctl -F all` is a fail-open trigger, in the same direction as Linux, and now measured as one**
+([`pf-flush-reference.txt`](../research/macos-isolation-spike/results/pf-flush-reference.txt) R0,
+which causes it from a named trigger in a single run rather than stitching three together):
+
+1. Sandbox enforcing: `allow=301 deny=000`, main ruleset holds 2 references to `com.apple/*`.
+2. Another tool runs `pfctl -F all`. Our anchor keeps all 8 rules and its membership — **and the
+   main ruleset's `anchor "com.apple/*"` line is destroyed with everything else**, so nothing
+   descends into the anchor any more. `main-refs` goes to 0.
+3. NAT is dead too, so the guest reaches nothing. *This is the state that looks fail-closed.*
+4. Restore only NAT — an apple daemon restart, which is what any user whose VMs stopped working
+   will do. Now: `allow=301 deny=301`, with the anchor still holding 8 correct rules and the
+   address still in its slot.
+
+So the fail-closed appearance is a **transient artifact of the collateral damage**, and it lifts the
+moment someone fixes the visible problem. The invisible one stays.
+
+**The platforms therefore have the same hazard, not opposite ones.** Linux reaches it through
+`systemctl restart nftables` destroying our table; macOS reaches it through any tool's `pfctl -F all`
+destroying the reference that makes our table matter. Both leave a running sandbox reaching denied
+destinations with nothing to distinguish it from working isolation. The earlier claim that macOS
+"only ever takes the network away" is withdrawn.
+
+**One candidate does behave well, and the distinction is worth keeping.** A `pf.conf` reload
+(W7) *restores* the anchor reference, because those lines are in the file — so it damages NAT and
+then leaves the ruleset sound. It is `-F all`, which loads nothing back, that is dangerous.
 
 **Four limits, because this is a negative result and a negative is only as wide as its search.**
 
@@ -546,12 +567,31 @@ repaired without a reboot by restarting the apple daemon and re-arming the slot.
   *not* relying on someone else's reference surviving.
 - **n=1, one host, one run**, like everything else in that directory.
 
-**What this does to the priority.** The mid-life check is still undesigned and still needed — a
-fail-closed sandbox is a broken sandbox, and the `com.apple`-anchor candidate above is untested. But
-the *urgency* is asymmetric and should be treated that way: on Linux the failure hands a running
-agent a wider allowlist than it asked for, and on macOS the failure so far only ever takes the
-network away. Design the detector for the Linux hazard; macOS gets it for free and mostly needs it
-as diagnosis.
+**What this does to the priority.** The mid-life check is undesigned, needed, and needed **equally
+on both platforms** — the asymmetry claimed in the first draft of this section does not exist. Both
+platforms have an ordinary, unrelated administrative action that silently unfilters a running
+sandbox. Design the detector once, for the property, and run it on both.
+
+### The parent-anchor family: measured, and it is the reassuring half
+
+The candidate named above as the sharpest untested one has now been run
+([`pf-parent-anchor.txt`](../research/macos-isolation-spike/results/pf-parent-anchor.txt)), and all
+three cases **survived with live enforcement verified and the slot never re-armed**:
+
+| Candidate | Result |
+| --- | --- |
+| `pfctl -a com.apple -f /etc/pf.anchors/com.apple` — a direct parent reload | survived, still filtering |
+| loading rules into a *sibling* sub-anchor | survived, still filtering |
+| toggling the macOS Application Firewall, which owns `com.apple/250.ApplicationFirewall` | survived, still filtering |
+
+So reloading a parent anchor does **not** purge its children, and Apple's own components writing
+into `com.apple` do not disturb a sibling. That closes the open question this plan filed, in the
+good direction: the danger is not the anchor hierarchy, it is the **main ruleset's reference into
+it**, which is a different object with different lifetime and different visibility.
+
+**A by-product worth keeping, because it constrains any repair path.** Restarting a *sandbox* does
+not make vmnet reinstall the bridge's NAT; only restarting the apple *daemon* does. And a daemon
+restart moves every guest's address, so repair and re-arm are inseparable on this backend.
 
 ## Settled by review (2026-08-07)
 

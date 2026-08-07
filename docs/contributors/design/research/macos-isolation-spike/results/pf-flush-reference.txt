@@ -1,0 +1,68 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-07 23:12:08 CEST | anchor=com.apple/yoloai_b
+
+== SETUP — one enforcing sandbox, verified against a control ==
+        fr-a at 192.168.64.12 | main ruleset refs to com.apple/*: 2
+        before arming: allow=301 deny=301 (both must be reachable)
+        pf=Enabled   anchor=8  rules  slot=192.168.64.12,     main-refs=2  || allow=301 deny=000
+   PASS    enforcing: permitted reachable, denied blocked, main ruleset references the anchor
+
+== R0 THE FULL CHAIN — pfctl -F all, then restore NAT, then look again ==
+        Step 1: another tool runs pfctl -F all.
+        pfctl: rules cleared
+        pfctl: nat cleared
+        pfctl: dummynet cleared
+        pfctl: 0 tables deleted.
+        pfctl: 42 states cleared
+        pfctl: source tracking entries cleared
+        pfctl: pf: statistics cleared
+        pfctl: pf: interface flags reset
+        pf=Enabled   anchor=8  rules  slot=192.168.64.12,     main-refs=0  || allow=000 deny=000
+        Note main-refs above: the flush took the main ruleset's anchor reference with it.
+        With NAT also gone the guest reaches nothing, which is what the earlier run saw and
+        mistook for fail-closed. The next step is the one that reveals the real state.
+
+        Step 2: restore ONLY vmnet's NAT (apple daemon restart) — no ruleset repair.
+        fr-a now at 192.168.64.3 (a restart moves it, so the slot is re-armed to match)
+        pf=Enabled   anchor=8  rules  slot=192.168.64.3,      main-refs=0  || allow=301 deny=301
+   FAIL    R0: FAIL-OPEN CONFIRMED. Denied destination answered 301 with the anchor holding
+           8 correct rules and the address in its slot. pfctl -F all is a fail-open
+           trigger on macOS, not a fail-closed one — the earlier reading was NAT death
+           masking it. Same direction as Linux "systemctl restart nftables", and likewise
+           an ordinary action by a tool with no relationship to yoloAI.
+
+== R0b REPAIR before the reference tests, so they start from a sound host ==
+        pf=Enabled   anchor=8  rules  slot=192.168.64.3,      main-refs=2  || allow=301 deny=000
+   PASS    host repaired and enforcing again (main-refs=2)
+
+== R1 REFERENCES BASELINE ==
+        TOKENS: PID Process Name TOKEN TIMESTAMP 42417 pfd 13283238741682316742 0 days 04:05:44 
+
+== R2 DOES HOLDING OUR OWN -E REFERENCE PROTECT AGAINST ANOTHER TOOL'S -d? ==
+        pfctl: pf enabled
+        pfctl: Token : 13084781407664836791
+        our token: 13084781407664836791   references now: TOKENS: PID Process Name TOKEN TIMESTAMP 26460 pfctl 13084781407664836791 0 days 00:00:00 42417 pfd 13283238741682316742 0 days 04:05:44 
+        now another tool disables pf:
+        pfctl: pf disabled
+        pf state after that -d: Disabled   references: No pf starter references held 
+   FAIL    R2: pf is Disabled despite our -E reference — holding one does NOT protect against -d.
+           So yoloAI cannot defend its own enforcement by taking a reference; the only
+           defence is detecting the state, which needs the fourth verification check.
+
+== R3 -X AND THE COUNT — does releasing the last reference disable pf? ==
+        pf re-enabled: Enabled | references: No pf starter references held 
+        pfctl: pfctl: pf: token invalid
+        after releasing our token: pf=Enabled | references: No pf starter references held 
+   PASS    R3: releasing our reference did not disable pf on this host
+
+== R4 FINAL REPAIR AND VERIFY — the host must leave this run enforcing ==
+        pf=Enabled   anchor=8  rules  slot=192.168.64.3,      main-refs=2  || allow=301 deny=000
+   PASS    host is sound: pf enabled, anchor referenced, enforcement real
+
+== cleanup ==
+   destroyed fr-a
+   pf=Enabled  main ruleset refs to com.apple/*=2  references: No pf starter references held 
+
+   IF main-refs IS 0 THE HOST IS STILL FAIL-OPEN: run pf_anchor_eval.sh to repair.
+
+pass=4 fail=2 unknown=0

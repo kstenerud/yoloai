@@ -1,0 +1,79 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-07 22:22:54 CEST
+redaction active: tailnet suffix, peer/host short names and 100.64/10 addresses are masked
+
+== SETUP ==
+        host resolvers:  100.x.x.x(cgnat) fd7a:115c:a1e0::53 192.168.0.1 
+        guest resolvers: 192.168.64.1 
+
+== C0 CONTROL — public domains must agree before any divergence is believable ==
+        example.com: host=2 addrs, guest=2 addrs, guest-not-in-host: none
+        github.com: host=1 addrs, guest=1 addrs, guest-not-in-host: none
+        api.anthropic.com: host=1 addrs, guest=1 addrs, guest-not-in-host: none
+        registry.npmjs.org: host=12 addrs, guest=12 addrs, guest-not-in-host: none
+        objects.githubusercontent.com: host=4 addrs, guest=4 addrs, guest-not-in-host: none
+   PASS    both resolvers answer for public names, so a split-horizon miss below is attributable
+
+== C SPLIT-HORIZON — names the host's resolver sees and the guest's may not ==
+        This is the case dns-parity.txt named as most likely to diverge. Under host pf the
+        HOST's answer is what lands in the dst table, so a name only the host can resolve
+        produces an allowlist entry pointing where the guest will never send.
+        tailnet FQDN (self)        host=100.x.x.x(cgnat)              guest=100.x.x.x(cgnat)
+             ==> agree
+        tailnet FQDN (peer)        host=100.x.x.x(cgnat)               guest=100.x.x.x(cgnat)
+             ==> agree
+        bare name + search         host=100.x.x.x(cgnat)               guest=UNRESOLVED
+             ==> HOST-ONLY. Allowlisting this name writes an address into dst that the
+                 guest cannot even resolve, so the entry is inert and the sandbox is
+                 blocked from a domain the user explicitly allowed. Fail-closed, silent.
+        mDNS .local                host=127.0.0.1 192.168.0.157 192.168.139.3 192.168.64.1 guest=UNRESOLVED
+             ==> HOST-ONLY. Allowlisting this name writes an address into dst that the
+                 guest cannot even resolve, so the entry is inert and the sandbox is
+                 blocked from a domain the user explicitly allowed. Fail-closed, silent.
+   FAIL    2 split-horizon name(s) do not mean the same thing on both sides. Host-side
+           resolution is therefore NOT a transparent substitution, and the pf design needs a
+           stated answer for names the guest resolves differently or not at all.
+
+== D ROTATION — does a once-resolved allowlist decay? (host-side, 60 min) ==
+        Host-side only, deliberately: pf experiments running alongside this repeatedly
+        destroy vmnet NAT, and guest readings taken through that would record the outage as
+        DNS drift. The guest is sampled once now and once at the end, best-effort.
+
+        guest at start:
+          api.anthropic.com                  160.79.104.10
+          registry.npmjs.org                 104.16.0.34 104.16.1.34 104.16.10.34 104.16.11.34 104.16.2.34 104.16.3.34 104.16.4.34 104.16.5.34 104.16.6.34 104.16.7.34 104.16.8.34 104.16.9.34
+          github.com                         140.82.121.3
+          objects.githubusercontent.com      185.199.108.133 185.199.109.133 185.199.110.133 185.199.111.133
+          example.com                        104.20.23.154 172.66.147.243
+
+        t=0 baseline recorded
+        t=5   min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=10  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+1/-1 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=15  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=20  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=25  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=30  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=35  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=40  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=45  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=50  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=55  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+0/-0 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+        t=60  min api.anthropic.com:+0/-0 registry.npmjs.org:+0/-0 github.com:+1/-1 objects.githubusercontent.com:+0/-0 example.com:+0/-0
+
+        guest at end (best-effort; pf experiments may have run in this window):
+          api.anthropic.com                  
+          registry.npmjs.org                 
+          github.com                         
+          objects.githubusercontent.com      
+          example.com                        
+
+   FAIL    at least one domain's address set MOVED within 60 minutes. A dst table
+           resolved once at start is stale by the end of an ordinary session, and the
+           sandbox is blocked from a domain it was allowlisted for. This is inherited from
+           the one-shot in-guest ipset rather than caused by pf — but pf inherits it, and
+           the design should say whether it re-resolves or accepts the decay.
+
+== cleanup ==
+   destroyed sandbox dns-g
+
+pass=1 fail=2 unknown=0
