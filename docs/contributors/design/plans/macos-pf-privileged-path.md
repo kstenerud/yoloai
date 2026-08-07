@@ -437,11 +437,23 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
   runs once, and CDN rotation moves the addresses under a long-lived sandbox regardless of whether
   the two sides agreed at launch. Inherited, not caused by host `pf` — but host `pf` inherits it,
   and a table loaded once is exactly as stale as an ipset loaded once. Unmeasured.
-- **Pool size and exhaustion behaviour** are undecided.
-- **Whether yoloAI should hold its own `pfctl -E` reference.** Deliberately untested: getting `-X`
-  wrong drops the count and breaks vmnet NAT for every VM on the host. The reboot narrowed this —
-  pf is enabled at boot without help, so this is about surviving another process's `-X`, not about
-  starting from a disabled host.
+- **Pool size and exhaustion behaviour** are undecided — but pool size is no longer *also* a latency
+  decision. Under the blind cross-slot scrub it was: every start paid 9.3 ms per slot whether or not
+  anything occupied it (8/16/32 slots = 101/175/320 ms). The address-count dump measured in
+  [enforcement-state-reaping.md](enforcement-state-reaping.md) § *The scrub collapses* makes the cost
+  track running sandboxes instead, so an idle pool is free and sizing it is purely a question of how
+  many concurrently-isolated sandboxes to support. That collapse costs one added read in the grant
+  and is **not** approved here; without it, pool size and start latency stay the same dial.
+- **Whether yoloAI should hold its own `pfctl -E` reference.** Still undecided, but no longer
+  unmeasured on the part that matters. `pf-midlife-wipe.txt` W3 ran another tool's `pfctl -d`
+  followed by `-e`: pf came back Enabled, the anchor's rules and membership were untouched, and
+  **the pre-existing reference token was destroyed** — `References` went from `pfd`, held 3 days, to
+  `No pf starter references held`, with `-e` not restoring it. So the reference another process
+  holds is not something to depend on, and a boot restores it only because `pfd` takes it again.
+  What is still untested is the dangerous half, `-X`, deliberately: getting it wrong drops the count
+  and breaks vmnet NAT for every VM on the host. The same run measured the consequence of pf being
+  off at all, and it is **fail-closed** for VM guests — with pf disabled the sandbox reached
+  nothing, because vmnet's NAT is implemented in pf rather than merely coexisting with it.
 
 ## Sweep surfaces
 

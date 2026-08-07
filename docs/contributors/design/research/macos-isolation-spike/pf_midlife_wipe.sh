@@ -210,12 +210,24 @@ rearm() {
   [ "$a" != 000 ]
 }
 
+# A candidate that did not actually happen yields "SURVIVED" for free — the same vacuity that
+# DF172 gives a dead sandbox. A candidate sets NOTRUN when it could not perform its action, and
+# then no verdict is rendered at all: "we tried and it survived" and "we could not try" are
+# different claims and this run must not collapse them.
+NOTRUN=""
+
 # Every candidate: capture, act, settle, capture, judge, re-arm.
 candidate() {
   local label="$1"; shift
+  NOTRUN=""
   say "$label"
   echo "        before:"; capture
   "$@"
+  if [ -n "$NOTRUN" ]; then
+    unk "$label: NOT TRIED — $NOTRUN"
+    echo "           This candidate is UNTESTED. It is not evidence that the anchor survives it."
+    arm; return
+  fi
   sleep 3
   echo "        after:"; capture
   verdict "$label" "$state_rules" "$state_src" "$state_allow" "$state_deny"
@@ -228,15 +240,24 @@ candidate "W1 NO-OP CONTROL — wait, change nothing" w1
 
 # --- W2 Docker Desktop ------------------------------------------------------
 w2() {
-  if [ ! -d /Applications/Docker.app ]; then echo "        Docker Desktop not installed"; return; fi
+  if [ ! -d /Applications/Docker.app ]; then NOTRUN="Docker Desktop is not installed"; return; fi
+  if ! asuser docker info >/dev/null 2>&1; then
+    NOTRUN="Docker Desktop was not running to begin with, so a restart proves nothing"; return
+  fi
   echo "        quitting Docker Desktop"
   asuser osascript -e 'quit app "Docker"' >/dev/null 2>&1
   for _ in $(seq 1 30); do asuser docker info >/dev/null 2>&1 || break; sleep 2; done
-  echo "        docker down: $(asuser docker info >/dev/null 2>&1 && echo no || echo yes)"
+  if asuser docker info >/dev/null 2>&1; then
+    NOTRUN="Docker Desktop never went down (the osascript quit may need Automation permission)"
+    return
+  fi
+  echo "        docker down: yes"
   echo "        starting Docker Desktop"
   asuser open -a Docker >/dev/null 2>&1
   for _ in $(seq 1 60); do asuser docker info >/dev/null 2>&1 && break; sleep 2; done
-  echo "        docker up: $(asuser docker info >/dev/null 2>&1 && echo yes || echo no)"
+  local up; up=$(asuser docker info >/dev/null 2>&1 && echo yes || echo no)
+  echo "        docker up: $up"
+  [ "$up" = yes ] || NOTRUN="Docker Desktop went down but did not come back within 120s"
 }
 candidate "W2 DOCKER DESKTOP quit and start" w2
 
@@ -248,8 +269,20 @@ w3() {
   pfctl -d 2>&1 | quiet_pf | sed 's/^/        pfctl: /'
   sleep 2
   echo "        pf while disabled: $(pfenabled), anchor rules=$(nrules), src_$SLOT=$(tshow "yb_src_$SLOT")"
-  echo "        (this half is the interesting one: a disabled pf is UNENFORCED while every table"
-  echo "         and rule still reads as present — D6's shape, arrived at from a third direction)"
+  # The window itself is the finding, and it closes when pf is re-enabled — so it has to be
+  # measured here rather than in the after-capture, which only ever sees the repaired state.
+  local da dd; da=$(egress "$ALLOW"); dd=$(egress "$DENY")
+  echo "        egress WHILE pf is disabled: allow=$da deny=$dd"
+  if [ "$da" != 000 ] && [ "$dd" != 000 ]; then
+    bad "W3-WINDOW: with pf disabled the sandbox reaches a DENIED destination while its rules and"
+    echo "           membership both still read as present. Any check that reads state rather than"
+    echo "           behaviour calls this healthy — D6's fail-open, reached from a third direction,"
+    echo "           and reachable by any tool on the host running one command."
+  elif [ "$da" = 000 ]; then
+    unk "W3-WINDOW: permitted destination also unreachable while disabled; nothing attributable"
+  else
+    ok "W3-WINDOW: still enforcing with pf disabled (unexpected — re-read pfctl's output above)"
+  fi
   pfctl -e 2>&1 | quiet_pf | sed 's/^/        pfctl: /'
   echo "        references after: $(pfctl -s References 2>/dev/null | tr '\n' ' ')"
 }
@@ -257,14 +290,22 @@ candidate "W3 ANOTHER TOOL DISABLES AND RE-ENABLES pf" w3
 
 # --- W4 VPN client ----------------------------------------------------------
 w4() {
-  if [ ! -x "$TS" ]; then echo "        Tailscale CLI not at $TS — candidate NOT TRIED"; return; fi
+  if [ ! -x "$TS" ]; then NOTRUN="no Tailscale CLI at $TS"; return; fi
+  local before; before=$(asuser "$TS" status 2>&1 | head -1)
+  echo "        ts before: $before"
   echo "        tailscale down"
   asuser "$TS" down 2>&1 | head -3 | sed 's/^/        ts: /'
   sleep 5
+  local during; during=$(asuser "$TS" status 2>&1 | head -1)
+  echo "        ts during: $during"
   echo "        tailscale up"
   asuser "$TS" up 2>&1 | head -3 | sed 's/^/        ts: /'
   sleep 5
-  asuser "$TS" status 2>&1 | head -1 | sed 's/^/        ts: /'
+  echo "        ts after:  $(asuser "$TS" status 2>&1 | head -1)"
+  # If status never changed, the VPN never went down and "the anchor survived" is free.
+  if [ "$before" = "$during" ]; then
+    NOTRUN="tailscale status did not change across 'down' (CLI refused, or not logged in)"
+  fi
 }
 candidate "W4 VPN CLIENT (Tailscale) down and up" w4
 
@@ -274,12 +315,20 @@ w5() {
   echo "        original location: $orig"
   networksetup -createlocation "yoloai-spike" populate >/dev/null 2>&1
   networksetup -switchtolocation "yoloai-spike" >/dev/null 2>&1
-  echo "        switched to: $(networksetup -getcurrentlocation)"
+  local now; now=$(networksetup -getcurrentlocation)
+  echo "        switched to: $now"
   sleep 8
   networksetup -switchtolocation "$orig" >/dev/null 2>&1
   networksetup -deletelocation "yoloai-spike" >/dev/null 2>&1
-  echo "        restored to: $(networksetup -getcurrentlocation)"
+  local back; back=$(networksetup -getcurrentlocation)
+  echo "        restored to: $back"
   sleep 8
+  if [ "$now" = "$orig" ]; then
+    NOTRUN="the location never actually switched (still '$orig')"
+  elif [ "$back" != "$orig" ]; then
+    # Leaving the host on a scratch location would poison every later candidate.
+    bad "W5: the host did NOT return to '$orig' — it is on '$back'. Restore it by hand."
+  fi
 }
 candidate "W5 macOS NETWORK LOCATION switch and back" w5
 

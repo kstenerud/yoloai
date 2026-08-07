@@ -32,6 +32,7 @@ the impression that the harness worked first time.
 | `pf-scrub-collapse.txt` | the follow-up C6's own output suggested: `-s Tables -vv` reports every table's **address count** in one call, so provably-empty slots need no delete and the scrub becomes O(running sandboxes). Measured against a same-run blind baseline at five occupancies. **Run 3** — the two invalidated runs below are the same file's earlier attempts |
 | `pf-scrub-collapse-run1-invalidated.txt` | **invalidated, kept.** The K1 parser anchored the table-name pattern to end-of-line; pfctl emits a third column naming the owning anchor, so nothing matched and every table read as empty. K1 failed correctly — but K2 timed a "collapsed" sequence issuing **zero deletes** and reported 7x at every k |
 | `pf-scrub-collapse-run2-invalidated.txt` | **invalidated, kept, and the more instructive of the two.** K1 fixed and passing; K2 still issuing zero deletes, because the sequence invokes the dump through `sudo -n` under the shipped grant — which K3 in that same run proves refuses it. The probe measured the cost of a capability it had simultaneously demonstrated it did not have. Both runs' tell was identical: **a cost that does not move between k=0 and k=8 is not doing per-slot work** |
+| `pf-midlife-wipe.txt` | whether anything wipes the anchor **mid-life**, under a running sandbox — the macOS counterpart to the Linux `flush ruleset` finding. Seven candidates against a live enforcing sandbox, each judged on rules, membership **and** live egress in both directions. **Nothing wiped the anchor.** Its value is mostly in the two that did something else: `pfctl -F all` and a `pf.conf` reload leave our state intact and take out **vmnet's NAT**, so the guest loses egress entirely — fail-*closed*, the opposite of Linux. Also carries the census of who else writes pf anchors here |
 | `restart-control.txt` | the **no-reboot** control: a plain stop/start moves every guest's address on both backends, each with a freshly generated MAC. Replicates `lease-binding.txt` L2 and extends it — the new parts are the MAC mechanism, the exhausted lease pool, and a census resolving L1's UNKNOWN. Written to stop the reboot halves attributing to the reboot what an ordinary restart does anyway |
 
 ## What these files do NOT support
@@ -63,6 +64,18 @@ Read this before quoting anything from them.
   bigger project makes it smaller, never larger.
 - **C6's negative is bounded by the ten forms it tried.** No pfctl invocation it tested dumps table
   *contents* anchor-wide. A form nobody thought of is not excluded, and the run says so.
+- **`pf-midlife-wipe.txt`'s negative is exactly as wide as its candidate list, and no wider.** It
+  establishes that seven specific actions did not wipe the anchor. It does **not** establish that
+  nothing does. Named and *not* tried: a macOS system update, a third-party firewall that writes pf
+  (Little Snitch and similar are not installed on this host), Internet Sharing being toggled, and —
+  the sharpest of them — anything that reloads the **`com.apple` anchor itself**. The census in W0
+  shows `200.AirDrop` and `250.ApplicationFirewall` living in that same parent, so the system
+  components most likely to rewrite it are right there and were never exercised.
+- **Two candidates could not render a verdict on enforcement, only on state.** `pfctl -F all` and
+  the `pf.conf` reload both killed vmnet's NAT, so the guest had no network and neither block nor
+  pass was attributable. What survived them is read directly from pf (rules present, membership
+  present); that enforcement *continued to work across* the event is **not** shown, because the
+  repair path re-armed the slot before egress could be re-tested.
 - **`pf-scrub-collapse.txt` measures cost, not correctness.** Skipping provably-empty slots is only
   sound while slot allocation is under the cross-sandbox lock rule 3 already requires — the run
   states that argument and tests none of it.

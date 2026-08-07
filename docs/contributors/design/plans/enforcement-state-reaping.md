@@ -165,12 +165,85 @@ Steps 2 and 3 must not be reordered: scrubbing after claiming deletes our own en
 comes up matching no slot at all. That failure is silent in the dangerous direction — no `src` match
 means no rule matches, and traffic falls through to whatever the main ruleset does.
 
-**The cost this implies, unmeasured.** sudoers matches one table per invocation, so step 2 is one
-`sudo pfctl` call per slot — 31 calls at a 32-slot pool — on top of the flushes and adds, for roughly
-35 per sandbox start. Multiple *addresses* fit in one call (D5) but multiple *tables* do not. Nobody
-has measured what that costs on the start path. If it is material, the fix is not to skip the scrub
-but to reduce the pool to the number of slots actually wanted, since the scrub is O(pool), not
-O(sandboxes).
+**The cost this implies, measured on hardware (2026-08-07).** sudoers matches one table per
+invocation, so step 2 is one `sudo pfctl` call per slot — 31 calls at a 32-slot pool — on top of the
+flushes and adds, for roughly 35 per sandbox start. Multiple *addresses* fit in one call (D5) but
+multiple *tables* do not. Measured on an M4 MacBook Air, macOS 26.5.1
+([`pf-acquire-cost.txt`](../research/macos-isolation-spike/results/pf-acquire-cost.txt)):
+
+| | median |
+| --- | --- |
+| one NOPASSWD `sudo pfctl -T` call, warm | **9.3 ms** |
+| the same work as root, no `sudo` | **1.4 ms** |
+| the full 35-call acquisition sequence | **329 ms** |
+| `yoloai new --backend apple`, empty workdir | **2380 ms** |
+| `yoloai new --backend tart`, empty workdir | **40924 ms** |
+
+So acquisition is **13.8% of an apple sandbox start** and 0.8% of a tart one, and total cost is
+almost exactly `calls × 9.3 ms` — the 8/16/32-slot pools cost 101/175/320 ms, linear in pool size as
+predicted.
+
+**Which lever exists is decided by where the 9.3 ms goes: 85% of it is `sudo`, not `pfctl`.** The
+privileged work itself is 1.4 ms. Policy *size* is irrelevant — 500 extra sudoers rules cost 0.6 ms —
+so the fixed per-invocation overhead of spawning `sudo` is the whole cost, and **nothing but reducing
+the call count can help**. (Policy *source* is a different question and an untested one: a host whose
+sudoers arrives over LDAP/AD, or whose PAM stack does a network lookup, is not described by this
+measurement and is where the call count would hurt most.)
+
+### The scrub collapses to O(sandboxes), for one added read
+
+The obvious collapse — one call dumping every table's contents — **does not exist**. Ten `pfctl`
+forms were tried against planted marker addresses; none returns table contents anchor-wide.
+
+But a weaker read suffices, and it does exist. `pfctl -a <anchor> -s Tables -vv` reports every
+table's **address count** in one call, and **a table holding zero addresses cannot hold ours**, so it
+needs no delete. That is not a heuristic: it is the same blind delete rule 1 specifies, with the
+provably-empty slots skipped. Measured against a same-run blind baseline of 324 ms
+([`pf-scrub-collapse.txt`](../research/macos-isolation-spike/results/pf-scrub-collapse.txt)):
+
+| k = slots holding an address | collapsed | vs blind |
+| --- | --- | --- |
+| 0 | 49 ms | 6.6× |
+| 1 | 61 ms | 5.4× |
+| 2 | 70 ms | 4.6× |
+| 4 | 86 ms | 3.8× |
+| 8 | 123 ms | 2.6× |
+
+`49 + 9.25k` ms, so it stays ahead of the blind form until k ≈ 30 — which a 32-slot pool can barely
+reach. At a realistic two or three running sandboxes it is ~4.5× cheaper, and 2.9% of apple start
+rather than 13.8%.
+
+**It is sound only under the lock rule 3 already requires.** Between the dump and the deletes, a slot
+can only go from empty to holding *our* address if someone else writes our address — and nobody does:
+we alone write it, a live sandbox holds it so no concurrent start can be handed it, and slot
+allocation is under the cross-sandbox lock. Take that lock away and the skip is wrong.
+
+**And it removes pool size as a latency knob**, which is the more interesting consequence. Under the
+blind form, a larger pool costs every start 9.3 ms per slot whether or not anything uses it, so the
+user-visible cap and the start latency are the same dial. Under the collapsed form the cost tracks
+*running sandboxes*, and an idle 32-slot pool is free. Sizing the pool becomes purely a question of
+how many concurrently-isolated sandboxes to support.
+
+**The cost is one added `NOPASSWD` line, and it is not proposed here.**
+
+```
+<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -s Tables -vv$
+```
+
+Measured as refused under the shipped grant, permitted with the line, and refused again once it was
+removed mid-run — so the line is the whole difference and nothing else was quietly allowing it. It is
+a **read**: it cannot mutate membership, load a ruleset, or touch pf's enable state, so it reaches
+none of the nine bypasses D132 refused. It discloses each slot's address *count*, never an address,
+where the grant already permits `-t <table> -T show` — strictly **less** than 64 calls a holder can
+already make. **This does not make it approved.** sudoers matches a concatenated argument string, so
+every added line is a new place for an argument to be smuggled, and the only thing that has ever
+caught that here is D132's permit/refuse matrix. Re-run it against the extended policy, or keep the
+blind form and pay the 329 ms.
+
+**If the line is refused, the fallback is unchanged and still correct**: reduce the pool to the number
+of slots actually wanted, since the blind scrub is O(pool), not O(sandboxes). What is no longer
+available is "skip the scrub" — at 13.8% of start it was never expensive enough to justify reopening
+D3.
 
 ### 2. Reconcile — for capacity and hygiene, *not* for security
 
@@ -354,6 +427,66 @@ Two consequences the design must carry:
   (DF172) than to anything in the start path. **Undesigned** — and the first thing to design after
   this, because a guarantee that can be switched off by an unrelated `systemctl` command is not one.
 
+### The macOS half of the same question — measured, and it fails the other way (2026-08-07)
+
+The Linux trigger above is real and unrelated to yoloAI, so the obvious next question was whether
+macOS has one. Seven candidates were run against a live enforcing apple sandbox, each judged on the
+anchor's rules, its membership, **and** live egress in both directions
+([`pf-midlife-wipe.txt`](../research/macos-isolation-spike/results/pf-midlife-wipe.txt)):
+
+| Candidate | Anchor |
+| --- | --- |
+| no-op control (the harness's own check against spurious verdicts) | survived |
+| Docker Desktop quit and restart | survived |
+| another tool running `pfctl -d` then `-e` | survived |
+| Tailscale (a VPN client) down and up | survived |
+| a macOS network-location switch and back | survived |
+| another tool running `pfctl -F all` | **rules and membership survived**; see below |
+| a main-ruleset reload, `pfctl -f /etc/pf.conf` | **rules and membership survived**; see below |
+
+**Nothing wiped the anchor.** `pf.conf` reload was the candidate expected to behave like
+`flush ruleset` — the file ends with `load anchor "com.apple" from "/etc/pf.anchors/com.apple"` and
+our anchor nests under `com.apple`, present in no file — and it left all 8 rules and the membership
+in place. `pfctl -F all` reported `0 tables deleted` and did not reach into the anchor either.
+
+**But the last two do something else, and it is the opposite failure.** Both destroyed the *main*
+ruleset (4 → 0 rules), and vmnet's NAT lives there, so the guest lost egress entirely: `allow=000
+deny=000`. That is **fail-closed**. The same mechanism explains the `pfctl -d` window — with pf
+disabled the guest has no network at all, because on macOS the VM's connectivity *depends on* pf
+rather than merely being filtered by it. `pfctl -F all`'s output names it directly: `nat cleared`.
+
+**So the platforms diverge here as sharply as they do everywhere else.** On Linux, an ordinary
+`systemctl restart nftables` leaves the sandbox running and reaching denied destinations, silently.
+On macOS, every equivalent action measured either left enforcement alone or took the guest's network
+down — which announces itself immediately and strands the sandbox rather than freeing it. Both were
+repaired without a reboot by restarting the apple daemon and re-arming the slot.
+
+**Four limits, because this is a negative result and a negative is only as wide as its search.**
+
+- **It is exactly seven candidates.** Not tried, and named so the gap is legible: a macOS system
+  update, a third-party firewall that writes pf (none installed on this host), Internet Sharing being
+  toggled, and — the sharpest — **anything that reloads the `com.apple` anchor itself**. The census
+  shows `200.AirDrop` and `250.ApplicationFirewall` nested in that same parent, so the system
+  components most likely to rewrite it were sitting in the output and were never exercised. That is
+  the next test, not a conclusion.
+- **The two destructive candidates established state survival, not enforcement continuity.** With no
+  guest network, neither a block nor a pass is attributable (DF172's vacuity, which the harness
+  refused to render a verdict under). Rules and membership were read directly from pf and were
+  present; that filtering *kept working across* the event is unproven, because the repair re-armed
+  the slot before egress could be retested.
+- **`pfctl -d` drops the existing reference token.** `References` went from `pfd`, held 3 days, to
+  `No pf starter references held`, and `-e` did not restore it. That is a measured answer to a
+  question `macos-pf-privileged-path.md` had left deliberately untested, and it cuts toward yoloAI
+  *not* relying on someone else's reference surviving.
+- **n=1, one host, one run**, like everything else in that directory.
+
+**What this does to the priority.** The mid-life check is still undesigned and still needed — a
+fail-closed sandbox is a broken sandbox, and the `com.apple`-anchor candidate above is untested. But
+the *urgency* is asymmetric and should be treated that way: on Linux the failure hands a running
+agent a wider allowlist than it asked for, and on macOS the failure so far only ever takes the
+network away. Design the detector for the Linux hazard; macOS gets it for free and mostly needs it
+as diagnosis.
+
 ## Settled by review (2026-08-07)
 
 **The two platforms diverge, and the divergence is part of the model.** macOS uses a slot pool of
@@ -388,7 +521,17 @@ runs that isolation is meant to contain"**, and the agent-launch gate is exactly
 
 ## Open questions
 
-None blocking. The Linux unit's concrete shape (chain per sandbox, ipset per sandbox, or one chain
+**One measurement outstanding, and it is cheap.** Whether reloading the **`com.apple` anchor itself**
+purges the sub-anchors nested under it. Every other mid-life candidate has been run; this is the one
+that would behave like Linux's `flush ruleset`, and the system components most likely to do it —
+AirDrop and the macOS Application Firewall — live in that same parent anchor. Until it is run, "no
+macOS mid-life wipe trigger is known" is a statement about seven candidates, not about the platform.
+
+Not blocking, because the design does not change shape either way: rule 1 already assumes nothing
+survives, and the mid-life detector is already required by the Linux half. It changes how urgent the
+macOS half of that detector is.
+
+The Linux unit's concrete shape (chain per sandbox, ipset per sandbox, or one chain
 with per-source rules) is an implementation choice to make against the code, not a design fork — all
 three satisfy rules 0–4, and the divergence above means it need not answer to the macOS shape.
 

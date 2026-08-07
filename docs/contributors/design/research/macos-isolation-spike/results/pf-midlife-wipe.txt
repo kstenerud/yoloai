@@ -1,0 +1,133 @@
+host: macOS 26.5.1 arm64 | Mac16,12
+date: 2026-08-07 19:06:01 CEST | user=karlstenerud | anchor=com.apple/yoloai_b | slots=4 slot=1
+main ruleset rules before: 4 | pf: Enabled | location: Automatic
+
+== W0 CENSUS — who else writes pf anchors on this host ==
+        A wipe needs a writer. This is the population of them, read before anything moves.
+          com.apple
+          com.apple.internet-sharing
+        --- nested under com.apple:
+          com.apple/200.AirDrop
+          com.apple/250.ApplicationFirewall
+          com.apple/yoloai_b
+          com.apple/yoloai_rb
+        (Tailscale on macOS uses NetworkExtension rather than pf; its absence here is the
+         evidence for that, and it is why W5 is a weak candidate a priori.)
+
+== SETUP — one live sandbox, enforcing, with a control ==
+        mw-a at 192.168.64.34
+        BEFORE any rules: allow=301 deny=301  (both must be reachable)
+   PASS    baseline: both destinations reachable, so a later block is attributable to pf
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+   PASS    armed: mw-a is enforcing on slot 1 — allowed reachable, denied blocked
+
+== W1 NO-OP CONTROL — wait, change nothing ==
+        before:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+        (doing nothing for 10s)
+        after:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+   PASS    W1 NO-OP CONTROL — wait, change nothing: SURVIVED — rules, membership and enforcement all intact
+
+== W2 DOCKER DESKTOP quit and start ==
+        before:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+        quitting Docker Desktop
+        docker down: yes
+        starting Docker Desktop
+        docker up: yes
+        after:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+   PASS    W2 DOCKER DESKTOP quit and start: SURVIVED — rules, membership and enforcement all intact
+
+== W3 ANOTHER TOOL DISABLES AND RE-ENABLES pf ==
+        before:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+        pfctl -d (disable), then -e (enable) — pf is reference counted, so this is what a
+        tool that thinks it owns the firewall does
+        references before: TOKENS: PID      Process Name                 TOKEN                    TIMESTAMP 1041     pfd                          11221686505485179016     3 days 07:36:56 
+        pfctl: pf disabled
+        pf while disabled: Disabled, anchor rules=8, src_1=192.168.64.34,
+        egress WHILE pf is disabled: allow=000 deny=000
+   UNKNOWN W3-WINDOW: permitted destination also unreachable while disabled; nothing attributable
+        pfctl: pf enabled
+        references after: No pf starter references held 
+        after:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+   PASS    W3 ANOTHER TOOL DISABLES AND RE-ENABLES pf: SURVIVED — rules, membership and enforcement all intact
+
+== W4 VPN CLIENT (Tailscale) down and up ==
+        before:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+        ts before: 100.107.208.103  karls-macbook-air  kstenerud@  macOS    -                                                             
+        tailscale down
+        ts during: Tailscale is stopped.
+        tailscale up
+        ts after:  100.107.208.103  karls-macbook-air  kstenerud@  macOS    -  
+        after:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+   PASS    W4 VPN CLIENT (Tailscale) down and up: SURVIVED — rules, membership and enforcement all intact
+
+== W5 macOS NETWORK LOCATION switch and back ==
+        before:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+        original location: Automatic
+        switched to: yoloai-spike
+        restored to: Automatic
+        after:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+   PASS    W5 macOS NETWORK LOCATION switch and back: SURVIVED — rules, membership and enforcement all intact
+
+== W6 ANOTHER TOOL RUNS pfctl -F all ==
+        before:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=301 deny=000
+        pfctl -F all at the MAIN level (not -a), as another tool would run it. This also
+        flushes the main ruleset's nat rules, which is where vmnet's live.
+        main ruleset rules before: 4
+        pfctl: rules cleared
+        pfctl: nat cleared
+        pfctl: dummynet cleared
+        pfctl: 0 tables deleted.
+        pfctl: 38 states cleared
+        pfctl: source tracking entries cleared
+        pfctl: pf: statistics cleared
+        pfctl: pf: interface flags reset
+        main ruleset rules after:  0
+        after:
+        rules=8   src_1=192.168.64.34,     dst_1=1.1.1.1,     allow=000 deny=000
+   UNKNOWN W6 ANOTHER TOOL RUNS pfctl -F all: the PERMITTED destination is also unreachable, so nothing here is attributable to
+           enforcement — the sandbox lost its network (DF172 vacuity). Verdict withheld.
+        !! the permitted destination is unreachable after re-arming: this candidate took
+           out VM networking, not just our anchor. Repairing before continuing.
+        after apple daemon restart: mw-a at 192.168.64.3, allow=301
+
+== W7 MAIN RULESET RELOAD (pfctl -f /etc/pf.conf) — the Linux analogue, and destructive ==
+        /etc/pf.conf ends with: load anchor "com.apple" from "/etc/pf.anchors/com.apple",
+        and our anchor is nested at com.apple/yoloai_b, loaded at runtime and present in no
+        file. vmnet's NAT is in the same position, which is why this is the one candidate
+        that can break the host's VM networking rather than just our rules.
+        before:
+        rules=8   src_1=192.168.64.3,      dst_1=1.1.1.1,     allow=301 deny=301
+        main ruleset rules before: 2
+        main ruleset rules after:  2
+        after:
+        rules=8   src_1=192.168.64.3,      dst_1=1.1.1.1,     allow=000 deny=000
+   UNKNOWN W7 main ruleset reload: the PERMITTED destination is also unreachable, so nothing here is attributable to
+           enforcement — the sandbox lost its network (DF172 vacuity). Verdict withheld.
+
+== W7-RECOVERY — can a host get back to working VM networking without a reboot? ==
+        This matters as much as the wipe: if enforcement vanishes and cannot be restored
+        in-process, the design needs a repair path, not just a detector.
+        rules=8   src_1=192.168.64.3,      dst_1=1.1.1.1,     allow=000 deny=000
+        vmnet NAT did not survive; attempting apple daemon restart
+        mw-a now at 192.168.64.3
+        rules=8   src_1=192.168.64.3,      dst_1=1.1.1.1,     allow=301 deny=000
+   PASS    recovered by restarting the apple daemon and the sandbox — no reboot needed
+
+== cleanup ==
+   destroyed sandbox mw-a
+   anchor rules=0
+   main ruleset: before=4 after=4   pf status=Enabled
+   network location: Automatic
+
+pass=8 fail=0 unknown=3
