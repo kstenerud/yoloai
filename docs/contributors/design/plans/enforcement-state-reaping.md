@@ -300,11 +300,59 @@ It also kills the single global name: in the host root netns every sandbox share
   the equivalent can be **one atomic transaction**, which removes that hazard rather than managing
   it. Worth exploiting deliberately.
 
-**Not yet measured on Linux:** whether a stale rule for a recycled address actually takes precedence
-end-to-end (the D3 equivalent). nftables evaluates rules in order within a chain and a terminal
-verdict stops evaluation, so it should — but "should" is what D3 was written to replace, and the
-macOS result came from a live sandbox rather than from a manual. This wants a real two-sandbox run
-before the design is called settled.
+### D3 reproduces on Linux — measured end to end, 2026-08-07
+
+Not inferred from rule-order semantics. Host-side nft rules were installed by hand (the shipped
+firewall is still in-container, so there is no host state to go stale yet), against real containers
+on the default bridge:
+
+1. **A** at `172.17.0.2`, allowlist `{1.1.1.1}`. Reached `1.1.1.1`, blocked from `8.8.8.8` — the
+   mechanism enforces, both directions.
+2. A destroyed, its rules deliberately left behind.
+3. **B** created, handed `172.17.0.2`, **no policy of its own**: blocked from `8.8.8.8` and
+   **reached `1.1.1.1`** — it inherited a dead sandbox's allowlist, and the reach doubles as the
+   control proving B had a working network.
+4. **C** created on the same address **with its own correct policy** (`allow 8.8.8.8`) appended after
+   the stale rules: **blocked from `8.8.8.8`** — the destination it was configured for — and
+   **reached `1.1.1.1`**, which was never its. The stale `drop` at handle 4 shadowed C's own accept
+   at handle 6.
+
+C lost its own policy *and* gained A's, which is D3's result exactly. The hazard is not
+platform-specific and the Linux mechanism is not more forgiving.
+
+### Distro fragmentation, and the hazard it actually creates
+
+The backend layer has largely converged — modern distros ship `iptables` as an nf_tables front-end
+(this host: `iptables v1.8.10 (nf_tables)`, with `iptables-legacy` still present as an alternative).
+A custom `inet` table coexists with docker's own chains without interference; the whole experiment
+above ran alongside them.
+
+**The fragmentation that matters is the firewall *manager*, and the hazard is a full ruleset flush.**
+Verified on this host: `/etc/nftables.conf` begins with
+
+```
+flush ruleset
+```
+
+which is the Debian/Ubuntu convention. So `systemctl restart nftables` **destroys every table,
+including ours** — and it is an ordinary administrative action with no relationship to yoloAI.
+`nftables.service` happens to be disabled here and `ufw` is enabled, but neither fact is portable:
+firewalld (RHEL/Fedora/SUSE) has an analogous complete-reload, and a host may run any of them.
+
+**This is D6's fail-open mode with a concrete Linux trigger.** D6 measured on macOS that with the
+ruleset flushed and the table still populated, a sandbox reaches a denied destination — *"membership
+without rules is unenforced, and nothing distinguishes it from working isolation. VERIFY must check
+the RULES."* On Linux the same state is reachable by someone restarting a service.
+
+Two consequences the design must carry:
+
+- **Verification checks the rules, not just membership** — the same conclusion D6 forced, now
+  load-bearing on both platforms for different reasons.
+- **Enforcement can vanish under a *running* sandbox.** Every other failure in this plan is caught at
+  start; this one happens mid-life, silently, in the fail-open direction. Detecting it needs a
+  periodic or event-driven check that the rules still exist, closer to tart's net-health probe
+  (DF172) than to anything in the start path. **Undesigned** — and the first thing to design after
+  this, because a guarantee that can be switched off by an unrelated `systemctl` command is not one.
 
 ## Settled by review (2026-08-07)
 
