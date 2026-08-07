@@ -310,7 +310,17 @@ this plan otherwise describes, and it makes the ordering acceptance test unwrita
 
 ## Shape of the work
 
-**Phase 1 — capability, setup, verification.** Larger than it looks:
+**Phase 1 — capability, setup, verification, *and teardown*.** Larger than it looks:
+
+- **There is no uninstall, and two of the three artifacts survive reboots.** Setup writes a
+  `NOPASSWD` grant to `/etc/sudoers.d` and a pinned ruleset to `/etc/yoloai/`, and nothing removes
+  either — so uninstalling yoloAI leaves a passwordless root grant on the host naming a binary the
+  user no longer has a tool for. Teardown needs the same interactive privileged step as setup,
+  because the grant authorizes only `/sbin/pfctl` and therefore cannot delete its own files (which
+  is the correct design and must stay that way). Note also that **`pfctl` has no verb that removes
+  an anchor** — `-F all` empties it and it remains enumerable until reboot, measured on two
+  research anchors that had each been flushed by their own cleanup. See
+  [enforcement-state-reaping.md](enforcement-state-reaping.md) § 2b.
 
 - Doctor's capability model is keyed on **(backend, isolation mode)** only; there is no dimension for
   a host prerequisite that is neither. `FixStep` is **display-only** — there is no "run the fix"

@@ -269,6 +269,72 @@ traps:
   its entry — and that entry is exactly the one a recycled address will collide with, because the
   address was released the moment the sandbox stopped.
 
+### 2b. The sweep reclaims entries. Nothing reclaims the install.
+
+Rule 2 reclaims *addresses inside* tables. It says nothing about the things that hold them, or about
+the privileged artifacts that make them possible — and those outlive a sandbox by much more than an
+entry does.
+
+**Observed, not hypothesised.** The mid-life run's W0 census
+([`pf-midlife-wipe.txt`](../research/macos-isolation-spike/results/pf-midlife-wipe.txt)) found
+`com.apple/yoloai_rb` still loaded three days after the reboot round that created it, alongside
+`com.apple/yoloai_b` from a different harness. Both are research artifacts rather than anything
+product code created — but they are exactly the shape this design would ship, and they demonstrate
+the mechanism for free.
+
+**And they had both already been cleaned up.** Each harness's cleanup runs `pfctl -a <anchor> -F all`,
+and both anchors were still enumerable afterwards. **There is no `pfctl` verb that removes an
+anchor** — flushing empties it and leaves it in place, so "we tidied up after ourselves" and "the
+anchor is gone" are different claims, and only the reboot ever delivers the second.
+
+Three classes of state, none covered by rule 2:
+
+| | Lifetime | Reclaimed by |
+| --- | --- | --- |
+| Membership entries in `yb_src_N` / `yb_dst_N` | until reboot | rule 2's sweep |
+| **The anchor itself**, with its loaded rules | until reboot; flush does not remove it | *nothing* |
+| **The sudoers grant** in `/etc/sudoers.d/` | **survives reboots** | *nothing* |
+| **The pinned ruleset**, `/etc/yoloai/pf-pool.conf` | **survives reboots** | *nothing* |
+
+The last two are the serious ones, because they are the two that a reboot does *not* clear. Uninstall
+yoloAI and a `NOPASSWD` root grant naming `/sbin/pfctl` stays in `/etc/sudoers.d` indefinitely,
+authorizing a tool that is no longer installed. D132 designs an install — interactive, privileged,
+opt-in — and no uninstall. That asymmetry is the finding.
+
+**Two mechanical problems, both of which shape the answer rather than just complicating it.**
+
+- **Removal is as privileged as installation, and the grant cannot do it.** The grant authorizes
+  `/sbin/pfctl` and nothing else, so by construction it cannot delete a file in `/etc/sudoers.d` or
+  `/etc/yoloai`. Cleanup therefore cannot be a background sweep the way rule 2 can — it needs the
+  same interactive privileged step the install does. **This is correct and must not be "fixed"**: a
+  grant that could remove its own constraints is a grant that could rewrite them.
+- **Discovery is blocked by the same grant.** The grant permits reading *our* anchor
+  (`-a com.apple/yoloai -s rules`). Nothing enumerates anchors — `pfctl -s Anchors` is root-only and
+  ungranted — so an anchor left behind under a name yoloAI no longer uses is **invisible to the only
+  mechanism that would clean it up**. This is the same shape as the address-count dump in § 1c: a
+  read the grant does not have. If anchor names ever change between versions, every prior name leaks
+  permanently and silently.
+
+**Identify these by name, and note that this does not contradict rule 2.** Rule 2 forbids naming
+because sandbox-derived names are ambiguous — `yoloai-acme-probe` is two different things
+(DF19/DF115/DF125). These names are yoloAI's own fixed literals, chosen by the design and containing
+no user input, so the ambiguity that rule exists to avoid cannot arise. Addresses for entries, fixed
+literals for containers.
+
+**The unit is the host, not the backend.** `Backend.Prune(ctx, knownInstances, …)` is per-backend
+(`runtime/runtime.go:519`), but pf state is host-global and shared: an apple guest and a tart guest
+hold different allowlists in different slots of the same pool simultaneously
+(`pf-tart-pool.txt` T1/T2/T3). So this does not fit that interface — pruning "the apple backend" must
+not reap a slot belonging to a running tart sandbox, and `knownInstances` scoped to one backend is
+exactly the list that would get that wrong. Whatever reclaims pf state has to see every backend's
+live sandboxes at once, which is a different seam from the one prune uses today.
+
+**What this adds to "done".** A teardown path that removes the grant, the pinned file and the
+anchor's contents; `doctor` reporting the grant and pool as present-and-reclaimable state, since it
+already exists to *"surface reclaimable state"*; and the acknowledgement that the anchor itself
+cannot be removed before a reboot, so the honest report is "emptied, and gone at next restart"
+rather than "removed".
+
 ### 3. Lock-free, by ordering
 
 The sweep holds no lock. Two ordering rules make it safe without one:
