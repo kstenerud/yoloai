@@ -258,6 +258,54 @@ no network at all satisfies "the old policy no longer applies" for free — that
 mode, and it silently invalidated the first run of the `pf` research harness (A22). Assert that a
 permitted destination still succeeds, or the test certifies nothing.
 
+## The Linux half, measured on hardware (2026-08-07)
+
+Everything about slots, tables and sudo-call counts above is **macOS-only**. Linux has the same
+*hazard* — address-keyed state that outlives its sandbox — and a materially different shape. Measured
+on this host rather than reasoned about:
+
+**`ipset` is not on the host.** It ships *inside* the sandbox image (`Dockerfile` installs
+`iptables` and `ipset`), which is why the shipped `firewall.py` can use a single global set name
+`allowed-domains` — each netns has its own. The host has `iptables` v1.8.10 on the **nf_tables**
+backend, `ip6tables`, and `nft`; `ipset` is **absent**. So moving enforcement host-side either adds
+a new host dependency or uses **native nftables sets**, which are already present and need nothing
+installed. That is a decision this measurement forces and the macOS side never faced.
+
+It also kills the single global name: in the host root netns every sandbox shares one namespace, so
+`allowed-domains` becomes a collision rather than a convenience.
+
+| Property | Measured | Consequence |
+| --- | --- | --- |
+| nft set name length | ≥64 chars accepted | No naming cliff. Sandbox names cap at 56, so a per-sandbox set name fits — unlike the seatbelt socket path, where three bytes of tier decided it (DF169) |
+| Delete a set while a rule references it | **Refused**, `Device or resource busy` | Teardown is *ordered*: remove the rule, then the set. Reversed it fails, and a swallowed failure leaks the set |
+| Set survives its rule being removed | **Yes** | The orphan on Linux is the **whole container**, not an entry in it |
+| Empty set | **Fails closed** — destination unreachable, and reachable again once added, so the block was real and not a dead netns | Flush-then-populate is safe here too, same direction as macOS D4 |
+
+**Where the two platforms genuinely diverge, and it is not cosmetic:**
+
+- **No fixed pool.** Nothing on Linux forces reusable containers, so a **fresh set per sandbox**
+  is expressible — which satisfies rule 1b *by construction* rather than by remembering to flush.
+- **No capacity cap**, so no user-visible limit and no `doctor` slot reporting. The macOS 32-slot
+  ceiling is a consequence of D132's static ruleset, not a property of the problem.
+- **The leak is unbounded rather than fixed.** macOS leaks *entries* inside 32 permanent tables;
+  Linux leaks *sets*, one per sandbox that ever ran, forever. So the sweep is more valuable here even
+  though it is still not the security mechanism — and it has a distinct job: destroy orphaned sets,
+  in rule-then-set order.
+- **Rule 1 has a Linux analogue but a cheaper one.** The scrub becomes "remove any pre-existing rule
+  matching our source address" — O(rules), not O(pool), with no per-table `sudo` multiplier because
+  the host process is already privileged. The ~35-invocation cost is a macOS artifact of sudoers
+  matching one table per call.
+- **`nft -f` applies a whole ruleset file atomically.** The macOS acquisition sequence needs its
+  steps ordered because each `sudo pfctl` is a separate transaction with an observable gap; on Linux
+  the equivalent can be **one atomic transaction**, which removes that hazard rather than managing
+  it. Worth exploiting deliberately.
+
+**Not yet measured on Linux:** whether a stale rule for a recycled address actually takes precedence
+end-to-end (the D3 equivalent). nftables evaluates rules in order within a chain and a terminal
+verdict stops evaluation, so it should — but "should" is what D3 was written to replace, and the
+macOS result came from a live sandbox rather than from a manual. This wants a real two-sandbox run
+before the design is called settled.
+
 ## Settled by review (2026-08-07)
 
 **The two platforms diverge, and the divergence is part of the model.** macOS uses a slot pool of
