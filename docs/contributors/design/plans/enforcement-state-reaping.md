@@ -107,6 +107,36 @@ it is.
 This is the single most important rule, because it makes correctness independent of whether cleanup
 ever ran — and the case most needing to survive is the one where nothing ran at teardown.
 
+### 1b. Empty a reused container before populating it — the other half of the same hazard
+
+Rule 1 scrubs the **address**. It does nothing about the **policy container** the address is being
+attached to, and a reused container carries the last occupant's contents. *Found by auditing this
+plan on 2026-08-07; the first draft stated the invariant's second clause and delivered only the
+first.*
+
+The case: sandbox A occupies slot 0 with allowed destinations {X, Y}. A dies. Slot 0 is later
+assigned to sandbox B, whose allowlist is {Z}. `pfctl -T add` **adds** — it does not replace — so
+`yb_dst_0` becomes {X, Y, Z} and **B silently reaches X and Y**. That is D3's widening again,
+arriving through *slot* reuse rather than *address* reuse, and rule 1 cannot see it because B's
+address is entirely correct.
+
+Nothing clears it incidentally: table contents **survive a ruleset reload** (`pf-assumptions.txt`
+D2 — `src_17` intact across a reload, enforcement continuing), which is a property the design wants
+for other reasons and which here means a repair or pool resize will not save us.
+
+**So a reused container is emptied, never added to.** `pfctl -T flush` on the slot's `dst` table
+before populating it — already authorised by D132's grant, so no change to the security boundary.
+
+The flush leaves a window in which the table is empty, and that window is safe in the right
+direction: **an empty allowlist fails closed** (`pf-assumptions.txt` D4 — empty `dst`, both allowed
+and denied destinations unreachable). Flush-then-populate therefore passes through "no egress",
+never through "all egress".
+
+Stated generally, because the Linux unit is not chosen: **any container that can be reused must be
+emptied as part of claiming it.** A design that allocates a fresh container per sandbox and never
+reuses one satisfies this for free — which is a point in favour of that shape on Linux, where
+nothing forces a fixed pool.
+
 ### 2. Reconcile — for capacity and hygiene, *not* for security
 
 Rule 1 is what closes the inheritance hazard, and it closes it completely: an address is scrubbed
@@ -180,6 +210,9 @@ persistence is ever wanted, it has to persist the *reconciliation*, not the rule
 
 - Destroying a sandbox without a clean teardown, then creating another, gives the new one **its own**
   allowlist — asserted by reaching a destination the old policy allowed and the new one does not.
+  **Run it twice, for the two independent paths:** once where the new sandbox inherits the old
+  *address* (rule 1), and once where it inherits the old *slot* (rule 1b). One test cannot cover
+  both, and the second is the one the first draft of this plan would have passed.
 - A sweep with a sandbox created concurrently never removes the live sandbox's entry.
 - A `sandbox allow` concurrent with a sweep leaves the added entry present.
 - Orphan identification is exercised against the ambiguous-name case DF125 describes, and passes
