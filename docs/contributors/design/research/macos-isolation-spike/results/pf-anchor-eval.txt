@@ -1,0 +1,59 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-07 22:58:29 CEST | anchor=com.apple/yoloai_b
+
+== E1 DIAGNOSE — does the main ruleset still reference com.apple? ==
+        the whole main ruleset, verbatim:
+        | scrub-anchor "com.apple.internet-sharing" all fragment reassemble
+        | anchor "com.apple.internet-sharing" all
+        2 rule(s) total, 0 referencing the com.apple/* anchor
+        (lines naming com.apple.internet-sharing are a DIFFERENT anchor and do not count —
+         that near-miss is what made run 1 of this script report a healthy host)
+
+        what /etc/pf.conf says should be there:
+        | 4:# This file contains the main ruleset, which gets automatically loaded
+        | 11:# as the nested anchors rely on the anchor point defined here. In addition,
+        | 12:# to the anchors loaded by this file, some system services would dynamically 
+        | 13:# insert anchors into the main ruleset. These anchors will be added only when
+        | 20:# com.apple anchor point
+        | 22:scrub-anchor "com.apple/*"
+        | 23:nat-anchor "com.apple/*"
+        | 24:rdr-anchor "com.apple/*"
+        | 25:dummynet-anchor "com.apple/*"
+        | 26:anchor "com.apple/*"
+        | 27:load anchor "com.apple" from "/etc/pf.anchors/com.apple"
+   FAIL    the main ruleset contains NO reference to com.apple/*. Nothing descends into the anchor, so
+           every rule inside it is inert — loaded, correct, and never evaluated.
+
+== E2 DEMONSTRATE — arm a sandbox and check enforcement against D132's own checks ==
+        ev-a at 192.168.64.13
+        before arming: allow=301 deny=301 (both must be reachable)
+        armed slot 1 with src=192.168.64.13 dst=1.1.1.1
+        D132 check 1  pf enabled ............ Enabled
+        D132 check 2  pool loaded ........... 8 rules (want 8)
+        D132 check 3  our address in slot ... 192.168.64.13,
+        ==> all three checks PASS
+        ACTUAL egress: allow=301 deny=301
+   FAIL    ALL THREE D132 CHECKS PASS AND THE SANDBOX IS UNFILTERED. A denied destination answered
+           301. This is the fail-open D6 describes, reached from a third direction, and it is
+           invisible to every read the grant permits — the deciding state is in the MAIN
+           ruleset, which the grant cannot see. Verification needs a fourth check, and the
+           grant does not currently authorize the read that would answer it.
+
+== E3 REPAIR — restore the anchor reference, then vmnet's NAT, and re-verify ==
+        step 1: pfctl -f /etc/pf.conf   (restores the anchor reference; drops vmnet NAT)
+        main ruleset now: 2 rules, 2 referencing com.apple
+        step 2: restart the apple daemon (restores vmnet NAT; moves guest addresses)
+        main ruleset now: 4 rules, 2 referencing com.apple
+        ev-a now at 192.168.64.3
+        ACTUAL egress after repair: allow=301 deny=000
+   PASS    REPAIRED — enforcement is real again. The repair is two steps and the ORDER matters:
+           reload the main ruleset first, then restart the backend. Reloading pf.conf
+           alone leaves the guests without NAT; restarting the backend alone leaves the
+           anchor unreferenced, which is the state this run began in.
+
+== cleanup ==
+   destroyed ev-a
+   main ruleset: 4 rules, 2 referencing com.apple
+   pf: Enabled
+
+pass=1 fail=2 unknown=0

@@ -1,0 +1,65 @@
+host: macOS 26.5.1 arm64 | Mac16,12
+date: 2026-08-07 22:28:02 CEST | anchor=com.apple/yoloai_b parent=com.apple
+main ruleset rules before: 4
+
+== SETUP — one enforcing sandbox (never restarted) and one disposable ==
+        pa-a at 192.168.64.6 (enforcing, never restarted) | pa-b at 192.168.64.7 (disposable)
+        BEFORE any rules: allow=301 deny=301 (both must be reachable)
+   PASS    baseline: both reachable, so a later block is attributable to pf
+        rules=8   src_1=192.168.64.6,      allow=301 deny=000  | sub-anchors: com.apple/200.AirDrop com.apple/250.ApplicationFirewall com.apple/yoloai_b com.apple/yoloai_rb 
+   PASS    armed and enforcing on slot 1
+        parent anchor file: /etc/pf.anchors/com.apple (14 lines)
+
+== P1 DIRECT PARENT RELOAD — pfctl -a com.apple -f /etc/pf.anchors/com.apple ==
+        Our anchor is a CHILD of com.apple. If reloading a parent purges children, this is
+        the macOS equivalent of Linux "flush ruleset", and the mid-life detector becomes
+        urgent on both platforms rather than one.
+        rules=8   src_1=192.168.64.6,      allow=301 deny=000  | sub-anchors: com.apple/200.AirDrop com.apple/250.ApplicationFirewall com.apple/yoloai_b com.apple/yoloai_rb 
+   PASS    P1 parent anchor reload: SURVIVED — rules, membership and live enforcement all intact
+
+== P2 SIBLING SUB-ANCHOR WRITE — does loading one child disturb another? ==
+        The mechanism under P1, asked without depending on any Apple component: load rules
+        into com.apple/yoloai_sib and see whether com.apple/yoloai_b notices.
+        sibling now has 1 rule(s)
+        rules=8   src_1=192.168.64.6,      allow=301 deny=000  | sub-anchors: com.apple/200.AirDrop com.apple/250.ApplicationFirewall com.apple/yoloai_b com.apple/yoloai_rb com.apple/yoloai_sib 
+   PASS    P2 sibling sub-anchor write: SURVIVED — rules, membership and live enforcement all intact
+
+== P3 macOS APPLICATION FIREWALL toggled — the live instance of P1's hazard ==
+        ALF global state before: off (it owns com.apple/250.ApplicationFirewall)
+        ALF toggled to: Firewall is enabled. (State = 1)
+        rules=8   src_1=192.168.64.6,      allow=301 deny=000  | sub-anchors: com.apple/200.AirDrop com.apple/250.ApplicationFirewall com.apple/yoloai_b com.apple/yoloai_rb com.apple/yoloai_sib 
+   PASS    P3 Application Firewall toggle: SURVIVED — rules, membership and live enforcement all intact
+        ALF restored to off
+
+== B ENFORCEMENT CONTINUITY across a wipe — the verdict the last run had to withhold ==
+        Sequence: confirm enforcing; pfctl -F all (kills vmnet NAT, leaves our state); restore
+        NAT by restarting the DISPOSABLE sandbox only; then read pa-a's egress WITHOUT ever
+        re-arming its slot. pa-a keeps running throughout, so it keeps its address — which is
+        the whole point, since a restart would move it and break the test for the wrong reason.
+        rules=8   src_1=192.168.64.6,      allow=301 deny=000  | sub-anchors: com.apple/200.AirDrop com.apple/250.ApplicationFirewall com.apple/yoloai_b com.apple/yoloai_rb com.apple/yoloai_sib 
+        pa-a address before the flush: 192.168.64.6
+        pfctl: rules cleared
+        pfctl: nat cleared
+        pfctl: dummynet cleared
+        pfctl: 0 tables deleted.
+        pfctl: 200 states cleared
+        pfctl: source tracking entries cleared
+        pfctl: pf: statistics cleared
+        pfctl: pf: interface flags reset
+        main ruleset after flush: 0 rules
+        our anchor after flush:   rules=8 src_1=192.168.64.6,
+        restarting ONLY pa-b to make vmnet reinstall the bridge's NAT
+        main ruleset now: 0 rules
+        pa-a address after:  192.168.64.6  (must equal 192.168.64.6 for this test to mean anything)
+        pa-a egress, slot NEVER re-armed: allow=000 deny=000
+   UNKNOWN B: NAT did not come back from restarting the other sandbox, so egress is still dead and
+           continuity remains untestable by this route. What survived is still only STATE.
+
+== cleanup ==
+   destroyed sandbox pa-a
+   destroyed sandbox pa-b
+   anchor rules=0  sibling rules=0
+   main ruleset: before=4 after=0
+   NOTE flushed anchors remain enumerable until reboot; pfctl has no verb that removes one
+
+pass=5 fail=0 unknown=1
