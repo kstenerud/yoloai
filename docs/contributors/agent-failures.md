@@ -1316,3 +1316,38 @@ as scarce as the failures and twice as useful.
   repeatedly, disable the caches of whatever runs it, and make each iteration's expected outcome
   specific enough that the wrong one is recognisable.** A sweep whose iterations all fail
   identically cannot detect that it stopped measuring.
+
+### A33 — restated a finding's severity in the direction that made it interesting, and did not check the mechanism (2026-08-08)
+
+- **What happened:** relaying the macOS DNS results, I told the owner that host-side resolution
+  "can return host-relative addresses — `.local` resolving to `127.0.0.1` and the vmnet gateway — and
+  writing those into `dst` **allowlists the guest itself**", and framed it as "a security regression
+  created by the security fix". The owner asked the obvious question: if it resolves to `127.0.0.1`
+  the guest can contact itself, which seems like not a big deal. That is correct. Loopback traffic
+  never leaves the guest's own stack, so no host-side rule evaluates it — the entry is **inert**. The
+  dominant failure is *functional and fail-closed*: the user allowlists a name and the guest still
+  cannot reach it.
+- **Source of the false belief:** the plan's own sentence, which I read as a finding and repeated
+  without evaluating. `macos-pf-privileged-path.md` said writing `127.0.0.1` into `dst` "allowlists
+  *the guest itself*" — literally true and operationally empty, because "the guest itself" is exactly
+  the destination a host-side rule cannot see. I did not ask what packet would traverse the
+  enforcement point, which is the only question that decides whether an allowlist entry does anything.
+- **What makes this specific:** the two other addresses in the same answer — the vmnet gateway and the
+  host's LAN address — *are* a genuine widening, and modest. So the finding was real and I inflated
+  it: not invented, **mis-severitied**, in the direction that made it worth reporting. That is harder
+  to catch than a fabrication, because every component of the sentence is true and the citation
+  resolves. It also skipped a check I had just performed in the other direction: two days earlier I
+  measured on Linux which chain types a packet actually traverses, and the same question applied
+  here would have answered it in one step.
+- **Caught by:** the owner reading the claim and finding it implausible on the mechanism. No
+  mechanism caught it, and none could have — the artifact says what I said it says. The severity was
+  the unchecked part, and severity is not something a citation gate can verify.
+- **Cost:** the wrong framing reached the owner in conversation and sat in
+  `macos-pf-privileged-path.md`; both corrected the same day. The plan's *conclusion* — validate
+  resolver output, reject loopback, link-local, multicast and the guest's gateway — was right
+  throughout and is unchanged, which is why the error was easy to miss: a right remedy resting on a
+  wrong reason.
+- **The rule:** for any claim of the form "X is a security hole", state the packet, the path, and the
+  enforcement point it crosses before reporting it. If no packet crosses, the entry is inert
+  regardless of how wrong it looks. **Severity claims need their own verification; inheriting one
+  from a document is not verifying it.**

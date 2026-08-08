@@ -552,13 +552,23 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
   `dst`, and the guest — which cannot resolve the name at all — never sends there. The user
   allowlisted a domain and the sandbox still cannot reach it.
 
-  **And one result is worse than a miss.** The host resolved its own `.local` name to
-  `127.0.0.1 192.168.0.157 192.168.139.3 192.168.64.1` — loopback, and the vmnet gateway itself.
-  Host-side resolution can return **host-relative** addresses, whose meaning changes inside the
-  guest: writing `127.0.0.1` into a guest's `dst` does not allowlist what the user named, it
-  allowlists *the guest itself*. Moving resolution to the host is therefore not a transparent
-  substitution, and the design needs a stated rule — at minimum, refusing to install loopback and
-  link-local answers into a guest's allowlist rather than passing them through.
+  **And the answer contains addresses that mean something different in the guest.** The host
+  resolved its own `.local` name to `127.0.0.1 192.168.0.157 192.168.139.3 192.168.64.1` — loopback,
+  the host's LAN address, and the vmnet gateway.
+
+  **Corrected 2026-08-08, on the owner's challenge.** An earlier version of this bullet said writing
+  `127.0.0.1` into a guest's `dst` "allowlists the guest itself", and that was carried to the owner
+  as a security regression. It is not one. Loopback traffic never leaves the guest's own stack, so
+  no host-side rule evaluates it: the entry is **inert**, granting nothing. The dominant failure
+  here is *functional and fail-closed* — the user allowlisted a name and the guest still cannot
+  reach it, which is the same outcome the split-horizon reproduction below measures at `000`.
+
+  The genuine widening in that answer is the **other** addresses. `192.168.64.1` is the vmnet
+  gateway, so installing it permits guest→host on the bridge **across all ports**, where only `:53`
+  normally needs to be reachable; `192.168.0.157` is the host's LAN address. Both are modest and
+  both are real, and they are what makes output validation worth doing — not the loopback entry.
+  Moving resolution to the host is still not a transparent substitution, and the rule below still
+  stands; only the stated consequence changes.
 - **The both-sides-resolve-differently case, reproduced end to end
   ([`dns-split-horizon-sim.txt`](../research/macos-isolation-spike/results/dns-split-horizon-sim.txt)).**
   The runs above found *host-only* names, which produce an inert allowlist entry. The worse case —
