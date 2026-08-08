@@ -371,6 +371,20 @@ apple VM's traffic arrives over vmnet with no process identity attached.
 rules 1/1b/1c stay in the design, and it is worth stating as a measured constraint rather than an
 assumption. If some stable key exists, the two platforms converge.
 
+**Outcome (2026-08-08, `results/pf-nonaddress-key.txt`, `results/net-ceiling.txt`):** **no stable
+per-sandbox non-address key exists.** Four candidates tried. **Process identity: none** — guest
+traffic matches `user unknown`, and a `user = <uid>` rule bites the host while leaving the guest
+untouched, so `user`/`group` cannot key it. **MAC: unexpressible** — three syntaxes refused by the
+parser; the identifier is stable and visible and there is no way to write policy against it. **Tags:
+yes, and this is the one positive** — a tag applied on ingress keyed on the *bridge* survives NAT and
+is matchable on egress, which is the only way to distinguish guest traffic from host traffic after
+translation. It is per-*bridge*, so on the shared default network it cannot tell two guests apart.
+**Per-sandbox networks: granular but recycling** — distinct networks get distinct bridges and pf
+discriminates by interface with no address in the rule, but the bridge index is reused, the vmnet
+allocator **fills holes** (a deleted network's subnet went straight to the next one created), and a
+bridge exists only while a container is attached. So the interface is a per-*attachment* name that
+recycles exactly as an address does: the same hazard renamed, and rules 1/1b/1c survive unchanged.
+
 ### M2 — Can the guest's DNS be intercepted on apple and tart?
 
 The DNS-proxy direction (Cilium's `toFQDNs` shape) needs the guest's own queries to be observable or
@@ -379,6 +393,17 @@ without owning the gateway.
 
 **Decides:** whether guest-side resolution is available on macOS, which is the difference between
 "fix DNS properly" and "validate host answers and accept the gap".
+
+**Outcome (2026-08-08, `results/dns-intercept.txt`):** **available on apple, and the enforceable form
+works.** A passive tap on the bridge sees the guest's queries and not the host's, so observation
+alone is free. `rdr` redirects the guest's UDP/53 to a host listener **end to end** — to `127.0.0.1`
+*and* to the bridge address, with a listener-silent control when the rule is off. And the complete
+mechanism holds: `--dns` points the guest at our resolver, a pf rule closes 53 to everything else,
+the guest is refused at `8.8.8.8` while still resolving through us. `--dns` alone is bypassable, so
+the pf half is what makes it enforcement rather than cooperation. **tart: bounded negative** — the
+rule loaded and nothing arrived. Leading hypothesis, untested: macOS lists the vmnet gateway's IPv6
+link-local resolvers *first* and this rdr is IPv4-only, which would make tart DNS interception an
+IPv6 problem rather than a pf one.
 
 ### M3 — How is the unevaluated-anchor state detected cheaply?
 
@@ -393,12 +418,34 @@ packet, and what each costs on the start path.
 **Decides:** what verification actually has to do on macOS, and whether it is affordable per start
 now that `block return` makes a probe cost a round trip instead of a timeout.
 
+**Outcome (2026-08-08, `results/pf-liveness-detect.txt`):** **verification must be behavioural; a
+main-ruleset read does not close the gap.** Three detectors against two faults. Under the *shadowed*
+fault — anchor reference present, a `pass quick all` ahead of it, denied destination answering 301 —
+**detector A (`pfctl -s rules`) reports HEALTHY**, while the evaluation-counter delta and the
+behavioural canary both report BROKEN. All three catch the *flushed* fault. So reading the main
+ruleset is not a stronger proxy than the three checks it would replace; it is the same class of
+proxy one level up. Costs on a healthy host: **A 13–17 ms**, needs a new grant line for the whole
+main ruleset (refused today); **B 250–284 ms**, needs the anchor read widened to `-vv` (refused
+today) and needs prior traffic, so it is a poll and not a start check; **C 83–105 ms and no grant at
+all**. Most of C is process-spawn overhead in the harness, not network. **Recommend C.**
+
 ### M4 — Does macOS emit any signal when the main ruleset changes?
 
 Linux can subscribe to firewalld's reload. If macOS has no equivalent, the liveness detector must
 poll, and its interval is a design parameter rather than an implementation detail.
 
 **Decides:** subscription vs polling on macOS, and the polling interval if forced.
+
+**Outcome (2026-08-08, `results/pf-change-signal.txt`):** **no signal exists; polling is forced.**
+Across a reload, a disable/enable and `pfctl -F all`: **zero** unified-log entries matching a pf
+predicate, **zero** notify(3) keys fired from a watched list of nine — with the watcher proven alive
+in the same run by a post to itself — and `/etc/pf.conf`'s mtime unchanged by every event, so a file
+watcher is blind rather than merely weak. One partial signal is free: `pfctl -s info`'s *Enabled for*
+counter **resets on `-F all` but not on a plain reload**, and `-s info` is already in the shipped
+grant, so a poll that remembers the previous value detects a flush by seeing time run backwards. It
+cannot see a reload that drops the anchor line, which is the fault that defeats everything else — a
+cheap tripwire for the loud fault, not a substitute for M3's probe. Poll cost: `-s info` 2.0 ms,
+`-s rules` 4.2 ms, plus ~9.3 ms of `sudo`.
 
 ### M5 — What does a complete uninstall actually leave behind?
 
@@ -411,6 +458,18 @@ remains: anchor, tables, sudoers file, pinned ruleset.
 
 **Decides:** the content of a D132 uninstall amendment — a security-boundary change, so it amends the
 decision record and not just the plan.
+
+**Outcome (2026-08-08, `results/pf-uninstall-residue.txt`):** **the residue is authority, not
+litter.** After a user-style uninstall the sudoers grant **still authorized `pfctl`** — a standing
+NOPASSWD grant on a binary for a program that is gone, which the user has no way to know about. Also
+surviving: the pinned ruleset file, the anchor's 8 rules and 8 tables, and the dead sandbox's address
+still sitting in `yb_src_1`. No `pfctl` verb removes an anchor — `-F anchors` ("Unknown flush
+modifier"), `-X` ("option requires an argument") and `-R` all recorded refusing, and the anchor
+stayed listed under `com.apple`; only a reboot clears the node. An uninstall must therefore do four
+things, **in order**: flush the anchor, then remove the grant and the pinned file (the grant does not
+permit `-F`, so the uninstall needs a real `sudo` prompt and cannot use the grant it is deleting).
+Every step is root, so uninstall is interactive and privileged — the exact opposite of the install
+D132 designed.
 
 ### M6 — Is `NEFilterDataProvider` viable for seatbelt, and at what install cost?
 
@@ -438,6 +497,17 @@ Found live on apple. tart unmeasured.
 
 **Decides:** whether the v6 gap is per-backend or universal on macOS. Cheap.
 
+**Outcome (2026-08-08, `results/pf-v6-hole.txt`):** **universal — live on tart as well as apple.**
+Both guests hold a ULA and a link-local; with the pool loaded and the v4 allowlist empty, v4 was
+refused and **v6 reached the same host on the same port** on both backends. pf *can* enforce v6 in
+the same anchor (a v6 table pair blocked it), so the gap is an omission and not a limitation — but
+closing it costs more than a second table pair: the table must hold **every** v6 address the guest
+holds, because source selection is per destination scope (a guest talking to a link-local host
+sources from its own link-local, not the ULA the backend reports), and a guest can acquire more at
+any time via SLAAC or privacy addresses. A v4 table never has that problem. **Scope limit:** this
+host has no v6 default route, so everything measured is guest-to-host on the link; a host *with* v6
+upstream has a wider hole, not a narrower one.
+
 ### M8 — Does pool size scale acquisition cost linearly?
 
 329ms at 32 slots, 9.3ms per `sudo` call, 85% of which is `sudo` rather than `pfctl`. Linearity is
@@ -447,6 +517,51 @@ Run: the same acquisition sequence at 8 and 16 slots.
 
 **Decides:** the pool-size/start-latency trade with real numbers on both axes, which is an owner
 decision and currently has numbers on only one.
+
+**Outcome (2026-08-08, `results/pf-pool-scaling.txt`):** **linear, and the lever is real.** Fitted
+from n=8 and n=32 and checked against n=16: **0.0% error**. Per-call 18.81 ms, fixed overhead
+10.2 ms, so cost is dominated by the per-call term and halving the pool removes N/2 `sudo`
+invocations. Measured: 8 slots 217 ms, 16 slots 368 ms, 32 slots 668 ms. **The denominator is the
+surprise** — `container run -d` averages 676 ms, so acquisition at 32 slots costs as much again as
+the backend's own create, and at 8 slots about a third of it. Concurrency does not serialize
+(X3 measured 2.8× speedup on 4 overlapping acquisitions), so a start *burst* is cheaper than the
+per-start figures suggest. The other axis is unmeasured by design: slots are the concurrency ceiling
+and the exhaustion policy is a decision, not a measurement.
+
+---
+
+## What the results feed### Extras — four hazards found while building the above, none of them queued
+
+Run and recorded on the same terms. **X1 is the most consequential result of this pass.**
+
+- **X1 source-address spoofing** (`results/pf-spoof.txt`) — **the address key is defeasible, on both
+  backends.** In a `--network-isolated` sandbox the agent has passwordless `sudo`, root holds
+  `CAP_NET_ADMIN` (CapEff bit 12, present only with that flag), it **flushes its own in-guest
+  allowlist and regains egress** (DF179 reproduced), then takes an address **in no slot at all** and
+  reaches a destination denied to it. Same escape on tart via `ifconfig alias`. The mechanism is
+  structural: the pool is an allowlist of *blocks* keyed on address, so it constrains only addresses
+  it already holds. **A bridge-scoped default-deny closes it** while preserving the per-sandbox
+  matrix — one rule, no address in it, no new grant surface. Two verdicts are deliberately soft: A
+  borrowing B's *live* address failed on the return path (ARP delivers the reply to B), which says
+  nothing about a stale address whose owner exited; and the full-replace case ended with the guest
+  holding no address, which is UNKNOWN rather than a refusal.
+- **X2 revocation vs live connections** (`results/pf-revocation.txt`) — **deleting an allowlist entry
+  does not stop traffic already flowing.** The transfer kept advancing after the delete while new
+  connections were refused (the control). `pfctl -k <guest>` does **not** fix it: the state dump
+  shows it kills states sourced *from* the guest while the surviving state was sourced from the
+  *host*, created by an outbound packet matching no rule, because the pool is `in`-only. **Adding a
+  return-direction rule stops it** and leaves allowed traffic working — so the fix is one rule, not a
+  D132 amendment to permit `-k`, which is unscoped and reaches every state on the machine.
+- **X3 concurrent acquisition** (`results/pf-concurrent-acquire.txt`) — four concurrent acquisitions
+  on distinct slots neither corrupt tables nor cross allowlists, and concurrency gives 2.8× over
+  serial. But two acquisitions on **one** slot leave both addresses in it with **both** destinations,
+  and each guest then reaches the other's allowlisted destination: a cross-sandbox privilege leak
+  from contention alone. Fail-closed to the outside, still wrong. Slot allocation must be atomic
+  above pf. Timing-dependent — treat as "reachable", not "always".
+- **net_ceiling** (`results/net-ceiling.txt`) — 16 vmnet networks created with no limit hit, ~0.1 s
+  each; the allocator **fills holes**; a network has no host bridge until a container attaches. Feeds
+  M1. No apple/tart subnet collision in this allocation order, but nothing coordinates the two
+  allocators and an overlap was not engineered.
 
 ---
 
