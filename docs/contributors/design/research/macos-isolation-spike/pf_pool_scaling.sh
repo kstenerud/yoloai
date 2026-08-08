@@ -50,6 +50,12 @@ asuser() { sudo -u "$U" -H "$@"; }
 quiet_pf() { grep -viE 'use of -f option|main ruleset added|/etc/pf.conf for further|ALTQ|^$'; }
 mainrefs() { pfctl -s rules 2>/dev/null | grep -c 'com\.apple/' || true; }
 now()   { python3 -c 'import time;print(time.time())'; }
+sudoers_list() {   # ls|grep trips shellcheck and mangles odd names; glob and loop instead
+  local f out=""
+  for f in /etc/sudoers.d/*; do [ -e "$f" ] && out="$out ${f##*/}"; done
+  printf '%s' "${out# }"
+}
+
 
 cleanup() {
   echo
@@ -57,7 +63,7 @@ cleanup() {
   rm -f "$SUDOERS"; rm -rf "$POOLDIR"
   pfctl -a "$ANCHOR" -F all >/dev/null 2>&1
   asuser container rm -f ybp1 >/dev/null 2>&1
-  echo "   sudoers.d: [$(ls /etc/sudoers.d/ 2>/dev/null | tr '\n' ' ')]  main-refs: $(mainrefs)"
+  echo "   sudoers.d: [$(sudoers_list)]  main-refs: $(mainrefs)"
   echo
   echo "pass=$PASS fail=$FAIL unknown=$UNKNOWN"
   echo "results: $RESULTS"
@@ -79,9 +85,11 @@ $U ALL=(root) NOPASSWD: /sbin/pfctl ^-s info\$
 EOF
 chmod 440 "$SUDOERS"
 visudo -c -f "$SUDOERS" >/dev/null 2>&1 || { bad "grant did not validate; ABORTING"; exit 1; }
-asuser sudo -n /sbin/pfctl -s info >/dev/null 2>&1 \
-  && ok "grant is live (the user can run a permitted pfctl without a password)" \
-  || { bad "grant is not authorizing; ABORTING"; exit 1; }
+if asuser sudo -n /sbin/pfctl -s info >/dev/null 2>&1; then
+  ok "grant is live (the user can run a permitted pfctl without a password)"
+else
+  bad "grant is not authorizing; ABORTING"; exit 1
+fi
 
 asuser container system start >/dev/null 2>&1; sleep 2
 asuser container rm -f ybp1 >/dev/null 2>&1

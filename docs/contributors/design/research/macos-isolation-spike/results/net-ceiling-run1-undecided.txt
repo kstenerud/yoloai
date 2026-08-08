@@ -1,0 +1,98 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:01:17 CEST
+
+== N0 BASELINE ==
+        networks:
+          NETWORK  SUBNET
+          default  192.168.64.0/24
+        bridges: =127.0.0.1 bridge0=192.168.0.157 bridge0=100.107.208.103 bridge100=192.168.139.3 bridge101=192.168.64.1 
+        bridge count: 3
+
+== N1 THE CEILING — create networks until one fails ==
+        One at a time, stopping at the first failure with its message. Up to 16 attempted.
+        #    NAME       SECONDS   SUBNET             BRIDGE
+        1    yb-n-1     0.10      192.168.65.0/24    ?
+        2    yb-n-2     0.11      192.168.66.0/24    ?
+        3    yb-n-3     0.09      192.168.67.0/24    ?
+        4    yb-n-4     0.09      192.168.68.0/24    ?
+        5    yb-n-5     0.09      192.168.69.0/24    ?
+        6    yb-n-6     0.10      192.168.70.0/24    ?
+        7    yb-n-7     0.09      192.168.71.0/24    ?
+        8    yb-n-8     0.09      192.168.72.0/24    ?
+        9    yb-n-9     0.09      192.168.73.0/24    ?
+        10   yb-n-10    0.09      192.168.74.0/24    ?
+        11   yb-n-11    0.09      192.168.75.0/24    ?
+        12   yb-n-12    0.09      192.168.76.0/24    ?
+        13   yb-n-13    0.09      192.168.77.0/24    ?
+        14   yb-n-14    0.09      192.168.78.0/24    ?
+        15   yb-n-15    0.09      192.168.79.0/24    ?
+        16   yb-n-16    0.08      192.168.80.0/24    ?
+        
+   PASS    N1: 16 networks created without hitting a limit (the probe's own cap, not vmnet's)
+            So one-network-per-sandbox is not obviously capped below 16. The real ceiling is
+            above what was attempted and remains unmeasured.
+        bridges now: =127.0.0.1 bridge0=192.168.0.157 bridge0=100.107.208.103 bridge100=192.168.139.3 bridge101=192.168.64.1 
+
+== N2 SUBNET ALLOCATION — and whether it can collide with tart ==
+        Ranges handed out above, in order, so the allocator's pattern is visible:
+          NETWORK  SUBNET
+          default  192.168.64.0/24
+          yb-n-1   192.168.65.0/24
+          yb-n-10  192.168.74.0/24
+          yb-n-11  192.168.75.0/24
+          yb-n-12  192.168.76.0/24
+          yb-n-13  192.168.77.0/24
+          yb-n-14  192.168.78.0/24
+          yb-n-15  192.168.79.0/24
+          yb-n-16  192.168.80.0/24
+          yb-n-2   192.168.66.0/24
+          yb-n-3   192.168.67.0/24
+          yb-n-4   192.168.68.0/24
+          yb-n-5   192.168.69.0/24
+          yb-n-6   192.168.70.0/24
+          yb-n-7   192.168.71.0/24
+          yb-n-8   192.168.72.0/24
+          yb-n-9   192.168.73.0/24
+        
+        Now start a TART sandbox and see which range it takes, with the apple networks still up.
+        tart guest address: 192.168.81.2
+        bridges with tart up: =127.0.0.1 bridge0=192.168.0.157 bridge0=100.107.208.103 bridge100=192.168.139.3 bridge101=192.168.64.1 bridge102=192.168.81.1 
+   PASS    N2: no collision in this configuration — tart at 192.168.81.2, no apple network in 192.168.81.0/24
+            A negative bounded to THIS allocation order. tart picked its range with 16
+            apple networks already up; a different order may still collide, and nothing here
+            coordinates the two allocators.
+
+== N3 DOES A FREED INDEX COME BACK? — append, or fill the hole? ==
+        An allocator that appends gives a key that never repeats. One that fills holes gives a key
+        with exactly the staleness problem addresses have, and M1's K4 would inherit it.
+        before: =127.0.0.1 bridge0=192.168.0.157 bridge0=100.107.208.103 bridge100=192.168.139.3 bridge101=192.168.64.1 bridge102=192.168.81.1 
+        after deleting yb-n-2: =127.0.0.1 bridge0=192.168.0.157 bridge0=100.107.208.103 bridge100=192.168.139.3 bridge101=192.168.64.1 bridge102=192.168.81.1 
+        created yb-n-fresh -> 192.168.66.0/24
+        after: =127.0.0.1 bridge0=192.168.0.157 bridge0=100.107.208.103 bridge100=192.168.139.3 bridge101=192.168.64.1 bridge102=192.168.81.1 
+   PASS    N3: recorded — compare the subnet yb-n-fresh received against the one yb-n-2 released
+            If they match, the allocator fills holes and the key recycles. If yb-n-fresh took a
+            NEW range beyond every existing one, it appends and the key does not repeat.
+
+== WHAT WAS NOT TRIED ==
+        - The true vmnet ceiling, if N1 hit this probe's own cap rather than the system's. Raising
+          MAXTRY is a one-line change, but creating dozens of vmnet networks on a machine somebody
+          is using is not something this run should do unattended.
+        - Forcing a collision. N2 observed whichever ranges the two allocators happened to pick. It
+          did not try to ENGINEER an overlap with `--subnet`, which would prove the hazard is
+          reachable rather than merely unprevented. That is the stronger experiment and it is the
+          obvious follow-up if N2 comes back clean.
+        - Whether a container and a tart VM sharing a subnet can actually reach each other, or
+          whether vmnet keeps them on separate links despite the overlap. The reaping hazard does
+          not need them to be mutually reachable — it only needs the same address in two places —
+          but it changes how bad a collision is.
+        - Docker Desktop, which also allocates on this host and is a third allocator nobody
+          coordinates with.
+
+== cleanup ==
+   networks now:
+      NETWORK  SUBNET
+      default  192.168.64.0/24
+   bridges now: =127.0.0.1 bridge0=192.168.0.157 bridge0=100.107.208.103 bridge100=192.168.139.3 bridge101=192.168.64.1 
+
+pass=3 fail=0 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/net-ceiling.txt

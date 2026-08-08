@@ -57,15 +57,17 @@ mainrefs() { pfctl -s rules 2>/dev/null | grep -c 'com\.apple/' || true; }
 
 # The keys watched in S2. No API enumerates every notify key, so this list IS the claim's boundary
 # and it is printed in the results for exactly that reason.
-KEYS="com.apple.system.config.network_change
-com.apple.system.config.ipv4
-com.apple.system.config.ipv6
-com.apple.system.config.dns
-com.apple.system.packetfilter
-com.apple.pfctl
-com.apple.networkextension.filter-configuration-changed
-state:/Network/Global/IPv4
-com.apple.system.config.sc_dynamicstore"
+KEYS=(
+  com.apple.system.config.network_change
+  com.apple.system.config.ipv4
+  com.apple.system.config.ipv6
+  com.apple.system.config.dns
+  com.apple.system.packetfilter
+  com.apple.pfctl
+  com.apple.networkextension.filter-configuration-changed
+  state:/Network/Global/IPv4
+  com.apple.system.config.sc_dynamicstore
+)
 
 restore_pf() {
   pfctl -e >/dev/null 2>&1
@@ -105,7 +107,9 @@ note "pf.conf mtime: $(stat -f '%Sm' /etc/pf.conf)"
 
 # ---------------------------------------------------------------------------
 say "S2a IS THE NOTIFY WATCHER ALIVE? — proven before its silence is reported"
-notifyutil -v $(printf -- '-w %s ' $KEYS) -w com.yoloai.spike.selftest > "$WD/notify.txt" 2>&1 &
+WATCH=()
+for k in "${KEYS[@]}"; do WATCH+=(-w "$k"); done
+notifyutil -v "${WATCH[@]}" -w com.yoloai.spike.selftest > "$WD/notify.txt" 2>&1 &
 NPID=$!
 sleep 2
 notifyutil -p com.yoloai.spike.selftest >/dev/null 2>&1
@@ -118,7 +122,7 @@ else
   WATCHER_OK=0
 fi
 note "keys under watch:"
-printf '%s\n' $KEYS | sed 's/^/          /'
+printf '%s\n' "${KEYS[@]}" | sed 's/^/          /'
 : > "$WD/notify.txt"
 
 # ---------------------------------------------------------------------------

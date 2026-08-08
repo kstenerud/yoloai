@@ -1,5 +1,5 @@
 host: macOS 26.5.1 (25F80) arm64
-date: 2026-08-08 10:58:12 CEST
+date: 2026-08-08 13:09:35 CEST
 
 == P1 MEASURED — is any system extension installed on this host at all? ==
         0 extension(s)
@@ -30,7 +30,7 @@ date: 2026-08-08 10:58:12 CEST
 == P4 MEASURED — where would the containing app have to live? ==
         A system extension is not installed on its own. It ships INSIDE an app bundle, and the app
         requests activation at runtime. Current state of the two locations that matter:
-          /Applications entries owned by yoloAI : 0
+          /Applications entries matching yolo   : 0
           /Library/SystemExtensions             : 0 entries
         yoloAI ships as a single CLI binary, typically to a Homebrew prefix. It has no app bundle.
         That is a packaging change, not a code change, and it is the part most likely to be

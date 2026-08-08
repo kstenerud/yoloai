@@ -59,6 +59,11 @@ netfield() { asuser container inspect "$1" 2>/dev/null | python3 -c '
 import json,sys
 d=json.load(sys.stdin)
 print(d[0]["status"]["networks"][0].get(sys.argv[1],"").split("/")[0])' "$2" 2>/dev/null; }
+sudoers_list() {   # ls|grep trips shellcheck and mangles odd names; glob and loop instead
+  local f out=""
+  for f in /etc/sudoers.d/*; do [ -e "$f" ] && out="$out ${f##*/}"; done
+  printf '%s' "${out# }"
+}
 try() { asuser container exec ybu1 curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
           "http://$1/" 2>/dev/null || printf '000'; }
 
@@ -69,7 +74,7 @@ cleanup() {
   rm -rf "$POOLDIR"
   pfctl -a "$ANCHOR" -F all >/dev/null 2>&1
   asuser container rm -f ybu1 >/dev/null 2>&1
-  echo "   sudoers.d now: [$(ls /etc/sudoers.d/ 2>/dev/null | tr '\n' ' ')]"
+  echo "   sudoers.d now: [$(sudoers_list)]"
   echo "   $POOLDIR: $([ -e "$POOLDIR" ] && echo PRESENT || echo gone)"
   echo "   anchor rules: $(nrules)   main-refs: $(mainrefs)"
   echo "   NOTE the anchor NODE itself cannot be removed; see U5c. It is empty, which is the most"
@@ -196,10 +201,13 @@ note "     -F all empties it; the node remains. Trying the plausible spellings s
 note "     what was attempted rather than asserting an absence."
 pfctl -a "$ANCHOR" -F all >/dev/null 2>&1
 note "     after -F all: rules=$(nrules) tables=$(pfctl -a "$ANCHOR" -s Tables 2>/dev/null | grep -c . || true)"
-for attempt in "-a $ANCHOR -F anchors" "-a $ANCHOR -X" "-a $ANCHOR -R"; do
-  out=$(pfctl $attempt 2>&1 | head -1 | tr -d '\n')
-  printf '          pfctl %-24s -> %s\n' "$attempt" "${out:-<no output, no effect>}"
-done
+verb() {   # run pfctl with the given argv and report its first line
+  local out; out=$(pfctl "$@" 2>&1 | head -1 | tr -d '\n')
+  printf '%s' "${out:-<no output, no effect>}"
+}
+printf '          pfctl %-24s -> %s\n' "-a <anchor> -F anchors" "$(verb -a "$ANCHOR" -F anchors)"
+printf '          pfctl %-24s -> %s\n' "-a <anchor> -X"         "$(verb -a "$ANCHOR" -X)"
+printf '          pfctl %-24s -> %s\n' "-a <anchor> -R"         "$(verb -a "$ANCHOR" -R)"
 LISTED=$(pfctl -a com.apple -s Anchors 2>/dev/null | grep -c "$(basename "$ANCHOR")" || true)
 note "     still listed under com.apple: $([ "$LISTED" -gt 0 ] && echo YES || echo no)"
 if [ "$LISTED" -gt 0 ]; then

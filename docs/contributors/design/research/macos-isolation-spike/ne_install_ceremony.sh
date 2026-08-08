@@ -58,8 +58,10 @@ note "Program membership (a paid annual account), not a build step."
 say "P4 MEASURED — where would the containing app have to live?"
 note "A system extension is not installed on its own. It ships INSIDE an app bundle, and the app"
 note "requests activation at runtime. Current state of the two locations that matter:"
-note "  /Applications entries owned by yoloAI : $(ls /Applications 2>/dev/null | grep -ci yoloai || true)"
-note "  /Library/SystemExtensions             : $(ls /Library/SystemExtensions 2>/dev/null | wc -l | tr -d ' ') entries"
+napps=0; for a in /Applications/*[Yy]olo*; do [ -e "$a" ] && napps=$((napps+1)); done
+nsysext=0; for e in /Library/SystemExtensions/*; do [ -e "$e" ] && nsysext=$((nsysext+1)); done
+note "  /Applications entries matching yolo   : $napps"
+note "  /Library/SystemExtensions             : $nsysext entries"
 note "yoloAI ships as a single CLI binary, typically to a Homebrew prefix. It has no app bundle."
 note "That is a packaging change, not a code change, and it is the part most likely to be"
 note "underestimated: the deliverable stops being 'a binary' and becomes 'a signed, notarized"

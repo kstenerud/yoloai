@@ -69,6 +69,12 @@ import json,sys
 d=json.load(sys.stdin)
 print(d[0]["status"]["networks"][0].get(sys.argv[1],"").split("/")[0])' "$2" 2>/dev/null; }
 now_ms()   { python3 -c 'import time;print("%.1f"%(time.time()*1000))'; }
+sudoers_list() {   # ls|grep trips shellcheck and mangles odd names; glob and loop instead
+  local f out=""
+  for f in /etc/sudoers.d/*; do [ -e "$f" ] && out="$out ${f##*/}"; done
+  printf '%s' "${out# }"
+}
+
 
 try() { asuser container exec ybv1 curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
           "http://$1/" 2>/dev/null || printf '000'; }
@@ -146,7 +152,7 @@ cleanup() {
   rm -f "$SUDOERS" /tmp/pfv.rules /tmp/pfv.conf
   pfctl -a "$ANCHOR" -F all >/dev/null 2>&1
   asuser container rm -f ybv1 >/dev/null 2>&1
-  echo "   pf=$(pfstate)  main-refs=$(mainrefs)  sudoers: $(ls /etc/sudoers.d/ 2>/dev/null | tr '\n' ' ')"
+  echo "   pf=$(pfstate)  main-refs=$(mainrefs)  sudoers: [$(sudoers_list)]"
   if [ "$(mainrefs)" -eq 0 ]; then
     echo "   !! HOST IS FAIL-OPEN — repairing"
     pfctl -f /etc/pf.conf >/dev/null 2>&1

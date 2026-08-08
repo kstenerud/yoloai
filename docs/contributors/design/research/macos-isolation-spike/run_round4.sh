@@ -25,9 +25,21 @@ ITEMS=(
   "M7 IPv6 hole               pf_v6_hole.sh"
   "M3 liveness detectors      pf_liveness_detect.sh"
   "M4 ruleset change signal   pf_change_signal.sh"
+  "X1 source-address spoofing pf_spoof.sh"
+  "X2 revocation vs live conns pf_revocation.sh"
+  "X3 concurrent acquisition  pf_concurrent_acquire.sh"
 )
 
+# net_ceiling.sh is the fourth extra and is deliberately absent: it needs no privilege and has
+# already been run. Re-run it with plain `bash net_ceiling.sh`.
+
 mainrefs() { pfctl -s rules 2>/dev/null | grep -c 'com\.apple/' || true; }
+sudoers_list() {   # ls|grep trips shellcheck and mangles odd names; glob and loop instead
+  local f out=""
+  for f in /etc/sudoers.d/*; do [ -e "$f" ] && out="$out ${f##*/}"; done
+  printf '%s' "${out# }"
+}
+
 
 if [ "$#" -gt 0 ]; then
   SELECTED=("$@")
@@ -78,7 +90,7 @@ done
 
 echo
 echo "================================================================"
-echo " done. main-refs: $(mainrefs)   sudoers.d: [$(ls /etc/sudoers.d/ 2>/dev/null | tr '\n' ' ')]"
+echo " done. main-refs: $(mainrefs)   sudoers.d: [$(sudoers_list)]"
 if [ "${#FAILED[@]}" -gt 0 ]; then
   echo " scripts that did not exit cleanly:"
   printf '   %s\n' "${FAILED[@]}"
