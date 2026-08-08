@@ -422,6 +422,16 @@ approval.
 or is unparked toward a different mechanism. Expensive — timebox it to establishing the install
 ceremony, not building anything.
 
+**Outcome (2026-08-08, `results/ne-install-ceremony.txt`):** viable, and the cost is structural
+rather than permission-shaped. **Apple approval is not a barrier** — the NetworkExtension
+entitlement stopped being case-by-case in 2016, which corrects the impression
+`prior-art-egress-enforcement.md` §4 leaves. The barriers are that the deliverable changes: a
+Developer-ID-signed, notarized `.app` under `/Applications` (measured: this host has **zero**
+codesigning identities), a user approval step that cannot be scripted, and — measured —
+`systemextensionsctl developer` is refused while SIP is enabled, so even prototyping costs a
+SIP-disabled machine. yoloAI ships an unsigned CLI binary. MDM pre-authorization removes only the
+user-approval step, and only for managed fleets. Keeps the parking, with a better reason.
+
 ### M7 — Confirm the IPv6 hole on tart
 
 Found live on apple. tart unmeasured.
