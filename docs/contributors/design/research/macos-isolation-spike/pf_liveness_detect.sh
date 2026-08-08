@@ -208,15 +208,27 @@ note "pf.conf's own comments warn that system services insert anchors into the m
 note "runtime. Rules are first-match with 'quick', so anything inserted ahead of the com.apple"
 note "anchor point shadows it. Here that is simulated with one 'pass quick all' line, loaded from a"
 note "copy of /etc/pf.conf — so the reference detector A counts is still right there in the ruleset."
-awk '/^anchor "com\.apple\/\*"/ && !done {print "pass quick all"; done=1} {print}' \
-    /etc/pf.conf > /tmp/pfv.conf
+# Two edits, and the second is load-bearing. /etc/pf.anchors/com.apple contains ONLY the AirDrop
+# and ApplicationFirewall anchors — not vmnet's NAT, which the backend inserts at runtime. So
+# `load anchor "com.apple" from ...` REPLACES the anchor's live contents and destroys that NAT.
+# Run 1 kept the line, the guest lost all egress, and both destinations returned 000: the fault was
+# masked by NAT death, which is the same trap that forced last pass's fail-closed retraction.
+# Dropping the line leaves the anchor's dynamic contents intact, so what is tested is shadowing
+# alone.
+awk '/^anchor "com\.apple\/\*"/ && !done {print "pass quick all"; done=1}
+     /^load anchor/ {next}
+     {print}' /etc/pf.conf > /tmp/pfv.conf
 note "the injected ruleset, in full:"
 sed 's/^/          | /' /tmp/pfv.conf | grep -v '^          | *#' | grep -v '^          | *$'
 pfctl -f /tmp/pfv.conf 2>&1 | quiet_pf | sed 's/^/        pfctl: /'
 note "main-refs after injection = $(mainrefs)  (still non-zero: that is the entire point)"
 sa=$(try "$ALLOW"); sd=$(try "$DENY")
 note "allowed->$ALLOW=$sa   denied->$DENY=$sd   (denied reaching => enforcement is dead)"
-if [ "$sd" != 000 ]; then
+if [ "$sa" = 000 ] && [ "$sd" = 000 ]; then
+  unk "V2: BOTH destinations refused, so the guest has no egress at all and nothing was tested."
+  note "     That is NAT death, not enforcement — the classic masking failure. Check that the"
+  note "     injected ruleset above still omits the 'load anchor' line."
+elif [ "$sd" != 000 ]; then
   ok "V2 precondition: enforcement IS dead — the denied destination answered $sd"
   run_detectors
   if [ "$DA" = HEALTHY ]; then

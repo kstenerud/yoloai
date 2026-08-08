@@ -240,6 +240,59 @@ note "\`-k\` is NONE of them, and it is not scoped to an anchor: 'pfctl -k <host
 note "state on the machine, including the user's own. Granting it is a materially wider permission"
 note "than table membership, so if R2 showed survival, the fix is a D132 amendment and not a patch."
 
+say "R5 WHY DID IT SURVIVE THE KILL? — diagnosing, not asserting"
+note "R4 killed every state naming the guest and the transfer still advanced. That should not happen"
+note "if the block rule is reached, so something is re-permitting the flow. The leading hypothesis:"
+note "the pool's rules are all \`in\`. The HOST's outbound data is \`out\` on the bridge, matches no"
+note "rule, meets pf's default pass — and a passed packet CREATES STATE. That new state then carries"
+note "the rest of the connection, including the guest's replies, straight past the inbound block."
+note ""
+note "If that is right, a rule covering the return direction closes it. Tested, with the control that"
+note "legitimate allowed traffic must still work — a fix that blocks everything is not a fix."
+pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T add "$GW" >/dev/null 2>&1
+{ for ((i=0;i<SLOTS;i++)); do
+    echo "table <yb_src_$i> persist"; echo "table <yb_dst_$i> persist"
+    echo "pass  in quick from <yb_src_$i> to <yb_dst_$i>"
+    echo "block return in quick from <yb_src_$i> to any"
+    echo "block return out quick to <yb_src_$i>"
+  done; } > "$WD/pool2.rules"
+pfctl -a "$ANCHOR" -f "$WD/pool2.rules" 2>&1 | quiet_pf | sed 's/^/        pfctl: /'
+pfctl -a "$ANCHOR" -t "yb_src_$SLOT" -T add "$IP"  >/dev/null 2>&1
+pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T add "$GW"  >/dev/null 2>&1
+ctl=$(asuser container exec ybr1 curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$GW:$PORT/" 2>/dev/null)
+note "CONTROL with the return-direction rule loaded: allowed destination -> ${ctl:-000}"
+note "   (must still be non-000, or the rule is over-blocking and cannot be used)"
+if [ "${ctl:-000}" = 000 ]; then
+  unk "R5: the return-direction rule broke legitimate traffic; hypothesis untested"
+else
+  kill "$CURLPID" 2>/dev/null
+  asuser container exec ybr1 sh -c 'rm -f /tmp/r5.txt' >/dev/null 2>&1
+  asuser container exec ybr1 curl -sN --max-time 30 "http://$GW:$PORT/" -o /tmp/r5.txt \
+    >/dev/null 2>&1 &
+  CURLPID=$!
+  sleep 5
+  b5=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/r5.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
+  note "stream running: $b5 bytes; states naming the guest: $(states "$IP")"
+  note "states, verbatim, before the revocation:"
+  pfctl -s state 2>/dev/null | grep "$IP" | head -4 | sed 's/^/          /'
+  pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T delete "$GW" >/dev/null 2>&1
+  pfctl -k "$IP" >/dev/null 2>&1
+  note "after revoke + kill, states naming the guest: $(states "$IP")"
+  pfctl -s state 2>/dev/null | grep "$IP" | head -4 | sed 's/^/          /'
+  sleep 6
+  a5=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/r5.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
+  note "6s later: $a5 bytes (was $b5)"
+  if [ "${a5:-0}" -le "${b5:-0}" ]; then
+    ok "R5: HYPOTHESIS CONFIRMED. Covering the return direction stops the transfer, so what kept it"
+    note "    alive was a state created by the unmatched OUTBOUND packet. That makes the pool's"
+    note "    in-only rules incomplete for revocation, and the fix is a rule rather than a grant —"
+    note "    materially cheaper than widening D132 to allow \`pfctl -k\`."
+  else
+    bad "R5: the transfer survived even with the return direction covered ($b5 -> $a5). The"
+    note "    hypothesis is wrong and the mechanism is still unexplained — do not design against it."
+  fi
+fi
+
 say "WHAT WAS NOT TRIED"
 cat <<'EOF'
         - UDP, and long-lived idle connections. Only an actively streaming TCP connection was used;

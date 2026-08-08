@@ -215,9 +215,14 @@ s0=$(tbl yb_src_0); d0=$(tbl yb_dst_0)
 note "slot 0 after both: src=[$s0] dst=[$d0]"
 r0=$(reach "${G[0]}" "${DESTS[0]}"); r0x=$(reach "${G[0]}" "${DESTS[2]}")
 r1=$(reach "${G[1]}" "${DESTS[1]}"); r1x=$(reach "${G[1]}" "${DESTS[2]}")
-note "guest0: own=$r0  unrelated(${DESTS[2]})=$r0x"
-note "guest1: own=$r1  unrelated(${DESTS[2]})=$r1x"
-note "   an 'unrelated' that is non-000 means that guest is not filtered at all"
+# The leak that a shared slot actually produces is EACH OTHER'S allowlist, not an unrelated
+# address. Run 1 checked only the unrelated one, saw 000, and called a merged allowlist
+# "fail-closed" without testing the merge it had just printed.
+x01=$(reach "${G[0]}" "${DESTS[1]}"); x10=$(reach "${G[1]}" "${DESTS[0]}")
+note "guest0: own=$r0  unrelated(${DESTS[2]})=$r0x  guest1's-dest(${DESTS[1]})=$x01"
+note "guest1: own=$r1  unrelated(${DESTS[2]})=$r1x  guest0's-dest(${DESTS[0]})=$x10"
+note "   'unrelated' non-000 => that guest is not filtered at all (fail-open)"
+note "   the other guest's dest non-000 => allowlists MERGED (a cross-sandbox privilege leak)"
 LOSER=""
 printf '%s' "$s0" | grep -q "${IPS[0]}" || LOSER="${G[0]} (${IPS[0]})"
 printf '%s' "$s0" | grep -q "${IPS[1]}" || LOSER="${G[1]} (${IPS[1]})"
@@ -229,9 +234,14 @@ if [ "$r0x" != 000 ] || [ "$r1x" != 000 ]; then
 elif [ -n "$LOSER" ]; then
   bad "C2: $LOSER lost its claim (slot 0 src=[$s0]) though it did not reach the unrelated"
   note "     destination. Still a lost claim — inspect whether another rule happened to cover it."
+elif [ "$x01" != 000 ] || [ "$x10" != 000 ]; then
+  bad "C2: ALLOWLISTS MERGED. Both addresses survived in slot 0 and each guest can now reach the"
+  note "     OTHER's allowlisted destination. It is fail-closed against the outside world, but it is"
+  note "     a cross-sandbox privilege leak: two sandboxes that should be isolated share one policy,"
+  note "     produced by contention alone. Slot allocation must be atomic above pf either way — the"
+  note "     failure is a merge rather than a gap, which is less bad and still wrong."
 else
-  ok "C2: both addresses survived in slot 0 — they now SHARE one allowlist, which is its own"
-  note "     problem, but it is a fail-closed one"
+  ok "C2: both addresses survived in slot 0 and neither reached the other's destination"
 fi
 
 # ---------------------------------------------------------------------------
@@ -242,6 +252,9 @@ for ((i=0;i<N;i++)); do acquire "$i" "${IPS[$i]}" "${DESTS[$i]}"; done
 t1=$(now)
 SER=$(python3 -c "print('%.0f' % (($t1-$t0)*1000))")
 note "serial:     $N acquisitions back to back = ${SER} ms  ($(python3 -c "print('%.0f' % ($SER/$N))") ms each)"
+note "NOTE these call pfctl DIRECTLY as root, with no sudo, so they are not comparable to M8's"
+note "absolute figures — M8 measures the shipped path through sudo. What is comparable here is the"
+note "ratio below, which is the only thing this section claims."
 note "concurrent: the same $N overlapping        = ${CONC} ms  (from C1)"
 note "speedup: $(python3 -c "print('%.2f' % ($SER/$CONC if $CONC else 0))")x"
 note "   ~1.0x means pfctl/sudo serialize completely and concurrency buys nothing — in which case"

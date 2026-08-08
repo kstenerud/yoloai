@@ -308,7 +308,7 @@ if ! asuser "$YOLOAI" new dnsx "$WD" --backend tart >/dev/null 2>&1; then
 else
   TIP=$(asuser "$YOLOAI" ls 2>/dev/null | awk '$1=="dnsx"{print $4}')
   note "tart guest reported at '${TIP:-<none>}'"
-  TRES=$(asuser "$YOLOAI" exec dnsx cat /etc/resolv.conf 2>/dev/null)
+  TRES=$(asuser "$YOLOAI" exec dnsx -- cat /etc/resolv.conf 2>/dev/null)
   note "tart resolv.conf nameservers:"
   printf '%s\n' "$TRES" | awk '/^nameserver/{print "          " $0}'
   # macOS resolv.conf opens with a comment block and lists link-local v6 resolvers first. Run 1
@@ -323,15 +323,20 @@ else
     if start_listener "$TGW"; then
       flush
       u4="d4off-$$.example.com"
-      asuser "$YOLOAI" exec dnsx dscacheutil -q host -a name "$u4" >/dev/null 2>&1
+      asuser "$YOLOAI" exec dnsx -- dscacheutil -q host -a name "$u4" >/dev/null 2>&1
       sleep 1
       off4=$(seen "d4off")
       load "rdr pass on $TBR proto udp from any to any port 53 -> $TGW port $DNSPORT"
       u4b="d4on-$$.example.com"
-      asuser "$YOLOAI" exec dnsx dscacheutil -q host -a name "$u4b" >/dev/null 2>&1
+      asuser "$YOLOAI" exec dnsx -- dscacheutil -q host -a name "$u4b" >/dev/null 2>&1
       sleep 1
       on4=$(seen "d4on")
       note "rdr OFF saw $off4; rdr ON saw $on4   (want 0 then >=1)"
+      note "If nothing arrived, read the nameserver list above: macOS lists the vmnet gateway's"
+      note "IPv6 LINK-LOCAL resolvers FIRST, and this rdr matches IPv4 only. A guest that prefers"
+      note "the v6 resolver would never touch the redirected path — which would make DNS"
+      note "interception on tart an IPv6 problem, not a pf one. Stated as the leading hypothesis;"
+      note "it is not tested here."
       if [ "$off4" -eq 0 ] && [ "$on4" -gt 0 ]; then
         ok "D4: tart's DNS is redirectable the same way apple's is"
       elif [ "$off4" -gt 0 ]; then

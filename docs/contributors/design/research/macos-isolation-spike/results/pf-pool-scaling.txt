@@ -1,45 +1,45 @@
 host: macOS 26.5.1 arm64
-date: 2026-08-08 13:29:43 CEST | anchor=com.apple/yoloai_p
+date: 2026-08-08 13:47:03 CEST | anchor=com.apple/yoloai_p
 
 == P0 SETUP — the grant, in its shipped shape ==
    PASS    grant is live (the user can run a permitted pfctl without a password)
-        guest=192.168.64.16
+        guest=192.168.64.34
 
 == P1 ACQUISITION COST AT 8, 16 AND 32 SLOTS ==
         5 repetitions each. The expected call count is N+3; a run whose count disagrees is
         reported as broken rather than averaged in.
         SLOTS  CALLS    MEAN ms    PER CALL ms  runs
-        8      11       225.6      20.51         223.1 231.9 223.4 224.7 224.8
-        16     19       385.7      20.30         381.7 383.3 393.6 386.1 383.9
-        32     35       705.2      20.15         696.8 709.0 698.4 701.5 720.3
+        8      11       217.1      19.73         212.8 213.4 222.0 214.7 222.4
+        16     19       367.6      19.35         375.7 367.9 366.1 366.8 361.6
+        32     35       668.5      19.10         674.1 660.4 664.6 678.5 665.0
 
 == P2 IS IT LINEAR? — the question the 'shrink the pool' lever depends on ==
         If cost = a + b*(N+3), then a and b fall straight out of two points and the third checks it.
         fitted from n=8 and n=32:
-          per-call cost b   =  19.98 ms
-          fixed overhead a  =    5.8 ms
+          per-call cost b   =  18.81 ms
+          fixed overhead a  =   10.2 ms
         check against the measured n=16 point:
-          predicted 385.5 ms, measured 385.7 ms, error 0.2 ms (0.1%)
+          predicted 367.6 ms, measured 367.6 ms, error 0.0 ms (0.0%)
         => LINEAR within 10%. Cost is dominated by the per-call term, so pool size is a
            real latency lever: halving the pool removes (N/2) sudo invocations.
 
         What each size costs a sandbox start, using the fit:
-           4 slots ->  145.7 ms
-           8 slots ->  225.6 ms
-          16 slots ->  385.5 ms
-          32 slots ->  705.2 ms
+           4 slots ->  141.9 ms
+           8 slots ->  217.1 ms
+          16 slots ->  367.6 ms
+          32 slots ->  668.5 ms
 
 == P3 THE DENOMINATOR — what a sandbox start costs without any of this ==
         A latency lever is only worth pulling against the thing it is a fraction of. This measures
         `container run -d` — the backend's own create — which is the floor. A full `yoloai new` is
         larger (~2.4s in earlier runs), so the percentages below are the PESSIMISTIC framing: against
         a real sandbox start, acquisition is a smaller fraction than this section makes it look.
-        start 1: 769 ms
-        start 2: 674 ms
-        start 3: 675 ms
-        mean start: 706 ms
-        acquisition at 32 slots is 99.9% of that;
-        at 8 slots it is 32.0%.
+        start 1: 715 ms
+        start 2: 679 ms
+        start 3: 633 ms
+        mean start: 676 ms
+        acquisition at 32 slots is 98.9% of that;
+        at 8 slots it is 32.1%.
    PASS    P3: both axes of the pool-size decision now have numbers
 
 == P4 WHAT THE POOL SIZE ALSO BUYS — the axis that is not latency ==

@@ -191,21 +191,28 @@ note "(searches/inserts) are useless — they change whether or not anything hap
 # that catches a flush but sleeps through a reload is a partial tripwire, and the dangerous case is
 # a reload that drops the anchor line.
 up() { pfctl -s info 2>/dev/null | head -1 | sed -E 's/.*Enabled for //; s/ +Debug.*//'; }
-b_reload=$(up)
+# Seconds, so the comparison is "did it go BACKWARDS" and not "does it look small". Run 1 tested
+# whether the string contained "00:00:0", which is true of any recently-enabled pf — so a reload
+# that moved 3s -> 5s was scored as a reset, and the discrimination this section exists for was lost.
+upsec() { pfctl -s info 2>/dev/null | head -1 \
+          | sed -E 's/.*Enabled for ([0-9]+) days ([0-9]+):([0-9]+):([0-9]+).*/\1 \2 \3 \4/' \
+          | awk '{print $1*86400 + $2*3600 + $3*60 + $4}'; }
+br=$(upsec)
 pfctl -f /etc/pf.conf >/dev/null 2>&1
 sleep 2
-a_reload=$(up)
-note "uptime before a plain reload : $b_reload"
-note "uptime after  a plain reload : $a_reload    (a RELOAD is the dangerous quiet case)"
-b_flush=$(up)
+ar=$(upsec)
+note "uptime before a plain reload : $(up)  (${br}s)"
+note "uptime after  a plain reload : $(up)  (${ar}s)   a RELOAD is the dangerous quiet case"
+bf=$(upsec)
 pfctl -F all >/dev/null 2>&1
-a_flush=$(up)
+af=$(upsec)
+note "uptime before -F all         : (${bf}s)"
+note "uptime after  -F all         : (${af}s)"
 restore_pf >/dev/null
-note "uptime before -F all         : $b_flush"
-note "uptime after  -F all         : $a_flush"
 RELOAD_MOVED=no; FLUSH_MOVED=no
-printf '%s' "$a_reload" | grep -q '00:00:0' && RELOAD_MOVED=yes
-printf '%s' "$a_flush"  | grep -q '00:00:0' && FLUSH_MOVED=yes
+[ "$ar" -lt "$br" ] && RELOAD_MOVED=yes
+[ "$af" -lt "$bf" ] && FLUSH_MOVED=yes
+note "(a reset means the counter went BACKWARDS; 2s of elapsed time makes it go forwards)"
 note ""
 note "counter reset by a reload: $RELOAD_MOVED    by -F all: $FLUSH_MOVED"
 if [ "$FLUSH_MOVED" = yes ] && [ "$RELOAD_MOVED" = no ]; then

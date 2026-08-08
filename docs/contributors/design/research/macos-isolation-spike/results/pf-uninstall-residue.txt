@@ -1,0 +1,91 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:47:20 CEST | anchor=com.apple/yoloai_u
+
+== U1 INSTALL — the whole D132 mechanism, in its shipped shape ==
+        pinned ruleset written: /etc/yoloai-spike/pf-pool.conf (16 lines, root-owned)
+        grant installed: /etc/sudoers.d/yoloai-pf-spike-u (mode 440, owner root)
+        pool loaded through the grant: 8 rules
+
+== U2 USE IT — and prove enforcement was real, so the residue is a residue of something ==
+        guest=192.168.64.38
+        allowed->1.1.1.1=301   denied->1.0.0.1=000   (need non-000 then 000)
+   PASS    U2: enforcement was live before the uninstall
+
+== U3 UNINSTALL — everything a user's uninstall actually reaches ==
+        A user removes the binary and their data directory. brew uninstall does the same. Neither
+        knows /etc/sudoers.d or /etc/yoloai exists, and neither can unload a pf anchor.
+        Simulating exactly that: the sandbox goes away, and nothing under /etc is touched.
+        sandbox removed; the yoloAI binary and ~/.yoloai are left in place here on purpose — this run
+        must not delete the owner's working tree, and removing them would change nothing below.
+
+== U4 WHAT REMAINS — one line per artifact ==
+        ARTIFACT                     STATE     REMOVED BY
+        --------                     -----     ----------
+        sudoers grant                PRESENT   nothing — root-owned, survives reboot
+        pinned ruleset file          PRESENT   nothing — root-owned, survives reboot
+        anchor rules (8)             PRESENT   pfctl -a <anchor> -F all (needs root)
+        anchor tables (8)            PRESENT   pfctl -a <anchor> -F all (needs root)
+        the anchor node itself       PRESENT   no pfctl verb exists — see U5c
+        
+        addresses still held in the tables after the uninstall:
+          yb_dst_1     1 address(es): 1.1.1.1 
+          yb_src_1     1 address(es): 192.168.64.38 
+        (the guest's address is among them — it outlived the sandbox it identified)
+
+== U5 EXERCISE THE RESIDUE — inert litter, or a live capability? ==
+        U5a  does the grant still authorize pfctl, with yoloAI gone?
+   FAIL    U5a: YES. A standing NOPASSWD grant on /sbin/pfctl outlives the program it was for.
+             This is the residue that matters. It is not litter — it is authority, and the user has
+             no way to know it is there. An uninstall that does not remove it leaves the security
+             boundary widened forever.
+        
+        U5b  do the stale tables still hold the dead sandbox's address?
+             yes: 192.168.64.38 
+             With the rules still loaded this is D3 in its resting state: whoever next receives that
+             address inherits the allowlist. That is what rule 1 exists for — but rule 1 runs at
+             ACQUISITION, and after an uninstall there is no next acquisition to run it.
+   PASS    U5b: stale membership survives the uninstall, recorded
+        
+        U5c  is there ANY pfctl verb that removes an anchor?
+             -F all empties it; the node remains. Trying the plausible spellings so the negative names
+             what was attempted rather than asserting an absence.
+             after -F all: rules=0 tables=0
+          pfctl -a <anchor> -F anchors   -> pfctl: Unknown flush modifier 'anchors'
+          pfctl -a <anchor> -X           -> pfctl: option requires an argument -- X
+          pfctl -a <anchor> -R           -> No ALTQ support in kernel
+             still listed under com.apple: YES
+   PASS    U5c: confirmed — the anchor can be emptied but not removed; only a reboot clears the node
+
+== U6 WHAT AN UNINSTALL WOULD HAVE TO DO ==
+        1. rm /etc/sudoers.d/<grant>              root. The one that matters — it is authority.
+        2. rm -rf /etc/yoloai/                    root. The pinned ruleset the grant points at.
+        3. pfctl -a <anchor> -F all               root. Empties rules and tables. Note the grant
+                                                  does NOT permit -F, so this needs a real sudo
+                                                  prompt — the uninstall cannot use the grant it
+                                                  is deleting.
+        4. the anchor node                        cannot be removed; cleared at reboot.
+        Order matters: 3 before 1, or the last step loses the privilege it needs. And every step is
+        root, so an uninstall is an interactive, privileged operation — which is the opposite of the
+        install, whose whole design goal was to need no prompt at runtime.
+
+== WHAT WAS NOT TRIED ==
+        - A reboot. pf-reboot.txt already measured that the loaded ruleset is rebuilt from
+          /etc/pf.conf at boot, so the anchor node does not survive; that was NOT re-run here, and
+          the sudoers file and pinned ruleset plainly do survive since they are ordinary files.
+        - A real `brew uninstall`. The removal was simulated by reasoning about what it reaches
+          (the binary and the data dir); the formula was not executed, because this host's yoloAI is
+          the working tree.
+        - Removing ~/.yoloai. Deliberately not done — it is the owner's data. Nothing in the residue
+          list lives there, so it changes no result.
+        - Whether a second install re-uses a stale slot. That is the reaping design's own question
+          (rule 1), not the uninstall's.
+
+== cleanup — removing what a real uninstall would have to remove ==
+   sudoers.d now: []
+   /etc/yoloai-spike: gone
+   anchor rules: 0   main-refs: 2
+   NOTE the anchor NODE itself cannot be removed; see U5c. It is empty, which is the most
+        this cleanup can achieve, and that is the finding.
+
+pass=3 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-uninstall-residue.txt

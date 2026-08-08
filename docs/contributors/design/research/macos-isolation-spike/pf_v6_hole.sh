@@ -216,10 +216,10 @@ asuser "$YOLOAI" destroy v6x --abandon-unapplied >/dev/null 2>&1
 if ! asuser "$YOLOAI" new v6x "$WD" --backend tart >/dev/null 2>&1; then
   unk "V2: tart sandbox would not start; not measured"
 else
-  T4=$(asuser "$YOLOAI" exec v6x sh -c "ifconfig en0 | awk '/inet /{print \$2; exit}'" 2>/dev/null | tr -d '\r')
-  [ -z "$T4" ] && T4=$(asuser "$YOLOAI" exec v6x sh -c "ipconfig getifaddr en0" 2>/dev/null | tr -d '\r')
-  T6=$(asuser "$YOLOAI" exec v6x sh -c "ifconfig en0 | awk '/inet6/ && \$2 !~ /^fe80/ {print \$2; exit}'" 2>/dev/null | tr -d '\r')
-  [ -z "$T6" ] && T6=$(asuser "$YOLOAI" exec v6x sh -c "ifconfig en0 | awk '/inet6/{print \$2; exit}'" 2>/dev/null | tr -d '\r' | cut -d% -f1)
+  T4=$(asuser "$YOLOAI" exec v6x -- sh -c "ifconfig en0 | awk '/inet /{print \$2; exit}'" 2>/dev/null | tr -d '\r')
+  [ -z "$T4" ] && T4=$(asuser "$YOLOAI" exec v6x -- ipconfig getifaddr en0 2>/dev/null | tr -d '\r')
+  T6=$(asuser "$YOLOAI" exec v6x -- sh -c "ifconfig en0 | awk '/inet6/ && \$2 !~ /^fe80/ {print \$2; exit}'" 2>/dev/null | tr -d '\r')
+  [ -z "$T6" ] && T6=$(asuser "$YOLOAI" exec v6x -- sh -c "ifconfig en0 | awk '/inet6/{print \$2; exit}'" 2>/dev/null | tr -d '\r' | cut -d% -f1)
   note "tart guest: v4=${T4:-<none>} v6=${T6:-<none>}"
   if [ -z "$T4" ]; then
     unk "V2: could not read the tart guest's address; not measured"
@@ -227,10 +227,10 @@ else
     # macOS guests: route lookup differs from Linux, so the host address is derived from the subnet.
     tart_ex2() {
       case "$1" in
-        *"ip route"*)    asuser "$YOLOAI" exec v6x sh -c "netstat -rn -f inet | awk '/^default/{print \$2; exit}'" 2>/dev/null | tr -d '\r' ;;
-        *"ip -6 route"*) asuser "$YOLOAI" exec v6x sh -c "netstat -rn -f inet6 | awk '/^default/{print \$2; exit}'" 2>/dev/null | tr -d '\r' ;;
+        *"ip route"*)    asuser "$YOLOAI" exec v6x -- sh -c "netstat -rn -f inet | awk '/^default/{print \$2; exit}'" 2>/dev/null | tr -d '\r' ;;
+        *"ip -6 route"*) asuser "$YOLOAI" exec v6x -- sh -c "netstat -rn -f inet6 | awk '/^default/{print \$2; exit}'" 2>/dev/null | tr -d '\r' ;;
         *"ip -6 neigh"*) printf '' ;;
-        *) asuser "$YOLOAI" exec v6x sh -c "$1" 2>/dev/null | tr -d '\r' ;;
+        *) asuser "$YOLOAI" exec v6x -- sh -c "$1" 2>/dev/null | tr -d '\r' ;;
       esac
     }
     probe_backend "tart" tart_ex2 "$T4" "$T6" en0

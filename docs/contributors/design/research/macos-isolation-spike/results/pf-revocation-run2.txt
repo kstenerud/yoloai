@@ -1,0 +1,63 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:50:31 CEST | anchor=com.apple/yoloai_r
+
+== R0 SETUP ==
+        guest=192.168.64.5  host as seen from the guest=192.168.64.1
+        streaming server up on 192.168.64.1:18643 (one line per second, 40s)
+        allowed (the host) -> 200    denied (1.0.0.1) -> 000   (need non-000 then 000)
+   PASS    R0: enforcement is live and the stream endpoint is the allowlisted destination
+
+== R1 BASELINE — the stream runs to completion while the entry is present ==
+        Without this, a stream that stops for its own reasons would read as a revocation working.
+        bytes received at +5s: 45     at +11s: 108
+   PASS    R1: the stream is genuinely live and growing while permitted
+
+== R2 REVOKE MID-STREAM — the question ==
+        before revocation: 45 bytes received, 3 pf state(s) mentioning 192.168.64.5
+        revoking: pfctl -a com.apple/yoloai_r -t yb_dst_1 -T delete 192.168.64.1
+        pfctl: No ALTQ support in kernel
+        pfctl: ALTQ related functions disabled
+        pfctl: 1/1 addresses deleted.
+        allowlist now holds 0 address(es) — the revocation is applied
+        8s after revocation: 126 bytes (was 45)
+
+== R3 THE CONTROL — a NEW connection must now fail ==
+        Without this, 'the stream kept running' cannot be told apart from 'the delete did nothing'.
+        new connection to the same endpoint: 000   (must be 000)
+   FAIL    R2/R3: THE STREAM SURVIVED REVOCATION. New connections are refused, but the connection that
+             predated the delete kept receiving data. Removing an allowlist entry changes FUTURE
+             policy only. So a reclaimed slot is not a stopped sandbox, and the exposure window is
+             bounded by the lifetime of the longest open connection — which nothing bounds.
+
+== R4 THE FIX — does killing states stop it, and what does that cost? ==
+        pfctl -k kills state entries. If R2 showed survival, this is the missing step in every
+        revocation path: reaping, liveness reinstall, and sandbox teardown alike.
+        stream re-established: 54 bytes; states mentioning 192.168.64.5: 4
+        pfctl -k 192.168.64.5 -> No ALTQ support in kernel ALTQ related functions disabled 
+        states now: 0
+        6s after the kill: 108 bytes (was 54)
+   FAIL    R4: the stream survived even a state kill (54 -> 108)
+        
+        and what it costs at the security boundary — the shipped D132 grant permits four forms:
+          -a <anchor> -t <table> -T add|delete|flush|show ...   /   -a <anchor> -f <pinned file>
+          -a <anchor> -s rules                                  /   -s info
+        `-k` is NONE of them, and it is not scoped to an anchor: 'pfctl -k <host>' reaches every
+        state on the machine, including the user's own. Granting it is a materially wider permission
+        than table membership, so if R2 showed survival, the fix is a D132 amendment and not a patch.
+
+== WHAT WAS NOT TRIED ==
+        - UDP, and long-lived idle connections. Only an actively streaming TCP connection was used;
+          pf's state timeouts differ per protocol and per state, and an idle TCP state can persist
+          for hours by default.
+        - `pfctl -K` (kill by both endpoints), which would be narrower than `-k` and might be a
+          more defensible grant. Not tried, and it is the obvious next question if -k is too wide.
+        - Whether reloading the pool ruleset (the liveness repair path) drops states by itself.
+          That would make repair disruptive to innocent sandboxes, and it is untested.
+        - State timeouts as an alternative to killing: a short `tcp.established` timeout in the
+          anchor would bound the survival window without any new grant. Not measured.
+
+== cleanup ==
+   anchor rules: 0  main-refs: 2
+
+pass=2 fail=2 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-revocation.txt

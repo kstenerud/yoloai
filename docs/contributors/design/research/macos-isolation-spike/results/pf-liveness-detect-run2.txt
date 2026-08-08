@@ -1,0 +1,96 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:48:14 CEST | anchor=com.apple/yoloai_v
+
+== V0 SETUP — and proof that enforcement is real before anything is broken ==
+        guest=192.168.64.40  pf=Enabled  main-refs=2
+        allowed->1.1.1.1=301   denied->1.0.0.1=000   (need non-000 then 000)
+   PASS    enforcement is live: the allowlist passes and a denied destination is refused
+
+== V1 ALL THREE DETECTORS ON A HEALTHY HOST ==
+        Each must say HEALTHY here. A detector that says BROKEN on a working host is worse than none.
+        A main-ruleset inspection : HEALTHY 15.7 ms
+        B evaluation counters     : HEALTHY 252.5 (evals 15->21) ms
+        C behavioural canary      : HEALTHY 93.6 (code 000) ms
+   PASS    V1: all three agree the host is healthy
+
+== V2 FAULT F1 'SHADOWED' — the reference is PRESENT and pf still never descends ==
+        pf.conf's own comments warn that system services insert anchors into the main ruleset at
+        runtime. Rules are first-match with 'quick', so anything inserted ahead of the com.apple
+        anchor point shadows it. Here that is simulated with one 'pass quick all' line, loaded from a
+        copy of /etc/pf.conf — so the reference detector A counts is still right there in the ruleset.
+        the injected ruleset, in full:
+          | scrub-anchor "com.apple/*"
+          | nat-anchor "com.apple/*"
+          | rdr-anchor "com.apple/*"
+          | dummynet-anchor "com.apple/*"
+          | pass quick all
+          | anchor "com.apple/*"
+          | load anchor "com.apple" from "/etc/pf.anchors/com.apple"
+        main-refs after injection = 2  (still non-zero: that is the entire point)
+        allowed->1.1.1.1=000   denied->1.0.0.1=000   (denied reaching => enforcement is dead)
+   UNKNOWN V2: the injection did not actually stop enforcement (denied=000); nothing tested
+        restoring the real /etc/pf.conf
+        denied->1.0.0.1=000 after restore  (000 = enforcement back, no daemon restart needed)
+
+== V3 FAULT F2 'FLUSHED' — the control, and the fault measured last pass ==
+        pfctl: rules cleared
+        pfctl: nat cleared
+        pfctl: dummynet cleared
+        pfctl: 0 tables deleted.
+        pfctl: 235 states cleared
+        pfctl: source tracking entries cleared
+        pfctl: pf: statistics cleared
+        pfctl: pf: interface flags reset
+        guest now 192.168.64.2 | main-refs=0 | pf=Enabled
+        allowed->1.1.1.1=301   denied->1.0.0.1=301
+        A main-ruleset inspection : BROKEN 13.9 ms
+        B evaluation counters     : BROKEN 273.0 (evals 0->0) ms
+        C behavioural canary      : BROKEN 130.1 (code 301) ms
+   PASS    V3: all three detect the flushed fault
+
+== V4 GRANT SURFACE — what each detector would cost at the security boundary ==
+        The shipped D132 grant permits exactly four forms. Installing it here in its real shape (with
+        this run's anchor root) and asking for each detector's command is the only way to know.
+        grant installed and validated
+        PERMITTED  detector C (none needed)           pfctl -s info
+        refused    detector A wants                   pfctl -s rules
+        refused    detector B wants                   pfctl -a com.apple/yoloai_v -vvs rules
+        PERMITTED  (the permitted anchor read)        pfctl -a com.apple/yoloai_v -s rules
+        
+        So detector A needs a NEW grant line for the WHOLE main ruleset, and detector B needs the
+        existing anchor read widened to -vv. Both are security-boundary changes: D132's permit/refuse
+        matrix has to be re-run, not just a regex edited. Detector C needs nothing.
+   PASS    V4: grant removed and refusal re-verified
+
+== V5 REPAIR, THEN PRICE THE DETECTORS ON A HEALTHY HOST ==
+        after repair: main-refs=2 pf=Enabled guest=192.168.64.2
+        allowed=301 denied=000  (need non-000 then 000)
+   PASS    host is sound again
+        
+        Five repetitions of each, on a healthy host, since that is the case that runs every time:
+        run 1   A=HEALTHY 16.1   B=HEALTHY 264.1 (evals 6->59)   C=HEALTHY 84.4 (code 000)
+        run 2   A=HEALTHY 12.0   B=HEALTHY 298.3 (evals 62->79)   C=HEALTHY 90.1 (code 000)
+        run 3   A=HEALTHY 12.9   B=HEALTHY 245.4 (evals 102->118)   C=HEALTHY 95.5 (code 000)
+        run 4   A=HEALTHY 13.8   B=HEALTHY 282.0 (evals 131->137)   C=HEALTHY 89.8 (code 000)
+        run 5   A=HEALTHY 18.8   B=HEALTHY 241.1 (evals 140->146)   C=HEALTHY 98.9 (code 000)
+        
+        Read the middle column of each: that is the millisecond cost added per check. Compare against
+        a ~2.4s sandbox start. Detector B's figure includes the two requests it needs to see a delta,
+        which is why it is a poll and not a start-path check — at start there is no prior traffic to
+        compare against.
+
+== WHAT WAS NOT TRIED ==
+        - A third fault: pf DISABLED (`pfctl -d`). D132's check 1 already covers it and `-s info` is
+          in the shipped grant, so it is the one state existing verification does see.
+        - Shadowing by a real system service. `pass quick all` was injected by hand; no service was
+          induced to insert its own anchor ahead of com.apple. The mechanism is pf.conf's own
+          documented behaviour, but the specific trigger is not demonstrated here.
+        - Detector cost under load. All timings are on an idle host with one guest.
+        - Whether the canary can run concurrently with a real acquisition. It rides rule 1b's window,
+          so two sandboxes starting at once share that window; not tested.
+
+== cleanup ==
+   pf=Enabled  main-refs=2  sudoers: []
+
+pass=5 fail=0 unknown=1
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-liveness-detect.txt
