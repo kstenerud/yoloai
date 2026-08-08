@@ -1,0 +1,23 @@
+A=10.58.0.2  B=10.58.0.3  allowlisted=104.20.23.154
+
+=== BEFORE — br_netfilter not loaded (this host's default, and L5c's condition) ===
+  module loaded: no
+  default                    allowlisted=REACHABLE  denied=blocked    sibling=REACHABLE
+  host 'denied' counter: 3
+
+=== LOAD br_netfilter and route bridged frames through netfilter ===
+  module loaded: yes
+  bridge-nf-call-iptables: 1
+
+=== AFTER — same policy, same containers, nothing else changed ===
+  br_netfilter on            allowlisted=REACHABLE  denied=blocked    sibling=blocked
+  host 'denied' counter: 8 (was 3)
+  ip saddr 10.58.0.2 ip daddr @allowed counter packets 2 bytes 120 accept comment "allowed"
+  ip saddr 10.58.0.2 counter packets 8 bytes 528 drop comment "denied"
+
+=== verdict ===
+If sibling traffic is blocked only in the second row, then L5c/L5d measured a
+DEFAULT and not a structural limit: the host layer can be made to see
+sandbox-to-sandbox traffic by loading a module yoloAI does not currently load.
+If it stays reachable in both rows, the original wording stands.
+restored: br_netfilter unloaded

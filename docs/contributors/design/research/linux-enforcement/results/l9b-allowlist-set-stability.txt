@@ -1,0 +1,84 @@
+
+=== shipped Claude allowlist (internal/agent/agent.go:385) ===
+  api.anthropic.com
+  claude.ai
+  platform.claude.com
+  statsig.anthropic.com
+  sentry.io
+sampling each 6 times, 10s apart, from inside one container
+
+=== api.anthropic.com ===
+  round 1: 160.79.104.10
+  round 2: 160.79.104.10
+  round 3: 160.79.104.10
+  round 4: 160.79.104.10
+  round 5: 160.79.104.10
+  round 6: 160.79.104.10
+  ---
+  install-time snapshot (round 1): 160.79.104.10
+  union across all rounds        : 160.79.104.10 
+  set changed between rounds     : no
+  answers NOT covered by round 1 : 0
+  => round 1's snapshot covered every later answer over this window.
+
+=== claude.ai ===
+  round 1: 160.79.104.10
+  round 2: 160.79.104.10
+  round 3: 160.79.104.10
+  round 4: 160.79.104.10
+  round 5: 160.79.104.10
+  round 6: 160.79.104.10
+  ---
+  install-time snapshot (round 1): 160.79.104.10
+  union across all rounds        : 160.79.104.10 
+  set changed between rounds     : no
+  answers NOT covered by round 1 : 0
+  => round 1's snapshot covered every later answer over this window.
+
+=== platform.claude.com ===
+  round 1: 160.79.104.10
+  round 2: 160.79.104.10
+  round 3: 160.79.104.10
+  round 4: 160.79.104.10
+  round 5: 160.79.104.10
+  round 6: 160.79.104.10
+  ---
+  install-time snapshot (round 1): 160.79.104.10
+  union across all rounds        : 160.79.104.10 
+  set changed between rounds     : no
+  answers NOT covered by round 1 : 0
+  => round 1's snapshot covered every later answer over this window.
+
+=== statsig.anthropic.com ===
+  round 1: <unresolved>
+  round 2: <unresolved>
+  round 3: <unresolved>
+  round 4: <unresolved>
+  round 5: <unresolved>
+  round 6: <unresolved>
+  ---
+  install-time snapshot (round 1): 
+  union across all rounds        : 
+  set changed between rounds     : no
+  answers NOT covered by round 1 : 0
+  => round 1's snapshot covered every later answer over this window.
+
+=== sentry.io ===
+  round 1: 35.186.247.156
+  round 2: 35.186.247.156
+  round 3: 35.186.247.156
+  round 4: 35.186.247.156
+  round 5: 35.186.247.156
+  round 6: 35.186.247.156
+  ---
+  install-time snapshot (round 1): 35.186.247.156
+  union across all rounds        : 35.186.247.156 
+  set changed between rounds     : no
+  answers NOT covered by round 1 : 0
+  => round 1's snapshot covered every later answer over this window.
+
+=== what this decides ===
+resolve_domains() runs once, at install. If the set drifts, the allowlist is
+stale from the moment it is written, and the failure is closed — the agent is
+denied a destination its allowlist names. This is independent of where
+resolution happens; moving it host-side (L2) adds split-horizon on top.

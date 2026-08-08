@@ -1,0 +1,26 @@
+
+=== sandbox A, allowlisted for 1.1.1.1, makes one UDP query from port 54323 ===
+A = 172.17.0.2
+  entry while A is alive:
+    udp      17 27 src=172.17.0.2 dst=1.1.1.1 sport=54323 dport=53 src=1.1.1.1 dst=192.168.111.33 sport=53 dport=54323 mark=0 use=1
+
+=== destroy A — UDP has no close, so nothing should retire the entry ===
+  entry after A is gone:
+    udp      17 24 src=172.17.0.2 dst=1.1.1.1 sport=54323 dport=53 src=1.1.1.1 dst=192.168.111.33 sport=53 dport=54323 mark=0 use=1
+
+=== sandbox B must take the same address, or the test is meaningless ===
+B = 172.17.0.2 (A was 172.17.0.2)
+  dig present in B: DiG 9.20.26
+
+=== B's policy allows NOTHING — no 1.1.1.1, no port 53 ===
+
+=== NEGATIVE CONTROL — a query from a FRESH source port must be denied ===
+  no answer: blocked, as required
+
+=== THE TEST — same query, reusing the dead sandbox's source port ===
+  ANSWERED — B inherited A's UDP flow state and bypassed its own allowlist
+
+=== counters — which rule decided ===
+  ip saddr 172.17.0.2 ct state established,related counter packets 1 bytes 80 accept comment "established"
+  ip saddr 172.17.0.2 ip daddr @allowed counter packets 0 bytes 0 accept comment "allowlisted"
+  ip saddr 172.17.0.2 counter packets 1 bytes 80 drop comment "denied"

@@ -1,0 +1,32 @@
+peer (allowlisted for sandbox A, NOT for sandbox B): 104.20.23.154
+conntrack tcp established timeout: 432000s
+
+=== sandbox A starts, is allowlisted for the peer, and opens a long-lived flow ===
+A address = 172.17.0.3
+  conntrack entries for A:
+    tcp      6 431995 ESTABLISHED src=172.17.0.3 dst=104.20.23.154 sport=54321 dport=80 src=104.20.23.154 dst=192.168.111.33 sport=80 dport=54321 [ASSURED] mark=0 use=1
+
+=== sandbox A is destroyed — does its connection state go with it? ===
+  conntrack entries still naming 172.17.0.3 after the sandbox is gone: 1
+    tcp      6 116 TIME_WAIT src=172.17.0.3 dst=104.20.23.154 sport=54321 dport=80 src=104.20.23.154 dst=192.168.111.33 sport=80 dport=54321 [ASSURED] mark=0 use=1
+  RESULT: connection state OUTLIVES the sandbox. Nothing flushed it.
+
+=== sandbox B starts and takes the freed address ===
+B address = 172.17.0.3  (A's was 172.17.0.3)
+
+=== B's policy: the peer is NOT allowlisted for B ===
+  (A's table deleted first — nft -f merges, it does not replace)
+
+=== NEGATIVE CONTROL — B reaches the peer from a fresh source port ===
+  blocked, as the allowlist requires
+
+=== THE TEST — B reaches the peer reusing the dead sandbox's 5-tuple ===
+  blocked — the stale entry did not carry B past the allowlist
+
+=== counters ===
+  ip saddr 172.17.0.3 ct state established,related counter packets 0 bytes 0 accept comment "established"
+  ip saddr 172.17.0.3 ip daddr @allowed counter packets 0 bytes 0 accept comment "allowlisted"
+  ip saddr 172.17.0.3 counter packets 8 bytes 480 drop comment "denied"
+
+conntrack entries naming the shared address now:
+    none

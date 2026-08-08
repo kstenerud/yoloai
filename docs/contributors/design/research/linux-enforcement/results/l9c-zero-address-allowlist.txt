@@ -1,0 +1,21 @@
+=== does a domain resolving to 0.0.0.0 widen the allowlist? ===
+statsig.anthropic.com is in the shipped Claude allowlist (agent.go:385) and this
+host's resolver answers 0.0.0.0 for it — the standard DNS-blocking answer.
+
+-- what getaddrinfo hands resolve_domains --
+  statsig.anthropic.com -> ['0.0.0.0']
+
+-- is_ipv4('0.0.0.0') (firewall.py's only filter on a resolved address) --
+  is_ipv4("0.0.0.0") = True
+
+=== what iptables makes of it, in a throwaway netns ===
+  installed rules:
+    -P OUTPUT DROP
+    -A OUTPUT -o lo -j ACCEPT
+    -A OUTPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+    -A OUTPUT -p udp -m udp --dport 53 -j ACCEPT
+    -A OUTPUT -d 0.0.0.0/32 -j ACCEPT
+
+  reachability with 0.0.0.0 as the only allowlisted destination:
+    1.1.1.1:80  blocked
+    example.com blocked

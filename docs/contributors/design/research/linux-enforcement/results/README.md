@@ -35,6 +35,15 @@ the file says so rather than quietly resting on it — see the prerouting contro
 | L5c | `l5c-lateral-and-family.txt` | Same-bridge sandbox↔sandbox traffic is unfilterable. |
 | L6b | `l6b-set-replacement-atomicity.txt` | Set replacement is atomic and fails closed. |
 | L5d | `l5d-layers-compared.txt` | The in-guest layer covers what the host layer cannot see. |
+| L8 | `l8-br-netfilter.txt` | **Corrects L5c/L5d** — that gap is a default, not a limit. |
+| L9 | `l9-sidecar-resolver-context.txt` | Sidecar shares resolv.conf *and* hosts; no divergence. |
+| L9b | `l9b-allowlist-set-stability.txt` | Shipped allowlist domains are single-address and stable. |
+| L9c | `l9c-zero-address-allowlist.txt` | A `0.0.0.0` answer is inert, not a widening. |
+| L10 | `l10-conntrack-recycling.txt` | TCP residue does not carry a new sandbox through. |
+| L10b | `l10b-established-residue.txt` | Invalid — see below. Superseded by `l10c`. |
+| L10c | `l10c-udp-residue.txt` | **UDP residue does** — a new sandbox inherits the accept. |
+| L11 | `l11-l12-cni.txt` | CNI host-local wraps and reuses freed addresses. |
+| L12 | `l11-l12-cni.txt`, `l12b-stale-cni-entry.txt` | DF9 absent here; live stale accept found. |
 
 ## Runs that were discarded, and why
 
@@ -84,6 +93,25 @@ the file says so rather than quietly resting on it — see the prerouting contro
   the data on the line above it said `REACHABLE`. Nothing in the run's own controls would have caught
   that. The redone version installs the tool first, prints `iptables -S OUTPUT` as an install check,
   and measures each layer with the other removed.
+- **L10's first run: `nft -f` merges, it does not replace.** Loading B's policy while A's table
+  still existed left A's rules *and* A's allowlisted peer in the set, so the negative control found
+  the peer reachable and printed "REACHABLE (unexpected)". Both results were void. The control is
+  the only reason that was visible; the test's own answer looked like a finding. Fixed by deleting
+  the table before installing the replacement.
+- **L10b is invalid on two counts and is superseded by `l10c`.** It tried to hold a conntrack entry
+  in `ESTABLISHED` past the sandbox's death by dropping the flow's FIN/RST in a filter chain. That
+  cannot work: conntrack hooks at priority −200, well below the filter chain, so it records the state
+  transition before our rule ever drops the packet — the entry went to `FIN_WAIT` regardless. The
+  address also was not recycled that run (B got `.2`, A had `.3`), so the tuple could not have
+  matched anyway. L10 had a guard for exactly that and L10b had lost it; `l10c` restores it as a
+  hard abort.
+- **L10c's first run repeated L5d's trap.** A's policy binds B too, since they share an address, and
+  it was still loaded while B ran `apk add bind-tools` — so `dig` was never installed and both the
+  control and the test reported "blocked" for free. Every counter reading zero is what gave it away.
+  The fix drops the table before B fetches tooling, and asserts `dig` exists before testing.
+- **L9's first run produced a verdict from empty strings.** `docker0` had gone missing, so every
+  container command failed, and the resolv.conf comparison duly concluded "IS shared" by finding two
+  empty values equal. It now aborts when a value it is about to compare comes back empty.
 - **L1b's probe control returned 0.** The within-run comparison still holds (see the file), but
   the separate cgroup control for the prerouting hook did not fire either, so it proves nothing.
   The conclusion rests on the L1 output-hook control and on the address counter in the same chain,

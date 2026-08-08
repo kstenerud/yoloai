@@ -1,0 +1,34 @@
+
+=== start an agent container with a name only IT can resolve ===
+--add-host writes the agent's /etc/hosts. The sidecar has its own filesystem,
+so this is the divergence the shipped design is exposed to.
+
+=== CLAIM UNDER TEST (install-firewall.py docstring) ===
+  "The agent's /etc/resolv.conf nameservers are shared into this container by
+   Docker (--network container:<id> shares the resolv.conf), so read_nameservers()
+   sees the same DNS servers the agent uses."
+
+=== does --network container:<id> actually share /etc/resolv.conf? ===
+  agent  : nameserver 8.8.4.4 nameserver 8.8.8.8 search tail571a40.ts.net 
+  sidecar: nameserver 8.8.4.4 nameserver 8.8.8.8 search tail571a40.ts.net 
+  RESULT: resolv.conf IS shared — the docstring's claim holds for nameservers.
+
+=== is /etc/hosts shared? (resolve_domains uses getaddrinfo, which reads it first) ===
+  agent /etc/hosts lines: 8, and it contains allowlisted.example
+  sidecar /etc/hosts entries for allowlisted.example: 1
+
+=== THE MEASUREMENT — resolve the same name in each context ===
+  agent   resolves allowlisted.example -> 203.0.113.55
+  sidecar resolves allowlisted.example -> 203.0.113.55
+
+=== POSITIVE CONTROL — a name both contexts resolve identically ===
+  agent   resolves example.com -> 172.66.147.243
+  sidecar resolves example.com -> 104.20.23.154
+
+=== what this means for the installed allowlist ===
+resolve_domains() runs in the sidecar. apply_firewall() writes rules into the
+shared netns, so they bind the AGENT. Any name the two contexts resolve
+differently is allowlisted at the sidecar's answer and used at the agent's.
+Where the sidecar cannot resolve a name at all, the agent is allowlisted for
+nothing and the failure is closed — the same shape L2 measured for host-side
+resolution, one boundary further in.

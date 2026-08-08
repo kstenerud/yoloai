@@ -1,0 +1,24 @@
+=== is the CNI-FORWARD entry for 10.89.0.2 backed by a live sandbox? ===
+-- rules naming it --
+  -A CNI-FORWARD -d 10.89.0.2/32 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  -A CNI-FORWARD -s 10.89.0.2/32 -j ACCEPT
+-- yoloai0 bridge state --
+  Device "yoloai0" does not exist.
+-- anything holding a 10.89.x address? --
+-- host-local reservations for the yoloai network --
+  total 16
+  drwxr-xr-x 2 root root 4096 Aug  5 05:32 .
+  drwxr-xr-x 5 root root 4096 Aug  8 11:06 ..
+  -rw------- 1 root root   24 Aug  2 14:11 10.89.0.2
+  -rw------- 1 root root   10 Aug  5 05:32 last_reserved_ip.0
+  -rwxr-x--- 1 root root    0 Aug  2 14:11 lock
+-- yoloai sandboxes known to the tool --
+  yoloai: unknown command "list" for "yoloai"
+  
+  Did you mean this?
+  	ls
+  
+
+READ: an unconditional '-s 10.89.0.2 -j ACCEPT' with no sandbox behind it is a
+stale enforcement entry of the exact kind rule 1 exists for. If a future sandbox
+is allocated 10.89.0.2, it inherits a blanket accept it was never granted.

@@ -214,10 +214,16 @@ each layer *alone*, against a baseline where all three destinations are reachabl
 | host nftables only | reachable | blocked | **reachable** |
 | in-guest iptables only | reachable | blocked | **blocked** |
 
-The in-guest layer catches what the host layer structurally cannot see, because a sandbox's own
-`OUTPUT` chain sees all of its traffic regardless of whether the packets are ever routed. **The
-host-side layer is not a superset of the in-guest one and cannot replace it** — which is prior-art
-recommendation 6, now with a measured mechanism rather than a general defence-in-depth argument.
+The in-guest layer catches what the host layer does not see, because a sandbox's own `OUTPUT` chain
+sees all of its traffic regardless of whether the packets are ever routed.
+
+> **Corrected 2026-08-08 by L8.** The paragraphs above originally said the host layer
+> *structurally* cannot see this traffic, and concluded that it "is not a superset of the in-guest
+> one and cannot replace it". That was too strong and the second half is wrong as stated. What was
+> measured is a **default**: `br_netfilter` is available on the test host and simply not loaded.
+> Load it, set `bridge-nf-call-iptables=1`, and the host layer blocks sibling traffic — see L8. The
+> surviving claim is narrower: *as shipped and as configured by default*, the host layer does not
+> see it, and closing that requires a host-wide module and sysctl that yoloAI does not currently set.
 
 ### L6 — Is `nft -f` atomic in the way the design assumes?
 
@@ -257,6 +263,100 @@ everything from the guest at -10 and dropping it from another chain at 100: egre
 `-10` is the right place to *deny* from, and no priority anywhere lets our allowlist *guarantee*
 reachability — anything from docker to an operator's own rules can still deny what we permit. The
 design should describe our table as a denier, never as a grant.
+
+---
+
+## Linux — round 2
+
+Opened 2026-08-08 from what round 1 turned up. L8 exists because round 1 overstated a conclusion;
+the rest are questions round 1 raised and did not answer.
+
+### L8 — is the sibling-traffic gap structural, or just unloaded? **(a correction)**
+
+L5c/L5d concluded the host layer "structurally cannot" see traffic between sandboxes on one bridge.
+`br_netfilter` is present on this host and merely not loaded, which makes that claim unsafe.
+
+**Outcome: it is a default, not a limit.** `results/l8-br-netfilter.txt`. Same containers, same
+policy, nothing else changed: with the module unloaded the sibling was reachable; after
+`modprobe br_netfilter` and `bridge-nf-call-iptables=1` it was blocked, and the host chain's drop
+counter moved 3 → 8, so the chain genuinely saw and dropped those packets. Controls held throughout
+(allowlisted reachable, denied blocked). **The host layer can be made to see sandbox-to-sandbox
+traffic.** The cost is that both settings are host-wide rather than per-sandbox, and yoloAI sets
+neither today. The L5 outcome above carries the correction.
+
+### L9 — does the shipped sidecar resolve in a different context than the agent it binds?
+
+`install-firewall.py` resolves the allowlist in the sidecar and installs rules that bind the agent,
+asserting in its docstring that `--network container:<id>` shares the resolver view.
+
+**Outcome: the assertion holds, and the hypothesised divergence does not exist.**
+`results/l9-sidecar-resolver-context.txt`. `/etc/resolv.conf` is shared, and so — contrary to what
+prompted the item — is `/etc/hosts`: an `--add-host` entry written for the agent was visible in the
+sidecar, and both resolved it to the same address. There is no sidecar-vs-agent split-horizon.
+
+**But the run's own positive control diverged**, which was the real find: two resolutions of
+`example.com` moments apart returned different addresses. That is CDN rotation, not context
+divergence, and it applies to any one-shot resolution. So L9b asked whether the *shipped* allowlist
+is exposed to it. `results/l9b-allowlist-set-stability.txt`: sampling all five domains from
+`internal/agent/agent.go:385` six times over a minute, the four that resolve are single-address and
+did not move (`api.anthropic.com`, `claude.ai`, `platform.claude.com` all → `160.79.104.10`;
+`sentry.io` → `35.186.247.156`). The shipped allowlist is not exposed today; a user-supplied
+CDN-fronted domain would be, and `example.com` is the demonstration.
+
+**Two incidental findings.** `statsig.anthropic.com`, a shipped allowlist entry, does not resolve
+publicly and this host's resolver answers `0.0.0.0` for it — the standard DNS-blocking answer for a
+telemetry host. `firewall.py`'s `is_ipv4()` accepts `0.0.0.0`, so it reaches `iptables -d`. That is
+**not** a widening: `results/l9c-zero-address-allowlist.txt` shows iptables normalising it to
+`0.0.0.0/32`, with `1.1.1.1` and `example.com` both still blocked. The entry is inert, and the
+failure is closed — an allowlisted domain the agent silently cannot reach, with only a log line.
+
+### L10 — does connection state outlive a recycled address? **(the significant one)**
+
+Every rule shape here accepts `ct state established,related`, and docker hands a freed address
+straight to the next sandbox. Rule 1 clears rules; it does not clear conntrack.
+
+**Outcome: TCP is safe, UDP is not, and a new sandbox can inherit a dead one's authorisation.**
+
+- **TCP** (`results/l10-conntrack-recycling.txt`): state does outlive the sandbox, but a cleanly
+  closed flow lingers as `TIME_WAIT`, and a SYN reusing the dead tuple is classified `NEW` and falls
+  through to the allowlist. 8 packets hit the deny rule, 0 hit `established`. No inheritance.
+- **UDP** (`results/l10c-udp-residue.txt`): UDP has no close handshake, so the entry simply persists.
+  Sandbox A queried `1.1.1.1:53` from port 54323 while allowlisted for it; A was destroyed; B took
+  the same address with an allowlist containing **neither** the destination nor port 53. A query from
+  a fresh source port was denied — 1 packet on the deny counter. **The same query reusing A's source
+  port was answered — 1 packet on the `established` accept.** The counters name the rule that
+  decided.
+
+Packet, path, enforcement point: UDP `172.17.0.2:54323 → 1.1.1.1:53`, over `docker0` through the
+forward hook, crossing the `ct state established,related accept` rule by matching a conntrack entry
+created by a different, already-destroyed sandbox. The window is bounded by the UDP timeout (tens of
+seconds) and docker recycles addresses immediately, so the windows overlap. It requires reusing the
+prior flow's 5-tuple, which a hostile agent in B can simply search — the space is one 16-bit port
+against a guessable destination, and a prior DNS flow to a common resolver is the likely case.
+
+**Consequence: "clear before claim" must clear conntrack for the address, not only rules.**
+
+### L11 — does CNI host-local wrap and reuse?
+
+L4 said containerd "delays recycling rather than preventing it" and explicitly did not verify it.
+
+**Outcome: it wraps.** `results/l11-l12-cni.txt`. On a `/29`, host-local allocated forward to the end
+of the range and then handed the freed `10.66.0.2` straight back, repeatedly. containerd needs
+clear-before-claim exactly as docker does; the only difference is how many sandboxes it takes.
+
+### L12 — is DF9 still live?
+
+**Outcome: its symptom is absent here, but the run found live stale state instead.**
+`results/l11-l12-cni.txt`, `l12b`. The CNI firewall plugin did install `CNI-FORWARD` accepts naming
+each container, so the silent no-op did not reproduce on this host — corroboration only, since this
+used nerdctl's own network rather than yoloAI's conflist.
+
+What it did surface is round 1's hazard, live on this machine: `CNI-FORWARD` still carries an
+unconditional `-s 10.89.0.2/32 -j ACCEPT`, and host-local still holds a 6-day-old reservation file
+for that address, while the `yoloai0` bridge **does not exist** and no sandbox is running. A blanket
+accept with nothing behind it is precisely what rule 1 is for. Note the two leaks partly cancel — the
+stale IPAM reservation stops the address being reallocated — so the inheritance needs a reaper that
+clears IPAM without clearing the rule. `system prune` reaps CNI IPAM (D114), which is that shape.
 
 ---
 

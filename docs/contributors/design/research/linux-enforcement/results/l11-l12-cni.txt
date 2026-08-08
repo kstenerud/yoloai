@@ -1,0 +1,58 @@
+
+=== L11 — does CNI host-local wrap and reuse? ===
+a /29 leaves ~5 usable addresses, so a wrap is reachable in a few cycles
+-- fill the subnet --
+  container 1 -> 10.66.0.2
+  container 2 -> 10.66.0.3
+  container 3 -> 10.66.0.4
+  container 4 -> 10.66.0.5
+-- free the first one and keep allocating --
+  freed: 10.66.0.2
+  container 5 -> 10.66.0.6
+  container 6 -> 10.66.0.2
+    ^ this is the freed address, reused
+  container 7 -> 10.66.0.6
+  container 8 -> 10.66.0.2
+    ^ this is the freed address, reused
+  container 9 -> 10.66.0.6
+  container 10 -> 10.66.0.2
+    ^ this is the freed address, reused
+  ---
+  RESULT: host-local DOES wrap and reuse. containerd needs clear-before-claim
+          exactly as docker does; the difference is only how long it takes.
+  host-local's on-disk record of what it last handed out:
+    /var/lib/cni/networks/yb_l11net/lock
+    /var/lib/cni/networks/yb_l11net/10.66.0.3
+    /var/lib/cni/networks/yb_l11net/10.66.0.5
+    /var/lib/cni/networks/yb_l11net/last_reserved_ip.0
+    /var/lib/cni/networks/yb_l11net/10.66.0.4
+
+=== L12 — is DF9 still live? (CNI firewall plugin installing no accept rule) ===
+probe container address: 10.66.0.3
+-- CNI chains present in the shared filter table --
+  chain DOCKER-FORWARD {
+  chain DOCKER-USER {
+  chain CNI-FORWARD {
+  chain CNI-ADMIN {
+  chain CNI-ISOLATION-STAGE-1 {
+  chain CNI-ISOLATION-STAGE-2 {
+  chain DOCKER {
+  chain DOCKER-BRIDGE {
+  chain DOCKER-CT {
+  chain DOCKER-INTERNAL {
+-- does any CNI-FORWARD accept name this container? (DF9's symptom is: none) --
+  -N CNI-ADMIN
+  -N CNI-FORWARD
+  -A FORWARD -m comment --comment "CNI firewall plugin rules" -j CNI-FORWARD
+  -A CNI-FORWARD -m comment --comment "CNI firewall plugin admin overrides" -j CNI-ADMIN
+  -A CNI-FORWARD -d 10.89.0.2/32 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  -A CNI-FORWARD -s 10.89.0.2/32 -j ACCEPT
+  -A CNI-FORWARD -d 10.66.0.4/32 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  -A CNI-FORWARD -s 10.66.0.4/32 -j ACCEPT
+  -A CNI-FORWARD -d 10.66.0.5/32 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  -A CNI-FORWARD -s 10.66.0.5/32 -j ACCEPT
+  -A CNI-FORWARD -d 10.66.0.3/32 -m conntrack --ctstate RELATED,ESTABLISHED -j ACCEPT
+  -A CNI-FORWARD -s 10.66.0.3/32 -j ACCEPT
+  RESULT: an accept naming 10.66.0.3 is present — DF9's symptom is absent here
+-- egress works regardless? --
+  egress: REACHABLE

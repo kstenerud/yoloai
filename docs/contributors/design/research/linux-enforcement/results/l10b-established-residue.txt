@@ -1,0 +1,25 @@
+peer: 104.20.23.154   reused source port: 54322
+
+=== sandbox A, allowlisted for the peer, WITH its FIN/RST suppressed ===
+A = 172.17.0.3
+  entry while A is alive:
+    tcp      6 431996 ESTABLISHED src=172.17.0.3 dst=104.20.23.154 sport=54322 dport=80 src=104.20.23.154 dst=192.168.111.33 sport=80 dport=54322 [ASSURED] mark=0 use=1
+
+=== destroy A — its close packets are dropped, so the entry should stay ESTABLISHED ===
+  entry after A is gone:
+    tcp      6 115 FIN_WAIT src=172.17.0.3 dst=104.20.23.154 sport=54322 dport=80 src=104.20.23.154 dst=192.168.111.33 sport=80 dport=54322 [ASSURED] mark=0 use=1
+  RESULT: entry is not ESTABLISHED — this run does not reach the case it set out to test
+
+=== sandbox B takes the address; the peer is NOT allowlisted for B ===
+B = 172.17.0.2 (A was 172.17.0.3)
+
+=== NEGATIVE CONTROL — fresh source port must be denied ===
+  blocked, as required
+
+=== THE TEST — B reuses the dead sandbox's exact 5-tuple ===
+  blocked — even an ESTABLISHED residue does not carry a new sandbox through
+
+=== counters — which rule made the decision ===
+  ip saddr 172.17.0.2 ct state established,related counter packets 0 bytes 0 accept comment "established"
+  ip saddr 172.17.0.2 ip daddr @allowed counter packets 0 bytes 0 accept comment "allowlisted"
+  ip saddr 172.17.0.2 counter packets 8 bytes 480 drop comment "denied"
