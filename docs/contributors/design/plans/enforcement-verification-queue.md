@@ -150,12 +150,54 @@ and containerd goes through CNI IPAM.
 host can ever hand out the same address — which would make a blind cross-scrub delete a *live*
 sandbox's entry. Cheap.
 
+**Outcome (2026-08-08): three different behaviours, and one backend that cannot be enforced at all.**
+`results/l4-address-recycling.txt`, `l4b`, `l4c`.
+
+- **docker** — lowest-free, immediate reuse. Destroy a sandbox and the next one takes its address
+  back straight away. This is the case rule 1 was written for, and it is real.
+- **containerd** (CNI host-local IPAM) — allocates *forward*, not lowest-free: `10.4.0.2` freed, next
+  allocation `10.4.0.4`, then `.5`. That delays recycling rather than preventing it; host-local wraps
+  at the end of its range, which this run did not reach and so did not verify.
+- **rootless podman** — bridge addresses are distinct and also allocate forward, but **none of it is
+  visible to the host**. There is no host route to the rootless bridge; egress is NAT'd by a
+  `slirp4netns` process into **the host's own source address** and appears in the `output` hook, not
+  `forward`. Measured: the container's address counter in `forward` stayed at 0 while the host-address
+  counter in `output` took all four packets.
+
+**So the gap is bigger than recycling.** `output` is the one hook where the L1 cgroup key *is*
+available — but the egress process is shared: 1, 2 and 3 running sandboxes all had exactly **one**
+`slirp4netns`, whose cgroup names the rootless network namespace, not a sandbox. The sandboxes' own
+cgroups are distinct and do not originate the host-visible packets. **On rootless podman no
+per-sandbox key exists at the host level by any means measured** — not the address, not the cgroup.
+Host-side enforcement cannot single out one rootless podman sandbox, or tell its traffic from the
+host's own.
+
+**Cross-backend collision:** none in the default configuration — docker `172.17/16`, containerd
+`10.4.0/24`, yoloAI's own bridge `10.89/16` are disjoint, so a live address identifies at most one
+sandbox. That is a property of the shipped subnets, not a guarantee; operators can overlap them.
+
 ### L5 — Is the IPv6 hole live on Linux?
 
 DF104: `grep -rn ip6tables` returns nothing repo-wide. macOS found a live v6 hole on apple. Whether a
 docker guest here holds a routable v6 address at all is unmeasured.
 
 **Decides:** whether IPv6 filtering is urgent on Linux or latent. Cheap.
+
+**Outcome (2026-08-08): latent on this host, but the rule semantics are confirmed — and the run
+turned up a worse gap.** `results/l5b-ipv6-hole.txt`, `l5c`. The host has no route to the v6
+internet and docker's daemon has v6 off by default, so nothing is exposed here today. The
+family semantics are not in doubt though: in an `inet` chain an `ip saddr` rule counted 6 IPv4
+packets and **0** IPv6 packets, while an `ip6 saddr` rule counted the 6 v6 packets. Every allowlist
+rule the design writes is `ip saddr`-shaped, so a guest that does hold a routable v6 address is
+simply unfiltered. Enable v6 on the daemon and the hole is live.
+
+**The bigger find, which L5's failed attempts led to.** `br_netfilter` is not loaded, so traffic
+between two sandboxes **on the same bridge is switched, not routed, and never enters the forward
+hook at all**. Measured with the strongest policy the design can express — drop everything from A:
+A→internet was blocked and the counter moved, and A→B on the same bridge stayed **reachable**. Host-
+side nftables cannot contain sandbox-to-sandbox traffic on a shared bridge, and the default docker
+bridge is shared by every container on it. Whether that is exposure depends on whether yoloAI gives
+each sandbox its own network, which this run did not establish.
 
 ### L6 — Is `nft -f` atomic in the way the design assumes?
 
@@ -164,12 +206,37 @@ macOS's step-ordering hazard. Asserted from documentation, not observed.
 
 **Decides:** whether the Linux acquisition path can skip the ordering rules entirely. Cheap.
 
+**Outcome (2026-08-08): confirmed, and it is stronger than the plan assumed.**
+`results/l5-l6-l7-kernel-assumptions.txt`, `l6b`. A file whose last rule is syntactically invalid
+lands nothing; so does one whose last rule the *kernel* rejects rather than the parser — the failure
+mode is the same and the table does not appear at all. Replacing a live set's membership with
+`flush set` plus a repopulate in one file is a single transaction, so there is **no window in which
+the set is empty**. And a replacement that fails leaves the previous membership in force rather than
+an empty set, so the failure is closed rather than open. The Linux acquisition path can be one
+transaction and skip the ordering rules the macOS pf path has to sequence by hand.
+
+Noted in passing, because it misleads: since the whole file is one transaction, a single bad rule
+makes `nft` report the error against *every* rule in it. During L1 that made a valid `ip saddr` rule
+look unsupported.
+
 ### L7 — Hook priority against docker's own chains
 
 Our base chain ran at `priority -10` in the probes and enforced. Whether that is the *right*
 priority relative to docker's rules — rather than one that happened to work — is unexamined.
 
 **Decides:** the shipped hook priority, and whether docker's rules can pre-empt ours.
+
+**Outcome (2026-08-08): the priority barely matters; the asymmetry does.**
+`results/l5-l6-l7-kernel-assumptions.txt`. Docker's chains all sit at `priority filter` (0). Our
+chain enforced a drop identically at **-10, 0 and +10** — the choice of priority is not what makes
+containment work, because a drop ends the packet wherever it happens.
+
+**What is not symmetric is accept.** A drop at a lower priority number wins outright; an accept only
+ends *our* chain, and every later chain still runs and can still drop. Demonstrated by accepting
+everything from the guest at -10 and dropping it from another chain at 100: egress was blocked. So
+`-10` is the right place to *deny* from, and no priority anywhere lets our allowlist *guarantee*
+reachability — anything from docker to an operator's own rules can still deny what we permit. The
+design should describe our table as a denier, never as a grant.
 
 ---
 

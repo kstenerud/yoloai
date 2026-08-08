@@ -1,0 +1,32 @@
+rootless podman container address : 10.78.0.2  (host route: 0 )
+docker container address          : 172.17.0.2  (host route: 1 )
+host address                      : 192.168.111.33
+
+=== count traffic to 1.1.1.1:8443 in BOTH hooks, by source ===
+loaded rc=0
+
+=== POSITIVE CONTROL: docker container reaches out (known to be forwarded) ===
+  ip daddr 1.1.1.1 tcp dport 8443 ip saddr 10.78.0.2 counter packets 0 bytes 0 comment "fwd-from-podman-addr"
+  ip daddr 1.1.1.1 tcp dport 8443 ip saddr 172.17.0.2 counter packets 3 bytes 164 comment "fwd-from-docker-addr"
+  ip daddr 1.1.1.1 tcp dport 8443 counter packets 3 bytes 164 comment "fwd-any"
+  ip daddr 1.1.1.1 tcp dport 8443 ip saddr 192.168.111.33 counter packets 0 bytes 0 comment "out-from-host-addr"
+  ip daddr 1.1.1.1 tcp dport 8443 counter packets 0 bytes 0 comment "out-any"
+
+=== TEST: rootless podman container reaches out ===
+  ip daddr 1.1.1.1 tcp dport 8443 ip saddr 10.78.0.2 counter packets 0 bytes 0 comment "fwd-from-podman-addr"
+  ip daddr 1.1.1.1 tcp dport 8443 ip saddr 172.17.0.2 counter packets 4 bytes 216 comment "fwd-from-docker-addr"
+  ip daddr 1.1.1.1 tcp dport 8443 counter packets 4 bytes 216 comment "fwd-any"
+  ip daddr 1.1.1.1 tcp dport 8443 ip saddr 192.168.111.33 counter packets 4 bytes 216 comment "out-from-host-addr"
+  ip daddr 1.1.1.1 tcp dport 8443 counter packets 4 bytes 216 comment "out-any"
+
+=== verdict ===
+forward hook total=4 (from podman's own address: 0)
+output  hook total=4 (from the host's address:   4)
+VERDICT: rootless podman egress appears in the OUTPUT hook under the HOST's
+         source address. Its container address never appears in the host netns,
+         so host-side enforcement keyed on the guest address cannot see it —
+         and cannot distinguish it from the host's own traffic.
+
+=== which process originates it, and is its cgroup per-sandbox? ===
+3765556 /usr/bin/slirp4netns --disable-host-loopback --mtu=65520 --enable-sandbox --enable-seccomp --enable-ipv6 -c -r 3 -e 4 --netns-type=path /run/user/1000/netns/netns-be4247d5-127d-4d3f-4032-222807a60471 tap0
+3767689 /usr/bin/slirp4netns --disable-host-loopback --mtu=65520 --enable-sandbox --enable-seccomp --enable-ipv6 -c -r 3 --netns-type=path /run/user/1000/netns/rootless-netns-61af9af0fbb0d4e320ec tap0

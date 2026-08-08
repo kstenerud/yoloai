@@ -27,6 +27,13 @@ the file says so rather than quietly resting on it — see the prerouting contro
 | L3b | `l3b-firewalld-mechanism.txt` | Nor does firewalld on its nftables backend. |
 | L3c | `l3c-shared-vs-own-table.txt` | Own table survives reload, complete-reload, restart. |
 | L3d | `l3d-shared-table-iptables-backend.txt` | Sharing the manager's table *is* destroyed — the CVE shape. |
+| L4 | `l4-address-recycling.txt` | docker recycles at once; containerd allocates forward. |
+| L4b | `l4b-rootless-podman-path.txt` | Rootless podman egresses as the *host*, in the output hook. |
+| L4c | `l4c-rootless-podman-shared-egress.txt` | One shared egress process for any number of sandboxes. |
+| L5/6/7 | `l5-l6-l7-kernel-assumptions.txt` | `nft -f` atomic; priority irrelevant for drops. |
+| L5b | `l5b-ipv6-hole.txt` | Invalid — docker isolates separate bridges; see `l5c`. |
+| L5c | `l5c-lateral-and-family.txt` | Same-bridge sandbox↔sandbox traffic is unfilterable. |
+| L6b | `l6b-set-replacement-atomicity.txt` | Set replacement is atomic and fails closed. |
 
 ## Runs that were discarded, and why
 
@@ -49,6 +56,24 @@ the file says so rather than quietly resting on it — see the prerouting contro
   reload had nothing to flush. The foreign chain "survived", which proves nothing. L3d re-ran it
   after confirming firewalld had actually populated the shared table (30 of its own chains present),
   and that is the run the conclusion rests on.
+- **L4's podman rows are empty and should be read as invalid, not as zero.** The shared
+  `probe_backend` helper used docker's inspect format, which returns nothing for rootless podman —
+  whose containers have no `NetworkSettings.Networks` entry at all. The row duly printed
+  "address RECYCLED immediately", comparing one empty string to another. Podman was re-measured
+  properly in `l4b`/`l4c`; the original row is left in place because a format string that silently
+  yields "" and then compares equal is the kind of harness bug worth being able to recognise again.
+- **L4c's first count was self-matching.** `pgrep -af slirp4netns | grep -c rootless-netns` counts
+  its own pipeline, so it reported 5 egress processes at every sandbox count. The number was noise;
+  that it did not *change* was the only real signal. Recounted by walking `/proc/*/comm` and cgroup,
+  which gives 0, 1, 1, 1 for 0, 1, 2, 3 sandboxes.
+- **L5 and L5b both had failed controls, in opposite ways, and L5c is the valid run.** L5 put both
+  containers on one bridge, where the traffic never reaches the forward hook — so the v4 control
+  read "REACHABLE" when the policy said drop, and the counter sat at 0. L5b moved them to two
+  bridges to force routing, and hit docker's inter-network isolation, which blocked *both* families
+  before any rule of ours ran — a control that reads "blocked" for the wrong reason, which is the
+  more dangerous of the two failures because blocked is the answer you are hoping for. Neither run
+  supports a conclusion. L5c asks each question where it can actually be answered: lateral traffic
+  against a live internet control, and family matching on the host's own loopback.
 - **L1b's probe control returned 0.** The within-run comparison still holds (see the file), but
   the separate cgroup control for the prerouting hook did not fire either, so it proves nothing.
   The conclusion rests on the L1 output-hook control and on the address counter in the same chain,

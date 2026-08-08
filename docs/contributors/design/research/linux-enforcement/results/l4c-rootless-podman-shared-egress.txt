@@ -1,0 +1,20 @@
+=== rootless podman: does the host-visible egress process multiply per sandbox? ===
+counted by /proc comm + cgroup, not by pgrep text (which matches its own pipeline)
+  containers running: 0   egress processes: 0
+  containers running: 1   egress processes: 1
+  containers running: 2   egress processes: 1
+  containers running: 3   egress processes: 1
+
+=== that process, and the cgroup a nft output-hook rule would have to name ===
+  pid=3770296 comm=slirp4netns cgroup=/user.slice/user-1000.slice/user@1000.service/user.slice/rootless-netns-c8bdb841.scope
+
+=== per-container cgroups, for contrast — these ARE distinct ===
+  yb_s1 cgroup=...3c3d54f3cf35b2fa
+  yb_s2 cgroup=...a451b21c80977818
+  yb_s3 cgroup=...d0c030698c03282a
+
+CONCLUSION: the sandboxes have distinct cgroups, but they do not originate the
+host-visible packets. One shared egress process does, and its cgroup names the
+rootless network namespace rather than any sandbox. So on rootless podman there
+is no per-sandbox key at the host level: not the address (NAT'd to the host's
+own), and not the cgroup (shared).

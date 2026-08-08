@@ -1,0 +1,31 @@
+
+=== docker ===
+  A=172.17.0.2  B=172.17.0.3
+  A destroyed and recreated while B still holds 172.17.0.3: A'=172.17.0.2
+  RESULT: address RECYCLED immediately (same allocation returned)
+  subnet in use: 172.17.x
+
+=== podman ===
+  A=  B=
+  A destroyed and recreated while B still holds : A'=
+  RESULT: address RECYCLED immediately (same allocation returned)
+  subnet in use: .x
+
+=== containerd ===
+  A=10.4.0.2  B=10.4.0.3
+  A destroyed and recreated while B still holds 10.4.0.3: A'=10.4.0.4
+  RESULT: address not reused on the next allocation
+  subnet in use: 10.4.x
+
+=== CROSS-BACKEND COLLISION: can two backends hand out the same address at once? ===
+run one live sandbox on each backend and compare addresses
+  docker     : 172.17.0.2
+  podman     : 
+  containerd : 10.4.0.5
+  RESULT: no collision — each backend allocates from its own subnet.
+          default bridges are disjoint, so an address identifies at most one live sandbox.
+
+=== host routing table — are these subnets actually distinct? ===
+10.4.0.0/24 dev nerdctl0 proto kernel scope link src 10.4.0.1 
+10.89.0.0/16 dev yoloai0 proto kernel scope link src 10.89.0.1 linkdown 
+172.17.0.0/16 dev docker0 proto kernel scope link src 172.17.0.1 

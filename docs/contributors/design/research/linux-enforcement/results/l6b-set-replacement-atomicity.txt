@@ -1,0 +1,13 @@
+=== L6 (cont) — is a flush+repopulate of a live set a single transaction? ===
+  before: elements = { 10.0.0.1 }
+  after : elements = { 10.0.0.9, 10.0.0.10 }
+
+=== and does a FAILED flush+repopulate leave the old membership intact? ===
+/dev/stdin:5:27-40: Error: Could not resolve hostname: Temporary failure in name resolution
+		elements = { 10.0.0.99, not-an-address }
+  after a failed replace: elements = { 10.0.0.9, 10.0.0.10 }
+
+READ: flush and repopulate in one file is one transaction. There is no window in
+which the set is empty, and a rejected replacement leaves the previous membership
+in force rather than an empty set that would fail open. That is precisely the
+step-ordering hazard the macOS pf path has to sequence around by hand.

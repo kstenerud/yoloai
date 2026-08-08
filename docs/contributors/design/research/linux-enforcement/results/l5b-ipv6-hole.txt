@@ -1,0 +1,23 @@
+
+=== two v6-enabled bridges, so A -> B is genuinely FORWARDED by the host ===
+A: v4=10.51.0.2  v6=fd00:51::2
+B: v4=10.52.0.2  v6=fd00:52::2
+
+=== baseline — both families reachable before any policy ===
+  A -> B v4: blocked
+  A -> B v6: blocked
+
+=== install the allowlist EXACTLY as the design writes it — 'ip saddr' rules only ===
+  A -> B v4: blocked   <- POSITIVE CONTROL, must be blocked
+  A -> B v6: blocked   <- the question
+  ip saddr 10.51.0.2 counter packets 0 bytes 0 drop comment "v4-drop"
+
+=== now add the v6 half the design does not write, and confirm it would close it ===
+  A -> B v6: blocked
+  ip saddr 10.51.0.2 counter packets 0 bytes 0 drop comment "v4-drop"
+  ip6 saddr fd00:51::2 counter packets 0 bytes 0 drop comment "v6-drop"
+
+=== verdict ===
+v4-drop matched 0 packets; v6-drop matched 0 packets
+READ: an 'ip saddr' rule in an inet table is IPv4-only. A guest holding a routable
+      v6 address is unfiltered by it, and the repo writes no ip6 rules anywhere.

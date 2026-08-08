@@ -1,0 +1,23 @@
+
+=== PART 1 — can host nftables see sandbox-to-sandbox traffic on one bridge? ===
+br_netfilter module: NOT loaded
+A=10.53.0.2  B=10.53.0.3  (same bridge)
+-- policy: drop everything from A, the strongest containment the design can express --
+  A -> internet (1.1.1.1:80) : blocked   <- POSITIVE CONTROL, must be blocked
+  A -> B      (same bridge)  : REACHABLE   <- the question
+  ip saddr 10.53.0.2 counter packets 3 bytes 180 drop comment "drop-all-from-A"
+  READ: if the control is blocked and A still reaches B, then no host-side nftables
+        rule can contain traffic between two sandboxes on the same bridge — the
+        packets are switched, never routed, and never enter the forward hook.
+
+=== PART 2 — does an 'ip saddr' rule match IPv6 traffic? ===
+asked on the host's own loopback, where both families always exist, so the
+answer does not depend on this host having v6 internet (it does not).
+-- after 3 IPv4 pings:
+    ip saddr 127.0.0.1 counter packets 6 bytes 504 comment "v4-rule"
+    ip6 saddr ::1 counter packets 0 bytes 0 comment "v6-rule"
+-- after 3 more IPv6 pings:
+    ip saddr 127.0.0.1 counter packets 6 bytes 504 comment "v4-rule"
+    ip6 saddr ::1 counter packets 6 bytes 624 comment "v6-rule"
+  READ: the v4 counter must not move for v6 traffic. Every allowlist rule the
+        design writes is 'ip saddr'-shaped, and the repo writes no ip6 rules.

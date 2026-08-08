@@ -1,0 +1,77 @@
+
+=== L5 — is the IPv6 hole live on Linux? ===
+host IPv6 connectivity: none (no route to the v6 internet)
+docker daemon ipv6 setting: not set in daemon.json (default off)
+repo-wide ip6tables references: 4 files
+-- build a v6-enabled docker network so the question can be answered locally --
+guest A: v4=172.18.0.2  v6=fd00:5::2
+guest B: v6=fd00:5::3
+-- install the allowlist EXACTLY as the design writes it: 'ip saddr' rules only --
+  A -> B over IPv4: REACHABLE
+  A -> B over IPv6: REACHABLE
+  ip saddr 172.18.0.2 counter packets 0 bytes 0 drop comment "v4-drop-all"
+  READ: an 'ip saddr' rule in an inet table matches IPv4 only. If v6 is REACHABLE
+        while v4 is blocked, the same policy that contains the guest on v4 does not
+        exist for it on v6.
+
+=== L6 — is 'nft -f' atomic? ===
+-- load a file whose LAST rule is invalid; do the earlier rules land? --
+/dev/stdin:6:46-46: Error: syntax error, unexpected newline
+		ip saddr 10.99.0.3 this-is-not-valid-syntax
+		                                           ^
+  RESULT: nothing landed — the whole file rolled back, ATOMIC
+-- and a semantically-invalid (not syntactically) last rule --
+/dev/stdin:5:27-56: Error: cgroupv2 path fails: No such file or directory
+		socket cgroupv2 level 1 "definitely-not-a-real-cgroup" counter
+		                        ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  RESULT: nothing landed — atomic for kernel-rejected rules too
+-- replace a live ruleset in one transaction (the acquisition sequence's shape) --
+/dev/stdin:3:118-118: Error: syntax error, unexpected '}', expecting newline or semicolon
+	chain c { type filter hook forward priority -10; policy accept; ip saddr 10.99.0.1 ip daddr @allowed counter accept }
+	                                                                                                                    ^
+/dev/stdin:5:1-1: Error: syntax error, unexpected end of file
+}
+^
+Error: No such file or directory
+list set inet yb_l6 allowed
+              ^^^^^
+  before: 
+/dev/stdin:2:87-87: Error: syntax error, unexpected '}', expecting newline or semicolon
+table inet yb_l6 { set allowed { type ipv4_addr; elements = { 10.0.0.9, 10.0.0.10 } } }
+                                                                                      ^
+/dev/stdin:3:1-1: Error: syntax error, unexpected end of file
+table inet yb_l6 { set allowed { type ipv4_addr; elements = { 10.0.0.9, 10.0.0.10 } } }
+^
+/dev/stdin:1:16-20: Error: No such file or directory
+flush set inet yb_l6 allowed
+               ^^^^^
+Error: No such file or directory
+list set inet yb_l6 allowed
+              ^^^^^
+  after : 
+  READ: flush+repopulate in one file is a single transaction, so there is no window
+        in which the set is empty. That is what removes the macOS step-ordering hazard.
+
+=== L7 — hook priority against docker's own chains ===
+guest=172.17.0.2
+-- docker's own filtering lives here --
+  table ip nat
+  table ip filter
+  table ip6 nat
+  table ip6 filter
+  table ip raw
+  table ip6 raw
+  docker chains in the shared ip filter table: 31
+  their hook priorities:
+    type filter hook forward priority filter; policy accept;
+    type filter hook input priority filter; policy accept;
+    type filter hook output priority filter; policy accept;
+  our chain at priority -10  -> egress enforced
+  our chain at priority 0    -> egress enforced
+  our chain at priority 10   -> egress enforced
+-- the asymmetry that matters: our ACCEPT does not bind a later chain --
+  a drop at a lower priority number wins outright, because the packet is gone
+  before docker's chain runs. An accept only ends OUR chain; docker's rules at
+  priority 0 still run afterwards and can still drop. Verify by making docker's
+  table drop what ours accepts:
+  ours accepts at -10, a later chain drops at 100: egress is blocked — a later chain overrode our accept
