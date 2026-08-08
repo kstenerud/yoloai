@@ -76,9 +76,26 @@ root-owned file so it can be restored later.
 table <yb_src_0> persist
 table <yb_dst_0> persist
 pass  in quick from <yb_src_0> to <yb_dst_0>
-block drop in quick from <yb_src_0> to any
+block return in quick from <yb_src_0> to any
 …repeated per slot
 ```
+
+**`block return`, not `block drop` — changed 2026-08-08 on measurement.** The two enforce
+identically: allowed reaches, denied refuses, empty `dst` fails closed, on **both** apple and tart
+(`pf-canary-probe.txt` C3, `pf-mixed-backend.txt` M2). What differs is how a refusal is delivered.
+`drop` discards silently, so a blocked connection hangs until the client's own timeout; `return`
+sends an RST and answers **immediately** — measured 0.00s against 1.00–3.01s for the same probe.
+
+That decides two things at once:
+
+- **It is what makes the verification probe affordable.** With `drop` the probe waits out a timeout
+  on *every sandbox start* — ~1s against a 2.4s start. With `return` it costs a round trip.
+- **It is a better experience for the thing being sandboxed.** Today an agent that hits a
+  non-allowlisted domain hangs until something times out, which burns agent time and looks like a
+  network fault. `return` gives it an immediate connection refused, which is the truth.
+
+`drop` buys stealth, and there is nobody to hide from here: the agent knows it is sandboxed, and the
+allowlist is the user's own policy.
 
 Per sandbox at start: claim a free slot, `-T add` its address to `yb_src_N` and its resolved
 allowlist to `yb_dst_N`. At stop: `-T delete`.
@@ -107,6 +124,13 @@ apple, and an apple guest and a tart guest hold **different allowlists in differ
 simultaneously**, on separate vmnet bridges, with teardown by table delete restoring either
 (`pf-tart-pool.txt` T1/T2/T3). Nothing in the design distinguishes the backends because the rules
 key on source address; that was a prediction until this run.
+
+**And it is no longer one guest per backend.** Those two results were orthogonal — `pf-tart-pool.txt`
+had two guests across two bridges, `pf-pool-occupancy.txt` had eight guests on one bridge — so
+neither covered many guests across bridges, which is exactly what a per-bridge assumption would get
+wrong. `pf-mixed-backend.txt` crosses them: **three apple guests (192.168.64.x) and two tart guests
+(192.168.65.x) in one five-slot pool, five distinct allowlists, every diagonal reached and all 20
+off-diagonal paths refused — zero cross-backend leaks.**
 
 **Pool size and exhaustion are open.** 32 was measured; the cap is this design's one structural cost.
 What happens when the pool is full — refuse, or fall back to today's behaviour with DF179's
@@ -245,11 +269,18 @@ Three ways out, and the third is the one to take:
    check that would still be a proxy.
 2. **Grant `-s Anchors`** to confirm the anchor is enumerable. Cheaper, and **wrong**: our anchor
    was enumerable the whole time it was being ignored. It would have passed.
-3. **Probe the behaviour, which needs no grant at all.** Enforcement is a property of packets, and
-   every proxy for it has now been observed passing while the property was false. The pool can
-   carry a permanently-reserved slot whose `dst` is empty and whose `src` holds a canary address,
-   and the start path asserts a connection from it fails. That tests the thing itself, costs no new
-   privilege, and is the only option immune to the next unforeseen way the chain breaks.
+3. **Probe the behaviour, which needs no grant at all — built and validated 2026-08-08.**
+   Enforcement is a property of packets, and every proxy for it has now been observed passing while
+   the property was false. The probe cannot invent a source address, so it rides the window rule 1b
+   already creates: during acquisition the claimed slot's `dst` is briefly **empty**, and an empty
+   `dst` fails closed (D4). So *with our address in `src` and `dst` empty, a connection from the
+   guest must fail* — and if it succeeds, the rules are not being evaluated.
+
+   Measured ([`pf-canary-probe.txt`](../research/macos-isolation-spike/results/pf-canary-probe.txt)):
+   it discriminates in both directions on a healthy host (empty `dst` → blocked; populated → 301 in
+   0.03s), and on the broken host it **reached the destination through an empty allowlist in 0.03s
+   while all three checks above reported healthy**. It is the check the design needs and it costs no
+   privilege at all.
 
 **Whatever is chosen, the verification list is wrong as written and must not ship as three checks.**
 The research harness made exactly this mistake in miniature: `pf_pool_occupancy.sh` reported 56 of 56
@@ -528,6 +559,20 @@ upstream, so whether guests would egress over v6 elsewhere is unmeasured.
   allowlists *the guest itself*. Moving resolution to the host is therefore not a transparent
   substitution, and the design needs a stated rule — at minimum, refusing to install loopback and
   link-local answers into a guest's allowlist rather than passing them through.
+- **The both-sides-resolve-differently case, reproduced end to end
+  ([`dns-split-horizon-sim.txt`](../research/macos-isolation-spike/results/dns-split-horizon-sim.txt)).**
+  The runs above found *host-only* names, which produce an inert allowlist entry. The worse case —
+  one name, two answers — was created with an `/etc/hosts` entry, a faithful reproduction of the
+  mechanism rather than an approximation: two resolvers, one name, two answers. With the host's
+  answer installed into `dst` exactly as the design would, **the guest could not reach the name it
+  was allowlisted for (000) while the installed address was reachable (301)** as the control.
+  Nothing is misconfigured, no component errs, and no error is produced anywhere. **This is the
+  strongest argument in the file for re-resolving guest-side or reconciling the two answers**, and
+  it applies to Linux equally — a container has its own `resolv.conf` too.
+- **pf will not save the design from a bad answer.** `dst` tables accept `127.0.0.1`,
+  `169.254.1.1`, `224.0.0.1` and the vmnet gateway without complaint (only `0.0.0.0` failed to
+  land). So **validating resolver output — rejecting loopback, link-local, multicast and the
+  guest's own gateway — is yoloAI's job**, and a requirement rather than a refinement.
 - **Resolution is one-shot, so parity at start says nothing about hour six — and the decay is now
   measured.** `resolve_domains` runs once, and CDN rotation moves the addresses under a long-lived
   sandbox regardless of whether the two sides agreed at launch. Inherited, not caused by host `pf` —

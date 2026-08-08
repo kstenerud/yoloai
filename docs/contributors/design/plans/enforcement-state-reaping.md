@@ -593,6 +593,31 @@ it**, which is a different object with different lifetime and different visibili
 not make vmnet reinstall the bridge's NAT; only restarting the apple *daemon* does. And a daemon
 restart moves every guest's address, so repair and re-arm are inseparable on this backend.
 
+### Nothing heals it, and that sets how loud the detector has to be
+
+Every run up to this point repaired the moment it found the fault, so nobody knew how long a real
+user would sit unfiltered. Measured
+([`pf-main-ruleset-writers.txt`](../research/macos-isolation-spike/results/pf-main-ruleset-writers.txt)):
+
+- **Four minutes of polling after the break: nothing restored the reference.** Not a service, not a
+  timer, not the network.
+- **A sleep/wake cycle did not restore it either** — tested precisely because a wake rebuilding the
+  ruleset would have made sleep a repair rather than a hazard. It is neither.
+
+So the exposure window is **unbounded**: a host broken this way stays fail-open until a reboot or an
+explicit `pfctl -f /etc/pf.conf`. Every sandbox started in that window passes every check yoloAI can
+perform and is completely unfiltered.
+
+**The mechanism is visible in the wreckage, and it explains why.** After the flush, the main ruleset
+came back holding *only* `com.apple.internet-sharing`'s two lines — that service re-inserts its own
+anchors on its own, while `/etc/pf.conf`'s `com.apple/*` lines stay gone. macOS has a mechanism for
+re-adding a service's anchors and none for restoring the base ruleset. Nothing is coming to help.
+
+**Two more candidates cleared, on the healthy side.** A sleep/wake cycle left the reference, the
+anchor, the membership and live enforcement all intact — the guest even kept its address across the
+sleep. So did activating and deactivating **content caching**. The dangerous action remains a
+ruleset flush, not ordinary system activity.
+
 ## Settled by review (2026-08-07)
 
 **The two platforms diverge, and the divergence is part of the model.** macOS uses a slot pool of

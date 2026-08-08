@@ -1,0 +1,51 @@
+host: macOS 26.5.1 arm64 | RAM 32GB
+date: 2026-08-08 04:58:26 CEST | anchor=com.apple/yoloai_b | slots=5
+
+== M0 SETUP — a 5-slot pool using 'block return', and guests on two backends ==
+        creating mx-a0   (apple) ... ok  backend=apple  ip=192.168.64.7
+        creating mx-a1   (apple) ... ok  backend=apple  ip=192.168.64.8
+        creating mx-a2   (apple) ... ok  backend=apple  ip=192.168.64.9
+        creating mx-t0   (tart) ... ok  backend=tart   ip=192.168.65.2
+        creating mx-t1   (tart) ... ok  backend=tart   ip=192.168.65.3
+        5 usable guests
+        composition: 3 apple, 2 tart
+        distinct subnets in play: 192.168.64 192.168.65 
+   PASS    3 apple + 2 tart guests, distinct addresses, across 2 subnet(s)
+
+== M0b BASELINE — every guest reaches every destination before any membership exists ==
+        mx-a0   apple  -> 301 301 301 301 301
+        mx-a1   apple  -> 301 301 301 301 301
+        mx-a2   apple  -> 301 301 301 301 301
+        mx-t0   tart   -> 301 301 301 301 301
+        mx-t1   tart   -> 301 301 301 301 301
+   PASS    all 25 paths open unfiltered — every block below is attributable
+
+== M1 THE MIXED MATRIX — one pool, two backends, 5 independent allowlists ==
+        canary: mx-a0 -> another slot's destination = 000 (must be 000)
+   PASS    canary blocked: the matrix measures the pool, not the host
+        (diagonal = own destination, must be REACHED; off-diagonal must be 000)
+        mx-a0   apple  -> [301] 000 000 000 000
+        mx-a1   apple  -> 000 [301] 000 000 000
+        mx-a2   apple  -> 000 000 [301] 000 000
+        mx-t0   tart   -> 000 000 000 [301] 000
+        mx-t1   tart   -> 000 000 000 000 [301]
+        own-destination failures: 0   leaks: 0 (of which cross-backend: 0)
+   PASS    one pool holds 3 apple and 2 tart guests with 5 independent allowlists:
+           every diagonal reached, all 20 off-diagonal paths refused, ACROSS
+           two vmnet bridges and two subnets. Backend-agnostic is no longer n=1 per backend.
+
+== M2 block return ON TART — does the fast form enforce on the second backend too? ==
+        pf-canary-probe.txt measured this on apple only. Every 000 in the matrix above was
+        produced by 'block return', so the tart rows are the new evidence.
+   PASS    block return enforces correctly on tart as well as apple (2 tart row(s) clean)
+
+== cleanup ==
+   destroyed mx-a0
+   destroyed mx-a1
+   destroyed mx-a2
+   destroyed mx-t0
+   destroyed mx-t1
+   anchor rules=0
+   main ruleset: before=4 after=4, refs=2
+
+pass=5 fail=0 unknown=0

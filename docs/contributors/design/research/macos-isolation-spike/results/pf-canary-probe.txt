@@ -1,0 +1,63 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 04:16:03 CEST | anchor=com.apple/yoloai_b
+
+== C0 SETUP ==
+        cp-a at 192.168.64.4 | main-refs=2
+        unfiltered reach, for the timeout budget: code=301 time=0.03s
+   PASS    baseline: guest reaches 1.1.1.1 in 0.03s with nothing loaded
+
+== C1 DOES THE PROBE HOLD ON A HEALTHY HOST? (block drop) ==
+        Both directions. A probe that always says 'blocked' passes a one-sided test and is
+        worth nothing, so the reach half is as load-bearing as the block half.
+        dst EMPTY  -> code=000 time=5.00s   (must be 000)
+        dst LOADED -> code=301 time=0.03s   (must be non-000)
+   PASS    the probe discriminates: empty dst fails closed, populated dst reaches
+
+== C2 WHAT DOES IT COST? — the timeout a healthy start would pay, with block drop ==
+        "block drop" discards silently, so there is nothing to answer the probe and it waits
+        out its own timeout. That wait lands on EVERY sandbox start.
+        --max-time 1s -> code=000 time=1.00s
+        --max-time 2s -> code=000 time=2.00s
+        --max-time 3s -> code=000 time=3.01s
+        against an unfiltered reach of 0.03s, so a timeout of ~1s is already several
+        times the round trip and still a real addition to a 2.4s sandbox start.
+   PASS    block-drop probe cost measured
+
+== C3 DOES block return MAKE IT FREE? — and does it still block? ==
+        An RST answers immediately. If it also enforces correctly, the probe costs a round
+        trip rather than a timeout, and agents' blocked connections stop hanging too.
+        dst EMPTY  -> code=000 time=0.00s   (must be 000, and FAST)
+        dst LOADED -> code=301 time=0.04s   (must be non-000)
+        denied dest-> code=000 time=0.00s   (must be 000, and FAST)
+   PASS    block return enforces exactly as block drop does — allowed reaches, denied and empty refuse
+           Compare the times above with C2: that difference is the price of the probe, and
+           it is also what an agent pays today every time it hits a denied destination.
+
+== C4 DOES THE PROBE DETECT THE FAULT? — the whole reason it exists ==
+        Break the main ruleset, restore NAT only, then run the probe against a host where
+        all three D132 checks report healthy.
+        pfctl: rules cleared
+        pfctl: nat cleared
+        pfctl: dummynet cleared
+        pfctl: 0 tables deleted.
+        pfctl: 134 states cleared
+        pfctl: source tracking entries cleared
+        pfctl: pf: statistics cleared
+        pfctl: pf: interface flags reset
+        cp-a now at 192.168.64.3 | main-refs=0
+        D132 check 1 pf=Enabled | check 2 pool=8/8 rules | check 3 slot=192.168.64.3
+        PROBE with dst EMPTY -> code=301 time=0.03s
+   PASS    PROBE DETECTS THE FAULT. An empty dst reached 1.1.1.1 in 0.03s, which is only
+           possible if the rules are not evaluated — on a host where every check yoloAI
+           can perform reports healthy. This is the check the design needs, and it costs
+           no privilege at all.
+
+== C5 REPAIR AND VERIFY ==
+        after repair: allow=301 deny=000 main-refs=2
+   PASS    host is sound: pf enabled, anchor referenced, enforcement real
+
+== cleanup ==
+   destroyed cp-a
+   pf=Enabled  main-refs=2
+
+pass=6 fail=0 unknown=0

@@ -1,0 +1,92 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 03:44:46 CEST | anchor=com.apple/yoloai_b
+
+== S0 SETUP — an enforcing sandbox on a sound host ==
+        mw-w at 192.168.64.4 | main-refs=2
+        before arming: allow=301 deny=301 (both must be reachable)
+        pf=Enabled   main-refs=2  anchor=8  rules  slot=192.168.64.4,      || allow=301 deny=000
+   PASS    enforcing, on a host whose main ruleset references the anchor
+        the main ruleset as it should look:
+        | scrub-anchor "com.apple/*" all fragment reassemble
+        | scrub-anchor "com.apple.internet-sharing" all fragment reassemble
+        | anchor "com.apple/*" all
+        | anchor "com.apple.internet-sharing" all
+
+== S1 CONTENT CACHING activated then deactivated — a system service that rewires networking ==
+        content caching Activated was: false
+        acmu: 2026-08-08 03:45:00.241 AssetCacheManagerUtil[6495:16880259] Content caching activated.
+        acmu: 2026-08-08 03:45:00.242 AssetCacheManagerUtil[6495:16880259] Restart devices to take advantage of content caching immediately.
+        activated; main-refs=2
+        pf=Enabled   main-refs=2  anchor=8  rules  slot=192.168.64.4,      || allow=301 deny=000
+   PASS    S1a content caching activated: SURVIVED — reference, anchor, membership and live enforcement all intact
+        acmu: 2026-08-08 03:45:18.659 AssetCacheManagerUtil[7081:16881928] Content caching deactivated.
+        pf=Enabled   main-refs=2  anchor=8  rules  slot=192.168.64.4,      || allow=301 deny=000
+   PASS    S1b content caching deactivated: SURVIVED — reference, anchor, membership and live enforcement all intact
+
+== S2 INTERNET SHARING restarted — the service the census caught writing the main ruleset ==
+   UNKNOWN S2: com.apple.InternetSharing is not a loaded service on this host — NOT TRIED.
+           Its ANCHOR is present in the main ruleset regardless (the census saw it), so the
+           service inserts and removes that anchor on demand. Whether doing so disturbs
+           com.apple/* is therefore still open, and needs a host with sharing enabled.
+
+== S3 SLEEP/WAKE on a healthy host — the most ordinary event there is ==
+        scheduling an auto-wake 75s out, then sleeping. No keyboard needed.
+        slept at 03:45:30, awake at 03:47:10
+        immediately after wake: pf=Enabled main-refs=2 anchor=8 rules
+        slot membership: 192.168.64.4,
+        pf=Enabled   main-refs=2  anchor=8  rules  slot=192.168.64.4,      || allow=301 deny=000
+   PASS    S3 sleep/wake: SURVIVED — reference, anchor, membership and live enforcement all intact
+
+== S4 DOES A BROKEN HOST HEAL ITSELF? — break it, then watch for 4 minutes ==
+        Every previous run repaired immediately. Nobody knows how long a real user would sit
+        unfiltered, and that decides how loud the detector has to be.
+        pfctl: rules cleared
+        pfctl: nat cleared
+        pfctl: dummynet cleared
+        pfctl: 0 tables deleted.
+        pfctl: 120 states cleared
+        pfctl: source tracking entries cleared
+        pfctl: pf: statistics cleared
+        pfctl: pf: interface flags reset
+        broken: main-refs=0
+        t=30s  main-refs=0
+        t=60s  main-refs=0
+        t=90s  main-refs=0
+        t=120s main-refs=0
+        t=150s main-refs=0
+        t=180s main-refs=0
+        t=210s main-refs=0
+        t=240s main-refs=0
+   FAIL    S4: 4 minutes with no reference and nothing restored it. A host broken this way stays
+           fail-open indefinitely — in practice until a reboot or a manual pf.conf reload.
+           Any sandbox started in that window passes every check and is unfiltered.
+
+== S5 DOES A WAKE HEAL IT? — sleep/wake while broken ==
+        If waking rebuilds the main ruleset from /etc/pf.conf, sleep is a repair rather than
+        a hazard, and that changes what the detector has to cover.
+        before: main-refs=0
+        after wake: main-refs=0 | awake at 03:52:56
+   FAIL    S5: still no reference after a sleep/wake. The host does not heal on wake either, so the
+           fail-open window is bounded only by a reboot or an explicit repair.
+
+== S6 REPAIR, then -X properly — no -d in between this time ==
+        pf=Enabled   main-refs=2  anchor=8  rules  slot=192.168.64.3,      || allow=301 deny=000
+   PASS    host repaired and enforcing (main-refs=2)
+        references before: TOKENS: PID Process Name TOKEN TIMESTAMP 20802 pfd 3323685013552164766 0 days 00:00:25 
+        pfctl: pf enabled
+        pfctl: Token : 15447822800193098702
+        our token: 15447822800193098702 | references: TOKENS: PID Process Name TOKEN TIMESTAMP 21698 pfctl 15447822800193098702 0 days 00:00:00 20802 pfd 3323685013552164766 0 days 00:00:25 
+        pfctl: disable request successful. 2 more pf enable reference(s) remaining, pf still enabled.
+        after releasing it: pf=Enabled | references: TOKENS: PID Process Name TOKEN TIMESTAMP 20802 pfd 3323685013552164766 0 days 00:00:25 
+   PASS    S6: releasing our own reference did NOT disable pf — this time the token was valid when
+           released, so unlike the earlier attempt this is a real result
+
+== S7 FINAL VERIFY — the host must leave this run enforcing ==
+        pf=Enabled   main-refs=2  anchor=8  rules  slot=192.168.64.3,      || allow=301 deny=000
+   PASS    host is sound: pf enabled, anchor referenced, enforcement real
+
+== cleanup ==
+   destroyed mw-w
+   pf=Enabled  main-refs=2  references: TOKENS: PID Process Name TOKEN TIMESTAMP 20802 pfd 3323685013552164766 0 days 00:00:32 
+
+pass=7 fail=2 unknown=1

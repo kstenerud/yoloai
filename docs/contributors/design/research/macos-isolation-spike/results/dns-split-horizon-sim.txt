@@ -1,0 +1,50 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 04:55:54 CEST | simulated name=example.com
+
+== H0 SETUP — a sandbox, and the two sides agreeing before anything is faked ==
+        sh-a at 192.168.64.6
+        host  resolves example.com -> 104.20.23.154 172.66.147.243
+        guest resolves example.com -> 104.20.23.154 172.66.147.243
+   PASS    both sides agree before the simulation, so a later disagreement is the thing we introduced
+
+== H1 CREATE THE DIVERGENCE — /etc/hosts makes the HOST answer differently ==
+        host after edit, no flush: 1.1.1.1
+        host  now resolves example.com -> 1.1.1.1   (expected 1.1.1.1)
+        guest still resolves example.com -> 104.20.23.154 172.66.147.243
+   PASS    the two sides now disagree about one name — split horizon, reproduced
+
+== H1b INSTALL THE HOST'S ANSWER, AS THE pf DESIGN WOULD, AND SEE WHO IS RIGHT ==
+        dst now holds the HOST's answer: 1.1.1.1,
+        the user asked to allow 'example.com'. Two questions follow.
+        guest -> example.com (resolves to its OWN answer): 000
+        guest -> 1.1.1.1 (the host's answer, direct): 301   <-- positive control
+   FAIL    H1b: CONFIRMED, and it is the silent kind. The user allowlisted example.com; the guest cannot
+           reach example.com, while the address that WAS installed is reachable. Nothing is
+           misconfigured, no component erred, and no error is produced anywhere — the two
+           sides simply mean different things by one name. Host-side resolution is not a
+           transparent substitution for guest-side resolution.
+
+== H2 WILL pf ACCEPT A HOST-RELATIVE ADDRESS INTO A dst TABLE? ==
+        dns-gaps.txt caught the host resolving its own .local name to 127.0.0.1 and to the
+        vmnet gateway. Those mean something DIFFERENT inside a guest: 127.0.0.1 in a guest's
+        allowlist permits the guest to reach ITSELF, not the host the user meant. The
+        question is whether pf refuses such entries, or whether the design must.
+        127.0.0.1        rc=0 present=1  No ALTQ support in kernel
+        169.254.1.1      rc=0 present=1  No ALTQ support in kernel
+        224.0.0.1        rc=0 present=1  No ALTQ support in kernel
+        0.0.0.0          rc=0 present=0  No ALTQ support in kernel
+        192.168.64.1     rc=0 present=1  No ALTQ support in kernel
+        accepted into the table: 127.0.0.1 169.254.1.1 224.0.0.1 192.168.64.1
+   FAIL    H2: pf accepts host-relative and non-routable addresses into a dst table without complaint.
+           So nothing below yoloAI will catch a resolver answer that is meaningless or
+           actively wrong inside a guest. Validating resolver output — rejecting loopback,
+           link-local, multicast and the guest's own gateway — is the design's job, and it
+           is a requirement rather than a refinement.
+
+== cleanup ==
+   /etc/hosts restored from backup
+   verified: no simulation lines remain in /etc/hosts
+   host now resolves example.com to: 104.20.23.154 172.66.147.243
+   destroyed sh-a
+
+pass=2 fail=2 unknown=0

@@ -44,6 +44,7 @@ inclusion test first, then add a row to the index.
 | `container build` fails: `Dockerfile size (N bytes) exceeds the maximum allowed size of 16384`; or on older versions `Transport became inactive`. Linux backends unaffected | [Apple: `container build` rejects a Dockerfile over 16 KiB](#apple-container-build-rejects-a-dockerfile-over-16-kib) |
 | Apple sandbox: TUI loses left gutter / leading chars orphan onto row above, only on tmux scroll; `^b r` heals it; Docker clean; both emulators affected | [Apple: exec -t forces ONLCR, corrupting column tracking](#apple-container-exec--t-forces-onlcr-on-the-host-local-bridge-pty-corrupting-the-apps-column-tracking-on-scroll) |
 | Brokered agent on podman-macOS hangs on first API call; one-shot curl to the injector works | [Podman Machine: gvproxy stalls streaming](#podman-machine-macos-gvproxy-host-forward-passes-a-one-shot-curl-but-stalls-the-agents-streaming-connection) |
+| A healthy apple/tart guest suddenly resolves nothing (`UNRESOLVED` for every name) with no change to the guest; the host resolves fine; someone just flushed DNS or ran `killall -HUP mDNSResponder` | [macOS: restarting mDNSResponder takes guest DNS down through the vmnet gateway](#macos-restarting-the-hosts-mdnsresponder-takes-guest-dns-down-through-the-vmnet-gateway) |
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
@@ -3159,6 +3160,31 @@ on macOS — but the failure mode and on-disk residue differ.
 
 **Code:** `runtime/docker/resources/entrypoint.py` (`apply_overlays`, the
 `overlay.virtofs_fallback` / `overlay.local_upper` branch).
+
+## macOS: restarting the host's `mDNSResponder` takes guest DNS down through the vmnet gateway
+
+**Backends:** apple, tart (anything whose guest resolves through the vmnet gateway).
+
+**Symptom:** a healthy guest that resolved names a moment ago returns `UNRESOLVED` for everything,
+with no change to the guest, the VM, or its address. Host name resolution is fine.
+
+**Trigger:** anything that restarts the host's `mDNSResponder` — most commonly the
+`dscacheutil -flushcache; killall -HUP mDNSResponder` incantation used to make macOS notice an
+`/etc/hosts` edit or a DNS configuration change.
+
+**Explanation:** the guest's only resolver is the vmnet gateway (`192.168.64.1` on apple), and that
+gateway forwards through the **host's** `mDNSResponder`. Restarting it therefore breaks resolution
+*inside every guest*, not just on the host. Measured 2026-08-08: an apple guest was still returning
+`UNRESOLVED` **25 seconds** after the HUP, across five retries, while the host itself resolved
+normally throughout (`results/dns-split-horizon-sim-mdns-invalidated.txt`). The same coupling is why
+Tailscale MagicDNS names resolve inside a guest at all — the gateway inherits whatever the host's
+resolver stack can see, which is a feature of the same wire.
+
+**Consequence for tests and tooling:** a harness that reconfigures host DNS and then reads the guest
+is measuring its own side effect. Prefer letting macOS pick up `/etc/hosts` unaided — it watches the
+file, and the host answered correctly with no flush at all in the run that finally worked. If a
+flush is unavoidable, treat a guest that still does not resolve as an *aborted* run rather than a
+result: the failure looks exactly like a DNS divergence, and it was read as one twice.
 
 ## Linux: overlay flatten migration and host-side ownership of container-written state
 

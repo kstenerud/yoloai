@@ -1,0 +1,29 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 04:54:09 CEST | simulated name=example.com
+
+== H0 SETUP — a sandbox, and the two sides agreeing before anything is faked ==
+        sh-a at 192.168.64.5
+        host  resolves example.com -> 104.20.23.154 172.66.147.243
+        guest resolves example.com -> 104.20.23.154 172.66.147.243
+   PASS    both sides agree before the simulation, so a later disagreement is the thing we introduced
+
+== H1 CREATE THE DIVERGENCE — /etc/hosts makes the HOST answer differently ==
+        guest resolver still recovering from the mDNSResponder restart (attempt 1)
+        guest resolver still recovering from the mDNSResponder restart (attempt 2)
+        guest resolver still recovering from the mDNSResponder restart (attempt 3)
+        guest resolver still recovering from the mDNSResponder restart (attempt 4)
+        guest resolver still recovering from the mDNSResponder restart (attempt 5)
+        host  now resolves example.com -> 1.1.1.1   (expected 1.1.1.1)
+        guest still resolves example.com -> UNRESOLVED
+   FAIL    the guest's resolver did not recover from the mDNSResponder restart within 25s. That is a
+           finding about the topology — guest DNS depends on the host's resolver daemon — but
+           it is NOT the divergence this run exists to test. ABORTING rather than reporting
+           a dead resolver as a split-horizon result.
+
+== cleanup ==
+   /etc/hosts restored from backup
+   verified: no simulation lines remain in /etc/hosts
+   host now resolves example.com to: 104.20.23.154 172.66.147.243
+   destroyed sh-a
+
+pass=1 fail=1 unknown=0
