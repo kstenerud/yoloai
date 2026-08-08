@@ -4,9 +4,11 @@
 
 # Enforcement verification queue — Linux and macOS
 
-- **Status:** IN-PROGRESS — queue opened 2026-08-08 after the prior-art pass. **Linux pass complete
-  (L1–L7, 2026-08-08); macOS pass (M1–M8) outstanding.** The shared design documents are deliberately
-  untouched until both halves are in — see "Running both passes in parallel".
+- **Status:** IN-PROGRESS — queue opened 2026-08-08 after the prior-art pass. **Both measurement
+  passes are complete: Linux (L1–L12) and macOS (M1–M8, plus four unqueued extras), 2026-08-08.**
+  What remains is **synthesis** — the shared design documents are still deliberately untouched, and
+  it now has both halves to work from. The queue stays here rather than in `archive/plans/` because
+  it is synthesis's input, and its findings have not been applied to anything yet.
 - **Depends on:** enforcement-state-reaping.md, macos-pf-privileged-path.md
 
 **Working model.** Each item names what to run, what it *decides*, and what it costs. An item is
@@ -530,7 +532,7 @@ and the exhaustion policy is a decision, not a measurement.
 
 ---
 
-## What the results feed### Extras — four hazards found while building the above, none of them queued
+### Extras — four hazards found while building the above, none of them queued
 
 Run and recorded on the same terms. **X1 is the most consequential result of this pass.**
 
