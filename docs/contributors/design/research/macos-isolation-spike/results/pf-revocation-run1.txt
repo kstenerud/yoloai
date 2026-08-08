@@ -1,0 +1,19 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:31:28 CEST | anchor=com.apple/yoloai_r
+
+== R0 SETUP ==
+        guest=192.168.64.25  host as seen from the guest=192.168.64.1
+        streaming server up on 192.168.64.1:18643 (one line per second, 40s)
+        allowed (the host) -> 200    denied (1.0.0.1) -> 000   (need non-000 then 000)
+   PASS    R0: enforcement is live and the stream endpoint is the allowlisted destination
+
+== R1 BASELINE — the stream runs to completion while the entry is present ==
+        Without this, a stream that stops for its own reasons would read as a revocation working.
+        lines received at +5s: 0     at +11s: 0
+   FAIL    R1: the stream did not grow (0 -> 0); R2 would be meaningless. ABORTING
+
+== cleanup ==
+   anchor rules: 0  main-refs: 2
+
+pass=1 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-revocation.txt

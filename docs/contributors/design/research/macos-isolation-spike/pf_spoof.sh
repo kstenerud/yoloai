@@ -76,12 +76,15 @@ brof() { ifconfig -a 2>/dev/null | awk -v want="$1" '
   /inet / {if ($2==want) {print br; exit}}'; }
 
 # Reach from a guest, optionally binding a specific source address.
+# curl writes %{http_code} even when it fails (000) and ALSO exits non-zero. An `|| printf 000`
+# fallback therefore appends a second 000, and every "is it blocked?" test silently compares
+# "000000" against "000" and reads a successful block as a failure. Run 1 lost four verdicts to it.
 reach() {   # $1 = container, $2 = dest, [$3 = source address to bind]
-  local src=""
+  local src="" o
   [ -n "${3:-}" ] && src="--interface $3"
-  asuser container exec "$1" sh -c \
-    "curl -s -o /dev/null -w '%{http_code}' --max-time 5 $src http://$2/ 2>/dev/null" 2>/dev/null \
-    || printf '000'
+  o=$(asuser container exec "$1" sh -c \
+    "curl -s -o /dev/null -w '%{http_code}' --max-time 5 $src http://$2/ 2>/dev/null" 2>/dev/null)
+  printf '%s' "${o:-000}"
 }
 gsh() { asuser container exec "$1" sh -c "$2" 2>&1; }
 

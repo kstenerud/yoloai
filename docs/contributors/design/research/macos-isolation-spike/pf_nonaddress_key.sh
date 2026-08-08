@@ -73,11 +73,14 @@ load()   { flush; printf '%s\n' "$1" > /tmp/pfk.rules
 nrules() { pfctl -a "$ANCHOR" -s rules 2>/dev/null | grep -c . || true; }
 
 # Guest reach. Returns the HTTP code; 000 means it did not get through.
-gtry() { asuser container exec "$1" curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-           "http://$2/" 2>/dev/null || printf '000'; }
+# curl writes %{http_code} even when it fails (000) and ALSO exits non-zero. An `|| printf 000`
+# fallback therefore appends a second 000, and every "is it blocked?" test silently compares
+# "000000" against "000" and reads a successful block as a failure. Run 1 lost four verdicts to it.
+gtry() { local o; o=$(asuser container exec "$1" curl -s -o /dev/null -w '%{http_code}' \
+           --max-time 5 "http://$2/" 2>/dev/null); printf '%s' "${o:-000}"; }
 # Host reach, as the invoking user — the positive control for every guest block.
-htry() { asuser curl -s -o /dev/null -w '%{http_code}' --max-time 5 "http://$1/" 2>/dev/null \
-           || printf '000'; }
+htry() { local o; o=$(asuser curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
+           "http://$1/" 2>/dev/null); printf '%s' "${o:-000}"; }
 # One inspect answers address, gateway and MAC; $2 picks the field.
 netfield() { asuser container inspect "$1" 2>/dev/null | python3 -c '
 import json,sys

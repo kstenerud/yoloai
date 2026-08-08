@@ -1,0 +1,101 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:27:36 CEST | anchor=com.apple/yoloai_k | user=karlstenerud uid=501
+pf:   Status: Enabled for 0 days 09:11:18           Debug: Urgent
+
+== K0 SETUP AND THE CONTROLS EVERYTHING ELSE LEANS ON ==
+        main-refs=2  (0 means pf never descends into our anchor and NOTHING below is valid)
+        ybk1=192.168.64.12 mac=f2:7a:14:71:40:4b   ybk2=192.168.64.13   gateway=192.168.64.1 on bridge101
+        unfiltered: ybk1->1.0.0.1=301  ybk2->1.0.0.1=301  host->1.0.0.1=301   (all must be non-000)
+   PASS    baseline reach on both guests and the host — blocks below mean something
+
+== K1 PROCESS IDENTITY — is guest traffic attributed to any uid/gid? ==
+        pf matches `user`/`group` against the socket that owns a packet. A VM's packets are
+        forwarded, not generated locally, so they should own no socket — but that is the assumption
+        under test. `user unknown` matches exactly the no-socket case, so the two rules split it.
+        
+        K1a  rule: block in quick on bridge101 proto tcp from any to 1.0.0.1 user unknown
+        guest->1.0.0.1=000000   host->1.0.0.1=301  (host is the control: it owns a socket, must stay non-000)
+   FAIL    K1a: guest was NOT matched by `user unknown` — it does own a socket. Investigate.
+        
+        K1b  rule: block in quick on bridge101 proto tcp from any to 1.0.0.1 user = 501
+             If the VM's traffic were attributed to the user running it, this would block the guest.
+        guest->1.0.0.1=301   (non-000 => not attributed to uid 501)
+             control: the same rule shape on the OUTBOUND path must bite the HOST, or K1b proves nothing
+        host->1.0.0.1=000000   (000 => the rule form works and pf does match user for real sockets)
+   UNKNOWN K1b: the control failed — the rule never bit the host, so the guest result means nothing
+
+== K2 LINK LAYER — can pf match a MAC at all? ==
+        A guest's MAC is stable in ways a DHCP lease is not, so it would be a better key if pf could
+        see it. Three spellings, so what is refused is the concept and not one syntax.
+        refused:  block drop in quick on bridge101 from f2:7a:14:71:40:4b to any
+                  -> no IP address found for f2:7a:14:71:40:4b /tmp/pfk.rules:1: could not parse host specification 
+        refused:  block drop in quick on bridge101 ether from f2:7a:14:71:40:4b to any
+                  -> /tmp/pfk.rules:1: syntax error pfctl: Syntax error in config file: pf rules not loaded 
+        refused:  block drop in quick on bridge101 l2 from f2:7a:14:71:40:4b
+                  -> /tmp/pfk.rules:1: syntax error pfctl: Syntax error in config file: pf rules not loaded 
+   PASS    K2: pf's parser has no MAC/link-layer match. The guest's MAC is visible to the host but
+            not expressible as policy — so a stable identifier exists with no way to enforce on it.
+        for the record, macOS's other packet filter is gone: ipfw was removed in 10.10, and the
+        bridge(4) driver exposes no filter hooks — so pf is the only policy layer available.
+
+== K3 TAGS ACROSS NAT — does an ingress tag survive translation? ==
+        The tag is assigned by a rule keyed on the BRIDGE, never on an address, so this is a genuine
+        non-address key if it holds. What makes it valuable: after NAT every guest wears the host's
+        address, so nothing else can tell guest traffic from host traffic on the way out.
+        guest->1.0.0.1=000000  (000 => the tag survived NAT and was matched on egress)
+        host ->1.0.0.1=301  (non-000 => untagged host traffic is untouched — the control)
+        guest->1.1.1.1=301 (non-000 => the tag did not blanket-block the guest — the other control)
+   PASS    K3: tags do NOT reach the egress rule (guest still reached 1.0.0.1) — post-NAT keying is out
+
+== K5 THE STATUS QUO — one bridge for every guest on the default network ==
+        Stated as a control for K4: if the shared bridge already discriminated, K4 would be moot.
+        ybk1=000000  ybk2=000000  host=301   (both guests 000, host non-000 => interface is per-NETWORK)
+   UNKNOWN K5: unexpected split (ybk1=000000 ybk2=000000 host=301)
+
+== K4 PER-SANDBOX NETWORK — one network per sandbox makes the INTERFACE the key ==
+        `container network create` gives each network its own bridge, subnet and gateway. If yoloAI
+        created one per sandbox, policy could name the interface instead of the address.
+        ybk3=192.168.65.2 gw=192.168.65.1 on bridge102   ybk4=192.168.66.2 gw=192.168.66.1 on bridge103
+   PASS    K4a: distinct networks get distinct bridges (bridge102 vs bridge103)
+        baseline before any rule: ybk3=301 ybk4=301  (both must be non-000)
+        rule names bridge102 only:  ybk3->1.0.0.1=000000  ybk4->1.0.0.1=301  ybk3->1.1.1.1=301
+   FAIL    K4b: interface did not discriminate (ybk3=000000 ybk4=301 allow=301)
+        
+        K4c  DOES THE BRIDGE INDEX RECYCLE? This is the whole question. An address recycles, which
+             is why rules 1/1b/1c exist. A key that recycles the same way is the same hazard with a
+             new name, and a stale rule naming bridge103 would silently apply to whoever gets it next.
+        after deleting yb-k-b: bridge103 is gone
+        recreated yb-k-b: gw=192.168.66.1 on bridge103   (was 192.168.66.1 on bridge103)
+   PASS    K4c: the bridge index RECYCLED (bridge103 reused). Interface keying inherits the SAME staleness
+             hazard as addresses — rules 1/1b/1c would survive unchanged, only the key's name
+             changes. That is a negative for the 'macOS can converge with Linux' hope, and it is
+             the result this item existed to get.
+
+== K4d WHAT PER-SANDBOX NETWORKS COST ==
+        Only meaningful if K4 pointed anywhere, but cheap to record either way.
+        create+settle for one network: 0.10s added to every start
+        subnets are allocated per network from 192.168.64.0/16-ish space; the ceiling on concurrent
+        vmnet networks is not probed here (see NOT TRIED).
+
+== WHAT WAS NOT TRIED — so the negative is readable as the bounded claim it is ==
+        - tart. Its guests use the same vmnet bridges, so K1/K2/K3 should transfer, but only the
+          apple backend was measured here. `--net-softnet` is a separate mechanism (it filters in
+          a helper process, not pf) and was not examined.
+        - The vmnet network ceiling. How many networks can exist at once, and whether creation
+          fails or degrades at the limit, decides whether one-network-per-sandbox is even feasible.
+        - pf `label`, `probability`, `os` fingerprinting, `rtable`. Labels name a rule, not a
+          packet; the others are not identity.
+        - NetworkExtension flow attribution, which CAN see the owning process — but only for host
+          processes, and it does not see forwarded VM traffic. That is M6.
+        - Whether the guest can be made to SET something matchable (a DSCP/TOS bit, a source port
+          range). It can, which is exactly why it is not a security key: the guest controls it.
+
+== cleanup ==
+   anchor flushed | main-refs now=2 was=2
+   main ruleset unchanged
+   guests/networks removed:
+      NETWORK  SUBNET
+      default  192.168.64.0/24
+
+pass=5 fail=2 unknown=2
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-nonaddress-key.txt

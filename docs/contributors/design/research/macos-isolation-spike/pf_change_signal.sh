@@ -187,21 +187,39 @@ say "S3b THE ONE FIELD THAT MATTERS — does anything in the GRANTED read move?"
 note "'pfctl -s info' is already permitted by the shipped D132 grant, so a field that changes on a"
 note "ruleset load would give a poll that costs no new privilege at all. Counters that always move"
 note "(searches/inserts) are useless — they change whether or not anything happened."
-before=$(pfctl -s info 2>/dev/null | head -1)
+# Two events, compared, because "it moved" is not the finding — WHICH events move it is. A signal
+# that catches a flush but sleeps through a reload is a partial tripwire, and the dangerous case is
+# a reload that drops the anchor line.
+up() { pfctl -s info 2>/dev/null | head -1 | sed -E 's/.*Enabled for //; s/ +Debug.*//'; }
+b_reload=$(up)
+pfctl -f /etc/pf.conf >/dev/null 2>&1
+sleep 2
+a_reload=$(up)
+note "uptime before a plain reload : $b_reload"
+note "uptime after  a plain reload : $a_reload    (a RELOAD is the dangerous quiet case)"
+b_flush=$(up)
 pfctl -F all >/dev/null 2>&1
-after_flush=$(pfctl -s info 2>/dev/null | head -1)
+a_flush=$(up)
 restore_pf >/dev/null
-after_load=$(pfctl -s info 2>/dev/null | head -1)
-note "before      : $before"
-note "after -F all: $after_flush"
-note "after reload: $after_load"
-if [ "$before" = "$after_flush" ]; then
-  ok "S3b: the status line is IDENTICAL across a flush that voided enforcement"
-  note "    So the one read yoloAI is already allowed cannot see the fault. That is the finding:"
-  note "    a cheap poll of the granted surface is not available, and detection has to come from"
-  note "    somewhere else (M3's detectors) or from a widened grant."
+note "uptime before -F all         : $b_flush"
+note "uptime after  -F all         : $a_flush"
+RELOAD_MOVED=no; FLUSH_MOVED=no
+printf '%s' "$a_reload" | grep -q '00:00:0' && RELOAD_MOVED=yes
+printf '%s' "$a_flush"  | grep -q '00:00:0' && FLUSH_MOVED=yes
+note ""
+note "counter reset by a reload: $RELOAD_MOVED    by -F all: $FLUSH_MOVED"
+if [ "$FLUSH_MOVED" = yes ] && [ "$RELOAD_MOVED" = no ]; then
+  ok "S3b: A PARTIAL SIGNAL EXISTS, AND IT IS FREE. \`pfctl -s info\` is already in the shipped"
+  note "    grant, and its 'Enabled for' counter RESETS on \`-F all\` — so a poll that remembers the"
+  note "    previous value detects a flush with no new privilege, by seeing the uptime go backwards."
+  note "    But it does NOT move on a plain reload, and a reload that omits the anchor line is"
+  note "    exactly the fault that defeats every other check. So this is a cheap tripwire for the"
+  note "    loud fault, not a detector for the quiet one — it cannot replace a behavioural probe."
+elif [ "$FLUSH_MOVED" = yes ]; then
+  ok "S3b: the counter reset on BOTH events — a free poll that catches both; verify by re-running"
 else
-  ok "S3b: the status line MOVED on a flush — investigate, this would be a free poll"
+  ok "S3b: the counter survived the flush, so the granted read cannot see the fault at all"
+  note "    Detection has to come from M3's detectors or from a widened grant."
 fi
 note "main-refs after repair = $(mainrefs)"
 

@@ -1,0 +1,69 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:30:08 CEST | anchor=com.apple/yoloai_6
+
+== H0 THE HOST'S OWN IPv6, stated up front so the scope of every result below is clear ==
+        host v6 addresses:
+          lo0: ::1 prefixlen 128
+          lo0: fe80::1%lo0 prefixlen 64
+          utun0: fe80::c3f8:28e8:3145:1506%utun0 prefixlen 64
+          utun1: fe80::ef08:8e08:c67d:9e3c%utun1 prefixlen 64
+          en0: fe80::882:48fd:6771:571%en0 prefixlen 64
+          utun2: fe80::8837:95aa:2539:811%utun2 prefixlen 64
+          utun2: fd7a:115c:a1e0::332:d067 prefixlen 48
+          awdl0: fe80::7089:faff:fe1c:305c%awdl0 prefixlen 64
+          utun3: fe80::e37f:bf9d:e5ce:fe9b%utun3 prefixlen 64
+          utun4: fe80::ce81:b1c:bd2c:69e%utun4 prefixlen 64
+          llw0: fe80::7089:faff:fe1c:305c%llw0 prefixlen 64
+          bridge100: fe80::2cca:16ff:fe33:7b64%bridge100 prefixlen 64
+        default v6 route: fe80::%utun0
+        dual-stack listener up on port 18642 (AF_INET6 socket, so v4-mapped clients reach it too)
+
+== V1 APPLE ==
+        
+        --- apple ---
+        guest v4=192.168.64.21
+        guest v6=fd96:9d70:8059:3047:f005:33ff:febe:5424
+        scope: unique-local (ULA) — routable on the link, not globally
+        host as seen from the guest: v4=192.168.64.1  v6=fe80::2cca:16ff:fe33:7b65
+        baseline: v4->200   v6->200   (both must be non-000 for the comparison to mean anything)
+   PASS    apple: dual-stack baseline to the host listener
+        pool loaded, empty allowlist: v4->000   v6->200
+           (want v4=000 — enforcement bites — and v6 non-000 — enforcement does not see it)
+   FAIL    apple: THE HOLE IS LIVE. v4 refused, v6 reached the same host on the same port.
+
+== V2 TART ==
+        A tart guest is a full macOS VM; if it does not come up this reports UNKNOWN rather than
+        guessing, and V1 still stands on its own.
+        tart guest: v4=<none> v6=<none>
+   UNKNOWN V2: could not read the tart guest's address; not measured
+
+== V3 CAN pf BLOCK v6 AT ALL IN THIS ANCHOR? — 'we did not' vs 'pf cannot' ==
+        If a v6 table in the same anchor enforces, the fix is a second table pair and some plumbing.
+        If it does not load or does not bite, the fix is larger. Very different sizes of problem.
+        pool with v6 tables loaded: 16 rules (expect twice the v4-only count)
+        the v6 rules, as loaded:
+          pass in quick inet6 from <yb_src6_0> to <yb_dst6_0> flags S/SA keep state
+          block return in quick inet6 from <yb_src6_0> to any
+          pass in quick inet6 from <yb_src6_1> to <yb_dst6_1> flags S/SA keep state
+          block return in quick inet6 from <yb_src6_1> to any
+        the guest's v6 address added to a v6 table: 1 entr(y/ies) held
+        with the v6 block loaded: guest v6->host=200   (want 000)
+                                  guest v4->1.1.1.1=301  (unclaimed slot, so this is unaffected)
+   FAIL    V3: the v6 rules loaded but did not bite (200). The fix is larger than a table pair.
+
+== WHAT WAS NOT TRIED ==
+        - Global IPv6 egress. This host has no v6 default route, so guest-to-internet over v6 could
+          not be attempted at all. Everything above is guest-to-host on the link. If a user's host
+          HAS v6 upstream, the hole is wider than what is shown here, not narrower.
+        - v6 address recycling. Whether a guest's v6 address is reused across recreate the way its
+          v4 lease is — which decides whether a v6 table needs rules 1/1b/1c too — was not measured.
+        - SLAAC/privacy addresses. A guest may hold several v6 addresses and rotate them, which
+          would defeat a table keyed on one. Only the address the backend reports was used.
+        - ICMPv6. Neighbour discovery must keep working under any v6 block; blocking it wholesale
+          would break the link. The rules above are TCP-reachability only and were not audited for it.
+
+== cleanup ==
+   anchor rules: 0  main-refs: 2
+
+pass=1 fail=2 unknown=1
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-v6-hole.txt

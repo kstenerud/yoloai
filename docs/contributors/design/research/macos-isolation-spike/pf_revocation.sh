@@ -43,7 +43,7 @@ PORT=18643
 SLOTS=4; SLOT=1
 PASS=0; FAIL=0; UNKNOWN=0
 WD=$(mktemp -d /tmp/pfr.XXXXXX)
-SRVPID=""
+SRVPID=""; CURLPID=""
 
 RESULTS="$HERE/results/pf-revocation.txt"
 mkdir -p "$(dirname "$RESULTS")"
@@ -100,6 +100,7 @@ cleanup() {
   echo
   echo "== cleanup =="
   [ -n "$SRVPID" ] && kill "$SRVPID" 2>/dev/null
+  [ -n "$CURLPID" ] && kill "$CURLPID" 2>/dev/null
   flush
   asuser container rm -f ybr1 >/dev/null 2>&1
   rm -rf "$WD"
@@ -148,36 +149,45 @@ fi
 # ---------------------------------------------------------------------------
 say "R1 BASELINE — the stream runs to completion while the entry is present"
 note "Without this, a stream that stops for its own reasons would read as a revocation working."
-asuser container exec ybr1 sh -c \
-  "curl -s --max-time 20 http://$GW:$PORT/ -o /tmp/base.txt >/dev/null 2>&1 &" 2>/dev/null
+# Two fixes here, both learned from run 1 reading a live stream as 0 bytes.
+#   1. Backgrounded on the HOST. Run 1 used `sh -c "curl ... &"` inside the guest, and that process
+#      died with its `container exec` session.
+#   2. `-N`. Without it curl buffers its output, and at ~9 bytes/second the buffer never fills, so
+#      the file stays empty for the whole run while the transfer is in fact progressing normally.
+#      Diagnosed by confirming the guest reached the port (200), the exec was alive, and a curl
+#      process was running — all true while the file sat at 0 bytes.
+asuser container exec ybr1 curl -sN --max-time 25 "http://$GW:$PORT/" -o /tmp/base.txt \
+  >/dev/null 2>&1 &
+CURLPID=$!
 sleep 5
-n1=$(asuser container exec ybr1 sh -c 'wc -l < /tmp/base.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
+n1=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/base.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
 sleep 6
-n2=$(asuser container exec ybr1 sh -c 'wc -l < /tmp/base.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
-note "lines received at +5s: $n1     at +11s: $n2"
+n2=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/base.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
+note "bytes received at +5s: $n1     at +11s: $n2"
 if [ "${n2:-0}" -gt "${n1:-0}" ]; then
   ok "R1: the stream is genuinely live and growing while permitted"
 else
   bad "R1: the stream did not grow ($n1 -> $n2); R2 would be meaningless. ABORTING"; exit 1
 fi
-asuser container exec ybr1 sh -c 'pkill -f "curl -s --max-time" || true' >/dev/null 2>&1
+kill "$CURLPID" 2>/dev/null; CURLPID=""
 sleep 1
 
 # ---------------------------------------------------------------------------
 say "R2 REVOKE MID-STREAM — the question"
-asuser container exec ybr1 sh -c \
-  "curl -s --max-time 30 http://$GW:$PORT/ -o /tmp/rev.txt >/dev/null 2>&1 &" 2>/dev/null
+asuser container exec ybr1 curl -sN --max-time 30 "http://$GW:$PORT/" -o /tmp/rev.txt \
+  >/dev/null 2>&1 &
+CURLPID=$!
 sleep 5
-before=$(asuser container exec ybr1 sh -c 'wc -l < /tmp/rev.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
+before=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/rev.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
 ST=$(states "$IP")
-note "before revocation: $before lines received, $ST pf state(s) mentioning $IP"
+note "before revocation: $before bytes received, $ST pf state(s) mentioning $IP"
 note "revoking: pfctl -a $ANCHOR -t yb_dst_$SLOT -T delete $GW"
 pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T delete "$GW" 2>&1 | sed 's/^/        pfctl: /'
 held=$(pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T show 2>/dev/null | tr -d ' ' | grep -c . || true)
 note "allowlist now holds $held address(es) — the revocation is applied"
 sleep 8
-after=$(asuser container exec ybr1 sh -c 'wc -l < /tmp/rev.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
-note "8s after revocation: $after lines (was $before)"
+after=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/rev.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
+note "8s after revocation: $after bytes (was $before)"
 
 # ---------------------------------------------------------------------------
 say "R3 THE CONTROL — a NEW connection must now fail"
@@ -203,18 +213,20 @@ note "pfctl -k kills state entries. If R2 showed survival, this is the missing s
 note "revocation path: reaping, liveness reinstall, and sandbox teardown alike."
 pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T add "$GW" >/dev/null 2>&1
 asuser container exec ybr1 sh -c 'rm -f /tmp/k.txt' >/dev/null 2>&1
-asuser container exec ybr1 sh -c \
-  "curl -s --max-time 30 http://$GW:$PORT/ -o /tmp/k.txt >/dev/null 2>&1 &" 2>/dev/null
+kill "$CURLPID" 2>/dev/null
+asuser container exec ybr1 curl -sN --max-time 30 "http://$GW:$PORT/" -o /tmp/k.txt \
+  >/dev/null 2>&1 &
+CURLPID=$!
 sleep 5
-kb=$(asuser container exec ybr1 sh -c 'wc -l < /tmp/k.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
-note "stream re-established: $kb lines; states mentioning $IP: $(states "$IP")"
+kb=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/k.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
+note "stream re-established: $kb bytes; states mentioning $IP: $(states "$IP")"
 pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T delete "$GW" >/dev/null 2>&1
 out=$(pfctl -k "$IP" 2>&1 | head -2 | tr '\n' ' ')
 note "pfctl -k $IP -> ${out:-<no output>}"
 note "states now: $(states "$IP")"
 sleep 6
-ka=$(asuser container exec ybr1 sh -c 'wc -l < /tmp/k.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
-note "6s after the kill: $ka lines (was $kb)"
+ka=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/k.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
+note "6s after the kill: $ka bytes (was $kb)"
 if [ "${ka:-0}" -le "${kb:-0}" ]; then
   ok "R4: killing states DOES stop an established connection — the fix exists and works"
 else

@@ -44,7 +44,12 @@ N=4                      # concurrent sandboxes
 PASS=0; FAIL=0; UNKNOWN=0
 WD=$(mktemp -d /tmp/pfc.XXXXXX)
 declare -a G IPS
-DESTS=(1.1.1.1 1.0.0.1 8.8.8.8 9.9.9.9)
+# Candidates, not choices. Run 1 aborted on 8.8.8.8, which is a resolver and answers nothing on
+# port 80 — the preflight caught it correctly, but a fixed list means one dead address kills the
+# run. Four are SELECTED from this pool by the preflight below.
+CANDIDATES=(1.1.1.1 1.0.0.1 1.1.1.2 1.0.0.2 94.140.14.14 94.140.15.15
+            208.67.222.222 208.67.220.220 185.228.168.9 76.76.2.0 9.9.9.9 8.8.8.8)
+DESTS=()
 
 RESULTS="$HERE/results/pf-concurrent-acquire.txt"
 mkdir -p "$(dirname "$RESULTS")"
@@ -64,8 +69,11 @@ import json,sys
 d=json.load(sys.stdin)
 print(d[0]["status"]["networks"][0].get(sys.argv[1],"").split("/")[0])' "$2" 2>/dev/null; }
 now() { python3 -c 'import time;print(time.time())'; }
-reach() { asuser container exec "$1" curl -s -o /dev/null -w '%{http_code}' --max-time 6 \
-            "http://$2/" 2>/dev/null || printf '000'; }
+# curl writes %{http_code} even when it fails (000) and ALSO exits non-zero. An `|| printf 000`
+# fallback therefore appends a second 000, and every "is it blocked?" test silently compares
+# "000000" against "000" and reads a successful block as a failure. Run 1 lost four verdicts to it.
+reach() { local o; o=$(asuser container exec "$1" curl -s -o /dev/null -w '%{http_code}' \
+            --max-time 6 "http://$2/" 2>/dev/null); printf '%s' "${o:-000}"; }
 tbl() { pfctl -a "$ANCHOR" -t "$1" -T show 2>/dev/null | tr -d ' ' | tr '\n' ',' | sed 's/,$//'; }
 
 load_pool() {
@@ -130,12 +138,21 @@ echo "date: $(date '+%Y-%m-%d %H:%M:%S %Z') | anchor=$ANCHOR | pool=$SLOTS slots
 say "C0 SETUP — $N sandboxes, each with its own allowed destination"
 [ "$(mainrefs)" -gt 0 ] || { bad "host is fail-open; run pf_anchor_eval.sh first. ABORTING"; exit 1; }
 asuser container system start >/dev/null 2>&1; sleep 2
-note "preflight: every destination must answer from the host, or a 000 below means nothing"
-for d in "${DESTS[@]}"; do
-  c=$(asuser curl -s -o /dev/null -w '%{http_code}' --max-time 6 "http://$d/" 2>/dev/null)
-  note "  $d -> ${c:-000}"
-  [ "${c:-000}" = 000 ] && { bad "destination $d does not answer; ABORTING"; exit 1; }
+note "preflight: pick $N destinations that actually answer HTTP from the host. A destination that"
+note "answers nothing would make every guest's 000 free, which is A22 in its cheapest form."
+for c in "${CANDIDATES[@]}"; do
+  [ "${#DESTS[@]}" -ge "$N" ] && break
+  r=$(asuser curl -s -o /dev/null -w '%{http_code}' --max-time 6 "http://$c/" 2>/dev/null)
+  if [ -n "$r" ] && [ "$r" != 000 ]; then
+    DESTS+=("$c"); note "  $c -> $r   selected"
+  else
+    note "  $c -> ${r:-000}   skipped"
+  fi
 done
+if [ "${#DESTS[@]}" -lt "$N" ]; then
+  bad "only ${#DESTS[@]} of $N destinations answer; ABORTING"; exit 1
+fi
+ok "C0: $N usable destinations: ${DESTS[*]}"
 for ((i=0;i<N;i++)); do
   G[i]="ybc$i"
   asuser container rm -f "ybc$i" >/dev/null 2>&1

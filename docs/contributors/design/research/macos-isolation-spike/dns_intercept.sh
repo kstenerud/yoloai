@@ -78,10 +78,12 @@ brof() { ifconfig -a 2>/dev/null | awk -v want="$1" '
 
 # Resolve a name INSIDE the guest; prints the first A record or "". Deliberately A-only: `getent
 # hosts` returns the AAAA first on this image, which would silently never equal FAKEA.
+# `dig +short` writes ";; communications error to ..." to STDOUT on refusal, so an unfiltered
+# capture is non-empty and a successful BLOCK reads as a successful answer. Run 1 lost D3b to it.
 gdig()    { asuser container exec "$1" \
-              dig +short +time=2 +tries=1 A "$2" 2>/dev/null | head -1; }
+              dig +short +time=2 +tries=1 A "$2" 2>/dev/null | grep -v '^;;' | head -1; }
 gdig_at() { asuser container exec "$1" \
-              dig +short +time=2 +tries=1 A "$2" "@$3" 2>/dev/null | head -1; }
+              dig +short +time=2 +tries=1 A "$2" "@$3" 2>/dev/null | grep -v '^;;' | head -1; }
 
 # --- the host-side resolver under test -------------------------------------
 # Answers every A query with FAKEA and appends the queried name to its log, so "the guest used our
@@ -306,9 +308,13 @@ if ! asuser "$YOLOAI" new dnsx "$WD" --backend tart >/dev/null 2>&1; then
 else
   TIP=$(asuser "$YOLOAI" ls 2>/dev/null | awk '$1=="dnsx"{print $4}')
   note "tart guest reported at '${TIP:-<none>}'"
-  TRES=$(asuser "$YOLOAI" exec dnsx cat /etc/resolv.conf 2>/dev/null | tr '\n' ' ')
-  note "tart resolv.conf: ${TRES:-<unreadable>}"
-  TGW=$(printf '%s' "$TRES" | awk '/nameserver/{print $2; exit}')
+  TRES=$(asuser "$YOLOAI" exec dnsx cat /etc/resolv.conf 2>/dev/null)
+  note "tart resolv.conf nameservers:"
+  printf '%s\n' "$TRES" | awk '/^nameserver/{print "          " $0}'
+  # macOS resolv.conf opens with a comment block and lists link-local v6 resolvers first. Run 1
+  # flattened the file and took field 2 of the first line containing "nameserver", which was "#".
+  TGW=$(printf '%s\n' "$TRES" | awk '/^nameserver/ && $2 !~ /^fe80/ && $2 ~ /\./ {print $2; exit}')
+  note "first IPv4 nameserver: ${TGW:-<none>}"
   TBR=$(brof "$TGW")
   note "tart resolver $TGW is the gateway on ${TBR:-<none>}"
   if [ -z "$TBR" ]; then

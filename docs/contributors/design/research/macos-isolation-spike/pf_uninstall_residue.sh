@@ -64,8 +64,11 @@ sudoers_list() {   # ls|grep trips shellcheck and mangles odd names; glob and lo
   for f in /etc/sudoers.d/*; do [ -e "$f" ] && out="$out ${f##*/}"; done
   printf '%s' "${out# }"
 }
-try() { asuser container exec ybu1 curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
-          "http://$1/" 2>/dev/null || printf '000'; }
+# curl writes %{http_code} even when it fails (000) and ALSO exits non-zero. An `|| printf 000`
+# fallback therefore appends a second 000, and every "is it blocked?" test silently compares
+# "000000" against "000" and reads a successful block as a failure. Run 1 lost four verdicts to it.
+try() { local o; o=$(asuser container exec ybu1 curl -s -o /dev/null -w '%{http_code}' \
+          --max-time 5 "http://$1/" 2>/dev/null); printf '%s' "${o:-000}"; }
 
 cleanup() {
   echo

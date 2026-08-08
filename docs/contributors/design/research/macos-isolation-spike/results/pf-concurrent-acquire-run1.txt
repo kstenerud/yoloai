@@ -1,0 +1,15 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:31:53 CEST | anchor=com.apple/yoloai_c | pool=8 slots
+
+== C0 SETUP — 4 sandboxes, each with its own allowed destination ==
+        preflight: every destination must answer from the host, or a 000 below means nothing
+          1.1.1.1 -> 301
+          1.0.0.1 -> 301
+          8.8.8.8 -> 000
+   FAIL    destination 8.8.8.8 does not answer; ABORTING
+
+== cleanup ==
+   anchor rules: 0  main-refs: 2
+
+pass=0 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-concurrent-acquire.txt

@@ -1,0 +1,13 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:30:55 CEST | anchor=com.apple/yoloai_v
+
+== V0 SETUP — and proof that enforcement is real before anything is broken ==
+        guest=192.168.64.22  pf=Enabled  main-refs=2
+        allowed->1.1.1.1=301   denied->1.0.0.1=000000   (need non-000 then 000)
+   FAIL    enforcement not live at the start (allow=301 deny=000000); nothing below would mean anything. ABORTING
+
+== cleanup ==
+   pf=Enabled  main-refs=2  sudoers: []
+
+pass=0 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-liveness-detect.txt

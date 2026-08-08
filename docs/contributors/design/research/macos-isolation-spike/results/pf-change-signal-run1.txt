@@ -1,0 +1,126 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:31:03 CEST
+pf:   Status: Enabled for 0 days 09:14:45           Debug: Urgent
+
+== S0 BASELINE ==
+        main-refs=2
+        pf.conf mtime: May 21 10:57:02 2026
+
+== S2a IS THE NOTIFY WATCHER ALIVE? — proven before its silence is reported ==
+   PASS    S2a: the watcher receives notifications (its own test post came through)
+        keys under watch:
+          com.apple.system.config.network_change
+          com.apple.system.config.ipv4
+          com.apple.system.config.ipv6
+          com.apple.system.config.dns
+          com.apple.system.packetfilter
+          com.apple.pfctl
+          com.apple.networkextension.filter-configuration-changed
+          state:/Network/Global/IPv4
+          com.apple.system.config.sc_dynamicstore
+
+== S1/S3 THE EVENTS — log, notify, -s info and file mtime around each ==
+        
+        --- E1  pfctl -f /etc/pf.conf   (a benign reload) ---
+        S1 unified log entries matching the pf predicate since the event: 0
+        S2 notify keys that fired: 0
+        S3 changed lines in 'pfctl -s info' + '-s Anchors': 10
+            < Status: Enabled for 0 days 09:14:49           Debug: Urgent
+            > Status: Enabled for 0 days 09:14:52           Debug: Urgent
+            <   current entries                      289               
+            <   searches                         6188183          185.9/s
+            >   current entries                      272               
+            >   searches                         6188266          185.9/s
+            <   removals                           54831            1.6/s
+            >   removals                           54848            1.6/s
+        S4 /etc/pf.conf mtime changed: no
+            main-refs now = 2
+        
+        --- E3  pfctl -d then pfctl -e  (disable/enable) ---
+          pfctl: pf disabled
+          pfctl: pf enabled
+        S1 unified log entries matching the pf predicate since the event: 0
+        S2 notify keys that fired: 0
+        S3 changed lines in 'pfctl -s info' + '-s Anchors': 12
+            < Status: Enabled for 0 days 09:14:53           Debug: Urgent
+            > Status: Enabled for 0 days 00:00:03           Debug: Urgent
+            <   current entries                      272               
+            <   searches                         6188290          185.9/s
+            <   inserts                            54986            1.7/s
+            <   removals                           54848            1.6/s
+            >   current entries                      198               
+            >   searches                         6188609      2062869.7/s
+        S4 /etc/pf.conf mtime changed: no
+            main-refs now = 2
+        
+        --- E2  pfctl -F all            (THE FAULT) ---
+          pfctl: rules cleared
+          pfctl: nat cleared
+          pfctl: dummynet cleared
+          pfctl: 0 tables deleted.
+          pfctl: 198 states cleared
+          pfctl: source tracking entries cleared
+          pfctl: pf: statistics cleared
+          pfctl: pf: interface flags reset
+        S1 unified log entries matching the pf predicate since the event: 0
+        S2 notify keys that fired: 0
+        S3 changed lines in 'pfctl -s info' + '-s Anchors': 12
+            < Status: Enabled for 0 days 00:00:04           Debug: Urgent
+            > Status: Enabled for 0 days 00:00:03           Debug: Urgent
+            <   current entries                      198               
+            <   searches                         6188622      1547155.5/s
+            <   inserts                            54986        13746.5/s
+            <   removals                           54922        13730.5/s
+            >   current entries                      143               
+            >   searches                             222           74.0/s
+        S4 /etc/pf.conf mtime changed: no
+            main-refs now = 0
+        
+        repairing immediately — E2 leaves the host unenforced
+        main-refs after repair = 2
+
+== S3b THE ONE FIELD THAT MATTERS — does anything in the GRANTED read move? ==
+        'pfctl -s info' is already permitted by the shipped D132 grant, so a field that changes on a
+        ruleset load would give a poll that costs no new privilege at all. Counters that always move
+        (searches/inserts) are useless — they change whether or not anything happened.
+        before      : Status: Enabled for 0 days 00:00:04           Debug: Urgent
+        after -F all: Status: Enabled for 0 days 00:00:00           Debug: Urgent
+        after reload: Status: Enabled for 0 days 00:00:00           Debug: Urgent
+   PASS    S3b: the status line MOVED on a flush — investigate, this would be a free poll
+        main-refs after repair = 2
+
+== S4b THE FILE WATCH, REFUTED EXPLICITLY ==
+        Watching /etc/pf.conf is the first idea anyone has. Above, every event left its mtime
+        untouched — including the one that voided enforcement. The file is the SOURCE; the fault is in
+        the LOADED ruleset, and nothing keeps the two in agreement. A file watcher is not a weak
+        detector here, it is a blind one.
+   PASS    S4b: recorded — /etc/pf.conf mtime is not a signal for any of the three events
+
+== S5 THE COST OF POLLING, since that is what a negative forces ==
+        20 invocations of the granted read, as the user would issue them:
+        pfctl -s info x20 (as root, no sudo): 1.8 ms each
+        pfctl -s rules x20 (the main-ruleset read a poll would need): 4.5 ms each
+        
+        Add ~9.3 ms of sudo per call (pf-acquire-cost.txt, where 85% of a call was sudo and not pfctl).
+        At a 5s interval that is a fraction of a percent of one core, and a 5s worst-case window of
+        unenforced running. The interval is the design parameter; these are its two axes.
+
+== WHAT WAS NOT TRIED ==
+        - Every notify(3) key. There is no way to enumerate them, so only the list printed under S2a
+          was watched. A key exists that nobody here knows the name of is NOT excluded by this run.
+        - kqueue/EVFILT on /dev/pf. pf is driven by ioctl, not by file writes, so a vnode filter has
+          nothing to fire on; not attempted.
+        - A DTrace probe on the pf ioctl path. It would detect any writer, including the ones that
+          emit nothing — but it needs SIP disabled, which makes it a diagnostic and not a shipping
+          mechanism.
+        - NSWorkspace / SCDynamicStore notifications from a real system service inserting an anchor.
+          Only pfctl-driven events were triggered; no service was induced to change the ruleset.
+        - Whether a poll and M3's behavioural canary can share one timer. That is a design question,
+          and it belongs to synthesis.
+
+== cleanup ==
+   pf=Enabled  main-refs=2
+   main ruleset references com.apple/* again
+
+pass=3 fail=0 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-change-signal.txt

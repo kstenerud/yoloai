@@ -216,7 +216,8 @@ asuser "$YOLOAI" destroy v6x --abandon-unapplied >/dev/null 2>&1
 if ! asuser "$YOLOAI" new v6x "$WD" --backend tart >/dev/null 2>&1; then
   unk "V2: tart sandbox would not start; not measured"
 else
-  T4=$(asuser "$YOLOAI" exec v6x sh -c "ipconfig getifaddr en0" 2>/dev/null | tr -d '\r')
+  T4=$(asuser "$YOLOAI" exec v6x sh -c "ifconfig en0 | awk '/inet /{print \$2; exit}'" 2>/dev/null | tr -d '\r')
+  [ -z "$T4" ] && T4=$(asuser "$YOLOAI" exec v6x sh -c "ipconfig getifaddr en0" 2>/dev/null | tr -d '\r')
   T6=$(asuser "$YOLOAI" exec v6x sh -c "ifconfig en0 | awk '/inet6/ && \$2 !~ /^fe80/ {print \$2; exit}'" 2>/dev/null | tr -d '\r')
   [ -z "$T6" ] && T6=$(asuser "$YOLOAI" exec v6x sh -c "ifconfig en0 | awk '/inet6/{print \$2; exit}'" 2>/dev/null | tr -d '\r' | cut -d% -f1)
   note "tart guest: v4=${T4:-<none>} v6=${T6:-<none>}"
@@ -246,9 +247,19 @@ note "pool with v6 tables loaded: $n rules (expect twice the v4-only count)"
 note "the v6 rules, as loaded:"
 pfctl -a "$ANCHOR" -s rules 2>/dev/null | grep inet6 | head -4 | sed 's/^/          /'
 if [ -n "${A6:-}" ] && [ -n "${A4:-}" ]; then
-  pfctl -a "$ANCHOR" -t "yb_src6_$SLOT" -T add "$A6" >/dev/null 2>&1
+  note "Run 1 added ONLY the ULA the backend reports, and the block did not bite. The reason is"
+  note "source selection: talking to a LINK-LOCAL host address, the guest sources from its own"
+  note "link-local, not its ULA — so the table held an address the traffic never used. That is a"
+  note "finding in its own right: a v6 table keyed on 'the address the backend reports' is"
+  note "insufficient, because a guest holds several v6 addresses and picks per destination scope."
+  A6ALL=$(apple_ex "ip -6 -o addr show eth0 | awk '{print \$4}' | cut -d/ -f1" | tr -d '\r')
+  note "every v6 address the guest holds:"
+  for a in $A6ALL; do
+    note "  $a"
+    pfctl -a "$ANCHOR" -t "yb_src6_$SLOT" -T add "$a" >/dev/null 2>&1
+  done
   held=$(pfctl -a "$ANCHOR" -t "yb_src6_$SLOT" -T show 2>/dev/null | tr -d ' ' | grep -c . || true)
-  note "the guest's v6 address added to a v6 table: $held entr(y/ies) held"
+  note "v6 src table now holds $held entr(y/ies)"
   HV6=$(apple_ex "ip -6 route | awk '/default/{print \$3}'" | tr -d '\r')
   [ -z "$HV6" ] && HV6=$(apple_ex "ip -6 neigh | awk '{print \$1; exit}'" | tr -d '\r')
   if [ -n "$HV6" ]; then
@@ -258,9 +269,12 @@ if [ -n "${A6:-}" ] && [ -n "${A4:-}" ]; then
     note "                          guest v4->$ALLOW=$r4  (unclaimed slot, so this is unaffected)"
     if [ "$r6" = 000 ]; then
       ok "V3: pf DOES enforce on IPv6 in this anchor. The hole is an omission, not a limitation —"
-      note "    a second table pair closes it, at the cost of doubling the pool's table count."
+      note "    but closing it costs more than 'a second table pair': the table must hold EVERY v6"
+      note "    address the guest holds, and a guest can acquire more at any time (SLAAC, privacy"
+      note "    addresses), which a v4 table never has to contend with."
     else
-      bad "V3: the v6 rules loaded but did not bite ($r6). The fix is larger than a table pair."
+      bad "V3: the v6 rules loaded and the table held every address the guest has, and it STILL"
+      note "    did not bite ($r6). The fix is larger than a table pair."
     fi
   else
     unk "V3: no host v6 address reachable from the guest; not measured"

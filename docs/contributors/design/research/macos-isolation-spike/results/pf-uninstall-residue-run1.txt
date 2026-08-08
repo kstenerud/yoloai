@@ -1,0 +1,22 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:30:00 CEST | anchor=com.apple/yoloai_u
+
+== U1 INSTALL — the whole D132 mechanism, in its shipped shape ==
+        pinned ruleset written: /etc/yoloai-spike/pf-pool.conf (16 lines, root-owned)
+        grant installed: /etc/sudoers.d/yoloai-pf-spike-u (mode 440, owner root)
+        pool loaded through the grant: 8 rules
+
+== U2 USE IT — and prove enforcement was real, so the residue is a residue of something ==
+        guest=192.168.64.20
+        allowed->1.1.1.1=301   denied->1.0.0.1=000000   (need non-000 then 000)
+   FAIL    U2: enforcement was never live (allow=301 deny=000000); the residue below is of nothing. ABORTING
+
+== cleanup — removing what a real uninstall would have to remove ==
+   sudoers.d now: []
+   /etc/yoloai-spike: gone
+   anchor rules: 0   main-refs: 2
+   NOTE the anchor NODE itself cannot be removed; see U5c. It is empty, which is the most
+        this cleanup can achieve, and that is the finding.
+
+pass=0 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-uninstall-residue.txt

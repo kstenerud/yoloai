@@ -1,0 +1,17 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 13:31:20 CEST | anchor=com.apple/yoloai_s
+
+== S0 SETUP AND THE ENFORCEMENT MATRIX ==
+        A=ybs1 192.168.64.23/24 allowed 1.1.1.1
+        B=ybs2 192.168.64.24/24 allowed 1.0.0.1     bridge=bridge101 gateway=192.168.64.1
+        matrix:  A->own=301  A->B's=000000   |   B->A's=000000  B->own=301
+                 (want non-000, 000, 000, non-000)
+   FAIL    S0: the matrix does not hold; nothing below would be interpretable. ABORTING
+
+== cleanup ==
+   anchor rules: 0  main-refs: 2
+
+pass=0 fail=1 unknown=0
+   NOTE 'FAIL' here means an escape SUCCEEDED. This script fails when the product is weak,
+        not when the script is broken.
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-spoof.txt
