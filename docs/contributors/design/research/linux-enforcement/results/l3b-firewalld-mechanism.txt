@@ -1,0 +1,46 @@
+
+=== boot a fedora container with its own netns and NET_ADMIN ===
+
+=== install firewalld ===
+firewalld-2.2.3-2.fc41.noarch
+nftables v1.0.9 (Old Doc Yak #3)
+
+=== start dbus and firewalld ===
+running
+
+=== what firewalld put in the ruleset ===
+table inet firewalld
+
+=== add a FOREIGN table, exactly the shape our design installs ===
+foreign table loaded, rc=0
+-- tables now:
+table inet firewalld
+table inet yb_foreign
+
+=== TRIGGER: firewall-cmd --reload ===
+success
+
+=== RESULT: did the foreign table survive? ===
+table inet yb_foreign
+table inet firewalld
+VERDICT: foreign table SURVIVED a firewalld reload
+-- its contents (a table can survive with its rules gone):
+table inet yb_foreign {
+	set allowed {
+		type ipv4_addr
+		elements = { 203.0.113.7 }
+	}
+
+	chain c_forward {
+		type filter hook forward priority filter - 10; policy accept;
+		ip saddr 10.99.99.99 ip daddr @allowed counter packets 0 bytes 0 accept
+		ip saddr 10.99.99.99 counter packets 0 bytes 0 drop
+	}
+}
+
+=== POSITIVE CONTROL: firewalld's own table must have been rebuilt by that reload ===
+table inet firewalld
+control OK — firewalld's table is present, so the reload really ran
+
+=== which backend is firewalld using (nftables backend does a whole-ruleset flush) ===
+FirewallBackend=nftables

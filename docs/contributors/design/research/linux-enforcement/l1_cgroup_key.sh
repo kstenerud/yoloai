@@ -17,7 +17,7 @@ cleanup
 
 say "host cgroup layout"
 stat -fc 'cgroup fs type: %T' /sys/fs/cgroup
-echo -n 'net_cls (cgroup v1 — what `meta cgroup` reads): '
+echo -n 'net_cls (cgroup v1 — what the meta cgroup match reads): '
 if [ -d /sys/fs/cgroup/net_cls ]; then echo present; else echo ABSENT; fi
 echo "kernel: $(uname -r)   nft: $(nft --version)"
 

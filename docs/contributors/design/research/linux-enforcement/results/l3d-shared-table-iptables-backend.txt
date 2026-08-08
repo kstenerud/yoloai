@@ -1,0 +1,17 @@
+=== firewalld iptables backend is active; its chains are in the SHARED filter table ===
+firewalld chains present: 30
+
+=== install a foreign chain + FORWARD jump, the way docker installs DOCKER-USER ===
+  -N YB_FOREIGN
+  -A YB_FOREIGN -s 10.99.99.99/32 -j DROP
+  FORWARD jump present: 1
+
+=== TRIGGER: firewall-cmd --reload ===
+  success
+
+=== RESULT ===
+  foreign CHAIN:        DESTROYED
+  FORWARD jump to it:   0  (0 = enforcement silently voided)
+
+=== POSITIVE CONTROL: the reload really ran — firewalld rebuilt its own chains ===
+  firewalld chains after reload: 30

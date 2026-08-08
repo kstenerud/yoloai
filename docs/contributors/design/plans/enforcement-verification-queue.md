@@ -122,6 +122,25 @@ egress in both directions.
 **Decides:** the trigger list the liveness detector must cover, and whether a reload *subscription*
 (moby #49443's approach) covers enough of them to be the fast path.
 
+**Outcome (2026-08-08): measurement inverted the reading.** `results/l3-firewall-manager-triggers.txt`,
+`l3b`, `l3c`, `l3d`. Nothing a firewall manager did touched a dedicated `inet` table of ours:
+`ufw enable`/`reload`/`disable` and a full `docker restart` all left it present *and* enforcing
+(checked with live packets, not just `nft list`), and firewalld 2.2.3 on its nftables backend left it
+intact across `--reload`, `--complete-reload` and a full restart.
+
+**The variable is not whether a manager exists, it is whether you share its table.** Switching
+firewalld to its iptables backend and installing a foreign chain plus a `FORWARD` jump — docker's
+exact `DOCKER-USER` shape — a single `firewall-cmd --reload` destroyed both the chain and the jump,
+while firewalld rebuilt its own 30 chains. That is the moby CVE mechanism, reproduced, and it lands
+on tools that write into the shared `filter` table. Our design does not.
+
+**Consequence for liveness:** a reload *subscription* is much less valuable than moby #49443 implies
+for us, because the reloads do not reach us. What remains is the whole-ruleset class — `nft flush
+ruleset`, as `/etc/nftables.conf` opens with — which is table-agnostic and emits no signal at all. So
+if liveness detection is needed on Linux it is a probe, not a subscription. Note that
+`nftables.service` is **disabled** on the test host, making that trigger latent rather than live
+here; it was not fired, because it would have taken the SSH session's networking with it.
+
 ### L4 — Does address recycling behave the same on podman and containerd?
 
 Only docker was measured (lowest-free, immediate reuse). podman and containerd allocate differently

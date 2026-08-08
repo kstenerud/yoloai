@@ -1,0 +1,46 @@
+
+=== SAFETY: this host is reached over SSH — back up ufw config, allow 22, arm a watchdog ===
+ufw config backed up to /tmp/tmp.NHcBX2DEit
+ufw state before: Status: inactive
+watchdog armed: ufw force-disabled in 300s if this script dies (pid 3751478)
+
+=== install an enforcing sandbox ===
+guest=172.17.0.2  allowlisted=104.20.23.154 (example.com)  denied=1.1.1.1
+
+=== baseline — both controls must be right before any trigger means anything ===
+baseline                     table=yes  denied-dst=enforcing                         allowed-dst=reachable
+
+=== TRIGGER: ufw enable ===
+after ufw enable             table=yes  denied-dst=enforcing                         allowed-dst=reachable
+
+=== TRIGGER: ufw reload ===
+after ufw reload             table=yes  denied-dst=enforcing                         allowed-dst=reachable
+
+=== TRIGGER: ufw disable ===
+after ufw disable            table=yes  denied-dst=enforcing                         allowed-dst=reachable
+
+=== TRIGGER: docker restart (rewrites its own chains) ===
+guest address after docker restart: 172.17.0.2 (was 172.17.0.2)
+after docker restart         table=yes  denied-dst=enforcing                         allowed-dst=reachable
+
+=== TRIGGER: nft flush ruleset (the unconditional case, for reference) ===
+not run — it would drop this SSH session's host networking along with everything else.
+/etc/nftables.conf on this host begins with 'flush ruleset', but nftables.service is
+disabled and inactive, so that trigger is latent here, not live.
+
+=== final state ===
+table inet yb_l3 {
+	set allowed {
+		type ipv4_addr
+		elements = { 104.20.23.154 }
+	}
+
+	chain c_forward {
+		type filter hook forward priority filter - 10; policy accept;
+		ip saddr 172.17.0.2 ct state established,related accept
+		ip saddr 172.17.0.2 udp dport 53 accept
+		ip saddr 172.17.0.2 ip daddr @allowed counter packets 5 bytes 300 accept
+		ip saddr 172.17.0.2 counter packets 20 bytes 1200 drop
+	}
+}
+ufw: Status: inactive

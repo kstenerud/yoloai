@@ -1,0 +1,21 @@
+
+=== PART 1 — nftables backend: our own dedicated table ===
+  firewall-cmd --reload           own table: SURVIVED
+  firewall-cmd --complete-reload  own table: SURVIVED
+  firewalld full restart          own table: SURVIVED
+  control — firewalld's own table present: 1
+
+=== PART 2 — iptables backend: a rule sharing the manager's table (docker's situation) ===
+  tables with iptables backend:
+    table inet yb_own
+    table inet firewalld
+  foreign chain installed in the shared filter table:
+    -N YB_FOREIGN
+    -A YB_FOREIGN -s 10.99.99.99/32 -j DROP
+  after firewall-cmd --reload:
+    shared-table foreign chain: SURVIVED
+      -N YB_FOREIGN
+      -A YB_FOREIGN -s 10.99.99.99/32 -j DROP
+    our own dedicated table:    SURVIVED
+  control — is the FORWARD jump to our chain still there?
+    jumps: 1
