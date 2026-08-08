@@ -1,0 +1,110 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 14:14:43 CEST | anchor=com.apple/yoloai_v
+
+== V0 SETUP — and proof that enforcement is real before anything is broken ==
+        guest=192.168.64.13  pf=Enabled  main-refs=2
+        allowed->1.1.1.1=301   denied->1.0.0.1=000   (need non-000 then 000)
+   PASS    enforcement is live: the allowlist passes and a denied destination is refused
+
+== V1 ALL THREE DETECTORS ON A HEALTHY HOST ==
+        Each must say HEALTHY here. A detector that says BROKEN on a working host is worse than none.
+        A main-ruleset inspection : HEALTHY 16.0 ms
+        B evaluation counters     : HEALTHY 250.8 (evals 16->22) ms
+        C behavioural canary      : HEALTHY 97.1 (code 000) ms
+   PASS    V1: all three agree the host is healthy
+
+== V2 FAULT F1 'SHADOWED' — the reference is PRESENT and pf still never descends ==
+        pf.conf's own comments warn that system services insert anchors into the main ruleset at
+        runtime. Rules are first-match with 'quick', so anything inserted ahead of the com.apple
+        anchor point shadows it. Here that is simulated with one 'pass quick all' line, loaded from a
+        copy of /etc/pf.conf — so the reference detector A counts is still right there in the ruleset.
+        the injected ruleset, in full:
+          | scrub-anchor "com.apple/*"
+          | nat-anchor "com.apple/*"
+          | rdr-anchor "com.apple/*"
+          | dummynet-anchor "com.apple/*"
+          | pass quick all
+          | anchor "com.apple/*"
+        main-refs after injection = 2  (still non-zero: that is the entire point)
+        
+        Dropping the 'load anchor' line was not enough. ANY 'pfctl -f' of the main ruleset re-declares
+        nat-anchor "com.apple/*" with no body, and a declared-but-unfilled anchor loads EMPTY — so
+        vmnet's runtime NAT goes with it either way, and run 2 still saw both destinations refused.
+        Restarting the backend daemon re-inserts that NAT while leaving the injected main ruleset
+        alone, which is the same asymmetry the repair procedure already relies on.
+        guest re-created at 192.168.64.2 | main-refs=2 (the injection must have survived)
+        allowed->1.1.1.1=301   denied->1.0.0.1=301   (denied reaching => enforcement is dead)
+   PASS    V2 precondition: enforcement IS dead — the denied destination answered 301
+        A main-ruleset inspection : HEALTHY 18.6 ms
+        B evaluation counters     : BROKEN 248.5 (evals 0->0) ms
+        C behavioural canary      : BROKEN 132.4 (code 301) ms
+   PASS    V2 THE FINDING: detector A reports HEALTHY on a host that is not enforcing.
+            An inspection of the main ruleset is STILL a proxy. It counts the reference and cannot
+            see that something matched first. This is the same failure class as last pass, one
+            level up — so 'just read the main ruleset' does not close the gap.
+   PASS    V2: both the counter delta and the canary detect it
+        restoring the real /etc/pf.conf
+        denied->1.0.0.1=000 after restore  (000 = enforcement back, no daemon restart needed)
+
+== V3 FAULT F2 'FLUSHED' — the control, and the fault measured last pass ==
+        pfctl: rules cleared
+        pfctl: nat cleared
+        pfctl: dummynet cleared
+        pfctl: 0 tables deleted.
+        pfctl: 187 states cleared
+        pfctl: source tracking entries cleared
+        pfctl: pf: statistics cleared
+        pfctl: pf: interface flags reset
+        guest now 192.168.64.2 | main-refs=0 | pf=Enabled
+        allowed->1.1.1.1=301   denied->1.0.0.1=301
+        A main-ruleset inspection : BROKEN 14.5 ms
+        B evaluation counters     : BROKEN 246.5 (evals 0->0) ms
+        C behavioural canary      : BROKEN 130.6 (code 301) ms
+   PASS    V3: all three detect the flushed fault
+
+== V4 GRANT SURFACE — what each detector would cost at the security boundary ==
+        The shipped D132 grant permits exactly four forms. Installing it here in its real shape (with
+        this run's anchor root) and asking for each detector's command is the only way to know.
+        grant installed and validated
+        PERMITTED  detector C (none needed)           pfctl -s info
+        refused    detector A wants                   pfctl -s rules
+        refused    detector B wants                   pfctl -a com.apple/yoloai_v -vvs rules
+        PERMITTED  (the permitted anchor read)        pfctl -a com.apple/yoloai_v -s rules
+        
+        So detector A needs a NEW grant line for the WHOLE main ruleset, and detector B needs the
+        existing anchor read widened to -vv. Both are security-boundary changes: D132's permit/refuse
+        matrix has to be re-run, not just a regex edited. Detector C needs nothing.
+   PASS    V4: grant removed and refusal re-verified
+
+== V5 REPAIR, THEN PRICE THE DETECTORS ON A HEALTHY HOST ==
+        after repair: main-refs=2 pf=Enabled guest=192.168.64.2
+        allowed=301 denied=000  (need non-000 then 000)
+   PASS    host is sound again
+        
+        Five repetitions of each, on a healthy host, since that is the case that runs every time:
+        run 1   A=HEALTHY 16.8   B=HEALTHY 264.0 (evals 16->23)   C=HEALTHY 90.8 (code 000)
+        run 2   A=HEALTHY 12.4   B=HEALTHY 253.9 (evals 36->53)   C=HEALTHY 92.8 (code 000)
+        run 3   A=HEALTHY 13.5   B=HEALTHY 250.5 (evals 76->92)   C=HEALTHY 103.9 (code 000)
+        run 4   A=HEALTHY 13.1   B=HEALTHY 284.5 (evals 169->185)   C=HEALTHY 104.0 (code 000)
+        run 5   A=HEALTHY 13.2   B=HEALTHY 271.1 (evals 188->204)   C=HEALTHY 105.4 (code 000)
+        
+        Read the middle column of each: that is the millisecond cost added per check. Compare against
+        a ~2.4s sandbox start. Detector B's figure includes the two requests it needs to see a delta,
+        which is why it is a poll and not a start-path check — at start there is no prior traffic to
+        compare against.
+
+== WHAT WAS NOT TRIED ==
+        - A third fault: pf DISABLED (`pfctl -d`). D132's check 1 already covers it and `-s info` is
+          in the shipped grant, so it is the one state existing verification does see.
+        - Shadowing by a real system service. `pass quick all` was injected by hand; no service was
+          induced to insert its own anchor ahead of com.apple. The mechanism is pf.conf's own
+          documented behaviour, but the specific trigger is not demonstrated here.
+        - Detector cost under load. All timings are on an idle host with one guest.
+        - Whether the canary can run concurrently with a real acquisition. It rides rule 1b's window,
+          so two sandboxes starting at once share that window; not tested.
+
+== cleanup ==
+   pf=Enabled  main-refs=2  sudoers: []
+
+pass=8 fail=0 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-liveness-detect.txt

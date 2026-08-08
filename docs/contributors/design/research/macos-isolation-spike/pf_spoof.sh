@@ -233,6 +233,11 @@ if printf '%s' "$out" | grep -q "$IPB"; then
     note "     each other by anything the guest cannot defeat."
   else
     ok "S1: taking B's address did not grant B's allowlist"
+    note "     READ THIS NARROWLY. pf sees the source address and its rules would permit it; what"
+    note "     stops the escape is almost certainly the RETURN path — the reply is addressed to B,"
+    note "     and ARP resolves it to B's interface, because B is up and answering. That is not"
+    note "     enforcement, it is a collision with a live neighbour, and it says nothing about the"
+    note "     case where B has exited and its address is merely stale. S3 needs no such luck."
   fi
 else
   ok "S1: the guest could not add a second address (${out:-no output})"
@@ -318,6 +323,11 @@ if printf '%s' "$now" | grep -q "$IPB" && ! printf '%s' "$now" | grep -q "$IPA";
   else
     ok "S2: assuming B's address did not grant B's allowlist"
   fi
+elif [ -z "$(printf '%s' "$now" | tr -d ' ')" ]; then
+  unk "S2: A ended with NO address at all — the delete succeeded and the add did not, so nothing"
+  note "     was assumed and nothing is proven either way. Reported as unknown rather than as a"
+  note "     refusal: 'it could not take B's address' and 'it discarded its own' are different"
+  note "     outcomes and only the first would be reassuring."
 else
   ok "S2: the guest could not replace its address (now: $now)"
 fi

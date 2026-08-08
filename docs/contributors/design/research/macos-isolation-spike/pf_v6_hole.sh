@@ -131,10 +131,15 @@ note "dual-stack listener up on port $PORT (AF_INET6 socket, so v4-mapped client
 
 # A link-local v6 address needs a zone index; a ULA or global one must NOT have one, or curl
 # rejects it. Getting this wrong makes a reachable address look blocked.
-v6url() {   # $1 = address, $2 = guest interface
-  case "$1" in
-    fe80*) printf 'http://[%s%%%s]:%s/' "$1" "$2" "$PORT" ;;
-    *)     printf 'http://[%s]:%s/' "$1" "$PORT" ;;
+v6url() {   # $1 = address (with or without a zone), $2 = guest interface
+  # STRIP any zone the address already carries. macOS's netstat prints "fe80::1%en0" while Linux's
+  # `ip -6 route` prints a bare address, so appending a zone unconditionally produced
+  # "[fe80::1%en0%en0]" on tart — malformed, curl returned 000, and the run reported that the tart
+  # guest had no dual-stack path when the URL was simply invalid.
+  local a="${1%%\%*}"
+  case "$a" in
+    fe80*) printf 'http://[%s%%%s]:%s/' "$a" "$2" "$PORT" ;;
+    *)     printf 'http://[%s]:%s/' "$a" "$PORT" ;;
   esac
 }
 
