@@ -20,6 +20,43 @@ Linux results file, and the owning plan is updated with the outcome — includin
 - **A negative result states what was tried.** "Nothing wiped the anchor" is a much weaker claim
   than it reads unless it names the seven things attempted, as `pf_midlife_wipe.sh` does.
 
+## Running both passes in parallel
+
+They are largely independent, and the way to keep them so is to **make the write surfaces disjoint
+by role** rather than hope the diffs miss each other. This is the model
+[mac-verification-queue.md](mac-verification-queue.md) already used: the queue holds
+verification-only tasks — run it, record the result — and design changes are somebody else's commit.
+
+**Each pass writes only:**
+
+- its own raw runs — `research/macos-isolation-spike/results/` for macOS, a separate
+  `research/linux-enforcement/results/` for Linux, so there is no shared index to append to;
+- its own harness scripts;
+- **its own item's outcome line in this file**, and nothing else in this file.
+
+**Neither pass edits the shared design documents.** `enforcement-state-reaping.md`,
+`macos-pf-privileged-path.md` and D132 get updated in **one synthesis commit after both passes
+land**. That is not only conflict avoidance — see below.
+
+**Four collision points, in descending nastiness:**
+
+1. **Rationale-ID allocation, which is not a merge conflict but a duplicate.** `scripts/next-id.sh`
+   scans every local and remote-tracking ref, so the window is only between two allocations with no
+   fetch in between — and two agents working at the same time is exactly that window. **`git fetch`
+   immediately before allocating**, or better, have one side allocate a block for both up front. The
+   ascending-order rule makes a collision surface as a rebase conflict rather than silently, but
+   that is detection, not prevention.
+2. **`findings-unresolved.md`** — appended at the end by both, so two new entries conflict. That is
+   working as designed (it is what makes 1 detectable), but it means filing findings from both
+   passes concurrently guarantees a rebase.
+3. **This file** — both marking items done. Trivial to resolve, frequent if edited item-by-item.
+4. **The shared design docs** — the real one, and the reason for the synthesis rule above.
+
+**The bigger risk is not git.** L1/M1 are the same question asked on two platforms; so are L2/M2 and
+L3+M3+M4. Whoever finishes first would otherwise rewrite a shared design section from **half the
+evidence** — and a negative on M1 changes what a positive on L1 means. Hold the design edits until
+both halves are in; the queue's *What the results feed* section pairs them for exactly this reason.
+
 ---
 
 ## Linux
