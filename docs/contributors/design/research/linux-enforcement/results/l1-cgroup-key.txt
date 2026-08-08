@@ -1,0 +1,51 @@
+
+=== host cgroup layout ===
+cgroup fs type: cgroup2fs
+net_cls (cgroup v1 — what `meta cgroup` reads): ABSENT
+kernel: 6.8.0-136-generic   nft: nftables v1.0.9 (Old Doc Yak #3)
+
+=== which hooks accept a cgroup match? (rule-load time, not match time) ===
+prerouting   ACCEPTED
+input        ACCEPTED
+forward      REJECTED: Error: Could not process rule: Operation not supported
+output       ACCEPTED
+postrouting  REJECTED: Error: Could not process rule: Operation not supported
+
+=== start two containers ===
+A ip=172.17.0.2 cgroup=/system.slice/docker-30e35ad50491d44786ed47e07927c6f782759a3e38c448d564b6aea4b03c833a.scope (level 2)
+B ip=172.17.0.3
+
+=== can a container's own cgroup be matched in the hook that sees its traffic? ===
+-- forward hook, keyed on A's cgroup:
+Error: Could not process rule: Operation not supported
+add rule inet yb_l1 c_forward socket cgroupv2 level 2 "system.slice/docker-30e35ad50491d44786ed47e07927c6f782759a3e38c448d564b6aea4b03c833a.scope" counter
+
+=== POSITIVE CONTROL: the match does work where the kernel accepts it (output hook) ===
+counter after 3 pings FROM the probe cgroup:
+		socket cgroupv2 level 1 "yb_l1_probe" counter packets 3 bytes 252 comment "probe-cgroup"
+counter after 3 more pings from OUTSIDE it (must be unchanged):
+		socket cgroupv2 level 1 "yb_l1_probe" counter packets 3 bytes 252 comment "probe-cgroup"
+
+=== does forwarded container traffic reach an output-hook cgroup rule at all? ===
+A-in-output counter after A pings (0 = container traffic never enters the output hook):
+		ip saddr 172.17.0.2 counter packets 0 bytes 0 comment "A-in-output"
+
+=== recycling: destroy A, recreate immediately, compare both keys ===
+A  cgroup=/system.slice/docker-30e35ad50491d44786ed47e07927c6f782759a3e38c448d564b6aea4b03c833a.scope
+A' cgroup=/system.slice/docker-5a4db5ea0a72a7843883802fe117ec0c3859ff6352e5b95ac8a8e4561b6b0dbb.scope
+A  ip=172.17.0.2    A' ip=172.17.0.2
+RESULT: cgroup path NOT recycled
+RESULT: ADDRESS RECYCLED
+
+=== final ruleset ===
+table inet yb_l1 {
+	chain c_forward {
+		type filter hook forward priority filter - 10; policy accept;
+	}
+
+	chain c_output {
+		type filter hook output priority filter; policy accept;
+		socket cgroupv2 level 1 "yb_l1_probe" counter packets 3 bytes 252 comment "probe-cgroup"
+		ip saddr 172.17.0.2 counter packets 0 bytes 0 comment "A-in-output"
+	}
+}

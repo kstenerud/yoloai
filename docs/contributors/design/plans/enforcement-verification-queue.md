@@ -74,6 +74,17 @@ negative control. Then destroy and recreate to see whether the cgroup id is reus
 **Decides:** whether rules 1/1b/1c are needed on Linux at all, or become macOS-only. If the cgroup
 does not recycle, the hazard is *absent* here rather than mitigated. Cheap.
 
+**Outcome (2026-08-08): negative, and it closes the direction.** `results/l1-cgroup-key.txt`,
+`results/l1b-cgroup-prerouting.txt`. The kernel **refuses** `socket cgroupv2` in the `forward` and
+`postrouting` hooks outright — "Operation not supported" at rule-load time — and container egress
+is forwarded traffic. `prerouting` accepts the rule and then never fires it, on packets the same
+chain provably sees (address counter 3, cgroup counter 0). `meta cgroup` reads the cgroup-v1
+`net_cls` classid, which does not exist under unified cgroup v2. The match itself is fine where the
+kernel allows it: in the `output` hook it counted 3 packets from the probe cgroup and 0 from outside
+it. Confirmed alongside: the cgroup path does **not** recycle, and the address recycles immediately
+— the next container took `172.17.0.2` back. So the lead is real about the key and unavailable
+about the hook, and **rules 1/1b/1c stay on Linux.**
+
 ### L2 — Does split-horizon DNS break the allowlist on Linux too?
 
 macOS reproduced it end to end: host and guest resolve one name differently, the host's answer goes
@@ -85,6 +96,18 @@ would, guest reachability measured both ways.
 
 **Decides:** whether host-side resolution is viable anywhere, or whether the DNS-proxy direction is
 forced on both platforms. Cheap, and it is the other half of the biggest open design question.
+
+**Outcome (2026-08-08): reproduced, with no simulation needed, plus a second failure.**
+`results/l2-split-horizon-dns.txt`. The divergence is docker's shipped default on any
+systemd-resolved host: the host resolves through the loopback stub to the LAN resolver, and docker
+— unable to hand a container a loopback nameserver — substitutes public DNS. `yoloai.tail571a40.ts.net`
+resolves to `192.168.111.33` on the host and is NXDOMAIN in the guest. Both controls held
+(`example.com` reachable by name and address; `1.1.1.1` denied). Two results, not one:
+**(1)** the guest cannot reach the name it was allowlisted for — fail-closed and functional, as on
+macOS; **(2)** the host's answer wrote **the host's own LAN address** into the guest's allowed set,
+and the guest then completed a TCP connection to it. That second one is a widening that *happened*,
+not one inferred: packet `172.17.0.2 → 192.168.111.33:22`, forward hook, matched the `@allowed`
+accept. Host-side resolution is not viable on Linux either.
 
 ### L3 — What do `ufw` and `firewalld` do to a custom nft table?
 

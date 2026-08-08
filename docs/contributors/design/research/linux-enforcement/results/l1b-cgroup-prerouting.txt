@@ -1,0 +1,24 @@
+A ip=172.17.0.2 cgroup=/system.slice/docker-9ab200e422d72839a3f650e5f3df114fb1c4425771c638b1ad65b885d9034621.scope (level 2)
+
+=== load a prerouting chain with three counters: A-by-cgroup, A-by-address, probe-by-cgroup ===
+A-by-cgroup rule LOADED in prerouting
+
+=== TEST: container A sends 3 pings ===
+A ping rc=0
+
+=== POSITIVE CONTROL: a host process in the probe cgroup sends 3 pings ===
+
+=== counters ===
+table inet yb_l1b {
+	chain c_pre {
+		type filter hook prerouting priority filter - 10; policy accept;
+		socket cgroupv2 level 2 "system.slice/docker-9ab200e422d72839a3f650e5f3df114fb1c4425771c638b1ad65b885d9034621.scope" counter packets 0 bytes 0 comment "A-by-cgroup"
+		ip saddr 172.17.0.2 counter packets 3 bytes 252 comment "A-by-address"
+		socket cgroupv2 level 1 "yb_l1b_probe" counter packets 0 bytes 0 comment "probe-by-cgroup"
+	}
+}
+
+=== verdict ===
+A-by-cgroup=0  A-by-address=3  probe-by-cgroup=0
+VERDICT: prerouting sees A's packets (address counter moved) but the cgroup
+         match never fires — the rule loads clean and is inert.

@@ -1,0 +1,46 @@
+
+=== resolver configuration on each side ===
+host  : nameserver 127.0.0.53 
+guest : nameserver 8.8.8.8 nameserver 8.8.4.4 
+
+=== how each side resolves the two names ===
+host  yoloai.tail571a40.ts.net -> 192.168.111.33
+host  example.com  -> 172.66.147.243
+guest yoloai.tail571a40.ts.net -> <unresolved>
+guest example.com  -> 172.66.147.243
+
+=== start the guest and install the allowlist the design would build ===
+guest address: 172.17.0.2
+allowlist is built from the HOST's answers: 192.168.111.33, 172.66.147.243
+ruleset loaded, rc=0
+
+=== POSITIVE CONTROL — the allowlist mechanism works at all ===
+  guest -> example.com:80 (by name, resolves the same both sides): REACHABLE
+  guest -> 172.66.147.243:80 (same host, by address): REACHABLE
+
+=== NEGATIVE CONTROL — something not on the allowlist is actually denied ===
+  guest -> 1.1.1.1:80 (never allowlisted): blocked/unreachable
+
+=== DIRECTION 1 — can the guest reach the name it was allowlisted for? ===
+  guest -> yoloai.tail571a40.ts.net:22 (by name): blocked/unreachable
+
+=== DIRECTION 2 — what did the host's answer actually authorise? ===
+  the host resolved yoloai.tail571a40.ts.net to 192.168.111.33, which is this host's own LAN address
+  guest -> 192.168.111.33:22 (the address now in the allowlist): REACHABLE
+
+=== counters ===
+table inet yb_l2 {
+	set allowed {
+		type ipv4_addr
+		elements = { 172.66.147.243, 192.168.111.33 }
+	}
+
+	chain c_forward {
+		type filter hook forward priority filter - 10; policy accept;
+		ip saddr 172.17.0.2 ct state established,related accept
+		ip saddr 172.17.0.2 udp dport 53 accept comment "guest must be able to resolve"
+		ip saddr 172.17.0.2 tcp dport 53 accept
+		ip saddr 172.17.0.2 ip daddr @allowed counter packets 2 bytes 120 accept comment "allowlisted"
+		ip saddr 172.17.0.2 counter packets 4 bytes 240 drop comment "denied"
+	}
+}
