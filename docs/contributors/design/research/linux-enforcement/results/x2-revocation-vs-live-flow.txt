@@ -1,0 +1,32 @@
+peer (initially allowlisted, then revoked): 104.20.23.154
+guest: 172.17.0.2
+
+=== policy: 104.20.23.154 allowlisted ===
+
+=== open a long-lived keep-alive connection and let it run ===
+  bytes received so far: 1370
+  conntrack entry:
+    tcp      6 431999 ESTABLISHED src=172.17.0.2 dst=104.20.23.154 sport=46653 dport=80 src=104.20.23.154 dst=192.168.111.33 sport=80 dport=46653 [ASSURED] mark=0 use=1
+
+=== REVOKE — remove 104.20.23.154 from the allowlist, exactly as 'sandbox allow --remove' would ===
+  allowlist now: <empty>
+
+=== CONTROL — a NEW connection to the revoked peer must fail ===
+  blocked, as revocation intends
+
+=== THE QUESTION — is the connection that was already open still carrying data? ===
+  bytes before revocation: 1370
+  bytes 10s after        : 3288
+  RESULT: the revoked destination is STILL RECEIVING AND ANSWERING.
+          Revocation did not revoke; ct state established carries the old flow.
+
+=== THE FIX — drop the connection's state as part of revoking ===
+  conntrack entries for that pair now: 0
+  bytes at flush: 3288
+  bytes 8s later: 3288
+  RESULT: flow stopped. Revocation needs the conntrack drop to be part of it.
+
+=== counters ===
+  ip saddr 172.17.0.2 ct state established,related counter packets 25 bytes 2044 accept comment "established"
+  ip saddr 172.17.0.2 ip daddr @allowed counter packets 1 bytes 60 accept comment "allowlisted"
+  ip saddr 172.17.0.2 counter packets 10 bytes 924 drop comment "denied"

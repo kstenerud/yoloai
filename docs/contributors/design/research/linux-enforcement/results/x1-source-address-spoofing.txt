@@ -1,0 +1,45 @@
+
+=== sandbox with CAP_NET_ADMIN — the in-container firewall path grants it ===
+(engine_network.go:66 / launch.go:499; the sidecar path withholds it instead)
+guest address: 172.17.0.2   spoof target: 172.17.99.99
+
+=== host policy, keyed on the guest's address — the shape the design uses ===
+
+=== controls — the policy must actually work before any bypass means anything ===
+  guest -> 8.8.8.8 (allowlisted): REACHABLE
+  guest -> 1.1.1.1  (denied)     : blocked
+
+=== THE BYPASS — the agent takes an address the policy does not name ===
+  addresses the guest now holds:
+BusyBox v1.37.0 (2026-01-10 15:38:28 UTC) multi-call binary.
+
+Usage: ip [OPTIONS] address|route|link|tunnel|neigh|rule [ARGS]
+
+OPTIONS := -f[amily] inet|inet6|link | -o[neline]
+
+ip addr add|del IFADDR dev IFACE | show|flush [dev IFACE] [to PREFIX]
+ip route list|flush|add|del|change|append|replace|test ROUTE
+ip link set IFACE [up|down] [arp on|off] [multicast on|off]
+	[promisc on|off] [mtu NUM] [name NAME] [qlen NUM] [address MAC]
+	[master IFACE | nomaster] [netns PID]
+ip tunnel add|change|del|show [NAME]
+	[mode ipip|gre|sit] [remote ADDR] [local ADDR] [ttl TTL]
+ip neigh show|flush [to PREFIX] [dev DEV] [nud STATE]
+ip rule [list] | add|del SELECTOR ACTION
+  guest -> 1.1.1.1 sourced from 172.17.99.99: REACHABLE
+  host counters (the deny rule never sees these packets):
+    ip saddr 172.17.0.2 ip daddr @allowed counter packets 1 bytes 84 accept comment "allowlisted"
+    ip saddr 172.17.0.2 counter packets 2 bytes 168 drop comment "denied"
+
+=== THE FIX — one bridge-scoped rule, naming no address ===
+  rule added: iifname docker0 drop, below the per-sandbox accepts
+  guest -> 1.1.1.1 sourced from 172.17.99.99: blocked   <- must be blocked now
+  guest -> 1.1.1.1 from its own address: blocked         <- still blocked
+  guest -> 8.8.8.8 from its own address: REACHABLE       <- must STILL work
+  host counters:
+    ip saddr 172.17.0.2 ip daddr @allowed counter packets 2 bytes 168 accept comment "allowlisted"
+    ip saddr 172.17.0.2 counter packets 4 bytes 336 drop comment "denied"
+    iifname "docker0" counter packets 2 bytes 168 drop comment "bridge-default-deny"
+
+=== does the fix survive the agent picking an address outside the subnet too? ===
+  guest -> 1.1.1.1 sourced from 10.200.200.200: blocked

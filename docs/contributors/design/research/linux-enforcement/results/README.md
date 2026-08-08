@@ -44,6 +44,15 @@ the file says so rather than quietly resting on it — see the prerouting contro
 | L10c | `l10c-udp-residue.txt` | **UDP residue does** — a new sandbox inherits the accept. |
 | L11 | `l11-l12-cni.txt` | CNI host-local wraps and reuses freed addresses. |
 | L12 | `l11-l12-cni.txt`, `l12b-stale-cni-entry.txt` | DF9 absent here; live stale accept found. |
+| X1 | `x1-source-address-spoofing.txt` | The address key is defeasible; one bridge rule closes it. |
+| X2 | `x2-revocation-vs-live-flow.txt` | Revocation does not stop an already-open connection. |
+
+**X1 and X2 are the macOS pass's extras asked on Linux**, after that pass landed. Both reproduce, and
+X1's fix — a bridge-scoped default-deny naming no address — works here too.
+
+One cosmetic failure inside an otherwise valid X1 run: `ip -4 -br addr show` is not supported by
+busybox and printed a usage message. The `ip addr add` it was reporting on had already succeeded,
+which the bypass itself demonstrates, so the result stands and only the display of it failed.
 
 ## Runs that were discarded, and why
 

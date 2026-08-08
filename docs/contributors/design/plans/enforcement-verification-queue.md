@@ -565,6 +565,36 @@ Run and recorded on the same terms. **X1 is the most consequential result of thi
   M1. No apple/tart subnet collision in this allocation order, but nothing coordinates the two
   allocators and an overlap was not engineered.
 
+### Linux — round 3: the macOS extras, asked on Linux
+
+Run 2026-08-08 after the macOS pass landed, because X1 and X2 name mechanisms nftables has too.
+
+- **X1-Linux — the address key is defeasible here as well** (`results/x1-source-address-spoofing.txt`).
+  Same result, same shape. A sandbox holding `CAP_NET_ADMIN` — which the in-container firewall path
+  grants (`engine_network.go:66`, `launch.go:499`; the sidecar path withholds it instead) — ran
+  `ip addr add 172.17.99.99/16 dev eth0` and reached a denied destination, while the host's deny
+  counter never moved: the rule is keyed on the address the guest *had*. Controls held either side
+  (allowlisted reachable, denied blocked). **The bridge-scoped default-deny closes it on Linux too**:
+  one `iifname "docker0" drop` below the per-sandbox accepts blocked the spoofed source, kept the
+  allowlisted destination working, and also held when the guest picked an address *outside* the
+  bridge subnet. Both platforms now agree on the hazard and on the fix.
+- **X2-Linux — revocation does not stop a live flow** (`results/x2-revocation-vs-live-flow.txt`).
+  A keep-alive connection to an allowlisted peer was running; the element was deleted from the set;
+  new connections were refused (the control) while **the open connection kept receiving** —
+  1370 bytes before, 3288 ten seconds after. `ct state established,related accept` outranks the
+  allowlist, exactly as pf's `in`-only pool did. `conntrack -D -s <guest> -d <peer>` stopped it dead
+  (3288 → 3288). So the Linux fix is scoped where pf's `pfctl -k` was not: it names the pair.
+
+**These fold into L10 rather than sitting beside it.** X2 and L10c are one cause seen twice — the
+`established,related` accept is keyed on flow state, not on policy, so it survives both *revoking* a
+destination and *replacing the sandbox* behind an address. Any conntrack handling the design adopts
+has to cover both, and covering only one looks identical from the rules.
+
+**X3 and net_ceiling have no Linux counterpart yet.** X3 is slot contention, and the nftables design
+has no slot pool to contend for — but it does have one `@allowed` set per table in every harness
+here, and if the shipped design shares a set across sandboxes the same cross-sandbox leak follows by
+construction. That is a design question, not a measurement, and it is synthesis's to answer.
+
 ---
 
 ## What the results feed
