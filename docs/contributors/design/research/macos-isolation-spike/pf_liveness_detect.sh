@@ -222,6 +222,20 @@ note "the injected ruleset, in full:"
 sed 's/^/          | /' /tmp/pfv.conf | grep -v '^          | *#' | grep -v '^          | *$'
 pfctl -f /tmp/pfv.conf 2>&1 | quiet_pf | sed 's/^/        pfctl: /'
 note "main-refs after injection = $(mainrefs)  (still non-zero: that is the entire point)"
+note ""
+note "Dropping the 'load anchor' line was not enough. ANY 'pfctl -f' of the main ruleset re-declares"
+note "nat-anchor \"com.apple/*\" with no body, and a declared-but-unfilled anchor loads EMPTY — so"
+note "vmnet's runtime NAT goes with it either way, and run 2 still saw both destinations refused."
+note "Restarting the backend daemon re-inserts that NAT while leaving the injected main ruleset"
+note "alone, which is the same asymmetry the repair procedure already relies on."
+asuser container system stop  >/dev/null 2>&1; sleep 4
+asuser container system start >/dev/null 2>&1; sleep 6
+asuser container rm -f ybv1 >/dev/null 2>&1
+asuser container run -d --name ybv1 "$IMG" sleep 900 >/dev/null 2>&1
+sleep 4
+IP=$(netfield ybv1 ipv4Address)
+note "guest re-created at ${IP:-<none>} | main-refs=$(mainrefs) (the injection must have survived)"
+if [ -n "$IP" ]; then load_pool >/dev/null; claim; populate; fi
 sa=$(try "$ALLOW"); sd=$(try "$DENY")
 note "allowed->$ALLOW=$sa   denied->$DENY=$sd   (denied reaching => enforcement is dead)"
 if [ "$sa" = 000 ] && [ "$sd" = 000 ]; then

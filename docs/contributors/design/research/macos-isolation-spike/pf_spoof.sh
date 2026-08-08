@@ -35,13 +35,22 @@
 #   attempt also reports whether the address change itself succeeded, because "the attack failed"
 #   and "the attack never ran" look identical from the outside.
 #
-#   AND THE CONFIGURATION IS THE SHIPPED ONE. Run 1 used a plain `container run` as an unprivileged
-#   user, found the guest could not touch its interface, and concluded address keying holds. That was
-#   an artifact of a weaker-than-shipped setup: inside a real yoloAI sandbox the agent has
-#   PASSWORDLESS SUDO, and root there holds CapEff 0x...a80435fb, which includes CAP_NET_ADMIN —
-#   measured, and `ip addr add` then succeeds. Testing a configuration the product does not ship is
-#   how a harness certifies a property the product lacks (AGENTS.md rule 10). So every guest here is
-#   a `yoloai new` sandbox and every escape runs through `sudo`.
+#   AND THE CONFIGURATION HAS TO BE THE RIGHT ONE, which took three attempts to get right.
+#     run 1  a plain `container run` as an unprivileged user. No capabilities, no escape possible.
+#     run 2  a `yoloai new` sandbox. Still no escape — because a PLAIN sandbox has CapEff
+#            0x a804 2 5fb, and the isolated one has 0x a804 3 5fb. The single differing bit is
+#            number 12, which is CAP_NET_ADMIN. So the capability arrives only with the flag.
+#     run 3  `yoloai new --network-isolated`, which is the mode where isolation is the point and
+#            the only mode that grants CAP_NET_ADMIN (DF179).
+#
+#   The full chain is measured and it is the threat model, not a contrivance: the in-guest allowlist
+#   blocks a denied destination; the agent flushes its own OUTPUT chain through passwordless sudo
+#   (which is DF179's known weakness); egress returns; and `ip addr add` then succeeds. Host pf is
+#   the layer that is supposed to survive all of that, so that is the state these escapes run in.
+#
+#   THE DESIGN QUESTION THIS SETTLES is not really "can a guest spoof". It is whether host-pf
+#   enforcement may coexist with a sandbox holding CAP_NET_ADMIN. If an escape works here, the answer
+#   is no, and D132 has to say so — the capability and the address key cannot both be present.
 #
 # SAFETY: writes only into its own anchor; never touches the main ruleset.
 
@@ -97,8 +106,14 @@ reach() {   # $1 = sandbox, $2 = dest, [$3 = source address to bind]
 }
 # Runs as ROOT inside the sandbox, which is what an agent with a shell can do.
 gsh()  { asuser "$YOLOAI" exec "$1" -- sudo -n sh -c "$2" 2>&1; }
-mksb() { asuser "$YOLOAI" destroy "$1" --abandon-unapplied >/dev/null 2>&1
-         asuser "$YOLOAI" new "$1" "$2" --backend apple >/dev/null 2>&1; }
+# --network-isolated is what grants CAP_NET_ADMIN, so it is the only mode in which the escapes are
+# even expressible. It also installs an in-guest allowlist, which `disarm` then removes — as the
+# agent itself can (DF179) — so that the ONLY thing constraining the guest is host pf.
+mksb()   { asuser "$YOLOAI" destroy "$1" --abandon-unapplied >/dev/null 2>&1
+           asuser "$YOLOAI" new "$1" "$2" --backend apple --network-isolated >/dev/null 2>&1; }
+disarm() { asuser "$YOLOAI" exec "$1" -- sudo -n sh -c \
+             'iptables -F OUTPUT 2>/dev/null; iptables -P OUTPUT ACCEPT 2>/dev/null; \
+              ip6tables -F OUTPUT 2>/dev/null; echo done' >/dev/null 2>&1; }
 
 load_pool() {   # $1 = "deny" to append the bridge-scoped default-deny of S4
   flush
@@ -153,6 +168,26 @@ note "A=spoofa $IPA/$PFX allowed $ALLOW_A"
 note "B=spoofb $IPB/$PFX allowed $ALLOW_B     bridge=$BR gateway=$GW"
 [ -n "$IPA" ] && [ -n "$IPB" ] && [ -n "$BR" ] || { bad "setup incomplete; ABORTING"; exit 1; }
 
+note ""
+note "the in-guest allowlist is present first — confirming it, then removing it the way an agent can"
+pre=$(reach spoofa "$ALLOW_A")
+note "A -> $ALLOW_A with the in-guest allowlist intact: $pre  (000 expected: it is not allowlisted)"
+disarm spoofa; disarm spoofb
+post_a=$(reach spoofa "$ALLOW_A"); post_b=$(reach spoofb "$ALLOW_B")
+note "after the agent flushes its own OUTPUT chain: A->$ALLOW_A=$post_a  B->$ALLOW_B=$post_b"
+if [ "$pre" = 000 ] && [ "$post_a" != 000 ] && [ "$post_b" != 000 ]; then
+  bad "S0a: DF179 REPRODUCED — the agent removed its own in-guest allowlist and regained egress."
+  note "     That is the reason host pf exists, and it is the state everything below runs in: from"
+  note "     here, host pf is the only thing constraining these guests."
+elif [ "$post_a" = 000 ] || [ "$post_b" = 000 ]; then
+  bad "S0a: egress was not restored after the flush (A=$post_a B=$post_b); the escapes below would"
+  note "     be blocked by the GUEST rather than by pf, which proves nothing about pf. ABORTING"
+  exit 1
+else
+  note "     the in-guest allowlist did not block $ALLOW_A to begin with (got $pre); continuing, but"
+  note "     DF179 was not reproduced in this run"
+fi
+
 load_pool
 claim 1 "$IPA" "$ALLOW_A"
 claim 2 "$IPB" "$ALLOW_B"
@@ -167,11 +202,15 @@ else
 fi
 
 note ""
-note "what can an agent inside this sandbox actually do? This is the question run 1 got wrong."
+note "what can an agent inside this sandbox actually do? Two runs got this wrong; here it is"
+note "measured explicitly, because it decides whether the escapes below are even expressible."
 note "as the agent user:"
 asuser "$YOLOAI" exec spoofa -- sh -c 'id -u; grep CapEff /proc/self/status' 2>&1 | sed 's/^/          /'
-note "after sudo:"
+note "after sudo (passwordless, and that is the shipped configuration):"
 asuser "$YOLOAI" exec spoofa -- sudo -n sh -c 'id -u; grep CapEff /proc/self/status' 2>&1 | sed 's/^/          /'
+note "bit 12 of CapEff is CAP_NET_ADMIN. A PLAIN sandbox reports ...a80425fb (bit 12 clear); an"
+note "isolated one reports ...a80435fb (bit 12 set). If the value above lacks bit 12, this run is"
+note "not testing the mode it means to."
 CAP=$(gsh spoofa 'ip addr add 127.0.0.53/32 dev lo >/dev/null 2>&1 && echo CAN || echo CANNOT' | tail -1)
 note "interface control as root inside the sandbox: $CAP"
 gsh spoofa 'ip addr del 127.0.0.53/32 dev lo' >/dev/null 2>&1
@@ -298,7 +337,7 @@ asuser "$YOLOAI" destroy spoofx --abandon-unapplied >/dev/null 2>&1
 if ! asuser "$YOLOAI" new spoofx "$WD" --backend tart >/dev/null 2>&1; then
   unk "S5: tart sandbox would not start; not measured"
 else
-  TIP=$(asuser "$YOLOAI" exec spoofx -- ipconfig getifaddr en0 2>/dev/null | tr -d '\r')
+  TIP=$(asuser "$YOLOAI" exec spoofx -- /usr/sbin/ipconfig getifaddr en0 2>/dev/null | tr -d '\r')
   note "tart guest at ${TIP:-<none>}"
   if [ -z "$TIP" ]; then
     unk "S5: could not read the tart guest's address; not measured"
@@ -310,8 +349,8 @@ else
     note "tart baseline: ->allowed=$t1  ->denied=$t2   (need non-000 then 000)"
     if [ "$t1" != 000 ] && [ "$t2" = 000 ]; then
       TSPARE="${TIP%.*}.202"
-      adds=$(asuser "$YOLOAI" exec spoofx -- sudo -n ifconfig en0 alias "$TSPARE" netmask 255.255.255.0 2>&1 | tr -d '\r')
-      got=$(asuser "$YOLOAI" exec spoofx -- ifconfig en0 2>/dev/null | grep -c "$TSPARE" || true)
+      adds=$(asuser "$YOLOAI" exec spoofx -- sudo -n /sbin/ifconfig en0 alias "$TSPARE" netmask 255.255.255.0 2>&1 | tr -d '\r')
+      got=$(asuser "$YOLOAI" exec spoofx -- /sbin/ifconfig en0 2>/dev/null | grep -c "$TSPARE" || true)
       note "added alias $TSPARE to en0: $([ "$got" -gt 0 ] && echo yes || echo "no (${adds:-refused})")"
       if [ "$got" -gt 0 ]; then
         t3=$(asuser "$YOLOAI" exec spoofx -- curl -s -o /dev/null -w '%{http_code}' --max-time 5 \
@@ -324,7 +363,10 @@ else
         fi
         asuser "$YOLOAI" exec spoofx -- sudo -n ifconfig en0 -alias "$TSPARE" >/dev/null 2>&1
       else
-        ok "S5: the tart guest could not add an alias (no passwordless root inside the VM)"
+        ok "S5: the tart guest could not add an alias"
+        note "     NOTE it is not for lack of privilege: the tart guest HAS passwordless sudo to"
+        note "     root (measured). Run 2 mis-read this as 'no root' when the real cause was that"
+        note "     /sbin is absent from yoloai exec's PATH, so plain \`ifconfig\` was not found."
       fi
     else
       unk "S5: no tart enforcement baseline (allowed=$t1 denied=$t2); escape not attempted"

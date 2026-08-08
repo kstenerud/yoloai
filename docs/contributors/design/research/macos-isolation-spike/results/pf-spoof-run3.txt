@@ -1,0 +1,78 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 14:03:12 CEST | anchor=com.apple/yoloai_s
+
+== S0 SETUP AND THE ENFORCEMENT MATRIX ==
+        A=spoofa 192.168.64.5/24 allowed 1.1.1.1
+        B=spoofb 192.168.64.6/24 allowed 1.0.0.1     bridge=bridge101 gateway=192.168.64.1
+        matrix:  A->own=301  A->B's=000   |   B->A's=000  B->own=301
+                 (want non-000, 000, 000, non-000)
+   PASS    S0: enforcement is real and per-sandbox — escapes below mean something
+        
+        what can an agent inside this sandbox actually do? This is the question run 1 got wrong.
+        as the agent user:
+          501
+          CapEff:	0000000000000000
+        after sudo:
+          0
+          CapEff:	00000000a80425fb
+        interface control as root inside the sandbox: CANNOT
+   PASS    S0b: even as root the sandbox CANNOT modify its interfaces — address keying rests on that
+
+== S1 INHERIT — A adds B's address and uses B's allowlist ==
+        after 'ip addr add 192.168.64.6': RTNETLINK answers: Operation not permitted
+192.168.64.5/24 
+   PASS    S1: the guest could not add a second address (RTNETLINK answers: Operation not permitted
+192.168.64.5/24 )
+
+== S3 VANISH — A takes an address in NO slot at all ==
+        The pool blocks only what is IN a table. An address in no table matches no rule and meets
+        pf's default. This needs no knowledge of any other sandbox, which makes it the cheap attack.
+        after 'ip addr add 192.168.64.201': RTNETLINK answers: Operation not permitted
+192.168.64.5/24 
+   PASS    S3: the guest could not take an unused address (RTNETLINK answers: Operation not permitted
+192.168.64.5/24 )
+
+== S4 THE FIX — a bridge-scoped default-deny, which names no address ==
+        One rule after the per-slot passes: block everything on this bridge that no slot permitted.
+        If it closes S3 while leaving the matrix intact, the hazard has a one-line answer.
+        rules now: 9 (one more than before)
+        matrix still: A->own=301 A->B's=000 | B->own=301 B->A's=000
+        the spare address was never added in S3, so there is nothing to re-test: a 000 here would
+        mean 'no such source address', not 'blocked'. The matrix is still checked.
+   PASS    S4: the default-deny preserves the matrix (the escape it targets never reproduced)
+
+== S2 REPLACE — A discards its own address and becomes B ==
+        Run last: it costs A its network identity, and recovery is not guaranteed.
+        A's addresses now: 192.168.64.5/24 
+   PASS    S2: the guest could not replace its address (now: 192.168.64.5/24 )
+
+== S5 TART — same question, and the repo fact that frames it ==
+        yoloAI runs tart as: tart run --no-graphics <vm>  (runtime/tart/tart.go). It does NOT pass
+        --net-softnet, which is tart's own anti-spoofing mode — softnet exists precisely to prevent
+        'a class of security issues, such as ARP spoofing'. So on the shipped path there is no
+        guest-side mitigation, and the question is whether pf alone stops it.
+        tart guest at 192.168.65.3
+        tart baseline: ->allowed=301  ->denied=000   (need non-000 then 000)
+        added alias 192.168.65.202 to en0: no (sudo: ifconfig: command not found)
+   PASS    S5: the tart guest could not add an alias (no passwordless root inside the VM)
+
+== WHAT WAS NOT TRIED ==
+        - MAC/ARP spoofing. Only the IP was changed. tart's --net-softnet targets the ARP layer
+          specifically, and whether pf sees any of that was not examined (M1's K2 shows pf cannot
+          match a MAC at all, so it almost certainly cannot).
+        - --net-softnet itself. yoloAI does not pass it, so the shipped path was measured. Whether
+          softnet would close S5 is untested and would be a backend change, not a pf change.
+        - Raw sockets / crafted source addresses without configuring the interface. A guest with
+          NET_ADMIN can do this too; only the ip-addr route was tried, which is the easy one.
+        - Spoofing the GATEWAY's address, or another host on the LAN. Both are more disruptive than
+          this run should be on a machine somebody uses.
+        - Whether the S4 default-deny interacts with the vmnet NAT rules or with a second backend
+          sharing the bridge. Measured on one bridge with two apple guests only.
+
+== cleanup ==
+   anchor rules: 0  main-refs: 2
+
+pass=7 fail=0 unknown=0
+   NOTE 'FAIL' here means an escape SUCCEEDED. This script fails when the product is weak,
+        not when the script is broken.
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-spoof.txt

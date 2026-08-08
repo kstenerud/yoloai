@@ -1,0 +1,85 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-08 14:05:22 CEST | anchor=com.apple/yoloai_c | pool=8 slots
+
+== C0 SETUP — 4 sandboxes, each with its own allowed destination ==
+        preflight: pick 4 destinations that actually answer HTTP from the host. A destination that
+        answers nothing would make every guest's 000 free, which is A22 in its cheapest form.
+          1.1.1.1 -> 301   selected
+          1.0.0.1 -> 301   selected
+          1.1.1.2 -> 301   selected
+          1.0.0.2 -> 301   selected
+   PASS    C0: 4 usable destinations: 1.1.1.1 1.0.0.1 1.1.1.2 1.0.0.2
+        ybc0 = 192.168.64.8  allowed 1.1.1.1
+        ybc1 = 192.168.64.9  allowed 1.0.0.1
+        ybc2 = 192.168.64.10  allowed 1.1.1.2
+        ybc3 = 192.168.64.11  allowed 1.0.0.2
+
+== C1 CONCURRENT ACQUISITION ON DIFFERENT SLOTS ==
+        launching 4 acquisitions simultaneously, one per slot...
+        all 4 completed in 25 ms (wall clock, overlapping)
+        
+        end state of every slot:
+          slot 0: src=[192.168.64.8] dst=[1.1.1.1]
+          slot 1: src=[192.168.64.9] dst=[1.0.0.1]
+          slot 2: src=[192.168.64.10] dst=[1.1.1.2]
+          slot 3: src=[192.168.64.11] dst=[1.0.0.2]
+        
+        enforcement matrix (each guest must reach only its own destination):
+        ybc0 (192.168.64.8) ->  own:301  1:000  2:000  3:000
+        ybc1 (192.168.64.9) ->  0:000  own:301  2:000  3:000
+        ybc2 (192.168.64.10) ->  0:000  1:000  own:301  3:000
+        ybc3 (192.168.64.11) ->  0:000  1:000  2:000  own:301
+   PASS    C1: concurrent acquisitions on distinct slots neither corrupt tables nor cross allowlists
+
+== C2 TWO ACQUISITIONS, ONE SLOT — what contention does when allocation is not atomic ==
+        Slot allocation happens above pf; pf will let both write. Each acquisition FLUSHES the slot's
+        src table first, so the second flush erases the first one's claim. The loser then holds an
+        address in no src table at all — and the pool only blocks addresses it has in a table.
+        slot 0 after both: src=[192.168.64.8,192.168.64.9] dst=[1.0.0.1,1.1.1.1]
+        guest0: own=301  unrelated(1.1.1.2)=000  guest1's-dest(1.0.0.1)=301
+        guest1: own=301  unrelated(1.1.1.2)=000  guest0's-dest(1.1.1.1)=301
+           'unrelated' non-000 => that guest is not filtered at all (fail-open)
+           the other guest's dest non-000 => allowlists MERGED (a cross-sandbox privilege leak)
+   FAIL    C2: ALLOWLISTS MERGED. Both addresses survived in slot 0 and each guest can now reach the
+             OTHER's allowlisted destination. It is fail-closed against the outside world, but it is
+             a cross-sandbox privilege leak: two sandboxes that should be isolated share one policy,
+             produced by contention alone. Slot allocation must be atomic above pf either way — the
+             failure is a merge rather than a gap, which is less bad and still wrong.
+
+== C3 WHAT CONTENTION COSTS ==
+        serial:     4 acquisitions back to back = 70 ms  (18 ms each)
+        NOTE these call pfctl DIRECTLY as root, with no sudo, so they are not comparable to M8's
+        absolute figures — M8 measures the shipped path through sudo. What is comparable here is the
+        ratio below, which is the only thing this section claims.
+        concurrent: the same 4 overlapping        = 25 ms  (from C1)
+        speedup: 2.80x
+           ~1.0x means pfctl/sudo serialize completely and concurrency buys nothing — in which case
+           N sandboxes starting together each wait for all the others, and the pool-size trade from
+           M8 has to be read per-start-burst rather than per-start.
+   PASS    C3: contention cost recorded
+
+== C4 REPAIR — leave the pool in a correct state ==
+        ybc0 (192.168.64.8) ->  own:301  1:000  2:000  3:000
+        ybc1 (192.168.64.9) ->  0:000  own:301  2:000  3:000
+        ybc2 (192.168.64.10) ->  0:000  1:000  own:301  3:000
+        ybc3 (192.168.64.11) ->  0:000  1:000  2:000  own:301
+   PASS    C4: the pool is correct and enforcing at exit
+
+== WHAT WAS NOT TRIED ==
+        - More than 4 concurrent acquisitions, and acquisition racing against RELEASE (teardown)
+          rather than against another acquisition. Release also writes to tables an acquisition
+          may be reading.
+        - The canary probe under concurrency. It rides rule 1b's empty-dst window, so two sandboxes
+          starting together are both in that window; whether one probe can observe the other's is
+          untested and is the obvious follow-up to M3.
+        - Repeated trials. C2's interleaving is timing-dependent; a single run showing one outcome
+          does not mean the other cannot happen. Treat C2 as "this is reachable", never as "this is
+          what always happens".
+        - Whether yoloAI's own slot allocator already serializes. This measures pf's behaviour under
+          concurrent writers, which is the layer below that question.
+
+== cleanup ==
+   anchor rules: 0  main-refs: 2
+
+pass=4 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-concurrent-acquire.txt

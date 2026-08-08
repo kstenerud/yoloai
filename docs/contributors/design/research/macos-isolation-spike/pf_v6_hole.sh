@@ -216,10 +216,16 @@ asuser "$YOLOAI" destroy v6x --abandon-unapplied >/dev/null 2>&1
 if ! asuser "$YOLOAI" new v6x "$WD" --backend tart >/dev/null 2>&1; then
   unk "V2: tart sandbox would not start; not measured"
 else
-  T4=$(asuser "$YOLOAI" exec v6x -- sh -c "ifconfig en0 | awk '/inet /{print \$2; exit}'" 2>/dev/null | tr -d '\r')
-  [ -z "$T4" ] && T4=$(asuser "$YOLOAI" exec v6x -- ipconfig getifaddr en0 2>/dev/null | tr -d '\r')
-  T6=$(asuser "$YOLOAI" exec v6x -- sh -c "ifconfig en0 | awk '/inet6/ && \$2 !~ /^fe80/ {print \$2; exit}'" 2>/dev/null | tr -d '\r')
-  [ -z "$T6" ] && T6=$(asuser "$YOLOAI" exec v6x -- sh -c "ifconfig en0 | awk '/inet6/{print \$2; exit}'" 2>/dev/null | tr -d '\r' | cut -d% -f1)
+  # ABSOLUTE paths. `yoloai exec` runs with PATH=/bin:/usr/bin:/usr/sbin:/usr/local/bin:
+  # /opt/homebrew/bin — /sbin is NOT on it, so plain `ifconfig` is "not found". Run 2 read that as
+  # "the tart guest holds no IPv6 address", which would have made the v6 hole look apple-only. The
+  # guest in fact holds a ULA and a link-local; the probe simply could not see them.
+  T4=$(asuser "$YOLOAI" exec v6x -- /usr/sbin/ipconfig getifaddr en0 2>/dev/null | tr -d '\r')
+  TALL=$(asuser "$YOLOAI" exec v6x -- /sbin/ifconfig en0 2>/dev/null | tr -d '\r' \
+         | awk '/inet6/{print $2}' | cut -d% -f1)
+  note "tart en0 IPv6 addresses:"; printf '%s\n' "$TALL" | sed 's/^/          /'
+  T6=$(printf '%s\n' "$TALL" | grep -v '^fe80' | head -1)
+  [ -z "$T6" ] && T6=$(printf '%s\n' "$TALL" | head -1)
   note "tart guest: v4=${T4:-<none>} v6=${T6:-<none>}"
   if [ -z "$T4" ]; then
     unk "V2: could not read the tart guest's address; not measured"
@@ -227,10 +233,10 @@ else
     # macOS guests: route lookup differs from Linux, so the host address is derived from the subnet.
     tart_ex2() {
       case "$1" in
-        *"ip route"*)    asuser "$YOLOAI" exec v6x -- sh -c "netstat -rn -f inet | awk '/^default/{print \$2; exit}'" 2>/dev/null | tr -d '\r' ;;
-        *"ip -6 route"*) asuser "$YOLOAI" exec v6x -- sh -c "netstat -rn -f inet6 | awk '/^default/{print \$2; exit}'" 2>/dev/null | tr -d '\r' ;;
+        *"ip route"*)    asuser "$YOLOAI" exec v6x -- /bin/sh -c "/usr/sbin/netstat -rn -f inet | awk '/^default/{print \$2; exit}'" 2>/dev/null | tr -d '\r' ;;
+        *"ip -6 route"*) asuser "$YOLOAI" exec v6x -- /bin/sh -c "/usr/sbin/netstat -rn -f inet6 | awk '/^default/{print \$2; exit}'" 2>/dev/null | tr -d '\r' ;;
         *"ip -6 neigh"*) printf '' ;;
-        *) asuser "$YOLOAI" exec v6x -- sh -c "$1" 2>/dev/null | tr -d '\r' ;;
+        *) asuser "$YOLOAI" exec v6x -- /bin/sh -c "$1" 2>/dev/null | tr -d '\r' ;;
       esac
     }
     probe_backend "tart" tart_ex2 "$T4" "$T6" en0

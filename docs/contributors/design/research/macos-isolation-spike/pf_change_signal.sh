@@ -197,12 +197,12 @@ up() { pfctl -s info 2>/dev/null | head -1 | sed -E 's/.*Enabled for //; s/ +Deb
 upsec() { pfctl -s info 2>/dev/null | head -1 \
           | sed -E 's/.*Enabled for ([0-9]+) days ([0-9]+):([0-9]+):([0-9]+).*/\1 \2 \3 \4/' \
           | awk '{print $1*86400 + $2*3600 + $3*60 + $4}'; }
-br=$(upsec)
+brs=$(up); br=$(upsec)
 pfctl -f /etc/pf.conf >/dev/null 2>&1
 sleep 2
-ar=$(upsec)
-note "uptime before a plain reload : $(up)  (${br}s)"
-note "uptime after  a plain reload : $(up)  (${ar}s)   a RELOAD is the dangerous quiet case"
+ars=$(up); ar=$(upsec)
+note "uptime before a plain reload : $brs  (${br}s)"
+note "uptime after  a plain reload : $ars  (${ar}s)   a RELOAD is the dangerous quiet case"
 bf=$(upsec)
 pfctl -F all >/dev/null 2>&1
 af=$(upsec)
