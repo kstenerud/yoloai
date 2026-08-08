@@ -226,6 +226,8 @@ fi
 
 # ---------------------------------------------------------------------------
 say "K2a IS THE DUMP REACHABLE UNDER THE SHIPPED GRANT? (it must not be, and then we extend it)"
+# shellcheck disable=SC2086  # deliberate: $1 is a whole command line that must
+# word-split into argv; quoting it would pass it as a single argument.
 probe() { local out rc; out=$(sudo -u "$U" -H sudo -k -n $1 </dev/null 2>&1); rc=$?
   if [ "$rc" -eq 0 ]; then printf permit
   elif printf '%s' "$out" | grep -qiE "not allowed to execute|may not run|a password is required"; then printf refuse-by-policy

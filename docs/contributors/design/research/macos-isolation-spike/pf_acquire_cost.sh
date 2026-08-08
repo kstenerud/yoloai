@@ -357,6 +357,8 @@ if [ -n "$DUMP_FORM" ]; then
     | tee -a /tmp/pfcost.meds | grep -v '^MED '
   echo
   echo "        is it reachable under the SHIPPED grant (which permits -T show per table only)?"
+  # shellcheck disable=SC2086  # deliberate: DUMP_FORM is a multi-word pfctl form and
+  # must word-split into separate arguments; quoting it would pass one bogus argument.
   out=$(sudo -u "$U" -H sudo -k -n /sbin/pfctl -a "$ANCHOR" $DUMP_FORM 2>&1); rc=$?
   if [ "$rc" -eq 0 ]; then
     bad "the existing grant already permits an anchor-wide dump — unexpected; re-read the policy"

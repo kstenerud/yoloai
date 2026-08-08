@@ -116,8 +116,10 @@ LEAF='yb_(src|dst)_([0-9]|[12][0-9]|3[01])'
 { echo "$U ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\\.apple/yoloai_b -t $LEAF -T (add|delete|flush|show)( [0-9a-fA-F.:/]+)*\$"
   echo "$U ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\\.apple/yoloai_b -s rules\$"; } > /tmp/pfocc.sudoers
 echo "$U ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\\.apple/yoloai_b -s Tables -vv\$" > /tmp/pfocc.ext
-visudo -c -f /tmp/pfocc.sudoers >/dev/null 2>&1 && visudo -c -f /tmp/pfocc.ext >/dev/null 2>&1 \
-  || { bad "policy fails visudo -c; ABORTING"; exit 1; }
+if ! visudo -c -f /tmp/pfocc.sudoers >/dev/null 2>&1 || ! visudo -c -f /tmp/pfocc.ext >/dev/null 2>&1; then
+  bad "policy fails visudo -c; ABORTING"
+  exit 1
+fi
 install -m 0440 -o root -g wheel /tmp/pfocc.sudoers "$SUDOERS"
 install -m 0440 -o root -g wheel /tmp/pfocc.ext "$SUDOERS_EXT"   # measurement-only, as before
 sudo -u "$U" sudo -K >/dev/null 2>&1

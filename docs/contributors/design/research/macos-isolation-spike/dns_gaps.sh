@@ -129,6 +129,8 @@ container system start >/dev/null 2>&1
 "$YOLOAI" destroy "$SB" --abandon-unapplied >/dev/null 2>&1
 "$YOLOAI" new "$SB" "$WD" --backend apple >/dev/null 2>&1 || { bad "could not create $SB; ABORTING"; exit 1; }
 echo "        host resolvers:  $(scutil --dns | awk '/^resolver #1$/,/^$/' | grep nameserver | head -3 | awk '{print $3}' | tr '\n' ' ')"
+# shellcheck disable=SC2016  # deliberate: the awk body runs in the GUEST via sh -c,
+# so $2 must reach it unexpanded; expanding it here would substitute the host's value.
 echo "        guest resolvers: $(container exec "$VM" sh -c 'grep ^nameserver /etc/resolv.conf | awk "{print \$2}" | tr "\n" " "' 2>/dev/null)"
 
 # ---------------------------------------------------------------------------
@@ -205,7 +207,7 @@ for d in $ROTATE; do printf '          %-34s %s\n' "$d" "$(guestres "$d")"; done
 echo
 declare -a FIRST
 i=0
-for d in $ROTATE; do FIRST[$i]=$(hostres "$d"); i=$((i+1)); done
+for d in $ROTATE; do FIRST[i]=$(hostres "$d"); i=$((i+1)); done
 echo "        t=0 baseline recorded"
 drifted=0
 for ((t=1; t<=TICKS; t++)); do
