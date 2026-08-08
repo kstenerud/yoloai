@@ -459,6 +459,35 @@ on the default bridge:
 C lost its own policy *and* gained A's, which is D3's result exactly. The hazard is not
 platform-specific and the Linux mechanism is not more forgiving.
 
+### The macOS unevaluated-anchor finding has a Linux analogue, and it decides the chain type
+
+The macOS side found the worst shape of D6: `/etc/pf.conf`'s `anchor "com.apple/*"` line is what makes
+pf descend into our anchor, that line lives in a file we do not own, and `pfctl -F all` destroys it
+without restoring it. The anchor then holds every correct rule, the addresses sit in the right
+tables, pf is enabled — **and pf never looks at any of it**. Every start-path check passes.
+
+**Linux can reach the same state, but only by choosing the wrong chain type** — measured 2026-08-08:
+
+| Chain | Rules present | Enforced |
+| --- | --- | --- |
+| Regular chain (no hook), referenced by nothing | yes | **no** — destination reached |
+| Base chain (`type filter hook forward`), referenced by nothing | yes | **yes** — destination blocked |
+
+A base chain **self-registers with the netfilter hook**; nothing outside it needs to reference it,
+so no external actor can leave it present-and-inert. A regular chain is only reached by a `jump` from
+somewhere else, which is precisely pf's anchor-reference relationship and precisely as fragile.
+
+**So: our own table, our own base chain, at our own hook priority.** Concretely this rules out the
+otherwise-obvious implementation — hanging a rule in **`DOCKER-USER`**. That chain belongs to docker;
+if docker rebuilds it our jump vanishes, and we are back to correct rules that are never evaluated,
+with every existence check passing. The convenience of an established chain is not worth
+reintroducing the exact failure the macOS side had to discover by accident.
+
+This also sharpens what verification must check per platform. On Linux, with a base chain,
+*existence implies evaluation*, so checking our table and chain exist is sufficient. On macOS it is
+**not** — the anchor can exist, be correct, and be unreachable, so verification has to establish that
+pf actually descends into it.
+
 ### Distro fragmentation, and the hazard it actually creates
 
 The backend layer has largely converged — modern distros ship `iptables` as an nf_tables front-end
