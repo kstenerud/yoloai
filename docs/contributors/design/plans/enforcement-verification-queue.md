@@ -4,7 +4,9 @@
 
 # Enforcement verification queue — Linux and macOS
 
-- **Status:** IN-PROGRESS — queue opened 2026-08-08 after the prior-art pass. Nothing run yet.
+- **Status:** IN-PROGRESS — queue opened 2026-08-08 after the prior-art pass. **Linux pass complete
+  (L1–L7, 2026-08-08); macOS pass (M1–M8) outstanding.** The shared design documents are deliberately
+  untouched until both halves are in — see "Running both passes in parallel".
 - **Depends on:** enforcement-state-reaping.md, macos-pf-privileged-path.md
 
 **Working model.** Each item names what to run, what it *decides*, and what it costs. An item is
@@ -196,8 +198,26 @@ between two sandboxes **on the same bridge is switched, not routed, and never en
 hook at all**. Measured with the strongest policy the design can express — drop everything from A:
 A→internet was blocked and the counter moved, and A→B on the same bridge stayed **reachable**. Host-
 side nftables cannot contain sandbox-to-sandbox traffic on a shared bridge, and the default docker
-bridge is shared by every container on it. Whether that is exposure depends on whether yoloAI gives
-each sandbox its own network, which this run did not establish.
+bridge is shared by every container on it.
+
+**yoloAI does share one bridge, on both Linux backends.** `runtime/docker/docker.go` translates
+network mode `isolated` to the *default* bridge, with the comment that isolation "is implemented via
+iptables inside the container (entrypoint.py), not by Docker's network layer"; `runtime/containerd/
+cni.go` puts every sandbox on one `yoloai0` / `10.89.0.0/16` CNI network. So the topology this was
+measured on is the shipped one.
+
+**Which makes the layer comparison the useful result** (`results/l5d-layers-compared.txt`). Measuring
+each layer *alone*, against a baseline where all three destinations are reachable:
+
+| | allowlisted | denied | sibling sandbox |
+| --- | --- | --- | --- |
+| host nftables only | reachable | blocked | **reachable** |
+| in-guest iptables only | reachable | blocked | **blocked** |
+
+The in-guest layer catches what the host layer structurally cannot see, because a sandbox's own
+`OUTPUT` chain sees all of its traffic regardless of whether the packets are ever routed. **The
+host-side layer is not a superset of the in-guest one and cannot replace it** — which is prior-art
+recommendation 6, now with a measured mechanism rather than a general defence-in-depth argument.
 
 ### L6 — Is `nft -f` atomic in the way the design assumes?
 

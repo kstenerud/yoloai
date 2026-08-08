@@ -34,6 +34,7 @@ the file says so rather than quietly resting on it — see the prerouting contro
 | L5b | `l5b-ipv6-hole.txt` | Invalid — docker isolates separate bridges; see `l5c`. |
 | L5c | `l5c-lateral-and-family.txt` | Same-bridge sandbox↔sandbox traffic is unfilterable. |
 | L6b | `l6b-set-replacement-atomicity.txt` | Set replacement is atomic and fails closed. |
+| L5d | `l5d-layers-compared.txt` | The in-guest layer covers what the host layer cannot see. |
 
 ## Runs that were discarded, and why
 
@@ -74,6 +75,15 @@ the file says so rather than quietly resting on it — see the prerouting contro
   more dangerous of the two failures because blocked is the answer you are hoping for. Neither run
   supports a conclusion. L5c asks each question where it can actually be answered: lateral traffic
   against a live internet control, and family matching on the host's own loopback.
+- **L5d's first run had a control that could not fail, and a verdict written in advance.** The script
+  installed the in-guest layer *after* the host layer was already denying egress, so `apk add
+  iptables` could not reach its repositories and the in-guest rules were never installed at all. Both
+  of that section's controls — allowlisted still reachable, denied still blocked — were satisfied by
+  the host layer that was still loaded, so they held while the layer under test did not exist. The
+  file's closing verdict, written before the run, asserted the in-guest layer blocked sibling traffic;
+  the data on the line above it said `REACHABLE`. Nothing in the run's own controls would have caught
+  that. The redone version installs the tool first, prints `iptables -S OUTPUT` as an install check,
+  and measures each layer with the other removed.
 - **L1b's probe control returned 0.** The within-run comparison still holds (see the file), but
   the separate cgroup control for the prerouting hook did not fire either, so it proves nothing.
   The conclusion rests on the L1 output-hook control and on the address counter in the same chain,

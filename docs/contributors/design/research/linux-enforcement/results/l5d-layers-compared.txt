@@ -1,0 +1,29 @@
+sandbox A=10.54.0.2   sandbox B=10.54.0.3   (one shared bridge, as both backends ship)
+allowlisted destination: 104.20.23.154 (example.com)
+
+=== install iptables in A BEFORE any policy exists ===
+the previous run installed it after the host layer was already denying egress,
+so apk could not reach its repos and the in-guest layer silently never existed.
+  iptables in guest: iptables v1.8.13 (nf_tables)
+
+=== BASELINE — no layer at all ===
+  no policy                      allowlisted=REACHABLE  denied=REACHABLE  sibling=REACHABLE
+
+=== LAYER 1 ALONE — host-side nftables, the layer being designed ===
+  host nftables only             allowlisted=REACHABLE  denied=blocked    sibling=REACHABLE
+
+=== LAYER 2 ALONE — in-guest iptables, what yoloAI ships today ===
+  host layer removed, so nothing below can be credited to it
+  INSTALL CHECK — the guest's OUTPUT chain must really be default-deny:
+    -P OUTPUT DROP
+    -A OUTPUT -o lo -j ACCEPT
+    -A OUTPUT -m state --state RELATED,ESTABLISHED -j ACCEPT
+    -A OUTPUT -p udp -m udp --dport 53 -j ACCEPT
+    -A OUTPUT -d 104.20.23.154/32 -j ACCEPT
+  in-guest iptables only         allowlisted=REACHABLE  denied=blocked    sibling=blocked
+
+=== verdict ===
+Read the sibling column in the two 'ALONE' rows. The host layer cannot act on
+same-bridge sibling traffic at all — those packets are switched, not routed, and
+never enter the forward hook. Whether the in-guest layer catches them is what the
+second row answers, and it answers it without the host layer present to help.
