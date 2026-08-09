@@ -1,0 +1,49 @@
+
+=== two sandboxes on ONE shared bridge (docker0) — containerd's shape ===
+A host-side veth: vetha252fef     B host-side veth: vethe77197c
+both enslaved to: master docker0
+
+=== load br_netfilter so bridge ports are visible to netfilter ===
+  br_netfilter: MISSING   bridge-nf-call-iptables=1
+
+=== PART 1 — physdev: does the veth port discriminate on a shared bridge? ===
+  baseline: A->deny REACHABLE   B->deny REACHABLE
+  rule installed: -m physdev --physdev-in vetha252fef -j DROP
+  A->deny blocked   B->deny REACHABLE  <- B is the discrimination control
+  packet counter on the rule:
+    1        5   300 DROP       0    --  *      *       0.0.0.0/0            0.0.0.0/0            PHYSDEV match --physdev-in vetha252fef
+  K2/physdev: physdev discriminates per sandbox on a SHARED bridge
+
+=== PART 2 — nft bridge family keyed on the veth port ===
+  A->deny REACHABLE   B->deny REACHABLE
+    iifname "vetha252fef" ip daddr 1.1.1.1 counter packets 0 bytes 0 drop comment "A-by-veth"
+  K2/bridge-family: did not discriminate (A=REACHABLE B=REACHABLE)
+
+=== PART 3 — do veth names recycle? ===
+   container #1 -> vethf53c7da
+   container #2 -> vethfcf62ca
+   container #3 -> vethe6e427b
+   veth names do NOT recycle (3 distinct of 3)
+
+=== PART 4 — can the guest reach or change its host-side veth? ===
+  devices visible inside A: eth0 lo 
+  can A rename the host-side peer? (it has no handle on it)
+    ip: ioctl 0x8923 failed: No such device
+
+=== SUMMARY ===
+  physdev on shared bridge : physdev discriminates per sandbox on a SHARED bridge
+  nft bridge family        : did not discriminate (A=REACHABLE B=REACHABLE)
+  veth recycling           : veth names do NOT recycle (3 distinct of 3)
+
+=== WHAT WAS NOT TRIED ===
+  - Whether br_netfilter being loaded host-wide breaks anything else. It changes
+    netfilter's view of ALL bridged traffic on the host, not just ours, and L8 already
+    showed it makes docker's own rules apply to sibling traffic. Cost unmeasured.
+  - containerd/CNI: this run used docker's veths. CNI names its veths differently and
+    the yoloai0 bridge is shared; the mechanism should carry but was not run there.
+  - rootless podman: veths inside the rootless netns, untested for this key.
+  - Whether physdev survives a docker restart, or a container restart in place.
+  - Any IPv6 case.
+  - Whether the veth ifindex (as opposed to the name) recycles, which is what a
+    rule compiled to an index rather than a name would depend on.
+restored: br_netfilter unloaded

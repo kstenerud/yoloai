@@ -1,0 +1,60 @@
+
+=== PART 1 — one network per sandbox; is 'iifname <bridge>' a sufficient key? ===
+A=10.201.0.2 on br-04c1ad941734    B=10.202.0.2 on br-374429ec9302    allowlisted=172.66.147.243  denied=1.1.1.1
+-- baseline, no policy --
+   A->allow REACHABLE   A->deny REACHABLE   B->deny REACHABLE
+-- policy keyed ONLY on A's bridge. No address appears in any rule. --
+   address-matching rules in the table: 0
+   A->allow REACHABLE   A->deny blocked   B->deny REACHABLE  <- B is the discrimination control
+     iifname "br-04c1ad941734" ip daddr @allowed counter packets 1 bytes 60 accept comment "A-allowlisted"
+     iifname "br-04c1ad941734" counter packets 5 bytes 300 drop comment "A-denied"
+   K1: the interface alone discriminates per sandbox, with no address in the rule
+
+=== PART 2 — does the bridge name recycle? (macOS's K4 failed exactly here) ===
+   create #1 -> br-824dddfde03d
+   create #2 -> br-6373e821e8ba
+   create #3 -> br-25f7f4e345a1
+   create #4 -> br-e54e6e2b5db9
+   4 created and destroyed in sequence, 4 distinct names
+   K1 recycling: names do NOT recycle
+
+=== PART 3 — can the guest escape an interface-keyed rule? ===
+-- 3a: take an address the policy does not name (defeats address keying) --
+     spoof address held: 1 (0 would make the next line free)
+     A->deny from 10.201.0.99: blocked
+-- 3b: change its MAC (defeats ether-saddr keying) --
+     A's MAC is now 02:11:22:33:44:55
+     A->deny after MAC change: blocked
+-- 3c: can it change which HOST-side interface its packets arrive on? --
+     the veth peer and the bridge live in the host netns; A holds:
+       CapEff:	00000000a80435fb
+     host-side devices visible to A: eth0 lo 
+
+=== PART 4 — meta cgroup, actually executed as a rule this time ===
+L1 asserted this matcher was unusable from a directory-existence test.
+   rule LOADED. sending traffic...
+     meta cgroup 1234 counter packets 0 bytes 0 comment "meta-cgroup"
+   READ: a non-zero counter would mean meta cgroup matches here; zero with
+   traffic flowing means it loads and never fires, which is a measurement
+   rather than the directory test L1 relied on.
+
+=== SUMMARY ===
+K1 (bridge as sole key)      : the interface alone discriminates per sandbox, with no address in the rule
+K1 recycling                 : names do NOT recycle
+3a address spoof vs iifname  : blocked (REACHABLE would mean interface keying is ALSO defeasible)
+3b MAC change vs iifname     : blocked
+
+=== WHAT WAS NOT TRIED ===
+  - veth-level keying (physdev --physdev-in / nft bridge family) on a SHARED bridge,
+    which is what would remove the one-network-per-sandbox requirement. Needs
+    br_netfilter; covered separately in k2_veth_key.sh.
+  - ct mark / meta mark applied at claim time. Circular unless the mark is itself
+    applied by interface or cgroup, so it is downstream of this result.
+  - eBPF cgroup_skb/egress (systemd's IPAddressAllow mechanism). Different toolchain,
+    and it cannot cover the VM backends, so it is a second question not this one.
+  - Whether bridge names collide across a docker daemon restart, or across hosts.
+  - podman and containerd: this run is docker-only. containerd uses one shared CNI
+    bridge (yoloai0) for every sandbox, so a per-sandbox bridge key does NOT exist
+    there as currently configured — that is a design change, not a measurement.
+  - Any claim about macOS. vmnet recycles bridge indices; that was measured there
+    and this run says nothing about it.

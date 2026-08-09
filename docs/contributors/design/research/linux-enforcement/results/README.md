@@ -61,6 +61,8 @@ satisfied for free.
 | R4 | `r4-rootless-spoof-tcp.txt` | Spoofing works there too; rule 0b closes it. |
 | R5 | `r5-rootless-iifname-diagnostic.txt` | Diagnostic: which interface forwarded traffic arrives on. |
 | R6 | `r6-host-destined-traffic.txt` | **Forward-hook policy does not cover sandbox→host traffic at all.** |
+| K1 | `k1-interface-as-sole-key.txt` | **Refutes L1** — per-sandbox bridge is a sound, non-recycling key. |
+| K2 | `k2-veth-key-shared-bridge.txt` | The veth port keys per sandbox on a *shared* bridge. |
 
 **X1 and X2 are the macOS pass's extras asked on Linux**, after that pass landed. Both reproduce, and
 X1's fix — a bridge-scoped default-deny naming no address — works here too.
@@ -140,6 +142,18 @@ pending; this is the index-level version.
   `CapAdd` — the opposite of what the sentence claims. The real grant is `launch.go:1040`, guarded by
   `!sidecarFirewall`. The run's *result* is unaffected. Raw runs are not edited after the fact, so the
   file keeps the error and this line is the correction.
+
+**K1/K2 refute L1** (2026-08-09), which is the item the audit ranked first. Both keys discriminate
+per sandbox with no address in the rule, neither recycles, and neither is defeasible by a guest that
+holds `CAP_NET_ADMIN` — it changed its address and its MAC and stayed blocked, and cannot name the
+host-side interface at all. What K1/K2 do **not** support: anything about containerd or rootless
+podman (docker only), anything about macOS, and the nft `bridge`-family variant, which did not fire
+and whose reason is hypothesised rather than measured. K1 needs one network per sandbox; K2 needs
+`br_netfilter` host-wide, with unmeasured side effects. Both are design changes.
+
+One harness blemish worth naming: `k2`'s status line prints `br_netfilter: MISSING` while the module
+was demonstrably loaded — physdev matching cannot work without it, and the rule counted 5 packets.
+The `lsmod` display check is wrong; the measurement is not.
 
 ## Runs that were discarded, and why
 

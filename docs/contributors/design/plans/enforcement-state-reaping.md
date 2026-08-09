@@ -28,7 +28,7 @@ audit's claims were re-verified against the files by hand and all seven held.
 
 | Claim | Status |
 | --- | --- |
-| "There is no stable per-sandbox non-address key on either platform" | **SUSPENDED.** The Linux half tested **one** matcher family. `meta cgroup` was never executed as a rule — the evidence is a `[ -d /sys/fs/cgroup/net_cls ]` directory test. The per-network `iifname` experiment that macOS ran (M1/K4) was never run on Linux, where bridge names derive from non-recycling network IDs. This plan's own runs use `iifname` successfully as a non-address matcher four times (X1, R1, R2, R4). **Rules 1/1b/1c, 0b and the recycling half of rule 5 may all be consequences of this untested premise.** |
+| "There is no stable per-sandbox non-address key on either platform" | **REFUTED on Linux, 2026-08-09 — two such keys exist.** See § *The key exists on Linux* below. Rules 1/1b/1c, 0b and the recycling half of rule 5 rest on a premise that is false for the Linux container backends. |
 | X1: the bypass "also worked with an address outside the bridge subnet" | **FALSE.** That probe ran only *after* the fix and reads `blocked`. The bypass from an out-of-subnet source was never demonstrated, and is probably impossible (docker masquerades `-s 172.17.0.0/16`, so such a packet has no return path — a control satisfied by a different layer). |
 | L4: "no cross-backend collision in the default configuration" | **FALSE PREMISE.** It measured nerdctl's default network, not yoloAI's. podman's netavark default pool base is `10.89.0.0/16` — byte-identical to `cniSubnetCIDR` (`runtime/containerd/cni.go:44`). Rule 1's **blind** cross-table delete is specified against a collision that was never excluded. |
 | Rule 5: "TCP is safe" | **PARTIAL.** Supported only for a *cleanly closed* flow (`TIME_WAIT`). The ESTABLISHED case — 5-day timeout — was attempted once, failed to construct the state, and was never retried. **`ct state related` was never tested on either platform**, and every rule shape here accepts it. |
@@ -45,6 +45,52 @@ four keys and published its exclusions; L1 tested one and published a platform-w
 **What survives, verified by both audits:** L8, L10c, X2-Linux, R4, R6 and the A34 retraction, L11,
 L12b, L9c, L6b, L7, L4b/L4c, L3d, R3's lifecycle half; on macOS M1/K1 and K3, M5, M2/D2, M4's notify
 half, M6, M7, X3.
+
+## The key exists on Linux — L1 is refuted (2026-08-09)
+
+The experiment L1 should have run is macOS's own M1/K4, asked on Linux. It was run, and the answer is
+the opposite of what this plan was built on. **The interface is a per-sandbox key that does not
+recycle and that the guest cannot change.** Two variants, both measured:
+
+**K1 — the per-sandbox bridge** (`results/k1-interface-as-sole-key.txt`). Two sandboxes on two docker
+networks; a policy containing **zero address-matching rules**, keyed only on `iifname "br-<netid>"`.
+A's allowlisted destination stayed reachable, A's denied destination was blocked (5 packets on the
+drop counter), and **B was entirely unaffected** — the discrimination control. Four networks created
+and destroyed in sequence produced four distinct bridge names: **they do not recycle**, which is
+precisely where macOS's K4 failed (vmnet fills holes in `bridgeN`).
+
+**K2 — the per-sandbox veth port, on a *shared* bridge** (`results/k2-veth-key-shared-bridge.txt`).
+This matters because containerd puts every sandbox on one `yoloai0`. With `br_netfilter` loaded,
+`iptables -m physdev --physdev-in <veth>` discriminated A from B on `docker0`: A blocked with 5
+packets on the rule, B reachable. Veth names did not recycle across three create/destroy cycles.
+
+**And it is not defeasible.** Against the K1 rule, the guest — holding `CAP_NET_ADMIN` — added a
+second address (the move that defeats address keying outright, X1) and stayed **blocked**; changed
+its MAC and stayed **blocked**. It sees only `eth0` and `lo`; the veth peer and the bridge live in the
+host netns, and an attempt to rename the host-side peer from inside failed with `No such device`. The
+key is structural: the guest holds no handle on it.
+
+**`meta cgroup` was finally executed as a rule** rather than inferred from a directory test. It loads
+and never fires — 0 packets with traffic flowing. L1's *narrow* claim was right; its conclusion was
+not.
+
+**What this costs, stated plainly.** K1 requires **one network per sandbox**, which neither Linux
+backend does today (docker uses the default bridge, containerd one shared CNI network). K2 removes
+that requirement but needs `br_netfilter` loaded **host-wide**, which changes netfilter's view of all
+bridged traffic on the machine and whose side effects are unmeasured. Both are design changes, not
+drop-in fixes.
+
+**What it removes if adopted.** Rules 1/1b/1c exist to make address-keyed enforcement safe under
+recycling; rule 0b exists because the address key is defeasible; the recycling half of rule 5 exists
+because addresses are reused. All three are consequences of the key. A key that does not recycle and
+that the guest cannot reassign makes them unnecessary rather than mitigated. **Rewriting the plan on
+that basis is the next phase and has not been done** — this section records the measurement only.
+
+**Scope, and it is narrow on purpose.** Docker only. Not run on containerd or rootless podman. Says
+nothing about macOS, where vmnet recycles bridge indices and M1's negative may well stand. The
+nftables `bridge`-family variant did **not** fire (0 packets); the likely reason is that routed
+traffic never traverses the bridge-family forward hook, but that was **not measured** and is stated
+here as a hypothesis, not a finding.
 
 ## Why this is not a tidy-up
 
