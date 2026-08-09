@@ -5,7 +5,11 @@
 # macOS: enforce the network allowlist from host `pf`
 
 - **Status:** PLANNED — mechanism, authorization and enforcement measured on hardware
-  2026-08-02/04. Nothing built.
+  2026-08-02/04, and **revised 2026-08-09 against a completed verification pass** (M1–M8 plus four
+  unqueued extras, run against a parallel Linux pass). Nothing built. The pass added two required
+  mechanisms — a bridge-scoped default-deny and connection-state teardown — and settled the
+  verification, polling and pool-size questions with numbers. See § *What the verification pass
+  settled*.
 - **Depends on:** tamper-resistant-network-isolation.md, host-controlled-agent-launch.md
 - **Decision:** [D132](../../decisions/working-notes.md#d132--macos-pf-is-driven-through-a-generated-nopasswd-sudoers-grant-that-authorizes-pf-table-membership-and-nothing-else) — the mechanism and the five rejected alternatives. Cite that, not this file.
 - **Rides:** **any** — the user-visible surface only gains capability. `--network-isolated` becomes
@@ -477,9 +481,89 @@ requests `AF_INET` only. `ipv6-network-isolation.md` and `guest-network-families
 **This plan does not close DF104.**
 
 What it contributes: pf accepts `inet6` rules (parse-only) and a table holds both families at
-runtime. Any v6 rule must use the same `in quick` form. Measured limit: an apple guest holds a
-**ULA** (`fd00::/8` space) and has no IPv6 egress; tart guests have none; this host has no v6
-upstream, so whether guests would egress over v6 elsewhere is unmeasured.
+runtime. Any v6 rule must use the same `in quick` form.
+
+**Corrected 2026-08-09 by M7** (`../research/macos-isolation-spike/results/pf-v6-hole.txt`). This
+section previously said tart guests hold no v6 address. They do: **both** backends' guests hold a ULA
+*and* a link-local, and with the pool loaded and the v4 allowlist empty, v4 was refused while **v6
+reached the same host on the same port** on both. The hole is universal on macOS, not apple-only.
+
+pf *can* enforce v6 in the same anchor — a v6 table pair blocked it — so this is an omission rather
+than a limitation. But closing it costs more than a second table pair, and that is the part that
+belongs in the design: **the table must hold every v6 address the guest holds**, because source
+selection is per destination scope (a guest talking to a link-local host sources from its own
+link-local, not the ULA the backend reports), and a guest can acquire more at any time via SLAAC or
+privacy addresses. A v4 table never has that problem, so the v6 half is not the v4 half with a
+different family constant. **Scope limit:** this host has no v6 default route, so everything measured
+is guest-to-host on the link; a host *with* v6 upstream has a wider hole, not a narrower one.
+
+## What the verification pass settled (2026-08-09)
+
+Raw runs in `../research/macos-isolation-spike/results/`. Cross-platform conclusions live in
+[enforcement-state-reaping.md](enforcement-state-reaping.md); this section is the macOS-specific
+half. Two items are **new required mechanisms**, not refinements.
+
+**The address key is defeasible, and one static rule closes it (X1 — the pass's most consequential
+result).** In a `--network-isolated` sandbox the agent has passwordless `sudo`, root holds
+`CAP_NET_ADMIN`, it flushes its own in-guest allowlist and regains egress (DF179 reproduced), then
+takes an address **in no slot at all** and reaches a denied destination; same escape on tart via
+`ifconfig alias`. The pool is an allowlist of blocks keyed on address, so it constrains only the
+addresses it already holds. **A bridge-scoped default-deny** in the pinned ruleset closes it while
+preserving the per-slot matrix, with no address in the rule and no new grant surface. Reproduced
+independently on Linux, where the same one-rule fix works. Two verdicts stay deliberately soft: A
+borrowing B's *live* address failed on the return path (ARP delivers the reply to B), which says
+nothing about a stale address whose owner has exited; and the full-replace case left the guest
+holding no address, which is UNKNOWN rather than a refusal.
+
+**Deleting an allowlist entry does not stop traffic already flowing (X2).** The transfer kept
+advancing after the delete while new connections were refused. `pfctl -k <guest>` does **not** fix
+it — the state dump shows it killing states sourced *from* the guest while the surviving state was
+sourced from the *host*, created by an outbound packet matching no rule, because the pool is
+`in`-only. **A return-direction rule stops it** and leaves allowed traffic working. Prefer that to
+amending D132 for `-k`, which is unscoped and reaches every state on the machine. This is reaping
+rule 5; Linux found the same cause from the recycling side.
+
+**Slot allocation must be atomic above pf (X3).** Four concurrent acquisitions on *distinct* slots
+neither corrupt tables nor cross allowlists, and concurrency gives 2.8× over serial. But two
+acquisitions on **one** slot leave both addresses in it with **both** destinations, and each guest
+then reaches the other's allowlisted destination — a cross-sandbox privilege leak from contention
+alone. Fail-closed to the outside, still wrong. Timing-dependent: treat as *reachable*, not *always*.
+
+**Verification must be behavioural, and the cheapest detector needs no grant (M3).** Under the
+shadowed fault — anchor reference present, a `pass quick all` ahead of it, denied destination
+answering 301 — `pfctl -s rules` reports **HEALTHY** while the canary reports BROKEN. Costs on a
+healthy host: reading the main ruleset 13–17 ms but needs a new grant line (refused today); the
+evaluation-counter delta 250–284 ms, needs `-vv` (refused today) and needs prior traffic, so it is a
+poll not a start check; **the canary 83–105 ms and no grant at all**. Most of that is process spawn,
+not network. **Adopt the canary.**
+
+**Polling is forced (M4).** No signal exists: zero unified-log entries on a pf predicate, zero of
+nine watched notify(3) keys with the watcher proven alive in the same run, and `/etc/pf.conf`'s mtime
+unchanged by every event. One free partial: `pfctl -s info`'s *Enabled for* counter resets on
+`-F all` but not on a plain reload, and `-s info` is already granted — so a poll that remembers the
+previous value catches a flush by seeing time run backwards. It cannot see a reload that drops the
+anchor line, which is the fault that defeats everything else. Poll costs: `-s info` 2.0 ms,
+`-s rules` 4.2 ms, plus ~9.3 ms of `sudo`.
+
+**Pool size is a real lever, and the denominator is the surprise (M8).** Acquisition is linear —
+fitted from n=8 and n=32, checked against n=16 at **0.0% error**; per-call 18.81 ms, fixed overhead
+10.2 ms. Measured: 8 slots 217 ms, 16 slots 368 ms, 32 slots 668 ms. Against that, `container run -d`
+averages **676 ms**, so acquisition at 32 slots costs as much again as the backend's own create, and
+at 8 slots about a third of it. Concurrency does not serialize, so a start *burst* is cheaper than
+the per-start figures suggest. The other axis is a decision, not a measurement: slots are the
+concurrency ceiling and the exhaustion policy is the owner's call.
+
+**Uninstall (M5)** is a security-boundary change and amends D132 rather than this plan — the residue
+is standing authority, and removing it needs a real `sudo` prompt because the grant deliberately
+cannot flush.
+
+**`NEFilterDataProvider` stays parked, with a better reason (M6).** Apple approval is **not** the
+barrier — the NetworkExtension entitlement stopped being case-by-case in 2016, which corrects the
+impression [prior-art-egress-enforcement.md](../research/prior-art-egress-enforcement.md) §4 leaves.
+The barriers are that the deliverable changes shape: a Developer-ID-signed, notarized `.app` under
+`/Applications` (this host has **zero** codesigning identities), an unscriptable user approval, and —
+measured — `systemextensionsctl developer` refused while SIP is enabled, so even prototyping costs a
+SIP-disabled machine. yoloAI ships an unsigned CLI binary.
 
 ## Unmeasured, and known limits
 

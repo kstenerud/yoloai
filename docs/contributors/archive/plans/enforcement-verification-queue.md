@@ -1,15 +1,41 @@
-> **ABOUTME:** Everything in the host-side enforcement workstream that is still a claim rather
-> than a measurement, split by the hardware that can settle it. One Linux pass and one macOS
-> pass should clear it. Records what to run and what each result decides, not code.
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since. It is **not a specification** — its
+> conclusions have been applied to the live documents listed under *Where this landed*, and
+> those are the current answer. Good for archaeology: what was asked, what was run, and which
+> runs were thrown away. See [`../README.md`](../README.md).
+
+> **ABOUTME:** Everything in the host-side enforcement workstream that was still a claim rather
+> than a measurement, split by the hardware that could settle it. One Linux pass and one macOS
+> pass cleared it. Records what to run and what each result decides, not code.
 
 # Enforcement verification queue — Linux and macOS
 
-- **Status:** IN-PROGRESS — queue opened 2026-08-08 after the prior-art pass. **Both measurement
-  passes are complete: Linux (L1–L12) and macOS (M1–M8, plus four unqueued extras), 2026-08-08.**
-  What remains is **synthesis** — the shared design documents are still deliberately untouched, and
-  it now has both halves to work from. The queue stays here rather than in `archive/plans/` because
-  it is synthesis's input, and its findings have not been applied to anything yet.
-- **Depends on:** enforcement-state-reaping.md, macos-pf-privileged-path.md
+- **Status:** IMPLEMENTED — both measurement passes ran on hardware 2026-08-08 (Linux L1–L12 plus
+  X1/X2, macOS M1–M8 plus four unqueued extras), and synthesis applied their conclusions to the live
+  design documents on 2026-08-09. Archived in that same commit.
+- **Depends on:** —
+
+**Where this landed.** The outcomes below are recorded here as they were found; the conclusions drawn
+from them are live elsewhere, and those are what to cite:
+
+- [enforcement-state-reaping.md](../../design/plans/enforcement-state-reaping.md) — the cross-platform
+  synthesis: rule **0b** (the address key is defeasible; one scope-based deny closes it), rule **5**
+  (connection state outranks the rules), the settled key question (L1+M1), the verification answer
+  (L3+M3+M4), and what the pass opened and did not close.
+- [macos-pf-privileged-path.md](../../design/plans/macos-pf-privileged-path.md) § *What the
+  verification pass settled* — the macOS-specific half, plus the corrected IPv6 section.
+- [D132](../../decisions/working-notes.md) — amended for uninstall (M5) and for the two additions the
+  existing grant already covers.
+- [D133](../../decisions/working-notes.md) — resolution happens in the guest's resolver context
+  (L2+M2+L9).
+- [DF104](../../design/findings-unresolved.md) updated with both platforms' IPv6 measurements;
+  [DF188](../../design/findings-unresolved.md) filed for the sinkholed-allowlist-domain defect.
+- [testing-principles.md §11](../../principles/testing-principles.md) — the harness failure class that
+  produced roughly a dozen invalid runs across both platforms.
+
+**The raw runs are not archived** and remain the citable evidence:
+`design/research/linux-enforcement/results/` and `design/research/macos-isolation-spike/results/`,
+both of which keep the invalidated runs on purpose.
 
 **Working model.** Each item names what to run, what it *decides*, and what it costs. An item is
 done when a raw run lands in `research/macos-isolation-spike/results/` (macOS) or an equivalent

@@ -379,6 +379,44 @@ The cost-vs-benefit discipline rejects testing-principle-shaped statements that 
 
 ---
 
+## §11. A control that cannot fail proves nothing — check that the thing under test exists
+
+> **Rule.** Before believing a negative, confirm the mechanism under test was actually present and the control could have failed. A control satisfied by something *other* than the code under test certifies the opposite of the truth, and it does it silently.
+>
+> **Bites when:** an assertion passes because a prerequisite was missing rather than because the behaviour is right. · **See also:** TEST §1, TEST §7, AGENTS.md rule 10.
+
+**Principle.** "Blocked", "denied", "not found" and "no output" are the cheapest results in testing: almost any broken setup produces them. So a test whose *expected* outcome is a negative must, in the same run, demonstrate two things — that the positive path still works, and that **the mechanism under test was actually installed**. Otherwise the run is not a negative result; it is an absence of a result wearing one.
+
+The failure is not carelessness. In every instance below the harness was written carefully, ran cleanly, exited zero, and asserted exactly what its author intended — and its controls passed while the thing they were controlling for did not exist.
+
+### Pattern
+
+Three checks, cheapest first:
+
+1. **Assert the prerequisite, not just the outcome.** Print the installed rules, the tool version, the loaded module — the state the test depends on — and abort loudly if it is absent. `command -v dig || abort` costs one line and converts a false negative into a failed run.
+2. **Make the positive control specific to the layer under test.** A control satisfied by a *different* layer that happens to still be loaded is not a control. Remove the other layer, or assert which one decided (a rule counter, a log line, an error identity).
+3. **Treat empty as invalid, never as equal.** Two empty strings compare equal, two zero counters agree, and both read as consensus. Any comparison whose inputs can be empty needs an emptiness guard ahead of it.
+
+### Worked examples
+
+Drawn from the 2026-08 host-enforcement verification pass, which ran twelve queued items on each of two platforms and produced roughly a dozen invalid runs — nearly all of this one class, found on both platforms independently.
+
+- **The layer under test was never installed** (`linux-enforcement/results/l5d-layers-compared.txt`, run 1): the in-guest firewall was installed *after* the host firewall was already denying egress, so the package manager could not fetch `iptables` and the in-guest rules never existed. Both controls — "allowlisted still reachable", "denied still blocked" — passed, satisfied by the host layer that was still loaded. The run's written verdict claimed the in-guest layer blocked sibling traffic, one line below data saying it did not.
+- **Every counter read zero and the test still "passed"** (`l10c`, run 1): the same trap, and the giveaway was that *no* rule had matched anything — a decisive-looking negative in which no packet had been evaluated at all.
+- **A verdict assembled from empty strings** (`l9`, run 1): the container runtime was broken, every command failed, and a configuration comparison concluded "these are identical" by finding two empty values equal.
+- **Testing a sandbox that lacked the capability under test** (macOS pass, twice), **a `PATH` without `/sbin`**, and **an injection that killed the NAT so the fault it was probing for was masked** — three more of the same shape on the other platform.
+- **The one that was caught, and how:** a negative control that printed `REACHABLE (unexpected)` exposed that `nft -f` *merges* into an existing table rather than replacing it, so the previous policy — and its allowlisted destination — were still live (`l10`, run 1). The test's own result looked like a finding; only the control distinguished them.
+
+### Cost-vs-benefit
+
+Cost of applying: a handful of assertions per test, and the discipline to ask "what would this print if the thing I am testing were absent?" Damage prevented: a recorded result that is confidently backwards. This class does not surface as a flake or a failure — it surfaces as evidence, and it gets written into design documents. In the pass above it produced a written conclusion that had to be retracted, and it was caught by reading output rather than by any check in the harness.
+
+### Sources
+
+Project: the 2026-08 enforcement verification pass (`design/research/linux-enforcement/results/README.md` and `design/research/macos-isolation-spike/results/README.md`, both of which keep the invalidated runs deliberately). Related prior instance: DF172's vacuity mode, where conformance passed for free against a sandbox with no network at all.
+
+---
+
 ## Closing note
 
 Testing is the safety net that makes refactoring possible. Most of the actual code-improvement work in yoloAI's architecture remediation (W1–W14) was unblocked by tests at the right layer: the W11 runtime-registry refactor would have been terrifying without the integration tests at the backend boundary; the W12 sandbox carve-out would have been terrifying without the unit tests inside the domain code. Tests aren't there to make CI green; they're there so future-Karl (or a future contributor, or an AI agent) can change the code without breaking it.

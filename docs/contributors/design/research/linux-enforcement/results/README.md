@@ -4,9 +4,15 @@
 
 # Linux enforcement verification — raw results
 
-Counterpart to `../../macos-isolation-spike/results/`. Item definitions and what each result
-decides live in `design/plans/enforcement-verification-queue.md`; this directory holds only the
-runs. Harness scripts are one level up.
+Counterpart to `../../macos-isolation-spike/results/`. This directory holds only the runs; harness
+scripts are one level up.
+
+**Where the conclusions live.** Synthesis applied these results on 2026-08-09 — cite those documents,
+not this index: [enforcement-state-reaping.md](../../../plans/enforcement-state-reaping.md) (rules 0b and
+5, the key question, the verification answer), [macos-pf-privileged-path.md](../../../plans/macos-pf-privileged-path.md),
+D132 and D133 in `decisions/working-notes.md`, and DF104/DF188. The item definitions that generated
+these runs are archaeology now, in
+[archive/plans/enforcement-verification-queue.md](../../../../archive/plans/enforcement-verification-queue.md).
 
 **Host under test.** Ubuntu, kernel 6.8.0-136-generic, nftables v1.0.9, docker 29.6.1, podman
 4.9.3, nerdctl 2.2.1, unified cgroup v2 (`cgroup2fs`), systemd-resolved in stub mode with the
@@ -14,9 +20,12 @@ LAN resolver at `192.168.111.1`. `ufw` is installed and its unit is active, but 
 reports `inactive` — the unit being up is not the same as the firewall enforcing, which matters
 for L3. firewalld is not installed.
 
-**Method rules applied, both from the queue header.** Every negative carries a positive control
-in the same run, and every negative result names what was tried. Where a control was itself weak,
-the file says so rather than quietly resting on it — see the prerouting control in `l1b`.
+**Method rules applied.** Every negative carries a positive control in the same run, and every
+negative result names what was tried. Where a control was itself weak, the file says so rather than
+quietly resting on it — see the prerouting control in `l1b`. The discarded runs below are why those
+rules now live in [testing-principles.md §11](../../../../principles/testing-principles.md): nearly
+all of them failed the same way, with a control that something *other* than the code under test
+satisfied for free.
 
 | Item | File | Outcome |
 | --- | --- | --- |

@@ -4,10 +4,15 @@
 
 # Plan: reaping address-keyed enforcement state
 
-- **Status:** PLANNED — designed 2026-08-06 against measured address behaviour on both platforms. No
-  production code written. The macOS half was already designed inside
-  [macos-pf-privileged-path.md](macos-pf-privileged-path.md); this generalises it and settles the
-  Linux half, which was named as a cost and never worked out.
+- **Status:** PLANNED — designed 2026-08-06 against measured address behaviour on both platforms,
+  and **revised 2026-08-09 against a completed two-platform verification pass** (Linux L1–L12 plus
+  X1/X2, macOS M1–M8 plus four extras). No production code written. The macOS half was already
+  designed inside [macos-pf-privileged-path.md](macos-pf-privileged-path.md); this generalises it and
+  settles the Linux half, which was named as a cost and never worked out.
+  **What the pass changed:** rules 1–4 survive unaltered and are now measured rather than assumed,
+  but two rules were added — **0b**, because the address key turned out to be defeasible on both
+  platforms, and **5**, because connection state outranks the rules on both. Reaping alone was not
+  sufficient, and neither gap was visible from the design.
 - **Depends on:** tamper-resistant-network-isolation.md, macos-pf-privileged-path.md
 - **Rides:** **any.** It adds reclamation to a mechanism that does not ship yet; nothing user-visible
   is withdrawn. It is not optional *within* that mechanism — see "Why this is not a tidy-up".
@@ -61,6 +66,67 @@ ordering, or on a stored address still being the sandbox's. Only *live* state is
 
 Two clauses, and the second is the one a naive reaper misses: removing orphans is not sufficient if
 a live address can carry someone else's policy.
+
+## Reaping is necessary and not sufficient (synthesis, 2026-08-09)
+
+**The invariant above is about the state being *correct*. It says nothing about the state being
+*binding*, and measurement on both platforms now shows it is not.** A sandbox that changes its own
+address leaves every rule keyed on the old one, and no amount of correct address-keyed state
+constrains it.
+
+Measured independently on each platform, with the same outcome:
+
+- **macOS** (`research/macos-isolation-spike/results/pf-spoof.txt`) — in a `--network-isolated`
+  sandbox the agent has passwordless `sudo`, root holds `CAP_NET_ADMIN`, it flushes its own in-guest
+  allowlist and regains egress ([DF179](../findings-unresolved.md) reproduced), then takes an address
+  **in no slot at all** and reaches a denied destination. Same escape on tart via `ifconfig alias`.
+- **Linux** (`research/linux-enforcement/results/x1-source-address-spoofing.txt`) — `ip addr add
+  172.17.99.99/16 dev eth0` in a sandbox holding `CAP_NET_ADMIN`, then a denied destination reached
+  while the host's deny counter never moved. It also worked with an address *outside* the bridge
+  subnet.
+
+The mechanism is the same on both and it is structural, not a bug in either ruleset: **an allowlist
+of blocks keyed on address constrains only the addresses it already holds.** Enumerating the guilty
+can never be complete.
+
+### Rule 0b — every enforcement point needs one scope-based deny that names no address
+
+Above the per-sandbox rules, and below nothing:
+
+- **Linux** — `iifname "<bridge>" … drop` as the last rule of the chain. Measured: it blocks the
+  spoofed source, leaves the allowlisted destination reachable from the real address, and holds for
+  an address outside the subnet.
+- **macOS** — the bridge-scoped default-deny in the pinned ruleset file. It preserves the per-slot
+  matrix and **adds no grant surface**, because it is a static rule in the file D132 already pins,
+  not a membership mutation.
+
+This is one rule, on each platform, containing no address. That property is the point: it is the only
+part of the design whose correctness does not depend on the enforcement state being current. Rules
+1–4 keep the state honest; rule 0b is what makes the state *matter*.
+
+**It does not make reaping optional.** A stale entry still grants a new sandbox another's allowlist —
+D3 on macOS, reproduced on Linux — and rule 0b does nothing about that, because both sandboxes are
+inside the scope it denies. The two mechanisms answer different questions: 0b bounds what a guest can
+*become*, rules 1–4 bound what an address *carries*.
+
+## The keys, settled on both platforms (synthesis, 2026-08-09)
+
+L1 and M1 asked the same question and returned the same answer: **there is no stable per-sandbox
+non-address key on either platform.** This was the strongest lead out of the prior-art pass — Cilium's
+answer to address recycling is to stop keying on addresses — and it is closed.
+
+- **Linux** (`results/l1-cgroup-key.txt`, `l1b`) — the kernel refuses `socket cgroupv2` in the
+  `forward` and `postrouting` hooks, and container egress is forwarded. `prerouting` accepts the rule
+  and never fires it. `meta cgroup` reads a cgroup-v1 classid that does not exist under unified
+  cgroup v2. The match works in `output`, where container traffic never appears.
+- **macOS** (`results/pf-nonaddress-key.txt`) — no process identity (guest traffic matches
+  `user unknown`), no MAC matcher in pf's parser, and per-sandbox networks give distinct bridges
+  whose indices recycle exactly as addresses do. One positive: an ingress **tag** keyed on the bridge
+  survives NAT, which is the only way to tell guest from host traffic after translation — but it is
+  per-bridge, not per-sandbox.
+
+**So rules 1/1b/1c stay on both platforms, and for a measured reason rather than an assumed one.**
+The address is not a good key; it is the only key.
 
 ## Mechanism
 
@@ -363,6 +429,84 @@ of truth and a live patch stays best-effort, queued for next start if it cannot 
 soft-fails whenever the guest is unreachable; on host state there is no guest to be unreachable, so
 the queued-for-next-start path becomes rare rather than routine.
 
+### 5. Connection state is enforcement state, and it outranks the rules (synthesis, 2026-08-09)
+
+Every ruleset in this design accepts already-established flows — `ct state established,related` on
+Linux, the equivalent state table on macOS — because without it nothing works. That accept is keyed
+on **flow state, not on policy**, so it survives changes to policy. Measured on both platforms, and
+in both directions:
+
+- **Revoking a destination does not close it.** Linux (`results/x2-revocation-vs-live-flow.txt`): a
+  keep-alive connection to an allowlisted peer kept receiving after the element was deleted — 1370
+  bytes before, 3288 ten seconds after — while new connections were refused. macOS
+  (`results/pf-revocation.txt`): the transfer kept advancing after the delete, same control.
+- **Replacing the sandbox behind an address does not close it either.** Linux
+  (`results/l10c-udp-residue.txt`): sandbox A queried a resolver it was allowlisted for and was
+  destroyed; B took the same address with an allowlist naming neither the destination nor port 53; a
+  query from a fresh source port was denied, and **the same query reusing A's source port was
+  answered**, on the `established` rule. TCP is safe here — a cleanly closed flow lingers as
+  `TIME_WAIT` and a reused tuple is classified `NEW` — but UDP has no close handshake and simply
+  persists.
+
+**These are one cause seen twice, and a fix for either alone is indistinguishable from a fix for
+both when you read the rules.** So the rule is: **whenever an address's policy changes — revocation,
+teardown, or claim — the flow state for that address is dropped in the same operation.**
+
+Scoping differs, and macOS's is the constrained one:
+
+- **Linux** — `conntrack -D -s <addr> -d <peer>` for revocation, `-s <addr>` at teardown and claim.
+  Measured to stop the flow dead (3288 → 3288). It names the pair, so it reaches nothing else.
+- **macOS** — `pfctl -k <guest>` **does not work**, and the state dump says why: it kills states
+  sourced *from* the guest, while the surviving state was sourced from the *host*, created by an
+  outbound packet matching no rule because the pool is `in`-only. **A return-direction rule fixes
+  it**, and that is the form to adopt: `-k` is unscoped, reaches every state on the machine, and
+  would need a D132 amendment to permit. One rule beats a new grant.
+
+**Consequence for rule 1.** "Clear before claim" must clear conntrack for the address, not only the
+rules. Clearing the rules alone leaves the UDP inheritance above intact and looks complete.
+
+## Verifying that enforcement is live: behaviour, not state (synthesis, 2026-08-09)
+
+Reaping and liveness must be designed against one model of *what is currently live* — moby #49728 is
+the bug that comes from splitting them — so the verification answer belongs here. L3, M3 and M4
+converge on it, and it **retires the prior-art recommendation this workstream started from**.
+
+**Reading the rules is not verification. On both platforms, correct-looking state can be inert.**
+
+- **macOS** (`results/pf-liveness-detect.txt`) — under the *shadowed* fault, with the anchor reference
+  present but a `pass quick all` ahead of it and a denied destination answering 301, `pfctl -s rules`
+  reports **HEALTHY**. The behavioural canary reports BROKEN. A main-ruleset read is not a stronger
+  proxy than the checks it would replace; it is the same class of proxy one level up.
+- **Linux** — the same shape twice. A `socket cgroupv2` rule in `prerouting` loads clean and never
+  fires, on packets the same chain provably sees (`results/l1b-cgroup-prerouting.txt`); and every
+  trigger in the L3 matrix was judged on live packets rather than `nft list` precisely because the
+  table being present says nothing about it applying.
+
+**Subscription is not available, and on Linux it is also not needed.** moby #49443 fixes docker's
+firewalld-reload problem by subscribing to the reload signal, and the prior-art pass recommended
+following it. Measurement says otherwise on both platforms:
+
+- **Linux** (`results/l3-*`, `l3b`, `l3c`, `l3d`) — nothing a firewall manager does reaches a
+  dedicated `inet` table of ours. `ufw enable`/`reload`/`disable`, a full `docker restart`, and
+  firewalld on its nftables backend across `--reload`, `--complete-reload` and a restart all left it
+  present *and* enforcing. **The variable is whether you share the manager's table**: with firewalld
+  on its iptables backend, a foreign chain plus its `FORWARD` jump — docker's `DOCKER-USER` shape —
+  were both destroyed by one `firewall-cmd --reload` while firewalld rebuilt its own 30 chains. That
+  is the CVE mechanism, reproduced, and it selects for tools that write into the shared `filter`
+  table. Ours does not. What remains is the **whole-ruleset** class (`nft flush ruleset`, as
+  `/etc/nftables.conf` opens with), which is table-agnostic and emits no signal.
+- **macOS** (`results/pf-change-signal.txt`) — **no signal of any kind.** Zero unified-log entries
+  matching a pf predicate, zero of nine watched notify(3) keys (with the watcher proven alive in the
+  same run), and `/etc/pf.conf`'s mtime unchanged by every event, so a file watcher is blind rather
+  than weak.
+
+**So: a behavioural probe on both platforms, polled.** macOS has a measured shape to copy — detector
+C, 83–105 ms, **no grant needed**, most of it process-spawn rather than network. One free extra on
+macOS: `pfctl -s info`'s *Enabled for* counter resets on `-F all` but not on a plain reload, and
+`-s info` is already in the shipped grant, so a poll that remembers the previous value catches a
+flush by seeing time run backwards. It cannot see a reload that drops the anchor line — the fault
+that defeats everything else — so it is a cheap tripwire for the loud fault, never a substitute.
+
 ## Reboot is a clean slate on both platforms, and that is load-bearing
 
 Neither platform persists this state, and yoloAI must not make it persist:
@@ -391,6 +535,13 @@ persistence is ever wanted, it has to persist the *reconciliation*, not the rule
 - A `sandbox allow` concurrent with a sweep leaves the added entry present.
 - Orphan identification is exercised against the ambiguous-name case DF125 describes, and passes
   because it never reads a name.
+- **A sandbox that changes its own address is still contained** (rule 0b) — asserted by adding a
+  second address inside the bridge subnet *and* one outside it, and reaching a denied destination
+  from each. Without rule 0b both succeed, so this test fails loudly on a regression.
+- **Revoking a destination closes connections already open to it** (rule 5), and **a new sandbox on a
+  recycled address cannot reuse the previous one's UDP flow** — the second needs the prior flow's
+  5-tuple reused deliberately, because a fresh source port is denied either way and would pass
+  vacuously.
 
 **Every one of these must pair its negative with a positive control in the same run.** A sandbox with
 no network at all satisfies "the old policy no longer applies" for free — that is DF172's vacuity
@@ -694,6 +845,32 @@ macOS half of that detector is.
 The Linux unit's concrete shape (chain per sandbox, ipset per sandbox, or one chain
 with per-source rules) is an implementation choice to make against the code, not a design fork — all
 three satisfy rules 0–4, and the divergence above means it need not answer to the macOS shape.
+**One constraint the pass added to that choice:** whatever the unit, each sandbox needs its **own**
+allowlist set. macOS measured a cross-sandbox leak from contention alone — two acquisitions landing
+on one slot left both addresses in it with **both** destinations, and each guest reached the other's
+allowlisted destination (`results/pf-concurrent-acquire.txt`, X3). Linux has no slot pool to contend
+for, so it cannot reproduce that; but every harness in the Linux pass used a single shared `@allowed`
+set, and a shipped design that did the same would have the identical leak by construction, with no
+contention needed. Slot allocation on macOS must additionally be atomic above pf.
+
+### Opened by the pass, and not closed
+
+- **Rootless podman cannot be enforced from the host at all**, so the design's reach is narrower than
+  "Linux". There is no host route to its bridge; egress is NAT'd by `slirp4netns` into the **host's
+  own source address** and appears in the `output` hook, not `forward`. That hook is where a cgroup
+  key would be available — but the egress process is shared: 1, 2 and 3 running sandboxes all had
+  exactly one `slirp4netns`, whose cgroup names the rootless network namespace rather than a sandbox
+  (`results/l4b-rootless-podman-path.txt`, `l4c`). No per-sandbox key exists there by any means
+  measured, and its traffic is indistinguishable from the host's. **The design must say which backends
+  it covers, and rootless podman is currently not one of them.**
+- **Same-bridge sandbox-to-sandbox traffic is invisible to the host point as shipped.** `br_netfilter`
+  is not loaded by default and both Linux backends put every sandbox on one bridge, so those packets
+  are switched, not routed. Loading the module with `bridge-nf-call-iptables=1` makes them visible and
+  the policy then contains them (`results/l8-br-netfilter.txt`) — but both settings are host-wide, not
+  per-sandbox, and yoloAI sets neither. Until it does, the in-guest layer is the only thing covering
+  that traffic, which is an argument for keeping it rather than a gap to accept.
+- **Whether reloading the `com.apple` anchor purges sub-anchors nested under it** — carried over
+  unrun from the previous pass. Still not blocking, for the reason below.
 
 ## Related
 
