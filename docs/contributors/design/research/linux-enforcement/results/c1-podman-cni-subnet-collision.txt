@@ -1,0 +1,22 @@
+=== C1 — do podman's default allocator and yoloAI's CNI subnet overlap in practice? ===
+yoloAI's CNI subnet (runtime/containerd/cni.go:44): 10.89.0.0/16
+podman/netavark default pool base (containers.conf):
+  #default_subnet_pools = [
+  #  {"base" = "10.89.0.0/16", "size" = 24},
+  #  {"base" = "10.90.0.0/15", "size" = 24},
+  #  {"base" = "10.92.0.0/14", "size" = 24},
+
+-- create a podman network with NO --subnet, as a user would --
+   yb_c1 subnet: 10.89.0.0/24
+   yb_c2 subnet: 10.89.1.0/24
+
+-- what address does a container on it get? --
+   podman container: 10.89.0.2
+
+-- what does yoloAI's CNI IPAM currently hold? --
+   reserved: 10.89.0.2
+
+=== VERDICT ===
+   COLLISION LIVE: podman's default allocator hands out inside yoloAI's own
+   10.89.0.0/16. A podman sandbox and a containerd sandbox can hold the same
+   address, and rule 1's blind cross-table delete would remove a LIVE entry.
