@@ -17,6 +17,35 @@
 - **Rides:** **any.** It adds reclamation to a mechanism that does not ship yet; nothing user-visible
   is withdrawn. It is not optional *within* that mechanism — see "Why this is not a tidy-up".
 
+## ⚠ AUDIT SUSPENSION — 2026-08-09. Do not build from the suspended claims below.
+
+Two independent audits (one of the prior-art research, one re-deriving every conclusion from the raw
+runs) found this plan's conclusions **systematically stated one step wider than the runs that produced
+them**. The measurements are largely sound; the generalisations on top of them are not. Seven of the
+audit's claims were re-verified against the files by hand and all seven held.
+
+**Suspended — measured too narrowly, or not measured at all:**
+
+| Claim | Status |
+| --- | --- |
+| "There is no stable per-sandbox non-address key on either platform" | **SUSPENDED.** The Linux half tested **one** matcher family. `meta cgroup` was never executed as a rule — the evidence is a `[ -d /sys/fs/cgroup/net_cls ]` directory test. The per-network `iifname` experiment that macOS ran (M1/K4) was never run on Linux, where bridge names derive from non-recycling network IDs. This plan's own runs use `iifname` successfully as a non-address matcher four times (X1, R1, R2, R4). **Rules 1/1b/1c, 0b and the recycling half of rule 5 may all be consequences of this untested premise.** |
+| X1: the bypass "also worked with an address outside the bridge subnet" | **FALSE.** That probe ran only *after* the fix and reads `blocked`. The bypass from an out-of-subnet source was never demonstrated, and is probably impossible (docker masquerades `-s 172.17.0.0/16`, so such a packet has no return path — a control satisfied by a different layer). |
+| L4: "no cross-backend collision in the default configuration" | **FALSE PREMISE.** It measured nerdctl's default network, not yoloAI's. podman's netavark default pool base is `10.89.0.0/16` — byte-identical to `cniSubnetCIDR` (`runtime/containerd/cni.go:44`). Rule 1's **blind** cross-table delete is specified against a collision that was never excluded. |
+| Rule 5: "TCP is safe" | **PARTIAL.** Supported only for a *cleanly closed* flow (`TIME_WAIT`). The ESTABLISHED case — 5-day timeout — was attempted once, failed to construct the state, and was never retried. **`ct state related` was never tested on either platform**, and every rule shape here accepts it. |
+| L3: "ufw does not touch our table" | **UNCONTROLLED.** No run shows ufw ever enforcing; `ufw status` reads `inactive` before and after. This is a third of what retired the moby #49443 subscription recommendation. |
+| Rootless podman "is out of the agent's reach" | **INFERRED, not measured.** The direct test was killed mid-run (`apk add` inside a container whose egress had just been denied). Two proxies survive and the inference is sound; the wording is not. |
+| "Reboot is a clean slate on Linux" | **NO RUN EXISTS.** Prose about a measurement. The check cited also misses `/etc/nftables.conf`, which this pass separately found on this host opening with `flush ruleset`. |
+| L5d's layer comparison | **MISLABELLED.** It used a hand-built `-P OUTPUT DROP` chain; the shipped `firewall.py` ends with `-j REJECT` and uses ipset. It also scored the in-guest layer as covering more **without noting X1/DF179 proved the same agent can flush it** — a defeasible layer compared against a non-defeasible one on coverage alone. |
+
+**The root cause, and it is structural.** Every macOS raw run ends with a `WHAT WAS NOT TRIED` block
+and that pass's results README carries a *"What these files do NOT support"* section. **The Linux half
+has neither.** Both auditors traced the over-broad conclusions to exactly that asymmetry: M1 tested
+four keys and published its exclusions; L1 tested one and published a platform-wide negative.
+
+**What survives, verified by both audits:** L8, L10c, X2-Linux, R4, R6 and the A34 retraction, L11,
+L12b, L9c, L6b, L7, L4b/L4c, L3d, R3's lifecycle half; on macOS M1/K1 and K3, M5, M2/D2, M4's notify
+half, M6, M7, X3.
+
 ## Why this is not a tidy-up
 
 Moving enforcement out of the guest replaces per-sandbox state that dies with the sandbox

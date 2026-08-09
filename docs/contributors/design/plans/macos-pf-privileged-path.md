@@ -18,6 +18,25 @@
   is internal. If any phase ends up *withdrawing* isolation somewhere, that half is **breaking** and
   needs a `docs/BREAKING-CHANGES.md` entry.
 
+## ⚠ AUDIT SUSPENSION — 2026-08-09
+
+An independent re-derivation of every conclusion against the raw runs found three items here that do
+not follow from their data. The macOS harness discipline is otherwise the **stronger** of the two
+passes — every run ends with `WHAT WAS NOT TRIED`, and the results README actively refutes its own
+earlier rounds — and most macOS conclusions were confirmed sound.
+
+| Claim | Status |
+| --- | --- |
+| X2: "a return-direction rule stops it… prefer that to amending D132 for `pfctl -k`" | **UNSUPPORTED — the deciding arm was never run.** The successful arm executes `-T delete` **and** `pfctl -k`. Three arms exist: no-kill/no-rule (survives), kill/no-rule (survives), kill+rule (stops). That proves the rule **necessary**, never **sufficient**. pf semantics predict rule-alone fails, since a packet matching existing state is not re-evaluated — which is why the in-only rules failed earlier. **It also contradicts the Linux half**, where the same finding was fixed by state teardown, while the synthesis calls them "one cause seen twice". Re-run with `pfctl -k` deleted. |
+| M8's pool-cost figures, and the 8-slot decision drawn from them | **SUSPENDED.** `pf-acquire-cost.txt` ran the identical call counts on the same host a day earlier and got **101 / 175 / 320 ms** against M8's **217 / 368 / 668 ms** — every point 2.09× apart, unexplained, and M8's own preamble quotes the old numbers without noticing. The earlier set is corroborated by an n=40 per-call breakdown (9.3 ms = 7.9 sudo + 1.4 pfctl); M8's fitted 18.81 ms/call is exactly double. On the lower numbers 32 slots is ~47% of a container create, not 99%, and the case for 8 over 16 largely dissolves. The headline "0.0% error" is a coincidence at the mean — the harness's own verdict says "LINEAR within 10%". **Re-run both harnesses back to back before the pool size stands.** |
+| M3 detector C, recommended and adopted | **FAILS OPEN.** It returns HEALTHY iff the probe's HTTP code is `000`, and the helper defaults to `000` — so it also reports HEALTHY when the network is down, the destination is unreachable, the container is gone, or the backend daemon is dead. That is a free-negative generator installed as production verification. It also mutates live policy (flush allowlist → probe → restore) and races acquisition. |
+
+Also noted: **M4's unified-log negative has no positive control** (the notify half does, exemplary — a
+post to itself; the log predicate has no demonstration it could ever match, and this directory has
+already been burned once by a wrong predicate). And **`pf-spoof-run2.txt` / `-run3.txt` carry no
+invalidation marker** while concluding, 7 PASS / 0 FAIL, that guests *cannot* spoof their source
+address — the exact inverse of the pass's most consequential result.
+
 ## Why this exists
 
 On macOS, `--network-isolated` is either weak or absent. `apple` installs the allowlist inside the

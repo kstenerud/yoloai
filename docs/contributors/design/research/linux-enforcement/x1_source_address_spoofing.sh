@@ -18,7 +18,7 @@ DENY=1.1.1.1       # never allowlisted, answers ICMP
 SPOOF=172.17.99.99 # inside docker0's subnet, so masquerade still applies; held by nobody
 
 say "sandbox with CAP_NET_ADMIN — the in-container firewall path grants it"
-echo "(engine_network.go:66 / launch.go:499; the sidecar path withholds it instead)"
+echo "(granted at launch.go:1040, guarded by !sidecarFirewall; the sidecar path withholds it)"
 docker run -d --name $CT --cap-add NET_ADMIN alpine sleep 400 >/dev/null
 G=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' $CT)
 echo "guest address: $G   spoof target: $SPOOF"

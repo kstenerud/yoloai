@@ -85,6 +85,62 @@ was wrong. L2's *first* conclusion — the guest cannot reach the name it was al
 unaffected, and so is D133. What replaces the retracted half is a larger and unrelated finding: a
 forward-only design cannot express any policy about sandbox-to-host traffic.
 
+## What these files do NOT support
+
+Added 2026-08-09 after an independent audit. **This section is the one the macOS pass had and this
+one did not, and its absence is the root cause of every over-broad conclusion below.** Every macOS raw
+run ends with a `WHAT WAS NOT TRIED` block; no Linux run here has one. Retrofitting per-run blocks is
+pending; this is the index-level version.
+
+- **L1 does not support "there is no per-sandbox non-address key on Linux."** It tested one matcher
+  family (`socket cgroupv2`). `meta cgroup` was never executed as a rule — the evidence is a
+  `[ -d /sys/fs/cgroup/net_cls ]` directory test. Untried: per-sandbox docker network →
+  `iifname "br-<netid>"` (macOS's K4, the candidate that nearly worked there), `ether saddr` with a
+  launcher-assigned MAC, `physdev`/`meta ibrname` under the `br_netfilter` L8 proved loadable, and
+  `ct mark`/`meta mark`. What L1 *does* support: the kernel refuses `socket cgroupv2` in `forward` and
+  `postrouting`, it never fires in `prerouting`, cgroup paths do not recycle, and addresses do.
+- **L2 does not support "host-side resolution is not viable on Linux."** It measured docker's
+  *default* resolver substitution. yoloAI sets no `--dns`; the run never tried pointing the guest at
+  the host's own upstream. What it supports: with the shipped default, host and guest resolve
+  differently, and the guest cannot reach a name it was allowlisted for.
+- **L3 does not support "ufw does not touch our table."** Nothing in the run shows ufw ever
+  enforcing; its exit codes are discarded and `ufw status` reads `inactive` before and after. The
+  firewalld half *is* controlled and does support its claim. `--complete-reload` is supported by
+  nothing.
+- **L4 does not support "no cross-backend collision."** It measured nerdctl's default network; the
+  podman row is empty strings. yoloAI's own subnet (`10.89.0.0/16`) is byte-identical to podman's
+  netavark default pool base — the collision the item existed to exclude.
+- **L5c/L5d/L8 probe the sibling over ICMP while both controls run over TCP** — the exact defect this
+  pass elevated to a principle and never applied to its own earlier runs. L8's counter arithmetic
+  rescues it (+5 = 3 SYNs + 2 echoes); L5c's sibling result has no counter at all.
+- **L5d's second row is not "what yoloAI ships today."** It is a hand-built `-P OUTPUT DROP` chain;
+  the shipped `firewall.py` ends with a terminal `-j REJECT` and uses ipset. The table also scores the
+  in-guest layer as covering more without noting X1/DF179 proved the same agent can flush it.
+- **L9 does not support "no sidecar-vs-agent divergence."** Its positive control *failed*
+  (`172.66.147.243` vs `104.20.23.154`), and the "CDN rotation" explanation was never measured. The
+  harness compares only the first address while the code under test keeps every A record.
+- **L9b's 60 seconds does not support "not exposed today"** for a snapshot that must hold for a
+  sandbox's whole life. macOS measured the same phenomenon over an hour and saw `github.com` move
+  within 10 minutes.
+- **L10 does not support "TCP is safe."** Only a *cleanly closed* flow (`TIME_WAIT`) was measured. The
+  ESTABLISHED case (5-day timeout) was attempted once, failed to construct the state, and was never
+  retried. `ct state related` was never tested on either platform.
+- **X1 does not support "the bypass also worked outside the bridge subnet."** That probe ran only
+  after the fix and reads `blocked`; docker masquerades `-s 172.17.0.0/16`, so such a packet has no
+  return path and "blocked" there is free.
+- **R1's spoof and rule-0b halves are void** — the container had no `NET_ADMIN`, so the spoof address
+  was never assigned. R1's *enforcement* result is sound and independent.
+- **R5 did not identify the wrong-bridge bug** — it never counted `podman2`, the bridge in question,
+  and it is the only item here with no harness script. R4's own counter is what establishes it.
+- **R2 does not support "out of the agent's reach" as measured** — the direct test was killed
+  mid-run. Two proxies survive (`CapEff` bits, missing netns path) and the inference is sound.
+- **No Linux run covers reboot or persistence.** The plan's "clean slate" claim is prose.
+- **`x1-source-address-spoofing.txt`'s header cites the wrong code.** It names `engine_network.go:66`
+  / `launch.go:499` as where the agent is granted `CAP_NET_ADMIN`; both are the **sidecar's** own
+  `CapAdd` — the opposite of what the sentence claims. The real grant is `launch.go:1040`, guarded by
+  `!sidecarFirewall`. The run's *result* is unaffected. Raw runs are not edited after the fact, so the
+  file keeps the error and this line is the correction.
+
 ## Runs that were discarded, and why
 
 - **R1, R2 and R3's spoofing results were all free, and it took three runs to see it.** Every one
