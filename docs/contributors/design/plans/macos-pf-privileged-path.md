@@ -550,8 +550,34 @@ fitted from n=8 and n=32, checked against n=16 at **0.0% error**; per-call 18.81
 10.2 ms. Measured: 8 slots 217 ms, 16 slots 368 ms, 32 slots 668 ms. Against that, `container run -d`
 averages **676 ms**, so acquisition at 32 slots costs as much again as the backend's own create, and
 at 8 slots about a third of it. Concurrency does not serialize, so a start *burst* is cheaper than
-the per-start figures suggest. The other axis is a decision, not a measurement: slots are the
-concurrency ceiling and the exhaustion policy is the owner's call.
+the per-start figures suggest.
+
+**Decided 2026-08-09 (owner): the default pool is 8 slots, with a configurable ceiling.** 217 ms
+against a 676 ms create is about a third; 16 would be +54% and 32 would double start latency, and
+every user pays it whether or not they ever open a second isolated sandbox. The asymmetry settles it:
+**too small is a visible, recoverable, configurable error** that names the cap and how to free a slot,
+while **too large is invisible latency nobody attributes to a pool they never use.**
+
+Three consequences that are not obvious and must survive into the build:
+
+- **The ceiling is set at install, not at runtime.** Pool size is baked into the pinned root-owned
+  ruleset file, because D132 makes the rules static and only membership mutable. So the config field
+  cannot be an ordinary key that takes effect on next start — changing it rewrites
+  `/etc/yoloai/pf-pool.conf` and needs a real `sudo` prompt. Spell it as *set at install; changing it
+  re-runs the privileged install step*.
+- **`doctor` reports the configured cap and current usage**, because a cap the user cannot see is a
+  cap they will hit as a mystery.
+- **This is a macOS-only knob.** Linux has no pool. Surface it as a platform difference in the model
+  rather than inventing a Linux cap to match (§ *Settled by review* in
+  [enforcement-state-reaping.md](enforcement-state-reaping.md)).
+
+**The lever for a bigger pool is the collapsed scrub, and it was deliberately not taken.** Under the
+blind form the cost is ~18.8 ms per slot on every start regardless of use; under the collapsed form
+(`-s Tables -vv`, skipping provably-empty slots) it is `49 + 9.25k` ms where **k is running
+sandboxes**, and an idle 32-slot pool is free — pool size stops being a latency knob entirely. That
+form needs **one added `NOPASSWD` read line**, which is a change to the security boundary and
+therefore D132's to make, not this plan's. If it is ever approved, revisit this default upward and
+the config field largely stops mattering. Until then, 8.
 
 **Uninstall (M5)** is a security-boundary change and amends D132 rather than this plan — the residue
 is standing authority, and removing it needs a real `sudo` prompt because the grant deliberately

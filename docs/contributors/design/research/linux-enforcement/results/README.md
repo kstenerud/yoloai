@@ -55,6 +55,11 @@ satisfied for free.
 | L12 | `l11-l12-cni.txt`, `l12b-stale-cni-entry.txt` | DF9 absent here; live stale accept found. |
 | X1 | `x1-source-address-spoofing.txt` | The address key is defeasible; one bridge rule closes it. |
 | X2 | `x2-revocation-vs-live-flow.txt` | Revocation does not stop an already-open connection. |
+| R1 | `r1-rootless-netns-enforcement.txt` | Enforcement works inside podman's rootless netns. |
+| R2 | `r2-rootless-reach-and-lifecycle.txt` | Partial — agent holds NET_ADMIN but not CAP_SYS_ADMIN. |
+| R3 | `r3-rootless-spoof-cause-and-lifecycle.txt` | The rootless netns dies with the last container. |
+| R4 | `r4-rootless-spoof-tcp.txt` | Spoofing works there too; rule 0b closes it. |
+| R5 | `r5-rootless-iifname-diagnostic.txt` | Diagnostic: which interface forwarded traffic arrives on. |
 
 **X1 and X2 are the macOS pass's extras asked on Linux**, after that pass landed. Both reproduce, and
 X1's fix — a bridge-scoped default-deny naming no address — works here too.
@@ -63,8 +68,31 @@ One cosmetic failure inside an otherwise valid X1 run: `ip -4 -br addr show` is 
 busybox and printed a usage message. The `ip addr add` it was reporting on had already succeeded,
 which the bypass itself demonstrates, so the result stands and only the display of it failed.
 
+**R1–R5 answer the rootless-podman question** L4b/L4c left open: host-netns enforcement cannot reach
+it, but podman's *rootless network namespace* can, and the whole address-keyed design transfers there
+unchanged. Four of those five runs were invalid before R4 got it right — see below, because the way
+they failed is the most instructive part.
+
 ## Runs that were discarded, and why
 
+- **R1, R2 and R3's spoofing results were all free, and it took three runs to see it.** Every one
+  probed the spoofed source with `ping` while establishing its controls with `nc`. **ICMP does not
+  traverse `slirp4netns` on this host at all**, so "blocked" was guaranteed regardless of policy — the
+  R3 baseline finally showed it, with the container's *own* address unable to ping out before any rule
+  existed. Two runs had already recorded the reassuring answer. The rule this yields is sharper than
+  "use a control": **the control and the test must use the same protocol and the same path**, because
+  a control that travels differently from the test is not a control at all.
+- **R2 also hung and had to be killed.** It ran `apk add nftables` inside a container whose egress it
+  had just denied — the third instance of that exact mistake in this directory (see L5d, L10c). Its
+  earlier sections are valid and are kept: the agent holds `CAP_NET_ADMIN` but **not**
+  `CAP_SYS_ADMIN` (`CapEff 800415fb`), and `/run/user/<uid>/netns` is not visible inside the
+  container, which together are why it cannot reach the namespace that binds it.
+- **R4's first run tested rule 0b against the wrong interface.** It hardcoded `iifname "podman1"`
+  while that network sat on `podman2`, so the rule named an interface no packet ever arrived on and
+  its counter stayed at 0 — reading exactly like "the fix does not work". R5 is the diagnostic that
+  found it: outbound traffic matched neither the hardcoded bridge nor `veth*`. The design consequence
+  is real and not just a harness bug — **rule 0b's interface must be resolved per network at install
+  time**, never hardcoded, since podman and docker both name bridges per-network.
 - **L1, first two attempts.** `nft -f` rejected a chain named `fwd` (reserved word), then failed
   on a cgroup path that did not yet exist because paths resolve at rule-load time, not match time.
   Neither run produced a usable counter. The second failure is informative on its own: because

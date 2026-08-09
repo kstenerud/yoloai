@@ -1,0 +1,29 @@
+A=10.91.0.2 (NET_ADMIN)  B=10.91.0.3 (control)  allowlisted=172.66.147.243  denied=1.1.1.1
+
+=== controls ===
+  A -> allowlisted: REACHABLE   A -> denied: blocked   B -> denied: REACHABLE
+
+=== R2a — X1 spoofing, with the capability an agent actually has ===
+  agent adds 10.91.0.99/24: succeeded
+  addresses A now holds:
+        inet 10.91.0.2/24 brd 10.91.0.255 scope global eth0
+        inet 10.91.0.99/24 scope global secondary eth0
+  the spoof address IS held — the test below is meaningful
+  A -> denied sourced from 10.91.0.99: blocked
+
+=== R2b — does rule 0b close it here? ===
+  A -> denied from 10.91.0.99: blocked
+  A -> allowlisted from own address: REACHABLE
+    ip saddr 10.91.0.2 ip daddr @allowed counter packets 2 bytes 120 accept comment "allowlisted"
+    ip saddr 10.91.0.2 counter packets 4 bytes 240 drop comment "denied"
+    iifname "podman1" counter packets 2 bytes 168 drop comment "bridge-default-deny"
+
+=== R2c — can the agent reach the rootless netns and undo any of this? ===
+  capabilities the agent holds:
+    CapEff:	00000000800415fb
+  is the netns directory visible inside the container?
+    ls: /run/user/1000/netns: No such file or directory
+  can it see the host's /proc/1/ns/net (a route into another netns)?
+    net:[4026532384]
+  can it flush the rules that bind it (they are not in its own netns)?
+Terminated

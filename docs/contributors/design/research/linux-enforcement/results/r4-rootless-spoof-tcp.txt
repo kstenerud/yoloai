@@ -1,0 +1,31 @@
+
+=== install curl BEFORE any policy exists — it needs egress to arrive ===
+  curl present: curl 8.21.0 (x86_64-alpine-linux-musl) libcurl/8.21.0 OpenSSL/3.5.7 zlib/1.3.2 brotli/1.2.0 zstd/1.5.7 c-ares/1.34.8 libidn2/2.3.8 libpsl/0.21.5 nghttp2/1.69.0
+A=10.94.0.3  bridge=podman2  allowlisted=172.66.147.243  denied=1.1.1.1  spoof=10.94.0.99
+
+=== BASELINE — no policy anywhere ===
+  own address -> denied     : REACHABLE
+  own address -> allowlisted: REACHABLE
+
+=== PROTOCOL CHECK — the thing that invalidated R1-R3 ===
+  ICMP from own address -> denied: blocked — ICMP never traverses slirp4netns, so it can never be a valid probe here
+
+=== install the yoloAI policy inside the rootless netns, keyed on A ===
+  controls with the policy loaded:
+    own address -> denied     : blocked        <- must be blocked
+    own address -> allowlisted: REACHABLE   <- must still work
+
+=== THE TEST — agent takes an address the policy does not name, same protocol ===
+        inet 10.94.0.3/24 brd 10.94.0.255 scope global eth0
+        inet 10.94.0.99/24 scope global secondary eth0
+  spoofed 10.94.0.99 -> denied: REACHABLE
+    ip saddr 10.94.0.3 ip daddr @allowed counter packets 1 bytes 60 accept comment "allowlisted"
+    ip saddr 10.94.0.3 counter packets 5 bytes 300 drop comment "denied"
+
+=== RULE 0b — one bridge-scoped deny, naming no address ===
+  spoofed 10.94.0.99 -> denied     : blocked   <- must be blocked
+  own address  -> allowlisted : REACHABLE   <- must STILL work
+  own address  -> denied      : blocked   <- still blocked
+    ip saddr 10.94.0.3 ip daddr @allowed counter packets 2 bytes 120 accept comment "allowlisted"
+    ip saddr 10.94.0.3 counter packets 10 bytes 600 drop comment "denied"
+    iifname "podman2" counter packets 5 bytes 300 drop comment "bridge-default-deny"

@@ -1,0 +1,25 @@
+=== which interface does forwarded container traffic actually arrive on? ===
+A=10.95.0.2  spoof=10.95.0.99
+-- interfaces inside the rootless netns --
+  lo
+  tap0
+  podman1
+  veth0@if2
+  podman2
+  veth1@if2
+-- send TCP from the spoofed source --
+  spoofed request: REACHABLE
+-- counters --
+  iifname "podman1" counter packets 0 bytes 0 comment "iif-bridge"
+  iifname "veth*" counter packets 0 bytes 0 comment "iif-veth"
+  iifname "tap0" counter packets 5 bytes 590 comment "iif-tap0"
+  ip saddr 10.95.0.99 counter packets 6 bytes 331 comment "src-spoof"
+  counter packets 11 bytes 921 comment "all-forward"
+
+-- and from its own address, for comparison --
+  own-address request: REACHABLE
+  iifname "podman1" counter packets 0 bytes 0 comment "iif-bridge"
+  iifname "veth*" counter packets 0 bytes 0 comment "iif-veth"
+  iifname "tap0" counter packets 10 bytes 1180 comment "iif-tap0"
+  ip saddr 10.95.0.99 counter packets 6 bytes 331 comment "src-spoof"
+  counter packets 22 bytes 1842 comment "all-forward"

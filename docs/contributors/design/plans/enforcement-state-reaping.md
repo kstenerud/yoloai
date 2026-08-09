@@ -465,6 +465,55 @@ Scoping differs, and macOS's is the constrained one:
 **Consequence for rule 1.** "Clear before claim" must clear conntrack for the address, not only the
 rules. Clearing the rules alone leaves the UDP inheritance above intact and looks complete.
 
+## Rootless podman: a different enforcement point, the same design (2026-08-09)
+
+**The host netns genuinely cannot reach it**, for three compounding measured reasons: no host route
+to the rootless bridge; egress NAT'd by `slirp4netns` into the **host's own source address**,
+surfacing in the `output` hook rather than `forward`; and one shared `slirp4netns` serving 1, 2 and 3
+sandboxes alike, so even `output` — the one hook where a cgroup key works — has no per-sandbox key
+(`results/l4b-rootless-podman-path.txt`, `l4c`).
+
+**But "outside the sandbox" is not the same as "in the host netns", and the second is what matters.**
+Rootless podman puts the bridge in a *rootless network namespace* of its own, reachable via
+`podman unshare --rootless-netns`, with each sandbox in its own netns attached by veth. Inside it,
+`podman<N>` routes to `tap0` — so **sandbox egress is genuinely forwarded there**, which is the hook
+the whole address-keyed design needs. Everything transfers:
+
+- **Per-sandbox enforcement works** (`results/r1-rootless-netns-enforcement.txt`): a table installed
+  there blocked sandbox A's denied destination, left A's allowlisted destination reachable, and left
+  sandbox B — the control — entirely unaffected.
+- **The address key is defeasible here too, and rule 0b closes it**
+  (`results/r4-rootless-spoof-tcp.txt`): an agent holding `CAP_NET_ADMIN` added a second address and
+  reached a denied destination; one `iifname "<bridge>" drop` blocked it, 5 packets on that counter,
+  with the allowlisted destination still reachable from the real address.
+- **It is out of the agent's reach.** The agent holds `CAP_NET_ADMIN` but **not `CAP_SYS_ADMIN`**
+  (`CapEff 800415fb`), and `/run/user/<uid>/netns` is not visible inside the container — so it can
+  neither `setns` into the namespace nor name it. The rules that bind it are somewhere it cannot go,
+  which is the same property the netns-sharing sidecar provides on docker.
+
+**Two constraints this adds, both load-bearing:**
+
+1. **The rootless netns is destroyed when the last sandbox stops, and the enforcement dies with it**
+   (`results/r3-rootless-spoof-cause-and-lifecycle.txt`: table installed, only container stopped, both
+   netns files gone, table absent on restart). So enforcement is installed **per bring-up, before the
+   agent runs** — the agent-launch gate again — and never assumed to persist. Its converse is the
+   reaping problem in miniature: a sandbox starting while the netns *already* exists inherits whatever
+   state is in it, so rules 1–4 apply inside the rootless netns exactly as they do on the host.
+2. **Rule 0b's interface must be resolved per network at install time, never hardcoded.** Podman and
+   docker both name bridges per network (`podman2`, `br-<netid>`), and a 0b rule naming the wrong
+   bridge loads clean, counts zero, and enforces nothing — which is precisely how it read for one run
+   here before the diagnostic found it (`results/r5-rootless-iifname-diagnostic.txt`).
+
+**So the scope line is not "rootless podman is unenforceable".** It is: *host-netns enforcement covers
+docker and containerd; rootless podman is enforced from inside its own network namespace, with the
+same rules and one extra lifecycle requirement.* Unmeasured: podman 5.x defaults to **pasta** rather
+than `slirp4netns`, and whether that changes the topology is untested — this host runs 4.9.3.
+
+**A protocol note that cost three runs and belongs in any harness here:** ICMP does not traverse
+`slirp4netns` on this host, so `ping` can never be a valid probe inside the rootless netns. Three runs
+tested the spoof with `ping` while controlling with TCP and recorded a reassuring "blocked" that was
+free. Test and control must travel the same path.
+
 ## Verifying that enforcement is live: behaviour, not state (synthesis, 2026-08-09)
 
 Reaping and liveness must be designed against one model of *what is currently live* — moby #49728 is
@@ -855,14 +904,8 @@ contention needed. Slot allocation on macOS must additionally be atomic above pf
 
 ### Opened by the pass, and not closed
 
-- **Rootless podman cannot be enforced from the host at all**, so the design's reach is narrower than
-  "Linux". There is no host route to its bridge; egress is NAT'd by `slirp4netns` into the **host's
-  own source address** and appears in the `output` hook, not `forward`. That hook is where a cgroup
-  key would be available — but the egress process is shared: 1, 2 and 3 running sandboxes all had
-  exactly one `slirp4netns`, whose cgroup names the rootless network namespace rather than a sandbox
-  (`results/l4b-rootless-podman-path.txt`, `l4c`). No per-sandbox key exists there by any means
-  measured, and its traffic is indistinguishable from the host's. **The design must say which backends
-  it covers, and rootless podman is currently not one of them.**
+- ~~**Rootless podman cannot be enforced from the host at all.**~~ **Closed 2026-08-09 — the
+  enforcement point moves, the design does not.** See § *Rootless podman* below.
 - **Same-bridge sandbox-to-sandbox traffic is invisible to the host point as shipped.** `br_netfilter`
   is not loaded by default and both Linux backends put every sandbox on one bridge, so those packets
   are switched, not routed. Loading the module with `bridge-nf-call-iptables=1` makes them visible and

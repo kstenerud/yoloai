@@ -1,0 +1,41 @@
+A=10.92.0.2   (no yoloAI policy is loaded anywhere in this section)
+
+=== PART 1 — is a spoofed source blocked with NO policy of ours at all? ===
+  our tables in the rootless netns: 0 (expect 0)
+  baseline, own address -> 1.1.1.1 : blocked
+        inet 10.92.0.2/24 brd 10.92.0.255 scope global eth0
+        inet 10.92.0.99/24 scope global secondary eth0
+  spoofed 10.92.0.99 -> 1.1.1.1   : blocked
+
+  If the spoof is blocked here, the block is NOT ours. The cause is below.
+
+=== PART 2 — what netavark installed, and whether it is keyed per-address ===
+-- NAT rules mentioning the subnet or the container address --
+  ip daddr 10.92.0.0/24 counter packets 0 bytes 0 accept
+  ip daddr != 224.0.0.0/4 counter packets 2 bytes 168 masquerade
+  ip saddr 10.92.0.0/24 counter packets 3 bytes 208 jump NETAVARK-DBFED94EE3A99
+  meta mark & 0x00002000 == 0x00002000 counter packets 0 bytes 0 masquerade
+-- filter rules --
+  ip daddr 10.92.0.0/24 ct state related,established counter packets 0 bytes 0 accept
+  ip saddr 10.92.0.0/24 counter packets 4 bytes 336 accept
+  type filter hook forward priority filter; policy accept;
+
+  READ: if masquerade names 10.92.0.2 rather than 10.92.0.0/24, then a spoofed source
+  simply leaves un-NATed and slirp4netns drops it — a functional accident, not
+  a security control, and it would evaporate if netavark ever widened that rule.
+
+=== PART 3 — does the reverse hold? spoof an address netavark DOES masquerade ===
+  adding 10.92.0.3 (an address inside the subnet that no container holds)
+  spoofed 10.92.0.3 -> 1.1.1.1 : blocked
+
+=== PART 4 — lifecycle: does the netns and our table survive churn? ===
+  marker table installed: 1
+  netns files on disk:
+    netns-1feeb438-5b33-810c-d935-11ef035ca929
+    rootless-netns-61af9af0fbb0d4e320ec
+  -- stop the only container --
+  netns files after stop:
+  -- start it again --
+  A came back as 10.92.0.3 (was 10.92.0.2)
+  marker table GONE — enforcement must be reinstalled on every bring-up,
+  and the reinstall has to happen before the agent runs.

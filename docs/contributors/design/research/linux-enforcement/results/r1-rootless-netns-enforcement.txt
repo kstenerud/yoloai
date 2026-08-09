@@ -1,0 +1,40 @@
+sandbox A=10.90.0.4   sandbox B=10.90.0.5 (B is the untouched control)
+
+=== topology inside the rootless netns ===
+  1: lo    inet 127.0.0.1/8 scope host lo\       valid_lft forever preferred_lft forever
+  2: tap0    inet 10.0.2.100/24 brd 10.0.2.255 scope global tap0\       valid_lft forever preferred_lft forever
+  3: podman1    inet 10.90.0.1/24 brd 10.90.0.255 scope global podman1\       valid_lft forever preferred_lft forever
+  default route: default via 10.0.2.2 dev tap0 
+  READ: bridge -> tap0 is a route, so container egress is FORWARDED here,
+        which is the hook the whole address-keyed design needs.
+allowlisted=104.20.23.154  denied=1.1.1.1
+
+=== BASELINE — before any policy, everything must work ===
+  A -> allowlisted: REACHABLE
+  A -> denied     : REACHABLE
+  B -> denied     : REACHABLE
+
+=== install the design's own shape INSIDE the rootless netns ===
+  loaded rc=0
+
+=== TEST — does it bite, and does it leave the other sandbox alone? ===
+  A -> allowlisted: REACHABLE   <- must still work
+  A -> denied     : blocked   <- must be blocked
+  B -> denied     : REACHABLE   <- CONTROL: must be unaffected
+
+=== counters — which rule decided, and did the chain see the packets at all? ===
+  ip saddr 10.90.0.4 ip daddr @allowed counter packets 1 bytes 60 accept comment "allowlisted"
+  ip saddr 10.90.0.4 counter packets 4 bytes 240 drop comment "denied"
+
+=== X1 HERE — can A escape by taking an address the policy does not name? ===
+  ip: RTNETLINK answers: Operation not permitted
+  A -> denied sourced from 10.90.0.99: blocked
+
+=== and does the bridge-scoped default-deny (rule 0b) close it here too? ===
+  bridge interface: podman1
+  A -> denied from 10.90.0.99: blocked   <- must be blocked
+  A -> allowlisted from its own address: REACHABLE   <- must STILL work
+  B -> denied: blocked   <- B is now inside the deny scope too; expected blocked
+  ip saddr 10.90.0.4 ip daddr @allowed counter packets 2 bytes 120 accept comment "allowlisted"
+  ip saddr 10.90.0.4 counter packets 4 bytes 240 drop comment "denied"
+  iifname "podman1" counter packets 4 bytes 240 drop comment "bridge-default-deny"
