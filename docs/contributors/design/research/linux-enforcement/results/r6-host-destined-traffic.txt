@@ -1,0 +1,25 @@
+guest=172.17.0.2  bridge gateway=172.17.0.1  host LAN=192.168.111.33
+
+=== the strongest policy the design can express: drop everything, in the forward hook ===
+  guest -> 1.1.1.1:80 (external, genuinely routed): blocked   <- CONTROL, must be blocked
+  guest -> 172.17.0.1:22 (bridge gateway = the host):      REACHABLE
+  guest -> 192.168.111.33:22 (the host's LAN address):     REACHABLE
+
+=== which hook saw what — this is the whole finding ===
+  ip saddr 172.17.0.2 counter packets 3 bytes 180 drop comment "deny-all-forward"
+  ip saddr 172.17.0.2 counter packets 8 bytes 408 comment "seen-in-input"
+
+READ: a packet addressed to any address the HOST holds is delivered locally, so it
+traverses prerouting -> input and never enters the forward hook. A forward-only
+design therefore cannot express any policy about sandbox-to-host traffic at all.
+
+=== L2 RE-CHECK — was the host's LAN address reachable BECAUSE it was allowlisted? ===
+L2 concluded that host-side DNS resolution wrote the host's own LAN address into
+the guest's allowed set and that the guest then reached it through that entry.
+There is no allowlist at all in this run, and no accept rule of any kind:
+  accept rules present: 2
+  guest -> 192.168.111.33:22 : REACHABLE
+
+So the reachability does not depend on the allowlist entry. L2's second conclusion
+named the wrong mechanism: the entry was inert, and the traffic was never subject
+to the forward chain in the first place.

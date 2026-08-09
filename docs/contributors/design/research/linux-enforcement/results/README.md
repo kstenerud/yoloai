@@ -31,7 +31,7 @@ satisfied for free.
 | --- | --- | --- |
 | L1 | `l1-cgroup-key.txt` | Negative. Cgroup keying is unavailable for container egress. |
 | L1b | `l1b-cgroup-prerouting.txt` | The one hook that accepts the rule never fires it. |
-| L2 | `l2-split-horizon-dns.txt` | Reproduced, plus a demonstrated widening. |
+| L2 | `l2-split-horizon-dns.txt` | Split-horizon reproduced. **Its second conclusion is retracted — see `r6`.** |
 | L3 | `l3-firewall-manager-triggers.txt` | ufw and a docker restart do not touch our table. |
 | L3b | `l3b-firewalld-mechanism.txt` | Nor does firewalld on its nftables backend. |
 | L3c | `l3c-shared-vs-own-table.txt` | Own table survives reload, complete-reload, restart. |
@@ -60,6 +60,7 @@ satisfied for free.
 | R3 | `r3-rootless-spoof-cause-and-lifecycle.txt` | The rootless netns dies with the last container. |
 | R4 | `r4-rootless-spoof-tcp.txt` | Spoofing works there too; rule 0b closes it. |
 | R5 | `r5-rootless-iifname-diagnostic.txt` | Diagnostic: which interface forwarded traffic arrives on. |
+| R6 | `r6-host-destined-traffic.txt` | **Forward-hook policy does not cover sandbox→host traffic at all.** |
 
 **X1 and X2 are the macOS pass's extras asked on Linux**, after that pass landed. Both reproduce, and
 X1's fix — a bridge-scoped default-deny naming no address — works here too.
@@ -72,6 +73,17 @@ which the bypass itself demonstrates, so the result stands and only the display 
 it, but podman's *rootless network namespace* can, and the whole address-keyed design transfers there
 unchanged. Four of those five runs were invalid before R4 got it right — see below, because the way
 they failed is the most instructive part.
+
+**L2's second conclusion is retracted (2026-08-09).** L2 reported that host-side resolution wrote the
+host's own LAN address into the guest's allowed set and that the guest then reached it *through* that
+entry — described at the time as "a widening that happened, not one inferred". R6 re-ran it with no
+allowlist and no accept rule at all, and the guest reaches the host's LAN address anyway. Traffic to
+any address the host holds is delivered locally, so it goes prerouting → **input** and the forward
+chain never sees it: in R6 the forward counter took 3 packets (the external control) while the input
+counter took 8 (the two host-destined connections). The allowlist entry was inert and the attribution
+was wrong. L2's *first* conclusion — the guest cannot reach the name it was allowlisted for — is
+unaffected, and so is D133. What replaces the retracted half is a larger and unrelated finding: a
+forward-only design cannot express any policy about sandbox-to-host traffic.
 
 ## Runs that were discarded, and why
 

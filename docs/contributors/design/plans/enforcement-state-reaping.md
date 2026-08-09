@@ -465,6 +465,32 @@ Scoping differs, and macOS's is the constrained one:
 **Consequence for rule 1.** "Clear before claim" must clear conntrack for the address, not only the
 rules. Clearing the rules alone leaves the UDP inheritance above intact and looks complete.
 
+## The forward hook does not cover sandbox-to-host traffic (2026-08-09)
+
+**Measured** (`results/r6-host-destined-traffic.txt`). With the strongest policy this design can
+express — drop everything from the guest, in the forward hook — a sandbox still reached **both** the
+bridge gateway and **the host's own LAN address**, on SSH. The counters say exactly why: the forward
+chain took 3 packets (the external control, duly blocked) while an input-hook counter took 8 (the two
+host-destined connections). A packet addressed to any address the host itself holds is delivered
+locally, so it traverses prerouting → **input** and never enters the forward hook at all.
+
+So the scope of every rule in this plan, rule 0b included, is *traffic the host routes onward*. It is
+silent about traffic the host **terminates**, and silence here is permission.
+
+**What this needs, and it is not simply another deny.** The sandbox is *supposed* to reach one host
+service: the credential broker's injector endpoint, which on the bridge backends is published on the
+gateway address ([egress-broker-host-reachability.md](../research/egress-broker-host-reachability.md),
+D105/D106). So the input-hook counterpart must be an **allowlist of host services**, not a blanket
+drop — permit the injector endpoint, deny the rest — and it has to be built with the broker's
+reachability model in hand rather than against it. Getting that backwards breaks credential injection
+on every bridge backend at once.
+
+**This also corrects L2.** That item reported a second failure — host-side DNS resolution writing the
+host's own LAN address into the guest's allowed set, and the guest reaching it *through* that entry.
+R6 reproduces the reachability with **no allowlist and no accept rule of any kind**, so the entry was
+inert and the attribution was wrong. L2's first conclusion, and [D133](../../decisions/working-notes.md),
+are unaffected; the mechanism recorded here replaces the retracted half.
+
 ## Rootless podman: a different enforcement point, the same design (2026-08-09)
 
 **The host netns genuinely cannot reach it**, for three compounding measured reasons: no host route

@@ -1351,3 +1351,36 @@ as scarce as the failures and twice as useful.
   enforcement point it crosses before reporting it. If no packet crosses, the entry is inert
   regardless of how wrong it looks. **Severity claims need their own verification; inheriting one
   from a document is not verifying it.**
+
+### A34 — applied A33's own rule as a formula, naming an enforcement point I never checked the packet crossed (2026-08-09)
+
+- **What happened:** L2 measured that host-side DNS resolution puts the host's own LAN address into a
+  guest's allowlist. I reported that the guest then "completed a TCP connection to it", and called it
+  "a widening that **happened**, not one inferred", citing: *packet `172.17.0.2 → 192.168.111.33:22`,
+  forward hook, matching the `@allowed` accept*. The connection was real. **The attribution was
+  invented.** A packet addressed to any address the host itself holds is delivered locally and
+  traverses prerouting → **input**; it never enters the forward hook, so the `@allowed` rule never
+  adjudicated it. Re-run with no allowlist and no accept rule at all, the guest reaches the same
+  address anyway (`r6-host-destined-traffic.txt`: forward counter 3, input counter 8).
+- **Source of the false belief:** the connection succeeded, an accept rule existed that *would* have
+  matched had the packet arrived there, and its counter was non-zero. I read the counter as
+  attribution without checking that its two increments were the positive control's — they were.
+- **Why this one is worse than A33:** A33's rule was mine, taken one day earlier, and it says *state
+  the packet, the path, and the enforcement point it crosses*. I stated all three. Stating a path is
+  not measuring one, and the sentence I wrote to prevent the error is satisfied word-for-word by
+  committing it. **A rule phrased as "say X" gets discharged by saying X.** The version that would
+  have worked is *show which rule's counter moved for this packet, and rule out the alternatives* —
+  a check with an outcome, not a required assertion.
+- **Caught by:** myself, and only incidentally — I was answering "is there anything else to verify on
+  hardware?" and checked whether forward-hook rules cover host-destined traffic, expecting to find a
+  gap in the design. The gap was real; that it also falsified my own earlier claim was a by-product.
+  Nothing was looking for the error. Had that question not been asked, the wrong mechanism would have
+  stayed in a decision record.
+- **Cost:** the claim reached **D133**, a decision record, and the archived verification queue. Both
+  now carry the retraction; D133's decision is unchanged, because it never depended on this half.
+  The replacement finding is larger than the retracted one — forward-hook enforcement cannot express
+  any policy about sandbox-to-host traffic — so the error also delayed a real gap by a day.
+- **The rule:** **a counter is not attribution.** Before crediting a rule with a packet's fate,
+  re-run with that rule absent and confirm the outcome changes. Both A33 and this are the same
+  underlying habit — asserting a mechanism that fits the observation instead of the one that produced
+  it — and the corpus now says a stated mechanism is exactly as unreliable as a stated severity.
