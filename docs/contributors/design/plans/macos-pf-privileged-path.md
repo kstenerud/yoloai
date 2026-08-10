@@ -30,7 +30,7 @@ statements; this table is the index.
 
 | Claim | Resolution |
 | --- | --- |
-| X2: "a return-direction rule stops it… prefer that to amending D132 for `pfctl -k`" | **CONFIRMED WRONG.** The missing arm was run (`pf-revocation.txt` R5a). Rule alone, kill removed: the transfer **survived**, 54→108 bytes, four states intact. Rule + kill: 45→45, stopped. The two are necessary *together*. The cheap fix does not exist, and the D132 amendment the plan avoided is back on the table — or `-K`, or a state timeout. See § *What the verification pass settled*, and D132's 2026-08-09 remediation amendment. |
+| X2: "a return-direction rule stops it… prefer that to amending D132 for `pfctl -k`" | **CONFIRMED WRONG.** The missing arm was run (`pf-revocation.txt` R5a). Rule alone, kill removed: the transfer **survived**, 54→108 bytes, four states intact. Rule + kill: 45→45, stopped. The two are necessary *together*. The cheap fix does not exist. Both escapes were then measured and both are closed: an anchor accepts `set timeout` and **ignores it**, and a timeout cannot reach a busy state anyway (0s decay in 20s against an idle control's full 20s); `-K` kills **source tracking entries, not states**, so it was never a candidate. What does work is the two-host form `-k <guest> -k <gateway>`, which names both endpoints and so can be pinned in the grant. See § *What the verification pass settled*, and D132's 2026-08-09 remediation amendment. |
 | M8's pool-cost figures, and the 8-slot decision drawn from them | **ARTIFACT, resolved.** The harness timed `sudo -u <user> -H sudo -n pfctl` — two nested sudo invocations per call, the drop *inside* the timed region. Both shapes run back to back: the difference is **7.95 ms/call** against 7.9 ms for one sudo. Corrected: **93 / 158 / 297 ms**, i.e. 14 / 25 / 46% of a container create. The audit's predicted "~47% not 99%" was right. **The 8-slot decision is open again.** |
 | M3 detector C, recommended and adopted | **CONFIRMED, fixed, and re-priced.** Both fault classes induced, with the old sentinel run beside the new one: guest cut off — old HEALTHY, new UNKNOWN; container gone — old HEALTHY, new UNKNOWN. The fix needs three probes, so the canary costs **320–385 ms, not 83–105**, with a 15.3 s worst case against a dropping path. Its policy mutation and acquisition race are now stated as adoption conditions. |
 
@@ -59,13 +59,24 @@ Linux's refutation of "there is no stable per-sandbox non-address key" prompted 
   read is therefore *not* sufficient, and the reason has nothing to do with K4c.
 - **The ingress tag is genuinely per-sandbox.** With one network per sandbox, a tag applied on the
   bridge and matched on egress blocked one guest and not the other under a ruleset containing **no
-  address at all** — the same shape Linux's K1 established. But it is keyed on the interface, so it
-  inherits the instability above.
+  address at all** — the same shape Linux's K1 established.
+- **And a rule re-attaches by name when its interface returns.** This is what decides whether the
+  window above is a window or a permanent lapse, and it was the open question when the paragraph
+  below was first written. A sandbox restarted alone comes back on its own index and the loaded rule
+  still enforces with **no reload** — denied still blocked, allowed still reaching, and the guest's
+  *address* changed underneath a rule that never named it. pf resolves the interface at match time.
+  It also accepts rules naming an interface that does not exist yet, so pre-loading is possible.
 
-So the platforms do **not** converge, and that divergence is now a measured constraint rather than an
-assumption: on Linux the interface is a per-sandbox key that holds; here it survives everything except
-the sandbox restarting, which is ordinary. Neither the interface nor the tag is usable alone. What
-would be is a per-sandbox key that survives detach, and nothing measured here is one.
+**Correction to the first write-up of this section: the platforms are much closer than it said.** It
+concluded "neither the interface nor the tag is usable alone… nothing measured here is [a key that
+survives detach]". With I4 measured, that is wrong. Everything a key needs works here — held indices
+are never reassigned, the interface discriminates with no address in the rule, the tag is
+per-sandbox, and rules survive their interface cycling. **The whole price is one lifecycle rule:**
+withdraw a sandbox's rule when its interface goes and re-read the real index when it returns, because
+the one genuine hazard is a *stranger* taking a freed index and inheriting a stale rule — which is
+worse than not enforcing. Linux needs no such rule because its names do not recycle; macOS needs one
+because its indices do. That is a lifecycle requirement, not a missing key, and it is a far smaller
+gap than the claim that closed this investigation on macOS.
 
 > **Unrelated defect found while measuring this, and it is not a pf problem.** When the restarting
 > sandbox reclaimed its index, the sandbox that had taken it **lost its egress entirely** — still
@@ -593,11 +604,31 @@ connection; the rule's job is to stop a *new* state being created after the kill
 necessary together, and neither is sufficient.** The 2×2 is now complete: no-kill/no-rule survives,
 kill/no-rule survives, no-kill/rule survives, kill+rule stops.
 
-So the macOS remedy costs a **D132 amendment for `pfctl -k`** — which is not anchor-scoped and
-reaches every state on the machine, including the user's own — or one of two alternatives nobody has
-measured: `pfctl -K` (kills by both endpoints, so a narrower grant), or a short `tcp.established`
-timeout inside the anchor, which bounds the window with no new grant at all. **The cheap fix does not
-exist**; what looked like one was the kill still being in the sequence.
+So the macOS remedy costs a **D132 amendment**, and the two escapes this plan hoped for are both
+closed (`pf-revocation-alt.txt`).
+
+**The no-grant option is dead twice over.** A short `tcp.established` timeout in the pinned ruleset
+would have needed no new grant at all. But an anchor **accepts `set timeout` and silently ignores
+it** — `pfctl` exits 0, prints no error, and the anchor still reports the global 86400s against the
+20s requested. That is worse than a refusal, because it would have shipped as a working remedy in the
+one file D132 permits writing. And even where a timeout *does* apply it could not reach this case: a
+busy state's expiry decayed **0s over 20 seconds** while an idle control on the same host decayed the
+full 20s, because the timer is reset by the traffic itself. A timeout expires idle states, and the
+flow revocation exists to stop is by definition not idle.
+
+**`pfctl -K` was never a candidate, and the "narrower" claim was a category error** — including in an
+earlier revision of this section. `pfctl(8)` is explicit: `-K` kills **source tracking entries**, not
+state entries. Measured, it killed 0 src nodes and the transfer continued. Two runs' `WHAT WAS NOT
+TRIED` carried it as "narrower, and the obvious next question" without anyone reading the man page.
+
+**But there is a narrower form, and it works: `pfctl -k <guest> -k <gateway>`.** The two-host form
+names *both* endpoints, so a sudoers rule can pin the second to our own gateway rather than
+permitting `-k <anything>` — materially narrower than the form this plan rejected. It is
+**directional and the order is counter-intuitive**: guest first stops the flow (1 state killed),
+gateway first kills **0 states and reports success while the transfer continues**. A mechanism
+argument from which endpoint owns the surviving state predicts the opposite order and is wrong, so
+any amendment must pin this order exactly rather than derive it. Scope was measured, not assumed: a
+second sandbox streamed through every kill untouched.
 
 This **removes** the contradiction with Linux rather than creating one. Both platforms need state
 teardown, which is what the Linux half found and fixed. "One cause seen twice" was right about the
