@@ -630,6 +630,13 @@ argument from which endpoint owns the surviving state predicts the opposite orde
 any amendment must pin this order exactly rather than derive it. Scope was measured, not assumed: a
 second sandbox streamed through every kill untouched.
 
+**And "pin the peer" is only as stable as the gateway.** It is one address today —
+`192.168.64.1`, ten of ten observations — because sandboxes share the default network. The
+per-sandbox networks § *the cross-platform question* recommends give each sandbox its **own**
+gateway from a hole-filling allocator, so the two recommendations on this page pull against each
+other and the narrow grant is weakest precisely where interface keying is adopted. Untested, and it
+belongs in the permit/refuse matrix before either is built on.
+
 This **removes** the contradiction with Linux rather than creating one. Both platforms need state
 teardown, which is what the Linux half found and fixed. "One cause seen twice" was right about the
 cause; the macOS prescription had diverged from it, and the finding had not.

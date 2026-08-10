@@ -1621,6 +1621,17 @@ Two things make this worth an entry rather than a cleanup.
 
   **What the amendment should permit is the two-host form: `pfctl -k <guest> -k <gateway>`.** It stops the flow, and because it names *both* endpoints a sudoers rule can pin the second to yoloAI's own gateway instead of permitting `-k <anything>` — materially narrower than the unscoped form, and the same "pin the argument, refuse the rest" shape as the existing table rules. Two properties any implementation must respect: it is **directional and the working order is counter-intuitive** — guest first stops the flow, gateway first kills **0 states and reports success while the transfer continues** — and the effect is per-sandbox, measured with a second sandbox streaming through every kill untouched. The regex for it still has to go through the permit/refuse matrix, which is where this record's four "must not be tidied" properties apply.
 
+  **One qualification on "pin the peer", and it is a live interaction with the other recommendation
+  of the same day.** Pinning works because there is one gateway to pin: `192.168.64.1` in ten of ten
+  observations across this directory's runs. That is a property of the **default** network. The
+  interface-key design in `macos-pf-privileged-path.md` requires **one network per sandbox**, and
+  those get their own gateways — `192.168.65.1`, `.66.1`, `.68.1` in a single run — allocated by an
+  allocator `net-ceiling.txt` N3 shows *fills holes*. So under that design the peer is not a fixed
+  string but one of a recycling range, and the narrow grant is weakest exactly where the other
+  recommendation is adopted. Whether a regex can express the range safely is a permit/refuse matrix
+  question and is **untested**; a range that recycles is also a range a stale pin can point into.
+  Do not treat "pin the peer" as settled until that matrix is run against a real regex.
+
 - **The liveness detector's cost was wrong, and its correctness was worse.** The adopted canary **failed open**: it returned HEALTHY iff the probe's HTTP code was `000`, which is also what the probe helper returns when the container is gone, the daemon is dead, or the guest has no egress — healthy for every fault except the one it detects. Fixed and verified against both fault classes with the old sentinel running beside it (`pf-liveness-detect.txt` V3b). The fix needs three probes rather than one, so the figure is **320–385 ms, not 83–105**, with a **15.3 s** worst case against a path that drops rather than returns. **The no-grant property — the only reason this bullet is in a decision record — is unaffected.** Two conditions are new: the canary mutates live policy and so races acquisition, and its restore is unguarded.
 
 - **Not a grant question, recorded because it was measured here:** the pool-cost figures behind the 8-slot default were 2× too high (a harness that paid two nested `sudo` invocations per timed call). Corrected: 93 / 158 / 297 ms at 8 / 16 / 32 slots. Pool size does not touch the authorized command set, so it stays a plan decision — see `macos-pf-privileged-path.md` § *Audit remediation*.
