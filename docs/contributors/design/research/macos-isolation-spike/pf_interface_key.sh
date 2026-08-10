@@ -32,6 +32,10 @@
 #                        a sandbox that merely RESTARTS releases its index without releasing its
 #                        network — and if another sandbox can take it in that window, a claim-time
 #                        check is not sufficient and the whole approach fails here.
+#   I4 DOES THE RULE SURVIVE? whether a loaded rule naming `bridgeN` re-attaches when a bridge of
+#                        that name returns, or silently matches nothing from then on. This is what
+#                        decides whether I2 is a window or a permanent lapse, and the two have very
+#                        different remedies.
 #   I3 THE INGRESS TAG   M1's K3 found a tag applied on the bridge survives NAT and is matchable on
 #                        egress — the one positive result in that run. It was applied on the SHARED
 #                        default bridge, so it could not be per-sandbox. Re-asked with one network
@@ -329,22 +333,112 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+say "I4 DOES A RULE SURVIVE ITS INTERFACE DISAPPEARING? — this decides what I2 costs"
+note "I2 showed the index is released whenever a sandbox detaches. What that COSTS depends entirely"
+note "on something nobody has measured: whether a loaded rule naming \`bridgeN\` re-attaches when a"
+note "bridge of that name comes back, or silently matches nothing from then on."
+note "  re-attaches  -> the exposure is the restart window, and a claim-time read plus teardown is"
+note "                  close to sufficient."
+note "  goes inert   -> EVERY sandbox is unenforced after its first restart, with pf reporting a"
+note "                  correct-looking ruleset throughout. That is the shadowed-anchor failure"
+note "                  again, one level down, and it would not be visible to any rule inspection."
+a4=$(brofguest "$a_guest")
+note ""
+note "I4a  will pf even accept a rule naming an interface that does not exist? (pre-loading a pool"
+note "     of per-sandbox rules at install time depends on it)"
+i4a=$(printf 'block drop in quick on %s all\n' "bridge999" > /tmp/pfi4.rules; \
+      pfctl -a "$ANCHOR" -f /tmp/pfi4.rules 2>&1 | quiet_pf | tr '\n' ' ')
+i4arc=$?
+note "loading a rule on bridge999 -> rc=$i4arc ${i4a:-<no output>}"
+if [ "$i4arc" -eq 0 ]; then
+  ok "I4a: pf accepts a rule naming an absent interface (it resolves by name, not at load time)"
+else
+  note "     pf refused it, so rules can only name interfaces that already exist"
+fi
+
+if [ -z "$a4" ]; then
+  unk "I4: sandbox A has no bridge; cannot ask the deciding question"
+  RULE_SURVIVES=untested
+else
+  note ""
+  note "I4b  THE DECIDING ARM. A is enforced by an interface-keyed rule with no source address in it."
+  note "     Nothing else is started, so the index is not raced — this is an ordinary restart alone."
+  load "$(printf '%s\n' \
+    "pass  in quick on $a4 proto tcp to $ALLOW" \
+    "block drop in quick on $a4 proto tcp to any")" | sed 's/^/        pfctl: /'
+  b4_allow=$(gtry "$a_guest" "$ALLOW"); b4_deny=$(gtry "$a_guest" "$DENY")
+  note "before restart: A on $a4  ->$ALLOW=$b4_allow  ->$DENY=$b4_deny  (need non-000 then 000)"
+  if [ "$b4_allow" = 000 ] || [ "$b4_deny" != 000 ]; then
+    unk "I4b: the interface rule is not enforcing before the restart; nothing below is testable"
+    RULE_SURVIVES=untested
+  else
+    ok "I4b precondition: the interface-keyed rule enforces, with no source address in it"
+    asuser container stop "$a_guest" >/dev/null 2>&1; sleep 4
+    note "A stopped. bridge carrying its gateway now: $(brof "$(gwof "$a_guest")" 2>/dev/null || true)${_none:-}"
+    note "the anchor's rules while the interface is GONE (pf keeps them, which is the trap):"
+    pfctl -a "$ANCHOR" -s rules 2>/dev/null | sed 's/^/          /'
+    asuser container start "$a_guest" >/dev/null 2>&1; sleep 5
+    a4b=$(brofguest "$a_guest"); newip=$(netfield "$a_guest" ipv4Address)
+    note "A restarted: bridge=${a4b:-<none>} (was $a4), address=$newip"
+    note "NOTHING has been reloaded. Asking the same two questions again:"
+    a4_allow=$(gtry "$a_guest" "$ALLOW"); a4_deny=$(gtry "$a_guest" "$DENY")
+    note "after restart:  ->$ALLOW=$a4_allow  ->$DENY=$a4_deny"
+    if [ "$a4b" != "$a4" ]; then
+      unk "I4b: A came back on a DIFFERENT bridge ($a4 -> $a4b), so this arm cannot separate 'the"
+      note "     rule went inert' from 'the rule is correctly not matching a different interface'."
+      RULE_SURVIVES=moved
+    elif [ "$a4_deny" = 000 ] && [ "$a4_allow" != 000 ]; then
+      ok "I4b: the rule RE-ATTACHED. Same index, no reload, and the denied destination is still"
+      note "     blocked while the allowed one still reaches — and A's address changed to $newip,"
+      note "     which the rule never named. pf resolves the interface by name at match time, so"
+      note "     I2's window is a window and not a permanent lapse."
+      RULE_SURVIVES=yes
+    elif [ "$a4_deny" != 000 ]; then
+      bad "I4b: THE RULE WENT INERT. Same bridge name, rules still listed by pfctl, and the denied"
+      note "     destination now answers $a4_deny. A sandbox is unenforced after an ordinary restart"
+      note "     and every inspection of the ruleset reports it healthy — the shadowed-anchor class"
+      note "     again, and interface keying cannot be used without a reload on every attach."
+      RULE_SURVIVES=no
+    else
+      unk "I4b: the guest reached nothing at all after the restart (allow=$a4_allow); that is the"
+      note "     NAT-death masking case this directory has hit twice, not a verdict about the rule."
+      RULE_SURVIVES=unknown
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 say "VERDICT — composed from the values above, not asserted"
 note "held index reassigned while live : ${HELD_SAFE:-untested}"
 note "allocator recycles at all        : ${RECYCLES:-untested}"
 note "restart/detach window            : ${WINDOW:-untested}"
 note "ingress tag per sandbox          : ${TAGKEY:-untested}"
+note "rule survives its interface going away: ${RULE_SURVIVES:-untested}"
 note ""
 if [ "${HELD_SAFE:-no}" = yes ] && [ "${RECYCLES:-no}" = yes ] && [ "${WINDOW:-x}" = stable ]; then
-  ok "macOS HAS a usable per-sandbox non-address key. An index is stable for as long as a sandbox"
-  note "    holds it, including across a restart, and is only reused after release — so reading the"
-  note "    real bridge at acquisition and dropping the rule at release is sufficient. K4c measured"
-  note "    the after-release case and the investigation was closed on it. The platforms converge,"
-  note "    and the address-keyed machinery built to work around the missing key can go on both."
+  ok "macOS HAS a usable per-sandbox non-address key, unconditionally. An index is stable for as"
+  note "    long as a sandbox holds it, including across a restart, and is only reused after release."
+  note "    Reading the real bridge at acquisition and dropping the rule at release is sufficient."
+elif [ "${TAGKEY:-no}" = per_sandbox ] && [ "${RULE_SURVIVES:-no}" = yes ]; then
+  bad "macOS HAS the key, and ONE lifecycle rule is the whole price. Everything the key needs works:"
+  note "    a held index is never reassigned, the interface discriminates with no address in the"
+  note "    rule, the ingress tag is per-sandbox, and a rule re-attaches BY NAME when its interface"
+  note "    comes back — A's address changed underneath it and enforcement did not lapse."
+  note ""
+  note "    The single failure is the detach window. A sandbox that merely restarts gives up its"
+  note "    index, and a sandbox started in that window can take it — at which point the stale rule"
+  note "    governs a STRANGER, which is worse than not enforcing. So the key is usable if and only"
+  note "    if rule maintenance is bound to attach and detach: withdraw the rule when the interface"
+  note "    goes, re-read the real index and re-establish it when the interface returns."
+  note ""
+  note "    That is a lifecycle requirement, not a missing key, and it is a far smaller gap than"
+  note "    'there is no stable per-sandbox non-address key', which is what closed this on macOS."
+  note "    The platforms are closer than the divergence suggested: Linux needs no such rule because"
+  note "    its names do not recycle, macOS needs one because its indices do."
 elif [ "${TAGKEY:-no}" = per_sandbox ] && [ "${WINDOW:-x}" != stable ]; then
   unk "SPLIT RESULT. The tag discriminates per sandbox, but the interface it is keyed on is not"
-  note "    stable across a restart, so the tag inherits that instability. Neither is usable alone;"
-  note "    what would be is a per-sandbox key that survives detach, and nothing here is one."
+  note "    stable across a restart and it is NOT established that a rule re-attaches when the name"
+  note "    returns (I4: ${RULE_SURVIVES:-untested}). Without that, the window cannot be priced."
 else
   bad "macOS does NOT have a usable per-sandbox non-address key on this evidence, and the divergence"
   note "    from Linux is a measured constraint rather than an assumption: on Linux the interface is"
@@ -357,9 +451,10 @@ cat <<'EOF'
           I1-I3 transfers to it; the question there is a different one and it is not asked here.
         - Concurrent starts. The detach window in I2 is opened by hand, one sandbox at a time. Two
           sandboxes racing for a freed index is the case a real pool would hit and it is not run.
-        - Whether a rule naming a bridge SURVIVES that bridge disappearing. pf accepts rules on
-          absent interfaces, but whether the rule re-attaches when the name comes back, or silently
-          matches nothing, is not measured — and I2's remedy depends on which.
+        - Whether the re-attach in I4 holds when a DIFFERENT sandbox takes the name. I4 restarts A
+          alone and A gets its own index back, so the rule re-attaches to the same sandbox. The
+          hazard I2 describes is the other case, and combining them -- stale rule, name reused by a
+          stranger -- is the experiment that would price the window rather than just naming it.
         - The tag namespace. Whether pf tags are a limited resource, and what happens at 32 of them,
           is unmeasured; K3 and I3 both use two.
         - Any of this under the shipped D132 grant. Every rule here is loaded as root. The grant

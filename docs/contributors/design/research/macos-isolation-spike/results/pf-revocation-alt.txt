@@ -1,0 +1,169 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-10 10:40:45 CEST | anchor=com.apple/yoloai_ra
+
+== A0 SETUP — two sandboxes, both streaming, so 'narrower' can be measured and not assumed ==
+        guest A=192.168.64.18   guest B=192.168.64.19   gateway=192.168.64.1   port=18644
+        A streaming: 45 bytes   B streaming: 45 bytes   (both must be >0)
+   PASS    A0: both sandboxes hold a live, permitted stream
+
+== T1 CAN AN ANCHOR HOLD A TIMEOUT AT ALL? — asked first, because the rest is moot if not ==
+        `set timeout` is a ruleset OPTION. pf.conf documents options as main-ruleset constructs, and
+        D132 can write exactly one file: the pinned pool ruleset, loaded into our anchor. If an anchor
+        will not carry the option, the no-grant remedy cannot live where D132 is allowed to write.
+        pfctl exit=0, output:
+          pfctl: Use of -f option, could result in flushing of rules
+          present in the main ruleset added by the system at startup.
+          See /etc/pf.conf for further details.
+          
+          No ALTQ support in kernel
+          ALTQ related functions disabled
+        
+        and what the anchor then REPORTS, which is the part that decides it. Exit 0 means the file
+        parsed, not that the option took — and an option that parses and does nothing is the shape
+        most likely to be mistaken for a working remedy:
+          anchor: tcp.established           86400s
+          anchor: tcp.closing                 900s
+          global: tcp.established           86400s
+          global: tcp.closing                 900s
+        requested tcp.established=20s, anchor reports=86400s
+   FAIL    T1: the anchor ACCEPTED the option AND IGNORED IT. pfctl exited 0, printed no error, and the
+            anchor still reports 86400s against the 20s requested — the global
+            default, unchanged. This is worse than a refusal: a refusal is visible, and this would
+            have shipped as a working remedy in the one file D132 permits writing. `set` is a
+            ruleset option and an anchor is not a ruleset for that purpose.
+        
+        So the no-grant remedy cannot be written where D132 is allowed to write. What remains is
+        changing the HOST's global pf timeouts — a wider change than the grant it was meant to avoid,
+        affecting every connection on the machine — and this harness deliberately does not attempt it:
+        it never touches the main ruleset.
+
+== T2 WOULD A TIMEOUT BOUND THE CASE THAT MATTERS? — read off pf's own expiry counter ==
+        A tcp.established timer is reset by traffic. The exposure this is meant to bound is an agent
+        still moving data after its allowlist entry was revoked — which keeps its own state fresh. So
+        the question is not whether a timeout works, it is whether it can ever reach a BUSY state.
+        
+        Two states are watched over 20s, and the IDLE one is the control: if the method cannot see
+        an expiry decay where decay must be happening, then a busy state showing no decay proves
+        nothing about the state and everything about the instrument.
+        t=0    active(:18644) expires in 86400s    idle(:18645) expires in 86396s
+        t=20s   active(:18644) expires in 86400s    idle(:18645) expires in 86376s
+        
+        the two states, verbatim:
+          ALL tcp 192.168.64.1:18644 <- 192.168.64.18:60620       ESTABLISHED:ESTABLISHED
+             [3483101656 + 64512] wscale 6  [976459349 + 131392] wscale 8
+          --
+          ALL tcp 192.168.64.1:18645 <- 192.168.64.18:35208       CLOSING:ESTABLISHED
+             [3900122699 + 64511] wscale 6  [2781418260 + 131457] wscale 8
+        
+        decay over 20s:  active=0s   idle=20s   (a timer running down drops by ~20)
+   PASS    T2: the idle state decayed 20s over 20s and the BUSY state decayed 0s. The
+            method sees decay, and the busy state is not decaying — its timer is reset by its own
+            traffic. A tcp.established timeout expires IDLE states and cannot reach a flow that is
+            still moving data, which is precisely the flow revocation exists to stop.
+
+== T3 WHICH KILL FORMS STOP IT — with the control the first run of this section lacked ==
+        `-k <host>` works and is the wide one: a grant permitting it permits naming ANY host. The case
+        for an alternative is that the policy could constrain it, so what matters is which forms stop
+        the flow AND take arguments a regex can pin. What each form does, from pfctl(8) verbatim,
+        because two runs have now cited -K as 'the narrower one' without anyone reading it:
+               -K host | network
+          	     Kill all of the source tracking entries originating from the
+          	     specified host or network.  A second -K host or -K network option
+          	     may be specified, which will kill all the source tracking entries
+          	     from the first host/network to the second.
+          
+               -k host | network
+               -k host | network
+          	     Kill all of the state entries originating from the specified host
+          	     or network.  A second -k host or -k network option may be
+          	     specified, which will kill all the state entries from the first
+          	     host/network to the second.  For example, to kill all of the
+          	     state entries originating from “host”:
+        
+        Two things follow from that text and are measured below rather than assumed. -K kills SOURCE
+        TRACKING entries, not state entries, so it is not a narrower state kill — it is a different
+        object. And the two-host form is DIRECTIONAL: 'from the first host to the second'. Which
+        direction works is therefore a real question, and BOTH orders are run rather than reasoned
+        about: R4's state dump shows the surviving state sourced from the HOST, which argues for
+        gateway-then-guest, and that argument is recorded here so the measurement can contradict it.
+        
+        T3control  plain `-k <guest>`. pf-revocation.txt R5b stopped the flow with exactly this, so it
+                   MUST stop it here too. Without this arm, an alternative that fails is unattributable
+                   — it could be the form, or it could be this fixture, and the two are
+                   indistinguishable. The first run of this section omitted it and drew verdicts anyway.
+        
+        --- control: pfctl -k <guest> ---
+        A streaming: 54 bytes; states naming A: 3
+        pfctl -k 192.168.64.18 -> killed 3 states from 1 sources and 0 destinations 
+        A: 54 -> 54 bytes; states naming A now: 0
+        B (untargeted, must keep running): 324 -> 378 bytes
+        arm verdict: stops
+   PASS    T3control: plain -k stops the flow here, reproducing R5b — the fixture is sound and the arms
+                   below are attributable to the form they change
+        
+        --- guest-then-gateway: pfctl -k <guest> -k <gw> ---
+        A streaming: 54 bytes; states naming A: 1
+        pfctl -k 192.168.64.18 -k 192.168.64.1 -> killed 1 states from 1 sources and 1 destinations 
+        A: 54 -> 54 bytes; states naming A now: 0
+        B (untargeted, must keep running): 423 -> 486 bytes
+        arm verdict: stops
+        
+        --- gateway-then-guest: pfctl -k <gw> -k <guest> ---
+        A streaming: 54 bytes; states naming A: 1
+        pfctl -k 192.168.64.1 -k 192.168.64.18 -> killed 0 states from 1 sources and 1 destinations 
+        A: 54 -> 108 bytes; states naming A now: 1
+        B (untargeted, must keep running): 531 -> 585 bytes
+        arm verdict: survives
+        
+        --- source-tracking: pfctl -K <guest> ---
+        A streaming: 45 bytes; states naming A: 2
+        pfctl -K 192.168.64.18 -> killed 0 src nodes from 1 sources and 0 destinations 
+        A: 45 -> 108 bytes; states naming A now: 2
+        B (untargeted, must keep running): 630 -> 693 bytes
+        arm verdict: survives
+        
+   PASS    T3: the two-host kill works, and ONLY as `-k <guest> -k <gateway>` — guest FIRST.
+            The mechanism argument above predicted the opposite order and is refuted: reasoning
+            from which endpoint owns the surviving state does not predict which argument order
+            pfctl matches. An amendment must pin this order exactly; the reverse kills 0 states
+            and reports success while the transfer continues, which is the worst possible
+            failure for a grant to be written against.
+   PASS    T3: -K does NOT stop the flow, as its documentation says it would not — it kills source
+            tracking entries, a different object. The 'use -K, it is narrower' suggestion carried
+            by two runs' WHAT WAS NOT TRIED is closed: it is not a state kill at all.
+   PASS    T4: the untargeted sandbox B streamed through every kill — the effect is per-sandbox
+
+== VERDICT — composed from the values above ==
+        anchor accepts a timeout   : inert
+        timeout can reach a busy flow: no
+        two-host kill, guest->gw   : stops
+        two-host kill, gw->guest   : survives
+        -K (source tracking) stops it: survives
+        kill left the other sandbox alone: yes
+        
+   FAIL    D132 MUST WIDEN, but it can widen NARROWLY. The no-grant timeout does not reach a busy flow
+            (inert/no), so a state kill is required. The two-host form
+            stops it and names BOTH endpoints, so the grant can pin the peer to our own gateway
+            rather than permitting `-k <anything>` — materially narrower than the form D132
+            rejected, and the shape an amendment should take.
+
+== WHAT WAS NOT TRIED ==
+        - Changing the HOST's global pf timeouts. Deliberate: it needs a main-ruleset write, which
+          is both outside D132's grant and the fail-open path this directory has been burned by
+          twice. So T1's negative bounds what the ANCHOR can hold, and says nothing about whether a
+          global timeout would work — only that reaching for one is a bigger change, not a smaller.
+        - The sudoers regex for a two-host kill. T3a shows the form exists and works; whether a
+          regex can pin its second argument the way the table rules are pinned is a policy question
+          and needs the permit/refuse matrix, not this harness. It is the next step if -k is taken.
+        - UDP, and idle TCP. Everything here is one actively streaming TCP connection, which is the
+          hard case for a timeout and the easy case for a kill. An idle state's behaviour under
+          each form is unmeasured.
+        - Whether -K and the two-host form differ in what they reach. Both stopped the target here;
+          neither was measured against a state belonging to a THIRD party outside our anchor, which
+          is the actual scope claim behind calling one of them narrower.
+
+== cleanup ==
+   main-refs: before=2 after=2   anchor rules: 0
+
+pass=6 fail=2 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-revocation-alt.txt
