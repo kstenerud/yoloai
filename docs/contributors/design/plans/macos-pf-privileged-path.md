@@ -71,12 +71,23 @@ Linux's refutation of "there is no stable per-sandbox non-address key" prompted 
 concluded "neither the interface nor the tag is usable alone… nothing measured here is [a key that
 survives detach]". With I4 measured, that is wrong. Everything a key needs works here — held indices
 are never reassigned, the interface discriminates with no address in the rule, the tag is
-per-sandbox, and rules survive their interface cycling. **The whole price is one lifecycle rule:**
-withdraw a sandbox's rule when its interface goes and re-read the real index when it returns, because
-the one genuine hazard is a *stranger* taking a freed index and inheriting a stale rule — which is
-worse than not enforcing. Linux needs no such rule because its names do not recycle; macOS needs one
-because its indices do. That is a lifecycle requirement, not a missing key, and it is a far smaller
-gap than the claim that closed this investigation on macOS.
+per-sandbox, and rules survive their interface cycling.
+
+**And the one hazard is now priced rather than named (I5).** It is worse than "worse than not
+enforcing", and in a specific way. With the two sandboxes given *disjoint* allowlists — which is what
+makes a leak observable, since with no policy every destination answers — a stranger that took a
+departed sandbox's index **reached the destination only that sandbox was granted, and was refused the
+destination its own allowlist permits.** A cross-sandbox privilege leak of X3's class *and* a denial
+of the sandbox's real policy, from one un-withdrawn rule. The mechanism is visible in the rule dump:
+pf is first-match-with-`quick`, the stale `pass` wins for the departed sandbox's destination, and the
+stale `block` then catches everything else before the stranger's own `pass` is ever reached. Nothing
+about this is visible to an inspection — every rule is present and well-formed.
+
+**The remedy is measured, not advised (I5b).** Withdrawing the stale rule restores the stranger's own
+policy exactly. So the price is one lifecycle rule: withdraw a sandbox's rule when its interface goes,
+re-read the real index when it returns. Linux needs no such rule because its names do not recycle;
+macOS needs one because its indices do. That is a lifecycle requirement, not a missing key, and a far
+smaller gap than the claim that closed this investigation on macOS.
 
 > **Unrelated defect found while measuring this, and it is not a pf problem.** When the restarting
 > sandbox reclaimed its index, the sandbox that had taken it **lost its egress entirely** — still

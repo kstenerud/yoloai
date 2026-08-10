@@ -1,5 +1,5 @@
 host: macOS 26.5.1 arm64
-date: 2026-08-10 10:45:31 CEST | anchor=com.apple/yoloai_i | egress=en0
+date: 2026-08-10 11:17:39 CEST | anchor=com.apple/yoloai_i | egress=en0
 
 == I0 SETUP — and the reachability baseline every block below is measured against ==
         main-refs=2
@@ -110,38 +110,94 @@ date: 2026-08-10 10:45:31 CEST | anchor=com.apple/yoloai_i | egress=en0
              which the rule never named. pf resolves the interface by name at match time, so
              I2's window is a window and not a permanent lapse.
 
+== I5 THE COMBINED HAZARD — a stale rule, and a stranger holding the same name ==
+        I2 says a sandbox that restarts gives up its index and a stranger can take it. I4 says a rule
+        re-attaches by name. Put together they predict that a rule left behind by one sandbox will
+        govern a different one — but the DIRECTION is all that follows deductively, and the direction
+        is not the part that matters. What matters is which policy the stranger ends up under:
+          a stale BLOCK inherited -> the stranger is over-restricted. Wrong, visible, not a leak.
+          a stale PASS inherited  -> the stranger reaches a destination from SOMEONE ELSE'S allowlist,
+                                     which is a cross-sandbox privilege leak and the same class as X3.
+        Neither follows from I2 and I4; both rules end up loaded on one interface name and pf is
+        first-match-with-quick, so the outcome is an ordering question nobody has watched.
+        
+        Both sandboxes get a REAL policy and the two allowlists are disjoint, because that is what
+        makes a leak observable at all: with no policy every destination answers, so 'the stranger
+        reached it' would prove nothing. A is allowed 1.1.1.1 and denied everything else; the stranger
+        is allowed 1.0.0.1 and denied everything else. If the stranger reaches 1.1.1.1, it reached a
+        destination its own policy forbids, using a grant that belongs to a sandbox that is not running.
+        A under its own policy on bridge101: ->1.1.1.1=301  ->1.0.0.1=000  (need non-000 then 000)
+   PASS    I5 precondition: A is enforced by an interface-keyed rule, allowlist = 1.1.1.1
+        
+        A stopped, and its rule is DELIBERATELY left loaded. That IS the lifecycle bug being
+        priced — the plan's remedy is to withdraw it here, and I5b below runs that arm.
+        the stranger came up on: bridge101   (A held bridge101)   addr=192.168.69.2
+   PASS    I5: the collision is real — a live stranger is holding the name A's rule still points at
+        
+        I5a  BOTH rules loaded on one name: A's stale pair first (it was never withdrawn), the
+             stranger's own pair appended at its claim, exactly as a running system would have it.
+        the anchor, in evaluation order:
+          pass in quick on bridge101 inet proto tcp from any to 1.1.1.1 flags S/SA keep state
+          block drop in quick on bridge101 proto tcp all
+          pass in quick on bridge101 inet proto tcp from any to 1.0.0.1 flags S/SA keep state
+          block drop in quick on bridge101 proto tcp all
+        stranger ->1.1.1.1 (A's allowlist, NOT its own) = 301
+        stranger ->1.0.0.1  (its OWN allowlist)          = 000
+   FAIL    I5a: THE STRANGER INHERITED A'S POLICY WHOLE. It reached 1.1.1.1 — a destination its own
+             allowlist forbids, granted by a rule belonging to a sandbox that is not running —
+             and was refused 1.0.0.1, which its own allowlist permits. A cross-sandbox privilege
+             leak AND a denial of the sandbox's real policy, from one un-withdrawn rule.
+        
+        I5b  THE REMEDY, measured rather than recommended. Same collision, same stranger, with
+             A's rule WITHDRAWN as the plan's lifecycle rule requires. Only the stranger's own
+             pair is loaded. If this is clean, the lifecycle rule is sufficient for this hazard.
+        stranger ->1.1.1.1 (must now be refused) = 000
+        stranger ->1.0.0.1  (must now reach)      = 301
+   PASS    I5b: withdrawing the stale rule restores the stranger's own policy exactly. The
+             lifecycle rule the plan recommends is sufficient for this hazard, measured.
+
 == VERDICT — composed from the values above, not asserted ==
         held index reassigned while live : yes
         allocator recycles at all        : yes
         restart/detach window            : hazard
         ingress tag per sandbox          : per_sandbox
         rule survives its interface going away: yes
+        what a stale rule does to a stranger: leak_and_deny
+        withdrawing it restores correct policy: sufficient
         
    FAIL    macOS HAS the key, and ONE lifecycle rule is the whole price. Everything the key needs works:
             a held index is never reassigned, the interface discriminates with no address in the
             rule, the ingress tag is per-sandbox, and a rule re-attaches BY NAME when its interface
             comes back — A's address changed underneath it and enforcement did not lapse.
         
-            The single failure is the detach window. A sandbox that merely restarts gives up its
-            index, and a sandbox started in that window can take it — at which point the stale rule
-            governs a STRANGER, which is worse than not enforcing. So the key is usable if and only
-            if rule maintenance is bound to attach and detach: withdraw the rule when the interface
-            goes, re-read the real index and re-establish it when the interface returns.
+            The single failure is the detach window, and I5 prices it rather than naming it. A
+            sandbox that merely restarts gives up its index; a sandbox started in that window takes
+            it; and the rule left behind then does BOTH bad things at once (measured:
+            leak_and_deny). The stranger reached a destination only the departed sandbox was
+            granted — a cross-sandbox privilege leak of X3's class — AND was refused the
+            destination its own allowlist permits, because pf is first-match-with-quick and the
+            stale pair sits ahead of its own. Not 'unenforced': wrongly enforced, in both
+            directions, with every rule present and correct-looking to any inspection.
         
-            That is a lifecycle requirement, not a missing key, and it is a far smaller gap than
-            'there is no stable per-sandbox non-address key', which is what closed this on macOS.
-            The platforms are closer than the divergence suggested: Linux needs no such rule because
-            its names do not recycle, macOS needs one because its indices do.
+            The remedy is measured and not merely advised (I5b: sufficient). Withdrawing the stale
+            rule restores the stranger's own policy exactly. So: withdraw a sandbox's rule when its
+            interface goes, re-read the real index when it returns. That is a lifecycle
+            requirement, not a missing key, and it is a far smaller gap than 'there is no stable
+            per-sandbox non-address key', which is what closed this on macOS. Linux needs no such
+            rule because its names do not recycle; macOS needs one because its indices do.
 
 == WHAT WAS NOT TRIED ==
         - tart. Its guests share the vmnet bridges rather than getting one network each, so none of
           I1-I3 transfers to it; the question there is a different one and it is not asked here.
         - Concurrent starts. The detach window in I2 is opened by hand, one sandbox at a time. Two
           sandboxes racing for a freed index is the case a real pool would hit and it is not run.
-        - Whether the re-attach in I4 holds when a DIFFERENT sandbox takes the name. I4 restarts A
-          alone and A gets its own index back, so the rule re-attaches to the same sandbox. The
-          hazard I2 describes is the other case, and combining them -- stale rule, name reused by a
-          stranger -- is the experiment that would price the window rather than just naming it.
+        - Whether ORDER changes I5a's outcome. A's stale pair was loaded first, which is what a real
+          system produces, and pf is first-match-with-quick so it wins twice over. A stranger whose
+          rules landed FIRST is a different arm and is not run -- it would say whether the leak is a
+          property of staleness or only of ordering, and the remedy is the same either way.
+        - Recovery for the sandbox displaced in I2c. I5b withdraws the stale rule and the STRANGER
+          becomes correct; what happens to the original sandbox when it returns to find its name
+          taken is not measured, and it is the other half of the lifecycle rule.
         - The tag namespace. Whether pf tags are a limited resource, and what happens at 32 of them,
           is unmeasured; K3 and I3 both use two.
         - Any of this under the shipped D132 grant. Every rule here is loaded as root. The grant
@@ -152,5 +208,5 @@ date: 2026-08-10 10:45:31 CEST | anchor=com.apple/yoloai_i | egress=en0
 == cleanup ==
    main-refs: before=2 after=2
 
-pass=8 fail=3 unknown=0
+pass=11 fail=4 unknown=0
 results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-interface-key.txt
