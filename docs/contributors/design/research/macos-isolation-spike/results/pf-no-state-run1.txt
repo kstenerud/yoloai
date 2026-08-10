@@ -1,0 +1,98 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-10 13:57:01 CEST | anchor=com.apple/yoloai_n | egress=en0
+
+== N0 SETUP — a per-sandbox network, which is the shape the rewritten design specifies ==
+        guest=192.168.65.2  gateway=192.168.65.1  bridge=bridge101  egress=en0
+        rate-controlled server up on 192.168.65.1:18651 — 32 KB per 125 ms = 256 KB/s, 150s
+
+== N1 DOES `no state` SURVIVE THE ROUND TRIP THROUGH pfctl? ==
+        pfctl exiting 0 is not the question. This anchor accepts `set timeout` and silently ignores
+        it (pf-revocation-alt.txt T1), so the only honest check is to read the rule back out.
+        the anchor, read back verbatim:
+          pass in quick on bridge101 proto tcp from any to <yn_dst> no state
+          block drop in quick on bridge101 proto tcp all
+   PASS    N1: pf accepted `no state` AND reports it back — the keyword is really in the ruleset
+
+== N2 CORRECTNESS — does anything still work, on both paths ==
+        Two paths, because they fail for different reasons. The GATEWAY path is host-terminated and
+        never touches NAT. The EXTERNAL path is translated on en0, and reverse translation has to
+        remember the mapping somewhere — which is exactly what `no state` refuses to do.
+        allowlist: 1.1.1.1 192.168.65.1 
+        gateway   192.168.65.1:18651 -> 200    (allowlisted; need non-000)
+        external  1.1.1.1    -> 301   (allowlisted, NAT'd; need non-000)
+        denied    1.0.0.1     -> 000   (need 000)
+        counters: pass rule packets=7  block rule packets=5
+   PASS    N2: stateless pf is CORRECT on both paths with ingress rules alone — the prediction above is
+            refuted, and no return-direction rule is needed.
+
+== N3 STATE CENSUS — the gate ==
+        The whole experiment is 'policy on every packet'. If pf is still holding state for this flow,
+        N4 would be measuring something else. Opening a connection and counting is the only way to
+        know; the ruleset saying `no state` is a claim about intent, not about the state table.
+        stream is at 1048576 bytes; states mentioning 192.168.65.2: 3
+          ALL tcp 192.168.65.1:18651 -> 192.168.65.2:41632       TIME_WAIT:TIME_WAIT
+          ALL tcp 192.168.65.2:36888 -> 192.168.0.157:42042 -> 1.1.1.1:80       FIN_WAIT_2:FIN_WAIT_2
+          ALL tcp 192.168.65.1:18651 -> 192.168.65.2:34104       ESTABLISHED:ESTABLISHED
+   FAIL    N3: 3 state(s) exist for a flow whose rules all say `no state`. Something else created
+             them — the predicted candidate is pf's default pass on the return direction. Whatever
+             N4 shows, it is not showing stateless evaluation.
+
+== N4 REVOCATION OF AN IN-FLIGHT TRANSFER — the P1b shape ==
+        Sustained transfer, remove the allowlist entry with a table delete and NOTHING ELSE — no
+        `pfctl -k`, no reload — then sample the rate for 30s and read the block rule's counter.
+        Linux, for comparison: fast-path 300 KB/s for 30s with counter 0; no fast-path 0 KB/s inside
+        10s with counter 12.
+        before revocation: 1277952 bytes then 2064384 bytes (must be growing, or there is nothing to revoke)
+        block rule packet counter before: 5
+        revoking: pfctl -a com.apple/yoloai_n -t yn_dst -T delete 192.168.65.1
+        pfctl: No ALTQ support in kernel
+        pfctl: ALTQ related functions disabled
+        pfctl: 1/1 addresses deleted.
+        allowlist now: 1.1.1.1 
+        KB/s over the 30s after revocation: 256 256 256 256 256 256 256 256 256 256
+        block rule packet counter after: 5 (was 5)
+        states naming the guest now: 4
+   FAIL    N4: the transfer SURVIVED revocation under `no state` ( 256 256 256 256 256 256 256 256 256 256 KB/s, counter +0).
+
+== N4c THE CONTROL — the identical run with `no state` removed, which must SURVIVE ==
+        Without this arm N4 shows a transfer stopping, not `no state` stopping it. Same protocol,
+        same path, same destination, one keyword different.
+        the control anchor, read back (there must be NO `no state` here):
+          pass in quick on bridge101 proto tcp from any to <yn_dst> flags S/SA keep state
+          block drop in quick on bridge101 proto tcp all
+        before revocation: 1277952 then 2064384 bytes; states naming the guest: 5
+        KB/s over the 30s after revocation: 256 266 256 256 256 256 256 256 256 256
+        block rule packet counter: 0 -> 0
+   PASS    N4c: the stateful control SURVIVED revocation, as R2/R3/R5a found. The two arms differ.
+
+== N5 VERDICT — derived from the two arms and the census, not asserted ==
+          `no state` loads:            yes
+          return rule needed:          none
+          states during a live flow:   no
+          no-state arm:                survives
+          stateful control arm:        survives
+   FAIL    N5: `no state` does NOT give the Cilium shape here. macOS keeps its asymmetry, `pfctl -k`
+            stays in the design, and the D132 permit/refuse matrix for a two-endpoint kill is back
+            on the list.
+
+== WHAT WAS NOT TRIED ==
+        - UDP. Every rule and every probe here is TCP. pf's stateless handling of UDP is a separate
+          question and DNS rides on it.
+        - Throughput cost. Linux measured allowlist sizes 1/1000/10000 and found the run-to-run
+          variance larger than any difference. Nothing here measures what per-packet evaluation
+          costs on pf at any allowlist size, so "it costs nothing" is a Linux result only.
+        - `set state-policy if-bound`. If a floating state created elsewhere on the host can match
+          this flow on the bridge, that is a second way to defeat `no state`, and if-bound would be
+          the counter. Not loaded, and an anchor may well ignore it the way it ignores `set timeout`.
+        - Concurrency. One sandbox, one flow. Whether a second sandbox's traffic is affected by
+          these rules was measured for the stateful shape (pf-revocation-alt.txt T4) and not here.
+        - Long-lived idle connections, which is where state timeouts would have mattered.
+        - Whether `no state` changes anything for traffic the host TERMINATES rather than routes.
+          The gateway path here is host-terminated and it is the path the revocation was measured
+          on, which makes the external/NAT'd path the one with the weaker evidence.
+
+== cleanup ==
+   main-refs: before=2 after=2   anchor rules: 0
+
+pass=3 fail=3 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-no-state.txt
