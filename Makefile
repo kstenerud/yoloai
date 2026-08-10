@@ -254,7 +254,13 @@ crosscheck:
 ## check: the local gate. NOT all of CI — CI also runs the integration and
 ## integration-podman jobs, and `test` here is a bare `go test ./...` which skips
 ## every build-tagged file. See docs/contributors/procedures/pull-requests.md.
-check: lint lint-cross lint-speculative-api vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
+## gate-coverage: assert the other gates actually look at what you changed —
+## a test pytest never collects, or a gate with no tests, is a free green.
+.PHONY: gate-coverage
+gate-coverage:
+	python3 scripts/check_gate_coverage.py
+
+check: lint lint-cross lint-speculative-api gate-coverage vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## The Python surface is part of the app (contributors can modify it), so it is
@@ -292,8 +298,13 @@ python-test: python-typecheck
 ## top-level "conftest" module if checked in one pass.
 ## Lazy (`=`, not `:=`) so the git call happens only when this target runs,
 ## rather than on every `make` invocation including `make build`.
-PY_RUNTIME = $(shell git ls-files '*.py' | grep '^runtime/')
-PY_SCRIPTS = $(shell git ls-files '*.py' | grep '^scripts/')
+## `--others --exclude-standard` matches the shellcheck target, and is load-bearing:
+## plain `git ls-files` omits UNTRACKED files, so a new module type-checked clean
+## because mypy never opened it. That happened — `research_harness.py` passed a full
+## `make check` while untracked, and the green said nothing about the code. Honouring
+## .gitignore via --exclude-standard keeps scratch files out.
+PY_RUNTIME = $(shell git ls-files --cached --others --exclude-standard '*.py' | grep '^runtime/')
+PY_SCRIPTS = $(shell git ls-files --cached --others --exclude-standard '*.py' | grep '^scripts/')
 
 python-typecheck: ensure-python-venv
 	$(MYPY) --strict $(PY_RUNTIME)
