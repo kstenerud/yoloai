@@ -1,0 +1,99 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-10 15:20:15 CEST | anchor=com.apple/yoloai_l
+
+== L1 BASELINE — A enforcing on its own bridge ==
+        A: guest=192.168.65.2 gateway=192.168.65.1 bridge=bridge101
+        A -> its own allowlist (1.1.1.1): 301    A -> the stranger's (1.0.0.1): 000
+   PASS    L1: A is enforcing, and the two allowlists are disjoint so a leak is observable
+
+== L2 THE CONTROL — no lifecycle mechanism at all, so the stranger must INHERIT ==
+        Without this arm, a stranger with correct policy in L3 could be correct because the allocator
+        handed it a different index, because the timing happened to differ, or because the hazard does
+        not reproduce on this host today. I5 is reproducible, so the control is cheap and decisive.
+        L2: stopping A and creating a stranger immediately
+        L2: stranger is on bridge101 (A held bridge101); gateway=192.168.66.1
+        L2: stranger -> A's allowlist (1.1.1.1): 301    stranger -> its own (1.0.0.1): 000
+        L2: anchor now holds 8 rule(s)
+   PASS    L2: the stranger INHERITED A's policy — reached A's destination, refused its own. The
+            hazard reproduces, so L3 has something to fix.
+
+== L3 THE MECHANISM — the same race with the withdrawal loop running ==
+        Restoring A first, so this arm starts where L2 started rather than from L2's wreckage.
+        A is back on bridge101 with gateway 192.168.65.1
+        A enforcing again on its returned interface: -> 1.1.1.1 gives 301 (need non-000)
+        lifecycle daemon running: polls every 50 ms for 'bridge bridge101 no longer carries 192.168.65.1'
+        L3: stopping A and creating a stranger immediately
+        L3: stranger is on bridge101 (A held bridge101); gateway=192.168.66.1
+        L3: stranger -> A's allowlist (1.1.1.1): 000    stranger -> its own (1.0.0.1): 301
+        L3: anchor now holds 4 rule(s)
+   PASS    L3: the stranger got its OWN policy — it was refused A's destination and reached its own.
+            The lifecycle rule closes the hazard against a live restart, not just in principle.
+
+== L4 THE WINDOW — both sides of the race, in milliseconds ==
+        A verdict about a race that reports only the side that won is an opinion. These are the two
+        durations that decide whether the mechanism is sound or merely lucky on this host.
+        Three intervals, not one. The first is the backend tearing a sandbox down and is nothing to do
+        with us; folding it into 'our side' would flatter the mechanism by several seconds. The margin
+        that matters is measured from the moment the index is actually free.
+        stop issued -> index actually released   : 5212 ms   (the backend's, not ours)
+        release     -> withdrawal complete       : 33 ms   (ours: 50 ms poll + pfctl reload)
+        release     -> stranger held an interface: 816 ms   (theirs)
+        margin                                   : 783 ms
+   PASS    L4: withdrawal completed 783 ms before the stranger held an interface.
+            That margin is a fact about THIS host's sandbox start time, not a property of the design:
+            a faster start, a busier host, or folding detection into the 320-385 ms canary loop all
+            narrow it, and the canary's cadence alone would consume most of it.
+
+== L5 THE RETURN — re-reading the real index, which is the other half of the rule ==
+        I4 established that a rule re-attaches BY NAME when its interface returns. That is the good
+        case and also the trap: if the stranger still holds A's old index, A returns on a DIFFERENT
+        one, and a rule that re-attached by name is now attached to the stranger's interface — pointing
+        A's policy at another sandbox. Re-reading the index on return is the fix and has never been run.
+        leaving the stranger in place on bridge101 so A cannot have its old index back
+        A returned on bridge101 (it held bridge101 before)
+        the stranger is now on <none> (it held bridge101)
+        
+        A RECLAIMED ITS OLD INDEX, off the sandbox that had taken it. So the premise this section
+        was built on — that A returns on a DIFFERENT index while a stranger holds the old one —
+        does not arise on this backend, and the re-read half of the lifecycle rule cannot be
+        exercised by this route. That is a measured constraint, not a passing result.
+        displaced stranger: -> its own allowlist 000   -> A's 000   (both 000 = no egress at all)
+   PASS    L5: DF190 reproduces here as a side effect — the displaced sandbox has no bridge and no
+            egress at all, while A is fine. This is the fourth independent reproduction, and it
+            now has a trigger stated as a rule: a returning sandbox reclaims its index from the
+            incumbent, and the incumbent is not rehomed.
+
+== L6 VERDICT — derived from the arms above ==
+          hazard reproduces without the rule (L2): yes
+          stranger's policy with the rule (L3):    no
+          re-read half exercised (L5):             not-reachable
+   PASS    L6: the WITHDRAW half works against a live restart, with the control proving the hazard was
+            there to be closed and L4 reporting both sides of the race.
+            The RE-READ half is not-reachable: a returning sandbox reclaims its old index
+            rather than taking a new one, so the case that half exists for did not arise. It stays
+            unverified — and the plan should say so rather than describing the rule as measured.
+
+== WHAT WAS NOT TRIED ==
+        - Concurrency beyond two sandboxes. One departing, one arriving. Nothing here says what
+          happens when several are created inside one detach window, which is the case a busy host
+          produces and the case where a lowest-free allocator is most likely to hand out a
+          just-released index.
+        - Crash rather than `container stop`. A clean stop may release the index differently from a
+          killed VM or a daemon restart, and the product's dangerous case is the unclean one.
+        - The poll interval as a variable. 50 ms was chosen and never varied, so the margin in L4 is
+          one point on a curve nobody has drawn. The product's canary polls at 320-385 ms, and if
+          detection is folded into that loop the margin changes by an order of magnitude.
+        - What the daemon costs. It runs `ifconfig` twenty times a second per watched sandbox and
+          nothing measures that against a host running eight of them.
+        - Whether anything ELSE notices the withdrawal. The rules vanish from the anchor with no
+          signal, and a second manager -- or our own liveness canary -- may read that as a fault and
+          reinstall them. Untested, and it is the shape of the trample problem the plan already
+          names for Linux.
+        - Recovery if the daemon itself dies mid-window. The rules stay withdrawn and the sandbox
+          stays unenforced-but-unreachable, or stay loaded and stale; neither is measured.
+
+== cleanup ==
+   main-refs: before=2 after=2   anchor rules: 0
+
+pass=6 fail=0 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-lifecycle.txt
