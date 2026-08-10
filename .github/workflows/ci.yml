@@ -96,6 +96,16 @@ jobs:
             --base "origin/${{ github.base_ref }}" \
             --head "${{ github.event.pull_request.head.sha }}"
 
+      # A results file whose bounds are unstated gets read wider than its run. The
+      # two 2026-08 research passes are the controlled experiment: the one that wrote
+      # these sections produced no over-broad conclusions, the one that did not
+      # produced five. Same base ref as the gates above.
+      - name: Require a bounding section on new research results
+        run: |
+          python3 scripts/check_research_bounds.py \
+            --base "origin/${{ github.base_ref }}" \
+            --head "${{ github.event.pull_request.head.sha }}"
+
   integration:
     runs-on: ubuntu-latest
     needs: check
