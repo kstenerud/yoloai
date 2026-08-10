@@ -1,1096 +1,325 @@
-> **ABOUTME:** One design for reclaiming address-keyed network-enforcement state on both platforms,
-> because a stale entry does not merely block a new sandbox — it can hand it another sandbox's
-> allowlist. Covers the Linux host-netns point and the macOS `pf` point as one problem.
+> **ABOUTME:** How host-side per-sandbox egress enforcement is keyed, applied, verified and
+> reclaimed, on both platforms. Rewritten 2026-08-10: the original design keyed on the guest's IP
+> address, and measurement plus source research established that was the wrong axis.
 
-# Plan: reaping address-keyed enforcement state
+# Plan: host-side per-sandbox egress enforcement
 
-- **Status:** PLANNED — designed 2026-08-06 against measured address behaviour on both platforms,
-  and **revised 2026-08-09 against a completed two-platform verification pass** (Linux L1–L12 plus
-  X1/X2, macOS M1–M8 plus four extras). No production code written. The macOS half was already
-  designed inside [macos-pf-privileged-path.md](macos-pf-privileged-path.md); this generalises it and
-  settles the Linux half, which was named as a cost and never worked out.
-  **What the pass changed:** rules 1–4 survive unaltered and are now measured rather than assumed,
-  but two rules were added — **0b**, because the address key turned out to be defeasible on both
-  platforms, and **5**, because connection state outranks the rules on both. Reaping alone was not
-  sufficient, and neither gap was visible from the design.
+- **Status:** PLANNED — no production code. Rewritten 2026-08-10 on a different basis from the
+  2026-08-06 draft; see § *Why this was rewritten*.
 - **Depends on:** tamper-resistant-network-isolation.md, macos-pf-privileged-path.md
-- **Rides:** **any.** It adds reclamation to a mechanism that does not ship yet; nothing user-visible
-  is withdrawn. It is not optional *within* that mechanism — see "Why this is not a tidy-up".
-
-## ⚠ AUDIT SUSPENSION — 2026-08-09. Do not build from the suspended claims below.
-
-Two independent audits (one of the prior-art research, one re-deriving every conclusion from the raw
-runs) found this plan's conclusions **systematically stated one step wider than the runs that produced
-them**. The measurements are largely sound; the generalisations on top of them are not. Seven of the
-audit's claims were re-verified against the files by hand and all seven held.
-
-**Suspended — measured too narrowly, or not measured at all:**
-
-| Claim | Status |
-| --- | --- |
-| "There is no stable per-sandbox non-address key on either platform" | **REFUTED on Linux, 2026-08-09 — two such keys exist.** See § *The key exists on Linux* below. Rules 1/1b/1c, 0b and the recycling half of rule 5 rest on a premise that is false for the Linux container backends. |
-| X1: the bypass "also worked with an address outside the bridge subnet" | **FALSE.** That probe ran only *after* the fix and reads `blocked`. The bypass from an out-of-subnet source was never demonstrated, and is probably impossible (docker masquerades `-s 172.17.0.0/16`, so such a packet has no return path — a control satisfied by a different layer). |
-| L4: "no cross-backend collision in the default configuration" | **FALSE PREMISE.** It measured nerdctl's default network, not yoloAI's. podman's netavark default pool base is `10.89.0.0/16` — byte-identical to `cniSubnetCIDR` (`runtime/containerd/cni.go:44`). Rule 1's **blind** cross-table delete is specified against a collision that was never excluded. |
-| Rule 5: "TCP is safe" | **PARTIAL.** Supported only for a *cleanly closed* flow (`TIME_WAIT`). The ESTABLISHED case — 5-day timeout — was attempted once, failed to construct the state, and was never retried. **`ct state related` was never tested on either platform**, and every rule shape here accepts it. |
-| L3: "ufw does not touch our table" | **UNCONTROLLED.** No run shows ufw ever enforcing; `ufw status` reads `inactive` before and after. This is a third of what retired the moby #49443 subscription recommendation. |
-| Rootless podman "is out of the agent's reach" | **INFERRED, not measured.** The direct test was killed mid-run (`apk add` inside a container whose egress had just been denied). Two proxies survive and the inference is sound; the wording is not. |
-| "Reboot is a clean slate on Linux" | **NO RUN EXISTS.** Prose about a measurement. The check cited also misses `/etc/nftables.conf`, which this pass separately found on this host opening with `flush ruleset`. |
-| L5d's layer comparison | **MISLABELLED.** It used a hand-built `-P OUTPUT DROP` chain; the shipped `firewall.py` ends with `-j REJECT` and uses ipset. It also scored the in-guest layer as covering more **without noting X1/DF179 proved the same agent can flush it** — a defeasible layer compared against a non-defeasible one on coverage alone. |
-
-**The root cause, and it is structural.** Every macOS raw run ends with a `WHAT WAS NOT TRIED` block
-and that pass's results README carries a *"What these files do NOT support"* section. **The Linux half
-has neither.** Both auditors traced the over-broad conclusions to exactly that asymmetry: M1 tested
-four keys and published its exclusions; L1 tested one and published a platform-wide negative.
-
-**What survives, verified by both audits:** L8, L10c, X2-Linux, R4, R6 and the A34 retraction, L11,
-L12b, L9c, L6b, L7, L4b/L4c, L3d, R3's lifecycle half; on macOS M1/K1 and K3, M5, M2/D2, M4's notify
-half, M6, M7, X3.
-
-## The key exists on Linux — L1 is refuted (2026-08-09)
-
-The experiment L1 should have run is macOS's own M1/K4, asked on Linux. It was run, and the answer is
-the opposite of what this plan was built on. **The interface is a per-sandbox key that does not
-recycle and that the guest cannot change.** Two variants, both measured:
-
-**K1 — the per-sandbox bridge** (`results/k1-interface-as-sole-key.txt`). Two sandboxes on two docker
-networks; a policy containing **zero address-matching rules**, keyed only on `iifname "br-<netid>"`.
-A's allowlisted destination stayed reachable, A's denied destination was blocked (5 packets on the
-drop counter), and **B was entirely unaffected** — the discrimination control. Four networks created
-and destroyed in sequence produced four distinct bridge names: **they do not recycle**, which is
-precisely where macOS's K4 failed (vmnet fills holes in `bridgeN`).
-
-**K2 — the per-sandbox veth port, on a *shared* bridge** (`results/k2-veth-key-shared-bridge.txt`).
-This matters because containerd puts every sandbox on one `yoloai0`. With `br_netfilter` loaded,
-`iptables -m physdev --physdev-in <veth>` discriminated A from B on `docker0`: A blocked with 5
-packets on the rule, B reachable. Veth names did not recycle across three create/destroy cycles.
-
-**And it is not defeasible.** Against the K1 rule, the guest — holding `CAP_NET_ADMIN` — added a
-second address (the move that defeats address keying outright, X1) and stayed **blocked**; changed
-its MAC and stayed **blocked**. It sees only `eth0` and `lo`; the veth peer and the bridge live in the
-host netns, and an attempt to rename the host-side peer from inside failed with `No such device`. The
-key is structural: the guest holds no handle on it.
-
-**`meta cgroup` was finally executed as a rule** rather than inferred from a directory test. It loads
-and never fires — 0 packets with traffic flowing. L1's *narrow* claim was right; its conclusion was
-not.
-
-**What this costs, stated plainly.** K1 requires **one network per sandbox**, which neither Linux
-backend does today (docker uses the default bridge, containerd one shared CNI network). K2 removes
-that requirement but needs `br_netfilter` loaded **host-wide**, which changes netfilter's view of all
-bridged traffic on the machine and whose side effects are unmeasured. Both are design changes, not
-drop-in fixes.
-
-**What it removes if adopted.** Rules 1/1b/1c exist to make address-keyed enforcement safe under
-recycling; rule 0b exists because the address key is defeasible; the recycling half of rule 5 exists
-because addresses are reused. All three are consequences of the key. A key that does not recycle and
-that the guest cannot reassign makes them unnecessary rather than mitigated. **Rewriting the plan on
-that basis is the next phase and has not been done** — this section records the measurement only.
-
-### macOS converges — with one lifecycle rule Linux does not need (2026-08-10)
-
-The Linux refutation prompted re-asking the question on macOS, and **the key exists there too**
-(`results/pf-interface-key.txt`). What M1/K4 had recorded as "the index recycles" turns out to have
-measured recycling **after release**, which was never the question.
-
-- **I1 — a held index is never reassigned.** Four held, two more created, zero collisions; the control
-  confirms the allocator *does* recycle, so the negative is not free.
-- **I3 — the ingress tag is genuinely per-sandbox** under one network per sandbox: one guest blocked,
-  one not, under a ruleset containing **no address at all**. The same shape as K1 here.
-- **I4 — a rule re-attaches by name when its interface returns.** No reload, still enforcing. pf also
-  accepts rules naming interfaces that do not exist yet.
-
-**But the detach window leaks, and that is the divergence.** An ordinary restart releases the index
-(I2), a stranger can take it, and **that stranger inherits the departed sandbox's policy whole** (I5)
-— it reached a destination only the departed sandbox was granted, and was refused its own. That is
-X3's cross-sandbox-leak class *plus* denial of the real policy, and it is invisible to inspection;
-the mechanism is first-match-with-`quick`, so the stale pass wins before the stranger's own is
-reached. **I5b measured the remedy rather than advising it:** withdrawing the stale rule restores
-correct policy exactly.
-
-**So macOS pays one lifecycle rule** — withdraw a sandbox's rule when its interface goes, re-read the
-real index when it returns. Linux needs no such rule because its names do not recycle. That is a
-lifecycle requirement, not a missing key, and it is far smaller than the address-keyed machinery it
-replaces.
-
-**Scope, and it is narrow on purpose.** Docker only on Linux. Not run on containerd or rootless
-podman. On macOS: **apple backend only** — tart has no per-sandbox networks, so none of I1–I5
-transfers there, which is a different question rather than a missing answer. The
-nftables `bridge`-family variant did **not** fire (0 packets); the likely reason is that routed
-traffic never traverses the bridge-family forward hook, but that was **not measured** and is stated
-here as a hypothesis, not a finding.
-
-## Why this is not a tidy-up
-
-Moving enforcement out of the guest replaces per-sandbox state that dies with the sandbox
-(in-container `iptables`, a per-netns ipset) with **global host state keyed on an address**. Global
-state outlives the thing it describes. That is the entire cost of the move, and it is worth paying
-only if the state is reclaimed.
-
-**A stale entry does not merely block — it grants reach the sandbox was never configured for.**
-Measured on macOS: with a stale entry naming its address in another slot, a sandbox **lost its own
-allowlist and inherited the stale slot's** (`pf-assumptions.txt` D3, with a control establishing it
-had exactly its own policy immediately before). `quick` is first-match over rules keyed on a recycled
-address. This is a property of address-keyed enforcement, not of any particular shape: an orphaned
-*sub-anchor* does the identical thing (`pf-stale-a.txt` SA2).
-
-So the failure mode is silent and in the fail-open direction. A sandbox that is blocked complains; a
-sandbox that quietly holds a wider allowlist than it asked for does not.
-
-## Address recycling is the trigger, and it is routine on both platforms
-
-The hazard needs a recycled address. Both platforms supply one, for different reasons and on
-different timescales — which is why one design has to accommodate both allocators rather than assume
-either.
-
-**Linux/docker recycles immediately, by construction.** Measured 2026-08-06 on this host: three
-sequential create→destroy cycles each produced `172.17.0.2`. Holding `.2` and `.3`, freeing `.2`, and
-creating again returned `.2` — docker allocates the **lowest free address**, so a freed address is
-the *next* one handed out. Recycling is not a long-lived-host edge case here; it is the default first
-case. Destroy a sandbox without reclaiming its rules and the very next sandbox inherits them.
-
-**macOS recycles on pool wrap, which a long-lived host reaches and then never leaves.** Addresses
-advance per *start* (apple `.22`→`.23`, tart `.2`→`.4` with a fresh MAC), because `tart run`
-regenerates the MAC itself on every start and vmnet's DHCP sees a new host each time — so leases burn
-per start and `/var/db/dhcpd_leases` grows monotonically. On the test host that pool is **already
-exhausted**: 253 records covering `192.168.65.2`–`.254`, zero free, and the file survives reboots so
-it does not heal. Past that point every start *necessarily* recycles. The two backends do not share a
-pool — apple allocates from its own store, sequentially, appearing to restart from the low end after a
-host reboot — so neither backend's behaviour may be generalised to the other
-(`lease-binding.txt` L2, `restart-control.txt`, and `backend-idiosyncrasies.md`).
-
-**Consequence for the design.** Nothing may depend on an address being fresh, on an allocator's
-ordering, or on a stored address still being the sandbox's. Only *live* state is trustworthy.
-
-## The invariant
-
-> At any moment, an address appears in yoloAI's enforcement state **only if** a currently-running
-> sandbox holds that address, and the policy attached to it is that sandbox's own.
-
-Two clauses, and the second is the one a naive reaper misses: removing orphans is not sufficient if
-a live address can carry someone else's policy.
-
-## Reaping is necessary and not sufficient (synthesis, 2026-08-09)
-
-**The invariant above is about the state being *correct*. It says nothing about the state being
-*binding*, and measurement on both platforms now shows it is not.** A sandbox that changes its own
-address leaves every rule keyed on the old one, and no amount of correct address-keyed state
-constrains it.
-
-Measured independently on each platform, with the same outcome:
-
-- **macOS** (`research/macos-isolation-spike/results/pf-spoof.txt`) — in a `--network-isolated`
-  sandbox the agent has passwordless `sudo`, root holds `CAP_NET_ADMIN`, it flushes its own in-guest
-  allowlist and regains egress ([DF179](../findings-unresolved.md) reproduced), then takes an address
-  **in no slot at all** and reaches a denied destination. Same escape on tart via `ifconfig alias`.
-- **Linux** (`research/linux-enforcement/results/x1-source-address-spoofing.txt`) — `ip addr add
-  172.17.99.99/16 dev eth0` in a sandbox holding `CAP_NET_ADMIN`, then a denied destination reached
-  while the host's deny counter never moved. It also worked with an address *outside* the bridge
-  subnet.
-
-The mechanism is the same on both and it is structural, not a bug in either ruleset: **an allowlist
-of blocks keyed on address constrains only the addresses it already holds.** Enumerating the guilty
-can never be complete.
-
-### Rule 0b — every enforcement point needs one scope-based deny that names no address
-
-Above the per-sandbox rules, and below nothing:
-
-- **Linux** — `iifname "<bridge>" … drop` as the last rule of the chain. Measured: it blocks the
-  spoofed source, leaves the allowlisted destination reachable from the real address, and holds for
-  an address outside the subnet.
-- **macOS** — the bridge-scoped default-deny in the pinned ruleset file. It preserves the per-slot
-  matrix and **adds no grant surface**, because it is a static rule in the file D132 already pins,
-  not a membership mutation.
-
-This is one rule, on each platform, containing no address. That property is the point: it is the only
-part of the design whose correctness does not depend on the enforcement state being current. Rules
-1–4 keep the state honest; rule 0b is what makes the state *matter*.
-
-**It does not make reaping optional.** A stale entry still grants a new sandbox another's allowlist —
-D3 on macOS, reproduced on Linux — and rule 0b does nothing about that, because both sandboxes are
-inside the scope it denies. The two mechanisms answer different questions: 0b bounds what a guest can
-*become*, rules 1–4 bound what an address *carries*.
-
-## The keys, settled on both platforms (synthesis, 2026-08-09)
-
-L1 and M1 asked the same question and returned the same answer: **there is no stable per-sandbox
-non-address key on either platform.** This was the strongest lead out of the prior-art pass — Cilium's
-answer to address recycling is to stop keying on addresses — and it is closed.
-
-- **Linux** (`results/l1-cgroup-key.txt`, `l1b`) — the kernel refuses `socket cgroupv2` in the
-  `forward` and `postrouting` hooks, and container egress is forwarded. `prerouting` accepts the rule
-  and never fires it. `meta cgroup` reads a cgroup-v1 classid that does not exist under unified
-  cgroup v2. The match works in `output`, where container traffic never appears.
-- **macOS** (`results/pf-nonaddress-key.txt`) — no process identity (guest traffic matches
-  `user unknown`), no MAC matcher in pf's parser, and per-sandbox networks give distinct bridges
-  whose indices recycle exactly as addresses do. One positive: an ingress **tag** keyed on the bridge
-  survives NAT, which is the only way to tell guest from host traffic after translation — but it is
-  per-bridge, not per-sandbox.
-
-**So rules 1/1b/1c stay on both platforms, and for a measured reason rather than an assumed one.**
-The address is not a good key; it is the only key.
-
-## Mechanism
-
-Four rules. The first three are already settled for macOS and carry over unchanged; the fourth is
-what the Linux point needs and macOS gets for free.
-
-### 0. What "address" means, and how one sandbox ends up under another's policy
-
-**The address is the sandbox guest's own IP** — `172.17.0.2` on docker, `192.168.64.22` on apple. It
-is what the enforcement rule matches as the *source*: "traffic **from** this address is subject to
-this policy." So the address is the **join key** between a sandbox and its allowlist, and it is the
-only key available, because it is the only thing the packet carries.
-
-Nothing ever writes sandbox A's address into sandbox B's state. The hazard runs the other way, and
-it needs no mistake by anyone:
-
-1. Sandbox A holds `192.168.64.22`. Its address sits in slot 0's `src` table, paired by a static rule
-   with slot 0's `dst` table — A's allowlist.
-2. A dies without teardown. **Its entry stays.** Slot 0 still says "`.22` is subject to A's policy".
-3. Sandbox B starts and is handed `.22` — recycled, which on docker is immediate and on macOS is
-   inevitable once the lease pool wraps. B is assigned slot 1 and its address is written to slot 1's
-   `src` table, correctly.
-4. `.22` is now in **both** tables. `quick` is first-match, so slot 0 matches B's traffic first and
-   **B runs under A's allowlist**, not its own.
-
-No component behaved incorrectly. The join key was reused while a stale row still referenced it.
-
-### 1. Clear before claim, at every start
-
-**Before installing a sandbox's own rules, delete *this one address* from every table that could
-hold it.**
-
-This is not an inspection of other sandboxes, and an earlier draft of this section described it in a
-way that read like one. It is a blind delete of a single address across a bounded, fixed set of
-tables — 32 on macOS, one chain scan on Linux — without caring whose the address used to be. Deleting
-a non-member is a no-op.
-
-**Why blind rather than targeted:** hitting only the right table means knowing which slot the
-address's *previous* holder occupied. That is precisely the stored state established above as
-untrustworthy — a sandbox that crashed may never have recorded anything, and a record that exists may
-name a slot that has since been reused. The address is trustworthy; nothing that claims to describe
-it is.
-
-This is the single most important rule, because it makes correctness independent of whether cleanup
-ever ran — and the case most needing to survive is the one where nothing ran at teardown.
-
-### 1b. Empty a reused container before populating it — the other half of the same hazard
-
-Rule 1 scrubs the **address**. It does nothing about the **policy container** the address is being
-attached to, and a reused container carries the last occupant's contents. *Found by auditing this
-plan on 2026-08-07; the first draft stated the invariant's second clause and delivered only the
-first.*
-
-The case: sandbox A occupies slot 0 with allowed destinations {X, Y}. A dies. Slot 0 is later
-assigned to sandbox B, whose allowlist is {Z}. `pfctl -T add` **adds** — it does not replace — so
-`yb_dst_0` becomes {X, Y, Z} and **B silently reaches X and Y**. That is D3's widening again,
-arriving through *slot* reuse rather than *address* reuse, and rule 1 cannot see it because B's
-address is entirely correct.
-
-Nothing clears it incidentally: table contents **survive a ruleset reload** (`pf-assumptions.txt`
-D2 — `src_17` intact across a reload, enforcement continuing), which is a property the design wants
-for other reasons and which here means a repair or pool resize will not save us.
-
-**So a reused container is emptied, never added to.** `pfctl -T flush` on the slot's `dst` table
-before populating it — already authorised by D132's grant, so no change to the security boundary.
-
-The flush leaves a window in which the table is empty, and that window is safe in the right
-direction: **an empty allowlist fails closed** (`pf-assumptions.txt` D4 — empty `dst`, both allowed
-and denied destinations unreachable). Flush-then-populate therefore passes through "no egress",
-never through "all egress".
-
-Stated generally, because the Linux unit is not chosen: **any container that can be reused must be
-emptied as part of claiming it.** A design that allocates a fresh container per sandbox and never
-reuses one satisfies this for free — which is a point in favour of that shape on Linux, where
-nothing forces a fixed pool.
-
-### 1c. The two clears are orthogonal, and acquisition needs both
-
-They are easy to confuse and neither substitutes for the other:
-
-- **Rule 1 is cross-slot.** It protects against *our address* being stale in **someone else's** slot.
-  Flushing the slot we are claiming does nothing about it — that is D3 exactly: B legitimately holds
-  slot 1 while its address sits stale in slot 0.
-- **Rule 1b is within-slot.** It protects against *this slot's* leftovers. Scrubbing our address
-  everywhere does nothing about it, because the leftovers are someone else's destinations, not our
-  address.
-
-**A slot holds exactly one sandbox**, so its `src` table should hold exactly one address. Flush both
-of the slot's tables rather than only `dst` — that makes the slot's post-condition trivially the
-invariant instead of something argued about, and it removes stale addresses that would otherwise be
-subject to a policy which is *about to change meaning* under them.
-
-**Acquisition sequence, in order — the order is load-bearing:**
-
-1. `-T flush` the claimed slot's `src` **and** `dst`. The slot is now empty; an empty allowlist
-   fails closed (D4), so nothing is reachable through it during the rest of the sequence.
-2. `-T delete <our address>` from **every other** slot's `src`. Cross-slot scrub.
-3. `-T add <our address>` to the claimed slot's `src`.
-4. `-T add <destinations>` to the claimed slot's `dst`.
-
-Steps 2 and 3 must not be reordered: scrubbing after claiming deletes our own entry, and the sandbox
-comes up matching no slot at all. That failure is silent in the dangerous direction — no `src` match
-means no rule matches, and traffic falls through to whatever the main ruleset does.
-
-**The cost this implies, measured on hardware (2026-08-07).** sudoers matches one table per
-invocation, so step 2 is one `sudo pfctl` call per slot — 31 calls at a 32-slot pool — on top of the
-flushes and adds, for roughly 35 per sandbox start. Multiple *addresses* fit in one call (D5) but
-multiple *tables* do not. Measured on an M4 MacBook Air, macOS 26.5.1
-([`pf-acquire-cost.txt`](../research/macos-isolation-spike/results/pf-acquire-cost.txt)):
-
-| | median |
-| --- | --- |
-| one NOPASSWD `sudo pfctl -T` call, warm | **9.3 ms** |
-| the same work as root, no `sudo` | **1.4 ms** |
-| the full 35-call acquisition sequence | **329 ms** |
-| `yoloai new --backend apple`, empty workdir | **2380 ms** |
-| `yoloai new --backend tart`, empty workdir | **40924 ms** |
-
-So acquisition is **13.8% of an apple sandbox start** and 0.8% of a tart one, and total cost is
-almost exactly `calls × 9.3 ms` — the 8/16/32-slot pools cost 101/175/320 ms, linear in pool size as
-predicted.
-
-**Which lever exists is decided by where the 9.3 ms goes: 85% of it is `sudo`, not `pfctl`.** The
-privileged work itself is 1.4 ms. Policy *size* is irrelevant — 500 extra sudoers rules cost 0.6 ms —
-so the fixed per-invocation overhead of spawning `sudo` is the whole cost, and **nothing but reducing
-the call count can help**. (Policy *source* is a different question and an untested one: a host whose
-sudoers arrives over LDAP/AD, or whose PAM stack does a network lookup, is not described by this
-measurement and is where the call count would hurt most.)
-
-### The scrub collapses to O(sandboxes), for one added read
-
-The obvious collapse — one call dumping every table's contents — **does not exist**. Ten `pfctl`
-forms were tried against planted marker addresses; none returns table contents anchor-wide.
-
-But a weaker read suffices, and it does exist. `pfctl -a <anchor> -s Tables -vv` reports every
-table's **address count** in one call, and **a table holding zero addresses cannot hold ours**, so it
-needs no delete. That is not a heuristic: it is the same blind delete rule 1 specifies, with the
-provably-empty slots skipped. Measured against a same-run blind baseline of 324 ms
-([`pf-scrub-collapse.txt`](../research/macos-isolation-spike/results/pf-scrub-collapse.txt)):
-
-| k = slots holding an address | collapsed | vs blind |
+- **Rides:** **any.** It adds enforcement to a mechanism that does not ship yet; nothing user-visible
+  is withdrawn.
+
+**Filename note.** This file is still `enforcement-state-reaping.md` because eleven documents and
+harness scripts link to it, five of them in another agent's write surface. The name is historical:
+reaping is now one section rather than the subject. Renaming it is a follow-up, not a reason to churn
+those files.
+
+## Why this was rewritten
+
+The 2026-08-06 draft keyed enforcement on the sandbox's IP address and built four rules to make that
+safe: clear-before-claim, empty-before-populate, an acquisition ordering, and a sweep. Three things
+happened.
+
+1. **Two independent audits** found the draft's conclusions systematically stated one step wider than
+   the runs that produced them. The load-bearing one — *"there is no stable per-sandbox non-address
+   key on either platform"* — rested on a single nftables matcher on Linux and on a misread of the
+   macOS result.
+2. **Re-measurement refuted it.** A per-sandbox interface *is* a usable key on both platforms
+   (`k1-interface-as-sole-key.txt`, `k2-veth-key-shared-bridge.txt`, `pf-interface-key.txt`).
+3. **Source research** into Calico, Cilium, moby, netavark, CNI, Tailscale and systemd found that
+   nobody keys on the workload's address, that the conntrack fast-path we had adopted is the direct
+   cause of two bugs we hit, and that our reaping design had already shipped and been fixed as a
+   production defect elsewhere.
+
+The full list of retracted claims lives in
+[`research/linux-enforcement/results/README.md`](../research/linux-enforcement/results/README.md)
+§ *What these files do NOT support*, which is the durable record. This document is the replacement
+design, not a diff against the old one.
+
+## The three decisions everything else follows from
+
+1. **Key on the host-side interface, never on the guest's address.**
+2. **Evaluate policy on every packet — no `ct state established,related accept` in front.**
+3. **A rule's identity is the sandbox ID; the interface name is only its match.**
+
+---
+
+## 1. The key is the host-side interface
+
+**Measured, Linux** (`k1-interface-as-sole-key.txt`): two sandboxes on two docker networks, under a
+policy containing **zero address-matching rules** and keyed only on `iifname "br-<netid>"`. The
+allowlisted destination stayed reachable, the denied one was blocked with the counter to prove which
+rule decided, and the second sandbox was untouched. Four networks created and destroyed in sequence
+produced four distinct bridge names: **they do not recycle.**
+
+**Measured, shared bridge** (`k2-veth-key-shared-bridge.txt`): containerd puts every sandbox on one
+`yoloai0`, so the per-network variant does not apply there. With `br_netfilter` loaded,
+`iptables -m physdev --physdev-in <veth>` discriminated one sandbox from another on `docker0`.
+
+**Measured, macOS** (`pf-interface-key.txt`): a held bridge index is never reassigned; an ingress tag
+keyed on the bridge is per-sandbox under one network per sandbox, under a ruleset containing no
+address; and a rule re-attaches by name when its interface returns. What the earlier pass recorded as
+"the index recycles" had measured recycling *after release*, which was never the question.
+
+**It is not defeasible by the guest.** Holding `CAP_NET_ADMIN`, a sandbox added a second address and
+stayed blocked, changed its MAC and stayed blocked, and cannot name the host-side interface at all —
+it sees `eth0` and `lo`, and renaming the peer from inside fails with `No such device`. Neither Calico
+nor Cilium does MAC-based anti-spoofing either, for the same reason: the host-side interface is the
+trust boundary.
+
+### The pin: if an address appears in a rule, bind it to the interface upstream
+
+Both mature implementations still *use* addresses — they just never let the address be the thing that
+identifies the workload. Calico's per-endpoint chains contain **zero** IP matches
+(`felix/rules/endpoints.go`); the IP↔interface binding is enforced *before* policy by strict RPF in
+`raw`/PREROUTING (`-m rpfilter --invert --validmark`), with a comment aimed straight at our threat
+model: *"non-privileged containers can't usually spoof but privileged containers and VMs can."*
+Cilium bakes the endpoint's IP into its per-endpoint program as a load-time constant and drops on
+inequality (`bpf/lib/lxc.h`, `is_valid_lxc_src_ipv4`).
+
+**So: an address may appear in a rule only where an upstream check guarantees it belongs to that
+interface.** Without the pin, address-keyed rules are defeasible; with it, they are a derived
+attribute of a key that is not.
+
+**Not measured:** whether RPF is available and correct on every backend's topology here — in
+particular under rootless podman's userspace stack, and on macOS where the equivalent is Cilium's
+per-endpoint constant rather than a route lookup. Assume nothing.
+
+---
+
+## 2. No conntrack fast-path
+
+Every ruleset in the old draft opened with `ct state established,related accept`. **That rule is the
+direct cause of two of the bugs this workstream found**, and it is optional.
+
+Cilium routes `CT_NEW` and `CT_ESTABLISHED` into the same case, both calling a live policy lookup;
+only `CT_RELATED` and `CT_REPLY` skip enforcement (`bpf/bpf_lxc.c`). Consequently Cilium has **no
+conntrack flush on policy change anywhere**, and its GC filter could not express one. Calico keeps the
+fast-path and therefore needs flushing, with an ordering constraint most people would get wrong.
+
+**Measured here** (`p1-no-fastpath-correctness.txt`, `p1b-revocation-decay.txt`,
+`p2-fastpath-cost.txt`), on a rig with no DNS in the path:
+
+| | correctness | revocation of an in-flight transfer | throughput |
+| --- | --- | --- | --- |
+| fast-path | 64 MB transfer completes, denied refused, DNS fine | **300 KB/s sustained for 30 s; drop counter 0** | 35–42 Gbit/s |
+| no fast-path | identical | **0 KB/s within 10 s; drop counter 12** | 35–42 Gbit/s |
+
+The drop counter is what makes the second column a result: with the fast-path, no packet ever reached
+the deny rule. Throughput was measured at allowlist sizes 1, 1000 and 10000; run-to-run variance on a
+single configuration exceeded every difference between configurations, so the honest statement is
+**this proxy cannot separate the two shapes**, not that they are equal.
+
+**What dropping it removes:** the whole conntrack teardown apparatus — no flush, no ordering
+constraint, and no destination-scoped invalidation. That last one matters most, because **nobody in
+the surveyed corpus has built one.** Calico flushes by *endpoint* address (`--orig-src`/`--reply-src`);
+we would be revoking a *destination*. Every time this workstream built something with no prior art, it
+was wrong.
+
+It also removes the recycling inheritance measured in `l10c-udp-residue.txt`, which existed precisely
+because the established rule accepted a flow the allowlist did not.
+
+**And it closes a hole the field leaves open.** Grepping Calico and Cilium for conntrack helpers
+returns zero hits in both; both accept `RELATED`. An enabled FTP/SIP helper can mint an expectation
+authorising a connection the allowlist never approved. Not accepting `RELATED` on egress closes it.
+**This is a claim about rule shape and was not exercised by any run** — it needs its own test.
+
+### Two constraints that come with it
+
+**The chain policy must remain `accept`.** Predicted wrong and caught by a counter: replies *do*
+traverse the chain (1308 packets, 67 MB in `p1-no-fastpath-correctness.txt`) — they simply match no
+rule, because every rule matches on the guest's side. A chain defaulting to `drop` would kill all
+return traffic.
+
+**The sandbox gets a stall, not an error.** The transfer sat at 0 KB/s for 25 s rather than failing.
+Calico's BPF mode injects RSTs for exactly this reason, because a silently dropped flow is a black
+hole until TCP timeout. If "the agent just reconnects" is to be true, that is separate work and it
+applies to either shape.
+
+---
+
+## 3. Identity is the sandbox ID, not the interface name
+
+**Interface names are reusable, and one backend reuses them aggressively.** docker generates
+`veth` + 7 random hex with a 3-attempt collision probe and **persists** the name because it depends on
+it. CNI generates `veth%x` from 4 random bytes and does **not** persist it. netavark passes an **empty
+name and lets the kernel pick `vethN`** — lowest-free sequential, the worst case. My own K2 measured
+three docker cycles without reuse; that result does not transfer to netavark.
+
+CNI's own mac-spoof checker faces exactly this problem and separates the two concerns
+(`pkg/link/spoofcheck.go`): the **match** is `iifname == <host veth>`, while the **identity** is a
+chain name and rule comment derived from the container ID. Its teardown proves the point — it locates
+and removes everything with the interface name and MAC passed as empty strings.
+
+**So every rule we install carries an identity derived from the sandbox ID**, in the nft comment or
+the chain name. Calico does the same with a hash in an iptables comment, and its reaper parses back
+*only* the comments, having explicitly rejected parsing full rules as unrobust.
+
+**Consequence:** if we ever key on iptables rather than nftables, we must plant a marker rule — CNI's
+own source says GC is impossible otherwise. An nft comment is already a reconcilable key.
+
+---
+
+## Reaping, which is now small
+
+With a key that does not recycle and an identity independent of it, reaping stops being a security
+mechanism and becomes hygiene.
+
+**Nothing beneath us will do it.** The CNI GC verb is unimplemented in all 18 plugins (`/* FIXME GC */`),
+and the one working reconcile in that tree is unreferenced dead code. netavark has no reconciler at
+all. Docker's `cleanupLocalEndpoints` is the only one in the corpus, and it runs at daemon start only.
+The six-day-old orphaned accept rule and IPAM reservation in `l12b-stale-cni-entry.txt` are the
+expected outcome, not an anomaly.
+
+**The design, taken from docker's shape with netavark's ordering rule:**
+
+- A **persisted per-sandbox record** is the reconcile input. Docker reconciles from an in-process
+  registry, which does not survive its own death; netavark persists, which does.
+- **The record is removed before the rules it describes**, never after — netavark's file-lock comment
+  names the exact race, and they hit it.
+- **At startup, diff persisted records against live sandboxes and tear down the difference**, driving
+  the same path a normal delete takes.
+- **Never delete on one identifier alone.** Calico shipped an address-keyed reaper that deleted a
+  *live* workload's conntrack entries because an overlapping object went away (commit `cd27e0af`), and
+  Cilium guards its interface sweep with a reverse-pointer cross-check against an ifindex clash. Both
+  converge on cross-validating against a second independent signal. Cilium's liveness signal is
+  `LinkByName` plus **two consecutive** failed 5-minute rounds — deliberately slow, to avoid flapping.
+
+**Neither model covers a kill between "rules torn down" and "record removed."** That is netavark's
+residual gap and the reason a startup reconcile is still needed on top of ordered teardown.
+
+---
+
+## Verification and liveness
+
+**Reading the rules is not verification, on either platform.** On macOS, under the shadowed fault,
+`pfctl -s rules` reports HEALTHY while a denied destination answers 301. On Linux, a `socket cgroupv2`
+rule in `prerouting` loads clean and never fires. State that looks right can be inert.
+
+**Linux: subscribe.** Corrected 2026-08-10 — the earlier conclusion that a whole-ruleset flush emits
+no signal was reasoned from firewalld's D-Bus signal not covering it and generalised without testing
+the mechanism that does. Verified in a throwaway netns: `nft flush ruleset` emits a delete event per
+object plus `# new generation N by process <pid> (nft)`. `iptables-nft` operations are equally
+visible. **`iptables-legacy` is silent** — it uses `setsockopt`, which has no multicast channel — so a
+probe is the fallback for that backend and a startup backstop, not the primary mechanism.
+`github.com/google/nftables` ships a `Monitor` joining `NFNLGRP_NFTABLES`; it has no `NFT_MSG_NEWGEN`
+case, so attribution needs custom parsing, but `DELSETELEM` is covered.
+
+**macOS: poll.** No signal of any kind — zero log entries on a pf predicate, zero of nine watched
+notify keys with the watcher proven alive in the same run, and `/etc/pf.conf`'s mtime unmoved. The
+behavioural canary is the detector, at a **corrected 320–385 ms** with a 15.3 s worst case against a
+dropping path. It previously failed open, returning HEALTHY when the network was down.
+
+**Do not fight forever.** Tailscale's trample handling is the pattern: detect, re-apply with backoff,
+**bound the retries**, then raise a persistent health warning and stop — at n=10 it logs that it is no
+longer attempting to replace the file. Collapse a batch of events into one fixup and rate-limit, or
+two processes fight at machine speed. **yoloAI must decide its terminal state when it loses**: fail the
+sandbox, or degrade to visibly-unenforced. That is a product decision, not an implementation detail.
+
+---
+
+## What the forward hook does not cover
+
+**Sandbox→host traffic never enters it** (`r6-host-destined-traffic.txt`). Under a drop-everything
+forward policy a sandbox still reached the bridge gateway *and* the host's LAN address on SSH: forward
+counter 3, input counter 8. Packets addressed to an address the host holds are delivered locally.
+
+So every rule here is scoped to traffic the host **routes onward**, and is silent about traffic it
+**terminates** — and silence is permission. The counterpart must be an **allowlist of host services**,
+not a blanket deny, because the sandbox is supposed to reach the credential broker's injector endpoint
+on the gateway address. Getting that backwards breaks credential injection on every bridge backend at
+once.
+
+---
+
+## Per-backend reach
+
+| Backend | Key available | Notes |
 | --- | --- | --- |
-| 0 | 49 ms | 6.6× |
-| 1 | 61 ms | 5.4× |
-| 2 | 70 ms | 4.6× |
-| 4 | 86 ms | 3.8× |
-| 8 | 123 ms | 2.6× |
-
-`49 + 9.25k` ms, so it stays ahead of the blind form until k ≈ 30 — which a 32-slot pool can barely
-reach. At a realistic two or three running sandboxes it is ~4.5× cheaper, and 2.9% of apple start
-rather than 13.8%.
-
-**It is sound only under the lock rule 3 already requires.** Between the dump and the deletes, a slot
-can only go from empty to holding *our* address if someone else writes our address — and nobody does:
-we alone write it, a live sandbox holds it so no concurrent start can be handed it, and slot
-allocation is under the cross-sandbox lock. Take that lock away and the skip is wrong.
-
-**And it removes pool size as a latency knob**, which is the more interesting consequence. Under the
-blind form, a larger pool costs every start 9.3 ms per slot whether or not anything uses it, so the
-user-visible cap and the start latency are the same dial. Under the collapsed form the cost tracks
-*running sandboxes*, and an idle 32-slot pool is free. Sizing the pool becomes purely a question of
-how many concurrently-isolated sandboxes to support.
-
-**The cost is one added `NOPASSWD` line, and it is not proposed here.**
-
-```
-<user> ALL=(root) NOPASSWD: /sbin/pfctl ^-a com\.apple/yoloai -s Tables -vv$
-```
-
-Measured as refused under the shipped grant, permitted with the line, and refused again once it was
-removed mid-run — so the line is the whole difference and nothing else was quietly allowing it. It is
-a **read**: it cannot mutate membership, load a ruleset, or touch pf's enable state, so it reaches
-none of the nine bypasses D132 refused. It discloses each slot's address *count*, never an address,
-where the grant already permits `-t <table> -T show` — strictly **less** than 64 calls a holder can
-already make. **This does not make it approved.** sudoers matches a concatenated argument string, so
-every added line is a new place for an argument to be smuggled, and the only thing that has ever
-caught that here is D132's permit/refuse matrix. Re-run it against the extended policy, or keep the
-blind form and pay the 329 ms.
-
-**If the line is refused, the fallback is unchanged and still correct**: reduce the pool to the number
-of slots actually wanted, since the blind scrub is O(pool), not O(sandboxes). What is no longer
-available is "skip the scrub" — at 13.8% of start it was never expensive enough to justify reopening
-D3.
-
-### 2. Reconcile — for capacity and hygiene, *not* for security
-
-Rule 1 is what closes the inheritance hazard, and it closes it completely: an address is scrubbed
-immediately before it is claimed, so no sandbox can start under someone else's policy no matter what
-was left behind. **The sweep is therefore not on the security path.** What it does is reclaim what
-rule 1 leaves behind — entries for addresses nobody has claimed yet — which matters for two
-non-security reasons: macOS slots are a finite pool (32), and Linux state would otherwise grow
-without bound.
-
-That distinction is worth being firm about, because it sets where the sweep has to run. It does
-**not** have to run on every start; it can be lazy — at `system prune`, and on slot exhaustion, which
-is the moment its absence first costs anything. A sweep that runs rarely also contends rarely, which
-is most of why rule 4 is cheap.
-
-When it does run: any address in enforcement state that **no running sandbox holds** is removed. Two
-traps:
-
-- **Identify orphans by address, never by name.** `runtime/orphan.go` documents why: `yoloai-acme-probe`
-  is both principal `acme`'s sandbox `probe` and a legacy sandbox named `acme-probe` (DF19/DF115/DF125).
-  Any design that names orphans re-creates that finding. Addresses are unambiguous.
-- **A stopped-but-not-destroyed sandbox keeps its record**, so a "record gone" predicate never reaps
-  its entry — and that entry is exactly the one a recycled address will collide with, because the
-  address was released the moment the sandbox stopped.
-
-### 2b. The sweep reclaims entries. Nothing reclaims the install.
-
-Rule 2 reclaims *addresses inside* tables. It says nothing about the things that hold them, or about
-the privileged artifacts that make them possible — and those outlive a sandbox by much more than an
-entry does.
-
-**Observed, not hypothesised.** The mid-life run's W0 census
-([`pf-midlife-wipe.txt`](../research/macos-isolation-spike/results/pf-midlife-wipe.txt)) found
-`com.apple/yoloai_rb` still loaded three days after the reboot round that created it, alongside
-`com.apple/yoloai_b` from a different harness. Both are research artifacts rather than anything
-product code created — but they are exactly the shape this design would ship, and they demonstrate
-the mechanism for free.
-
-**And they had both already been cleaned up.** Each harness's cleanup runs `pfctl -a <anchor> -F all`,
-and both anchors were still enumerable afterwards. **There is no `pfctl` verb that removes an
-anchor** — flushing empties it and leaves it in place, so "we tidied up after ourselves" and "the
-anchor is gone" are different claims, and only the reboot ever delivers the second.
-
-Three classes of state, none covered by rule 2:
-
-| | Lifetime | Reclaimed by |
-| --- | --- | --- |
-| Membership entries in `yb_src_N` / `yb_dst_N` | until reboot | rule 2's sweep |
-| **The anchor itself**, with its loaded rules | until reboot; flush does not remove it | *nothing* |
-| **The sudoers grant** in `/etc/sudoers.d/` | **survives reboots** | *nothing* |
-| **The pinned ruleset**, `/etc/yoloai/pf-pool.conf` | **survives reboots** | *nothing* |
-
-The last two are the serious ones, because they are the two that a reboot does *not* clear. Uninstall
-yoloAI and a `NOPASSWD` root grant naming `/sbin/pfctl` stays in `/etc/sudoers.d` indefinitely,
-authorizing a tool that is no longer installed. D132 designs an install — interactive, privileged,
-opt-in — and no uninstall. That asymmetry is the finding.
-
-**Two mechanical problems, both of which shape the answer rather than just complicating it.**
-
-- **Removal is as privileged as installation, and the grant cannot do it.** The grant authorizes
-  `/sbin/pfctl` and nothing else, so by construction it cannot delete a file in `/etc/sudoers.d` or
-  `/etc/yoloai`. Cleanup therefore cannot be a background sweep the way rule 2 can — it needs the
-  same interactive privileged step the install does. **This is correct and must not be "fixed"**: a
-  grant that could remove its own constraints is a grant that could rewrite them.
-- **Discovery is blocked by the same grant.** The grant permits reading *our* anchor
-  (`-a com.apple/yoloai -s rules`). Nothing enumerates anchors — `pfctl -s Anchors` is root-only and
-  ungranted — so an anchor left behind under a name yoloAI no longer uses is **invisible to the only
-  mechanism that would clean it up**. This is the same shape as the address-count dump in § 1c: a
-  read the grant does not have. If anchor names ever change between versions, every prior name leaks
-  permanently and silently.
-
-**Identify these by name, and note that this does not contradict rule 2.** Rule 2 forbids naming
-because sandbox-derived names are ambiguous — `yoloai-acme-probe` is two different things
-(DF19/DF115/DF125). These names are yoloAI's own fixed literals, chosen by the design and containing
-no user input, so the ambiguity that rule exists to avoid cannot arise. Addresses for entries, fixed
-literals for containers.
-
-**The unit is the host, not the backend.** `Backend.Prune(ctx, knownInstances, …)` is per-backend
-(`runtime/runtime.go:519`), but pf state is host-global and shared: an apple guest and a tart guest
-hold different allowlists in different slots of the same pool simultaneously
-(`pf-tart-pool.txt` T1/T2/T3). So this does not fit that interface — pruning "the apple backend" must
-not reap a slot belonging to a running tart sandbox, and `knownInstances` scoped to one backend is
-exactly the list that would get that wrong. Whatever reclaims pf state has to see every backend's
-live sandboxes at once, which is a different seam from the one prune uses today.
-
-**What this adds to "done".** A teardown path that removes the grant, the pinned file and the
-anchor's contents; `doctor` reporting the grant and pool as present-and-reclaimable state, since it
-already exists to *"surface reclaimable state"*; and the acknowledgement that the anchor itself
-cannot be removed before a reboot, so the honest report is "emptied, and gone at next restart"
-rather than "removed".
-
-### 3. Lock-free, by ordering
-
-The sweep holds no lock. Two ordering rules make it safe without one:
-
-- **Write the sandbox record before its enforcement membership.**
-- **In the sweep, enumerate membership before reading records.**
-
-Then an address seen in a table had its record written earlier, so a live sandbox is never swept; and
-a sandbox created mid-sweep is not in the enumeration at all. Per-sandbox `flock`s already exist
-(`store.AcquireLock`, taken in create/start/stop/destroy/reset) and close same-sandbox races. Slot or
-chain allocation is cross-sandbox and needs its own lock.
-
-### 4. Live mutation must not race the sweep
-
-`sandbox <name> allow` mutates enforcement state for a *running* sandbox, and after the move it does
-so directly on host state rather than by exec'ing into the guest. So a reaper deciding "this address
-is orphaned" can interleave with a patch adding an entry for it.
-
-Rule 3's ordering does not cover this: it protects a sandbox's *first* membership write, not a later
-one. The mutation and the sweep must therefore agree on the same per-sandbox lock — which is the lock
-that already exists and that the file-exchange path was found not to take (DF182). Take it in the
-live-patch path, and have the sweep take it per candidate before removing.
-
-**The soft-fail contract survives the move and improves.** `netpolicy.json` on disk stays the source
-of truth and a live patch stays best-effort, queued for next start if it cannot be applied. Today it
-soft-fails whenever the guest is unreachable; on host state there is no guest to be unreachable, so
-the queued-for-next-start path becomes rare rather than routine.
-
-### 5. Connection state is enforcement state, and it outranks the rules (synthesis, 2026-08-09)
-
-Every ruleset in this design accepts already-established flows — `ct state established,related` on
-Linux, the equivalent state table on macOS — because without it nothing works. That accept is keyed
-on **flow state, not on policy**, so it survives changes to policy. Measured on both platforms, and
-in both directions:
-
-- **Revoking a destination does not close it.** Linux (`results/x2-revocation-vs-live-flow.txt`): a
-  keep-alive connection to an allowlisted peer kept receiving after the element was deleted — 1370
-  bytes before, 3288 ten seconds after — while new connections were refused. macOS
-  (`results/pf-revocation.txt`): the transfer kept advancing after the delete, same control.
-- **Replacing the sandbox behind an address does not close it either.** Linux
-  (`results/l10c-udp-residue.txt`): sandbox A queried a resolver it was allowlisted for and was
-  destroyed; B took the same address with an allowlist naming neither the destination nor port 53; a
-  query from a fresh source port was denied, and **the same query reusing A's source port was
-  answered**, on the `established` rule. TCP is safe here — a cleanly closed flow lingers as
-  `TIME_WAIT` and a reused tuple is classified `NEW` — but UDP has no close handshake and simply
-  persists.
-
-**These are one cause seen twice, and a fix for either alone is indistinguishable from a fix for
-both when you read the rules.** So the rule is: **whenever an address's policy changes — revocation,
-teardown, or claim — the flow state for that address is dropped in the same operation.**
-
-Scoping differs, and macOS's is the constrained one:
-
-- **Linux** — `conntrack -D -s <addr> -d <peer>` for revocation, `-s <addr>` at teardown and claim.
-  Measured to stop the flow dead (3288 → 3288). It names the pair, so it reaches nothing else.
-- **macOS** — **corrected 2026-08-10.** This entry previously said a return-direction rule fixes it
-  and that `-k` should therefore be avoided as an unscoped grant. **The rule alone does not fix it.**
-  With `pfctl -k` removed and everything else identical, the transfer survived (54 → 108 bytes, all
-  four states intact, two still ESTABLISHED); rule **and** kill together stopped it dead (45 → 45)
-  (`results/pf-revocation.txt` R5a/R5b). The original arm ran the delete *and* the kill, so it could
-  only ever have shown the rule **necessary** — never sufficient. Neither is sufficient alone.
-
-  **The form to adopt is `pfctl -k <guest> -k <gateway>`** (`results/pf-revocation-alt.txt`). It names
-  both endpoints, so the sudoers grant can pin the peer rather than permitting `-k <anything>` — the
-  grant must widen, but it can widen narrowly. Three properties, all measured:
-  - **It is directional, and the intuitive order is the broken one.** Guest-first kills the state and
-    stops the flow; gateway-first kills **zero** states, reports success, and the transfer continues.
-    The mechanism argument that produced the old wording — "the surviving state is sourced from the
-    host, so name the host first" — predicted the wrong order. **Pin the order; do not re-derive it.**
-  - **Scope was measured, not assumed:** a second sandbox streamed through every kill untouched.
-  - **Both no-grant escapes are dead.** An anchor accepts `set timeout` and *silently ignores it* —
-    `pfctl` exits 0, prints nothing, and the anchor still reports the global 86400 s against the 20 s
-    requested. And a timeout could not reach this case regardless: the busy state decayed 0 s over
-    20 s while an idle control decayed the full 20 s. `-K` was never a candidate — `pfctl(8)` says it
-    kills *source tracking* entries, not states; it killed 0 and the transfer continued.
-
-**So this rule is now symmetric, and that is the correction.** Both platforms need state teardown.
-"One cause seen twice" was right about the cause; the macOS *prescription* had diverged from it, not
-the finding from itself.
-
-**One interaction to carry into the design, currently untested.** "Pin the peer to our gateway" holds
-on the default network (one gateway, ten of ten observations) — but per-sandbox networks, which the
-interface-key result below recommends, get their **own** gateways from a hole-filling allocator
-(`.65.1`, `.66.1`, `.68.1` in one run). So the narrow grant is weakest exactly where interface keying
-is adopted. The two recommendations pull against each other and the combination has not been put
-through D132's permit/refuse matrix.
-
-**Consequence for rule 1.** "Clear before claim" must clear conntrack for the address, not only the
-rules. Clearing the rules alone leaves the UDP inheritance above intact and looks complete.
-
-## The forward hook does not cover sandbox-to-host traffic (2026-08-09)
-
-**Measured** (`results/r6-host-destined-traffic.txt`). With the strongest policy this design can
-express — drop everything from the guest, in the forward hook — a sandbox still reached **both** the
-bridge gateway and **the host's own LAN address**, on SSH. The counters say exactly why: the forward
-chain took 3 packets (the external control, duly blocked) while an input-hook counter took 8 (the two
-host-destined connections). A packet addressed to any address the host itself holds is delivered
-locally, so it traverses prerouting → **input** and never enters the forward hook at all.
-
-So the scope of every rule in this plan, rule 0b included, is *traffic the host routes onward*. It is
-silent about traffic the host **terminates**, and silence here is permission.
-
-**What this needs, and it is not simply another deny.** The sandbox is *supposed* to reach one host
-service: the credential broker's injector endpoint, which on the bridge backends is published on the
-gateway address ([egress-broker-host-reachability.md](../research/egress-broker-host-reachability.md),
-D105/D106). So the input-hook counterpart must be an **allowlist of host services**, not a blanket
-drop — permit the injector endpoint, deny the rest — and it has to be built with the broker's
-reachability model in hand rather than against it. Getting that backwards breaks credential injection
-on every bridge backend at once.
-
-**This also corrects L2.** That item reported a second failure — host-side DNS resolution writing the
-host's own LAN address into the guest's allowed set, and the guest reaching it *through* that entry.
-R6 reproduces the reachability with **no allowlist and no accept rule of any kind**, so the entry was
-inert and the attribution was wrong. L2's first conclusion, and [D133](../../decisions/working-notes.md),
-are unaffected; the mechanism recorded here replaces the retracted half.
-
-## Rootless podman: a different enforcement point, the same design (2026-08-09)
-
-**The host netns genuinely cannot reach it**, for three compounding measured reasons: no host route
-to the rootless bridge; egress NAT'd by `slirp4netns` into the **host's own source address**,
-surfacing in the `output` hook rather than `forward`; and one shared `slirp4netns` serving 1, 2 and 3
-sandboxes alike, so even `output` — the one hook where a cgroup key works — has no per-sandbox key
-(`results/l4b-rootless-podman-path.txt`, `l4c`).
-
-**But "outside the sandbox" is not the same as "in the host netns", and the second is what matters.**
-Rootless podman puts the bridge in a *rootless network namespace* of its own, reachable via
-`podman unshare --rootless-netns`, with each sandbox in its own netns attached by veth. Inside it,
-`podman<N>` routes to `tap0` — so **sandbox egress is genuinely forwarded there**, which is the hook
-the whole address-keyed design needs. Everything transfers:
-
-- **Per-sandbox enforcement works** (`results/r1-rootless-netns-enforcement.txt`): a table installed
-  there blocked sandbox A's denied destination, left A's allowlisted destination reachable, and left
-  sandbox B — the control — entirely unaffected.
-- **The address key is defeasible here too, and rule 0b closes it**
-  (`results/r4-rootless-spoof-tcp.txt`): an agent holding `CAP_NET_ADMIN` added a second address and
-  reached a denied destination; one `iifname "<bridge>" drop` blocked it, 5 packets on that counter,
-  with the allowlisted destination still reachable from the real address.
-- **It is out of the agent's reach.** The agent holds `CAP_NET_ADMIN` but **not `CAP_SYS_ADMIN`**
-  (`CapEff 800415fb`), and `/run/user/<uid>/netns` is not visible inside the container — so it can
-  neither `setns` into the namespace nor name it. The rules that bind it are somewhere it cannot go,
-  which is the same property the netns-sharing sidecar provides on docker.
-
-**Two constraints this adds, both load-bearing:**
-
-1. **The rootless netns is destroyed when the last sandbox stops, and the enforcement dies with it**
-   (`results/r3-rootless-spoof-cause-and-lifecycle.txt`: table installed, only container stopped, both
-   netns files gone, table absent on restart). So enforcement is installed **per bring-up, before the
-   agent runs** — the agent-launch gate again — and never assumed to persist. Its converse is the
-   reaping problem in miniature: a sandbox starting while the netns *already* exists inherits whatever
-   state is in it, so rules 1–4 apply inside the rootless netns exactly as they do on the host.
-2. **Rule 0b's interface must be resolved per network at install time, never hardcoded.** Podman and
-   docker both name bridges per network (`podman2`, `br-<netid>`), and a 0b rule naming the wrong
-   bridge loads clean, counts zero, and enforces nothing — which is precisely how it read for one run
-   here before the diagnostic found it (`results/r5-rootless-iifname-diagnostic.txt`).
-
-**So the scope line is not "rootless podman is unenforceable".** It is: *host-netns enforcement covers
-docker and containerd; rootless podman is enforced from inside its own network namespace, with the
-same rules and one extra lifecycle requirement.* Unmeasured: podman 5.x defaults to **pasta** rather
-than `slirp4netns`, and whether that changes the topology is untested — this host runs 4.9.3.
-
-**A protocol note that cost three runs and belongs in any harness here:** ICMP does not traverse
-`slirp4netns` on this host, so `ping` can never be a valid probe inside the rootless netns. Three runs
-tested the spoof with `ping` while controlling with TCP and recorded a reassuring "blocked" that was
-free. Test and control must travel the same path.
-
-## Verifying that enforcement is live: behaviour, not state (synthesis, 2026-08-09)
-
-Reaping and liveness must be designed against one model of *what is currently live* — moby #49728 is
-the bug that comes from splitting them — so the verification answer belongs here. L3, M3 and M4
-converge on it, and it **retires the prior-art recommendation this workstream started from**.
-
-**Reading the rules is not verification. On both platforms, correct-looking state can be inert.**
-
-- **macOS** (`results/pf-liveness-detect.txt`) — under the *shadowed* fault, with the anchor reference
-  present but a `pass quick all` ahead of it and a denied destination answering 301, `pfctl -s rules`
-  reports **HEALTHY**. The behavioural canary reports BROKEN. A main-ruleset read is not a stronger
-  proxy than the checks it would replace; it is the same class of proxy one level up.
-- **Linux** — the same shape twice. A `socket cgroupv2` rule in `prerouting` loads clean and never
-  fires, on packets the same chain provably sees (`results/l1b-cgroup-prerouting.txt`); and every
-  trigger in the L3 matrix was judged on live packets rather than `nft list` precisely because the
-  table being present says nothing about it applying.
-
-**Subscription is not available, and on Linux it is also not needed.** moby #49443 fixes docker's
-firewalld-reload problem by subscribing to the reload signal, and the prior-art pass recommended
-following it. Measurement says otherwise on both platforms:
-
-- **Linux** (`results/l3-*`, `l3b`, `l3c`, `l3d`) — nothing a firewall manager does reaches a
-  dedicated `inet` table of ours. `ufw enable`/`reload`/`disable`, a full `docker restart`, and
-  firewalld on its nftables backend across `--reload`, `--complete-reload` and a restart all left it
-  present *and* enforcing. **The variable is whether you share the manager's table**: with firewalld
-  on its iptables backend, a foreign chain plus its `FORWARD` jump — docker's `DOCKER-USER` shape —
-  were both destroyed by one `firewall-cmd --reload` while firewalld rebuilt its own 30 chains. That
-  is the CVE mechanism, reproduced, and it selects for tools that write into the shared `filter`
-  table. Ours does not. What remains is the **whole-ruleset** class (`nft flush ruleset`, as
-  `/etc/nftables.conf` opens with), which is table-agnostic and emits no signal.
-- **macOS** (`results/pf-change-signal.txt`) — **no signal of any kind.** Zero unified-log entries
-  matching a pf predicate, zero of nine watched notify(3) keys (with the watcher proven alive in the
-  same run), and `/etc/pf.conf`'s mtime unchanged by every event, so a file watcher is blind rather
-  than weak.
-
-> **⚠ CORRECTED 2026-08-10 — the Linux half of this is wrong.** The claim above that the
-> whole-ruleset class "emits no signal" was reasoned from firewalld's D-Bus signal not covering it,
-> and generalised to the platform without testing the mechanism that does. **nftables has a netlink
-> multicast group and a flush is fully observable.** Verified on this host in a throwaway netns:
-> `nft flush ruleset` emits `delete rule` / `delete chain` / `delete table` per object, plus
-> `# new generation N by process <pid> (nft)` — attribution included. `iptables-nft` operations are
-> equally visible; **`iptables-legacy` emits nothing**, because it uses `setsockopt` with no multicast
-> channel. `github.com/google/nftables` already ships a `Monitor` joining `NFNLGRP_NFTABLES` (it has
-> no `NFT_MSG_NEWGEN` case, so the PID attribution needs custom parsing, but `DELSETELEM` *is*
-> covered — relevant if the allowlist is an nft set). So Linux liveness is a **subscription**, with a
-> probe as the `iptables-legacy` fallback and a startup backstop — not a poll. Nobody in the surveyed
-> corpus uses this; OpenSnitch, whose whole job is staying installed, polls at 10 s instead.
-> The macOS half below stands: that was tested directly and no signal of any kind exists there.
-
-**So: a behavioural probe on both platforms, polled.** macOS has a measured shape to copy — detector
-C, 83–105 ms, **no grant needed**, most of it process-spawn rather than network. One free extra on
-macOS: `pfctl -s info`'s *Enabled for* counter resets on `-F all` but not on a plain reload, and
-`-s info` is already in the shipped grant, so a poll that remembers the previous value catches a
-flush by seeing time run backwards. It cannot see a reload that drops the anchor line — the fault
-that defeats everything else — so it is a cheap tripwire for the loud fault, never a substitute.
-
-## Reboot is a clean slate on both platforms, and that is load-bearing
-
-Neither platform persists this state, and yoloAI must not make it persist:
-
-- **Linux:** verified on this host — no `netfilter-persistent`/`iptables-persistent` unit and no
-  `/etc/iptables/rules.v4`, so rules and ipsets are lost at reboot. Critically, yoloAI containers
-  carry **no restart policy** (`grep` for `RestartPolicy` in `runtime/docker` returns nothing), so a
-  reboot stops sandboxes rather than resurrecting them unfiltered. Enforcement and sandbox die
-  together, which is the fail-*closed* direction.
-- **macOS:** anchors do not survive reboot either, which is why D132 authorises restore from one
-  pinned root-owned file (`/etc/yoloai/pf-pool.conf`) rather than from arbitrary input.
-
-**The hazard this rules out** is a persistence feature added later for convenience: rules that
-survive a reboot while sandboxes do not would come back attached to addresses nothing holds, and the
-first sandbox to be handed one of those addresses inherits a policy from before the reboot. If
-persistence is ever wanted, it has to persist the *reconciliation*, not the rules.
+| docker | per-network bridge, or veth via `physdev` | measured |
+| containerd | veth via `physdev` (one shared `yoloai0`) | mechanism measured on docker's veths, **not on CNI's** |
+| rootless podman | inside its own netns | the host netns cannot reach it at all; enforcement installs in the rootless netns, which the guest cannot enter (`CAP_SYS_ADMIN` absent, netns path invisible) |
+| apple | bridge index under one network per sandbox | needs the lifecycle rule below |
+| tart | **none** | no per-sandbox networks; a different question, not a missing answer |
+| seatbelt | out of scope here | parked, see `seatbelt-host-pf-enforcement.md` |
+
+**`br_netfilter` is unowned.** The veth variant needs it, docker only enables it for `icc=false`, and
+neither CNI nor netavark mentions it at all. It is a **host-wide** setting that changes packet paths
+for every bridge on the machine. It needs an explicit preflight assertion, not an assumption.
+
+**Rootless podman's enforcement dies with the last sandbox** — the netns is destroyed and the rules
+with it — so installation is per bring-up, before the agent runs.
+
+---
+
+## macOS: one lifecycle rule Linux does not need
+
+An ordinary restart releases a bridge index, a stranger can take it, and **that stranger inherits the
+departed sandbox's policy whole** — it reached a destination only the departed sandbox was granted and
+was refused its own. First-match-with-`quick` means the stale pass wins before the stranger's own rule
+is reached, and it is invisible to inspection. Withdrawing the stale rule restores correct policy
+exactly (measured, not advised).
+
+**So: withdraw a sandbox's rule when its interface goes; re-read the real index when it returns.**
+Linux needs no equivalent because its names do not recycle.
+
+**macOS also still needs state teardown for revocation**, which Linux does not once the fast-path is
+gone. The rule-alone arm was run and failed: the transfer survived, all four states intact. The form
+that works is `pfctl -k <guest> -k <gateway>`, guest first — gateway-first kills zero states and
+reports success. **Whether pf's `no state` gives the Cilium shape on macOS, removing this asymmetry,
+is untested and is the obvious next experiment.**
+
+**Also unresolved:** "pin the `-k` peer to our gateway" holds on the default network but weakens
+exactly where per-sandbox networks are adopted, since those get their own gateways from a hole-filling
+allocator. The two recommendations pull against each other and the combination has not been through
+D132's permit/refuse matrix.
+
+---
 
 ## What "done" means
 
-- Destroying a sandbox without a clean teardown, then creating another, gives the new one **its own**
-  allowlist — asserted by reaching a destination the old policy allowed and the new one does not.
-  **Run it twice, for the two independent paths:** once where the new sandbox inherits the old
-  *address* (rule 1), and once where it inherits the old *slot* (rule 1b). One test cannot cover
-  both, and the second is the one the first draft of this plan would have passed.
-- A sweep with a sandbox created concurrently never removes the live sandbox's entry.
-- A `sandbox allow` concurrent with a sweep leaves the added entry present.
-- Orphan identification is exercised against the ambiguous-name case DF125 describes, and passes
-  because it never reads a name.
-- **A sandbox that changes its own address is still contained** (rule 0b) — asserted by adding a
-  second address inside the bridge subnet *and* one outside it, and reaching a denied destination
-  from each. Without rule 0b both succeed, so this test fails loudly on a regression.
-- **Revoking a destination closes connections already open to it** (rule 5), and **a new sandbox on a
-  recycled address cannot reuse the previous one's UDP flow** — the second needs the prior flow's
-  5-tuple reused deliberately, because a fresh source port is denied either way and would pass
-  vacuously.
+Each of these must fail when the change it covers is reverted.
 
-**Every one of these must pair its negative with a positive control in the same run.** A sandbox with
-no network at all satisfies "the old policy no longer applies" for free — that is DF172's vacuity
-mode, and it silently invalidated the first run of the `pf` research harness (A22). Assert that a
-permitted destination still succeeds, or the test certifies nothing.
+- A sandbox holding `CAP_NET_ADMIN` that adds a second address, and one that changes its MAC, are
+  **still contained** — with a positive control proving an allowlisted destination still works.
+- Revoking a destination **stops an in-flight transfer**, asserted on the rate falling to zero *and*
+  on the deny counter incrementing. A rate of zero with a zero counter is a free negative.
+- Two sandboxes on one bridge get **independent** policy: one blocked, the other reachable, in the
+  same run.
+- A sandbox destroyed without clean teardown leaves **no rule** that a later sandbox can inherit,
+  asserted by reconciling and then checking a fresh sandbox gets only its own allowlist.
+- Rules for a sandbox whose interface has gone are **withdrawn** (macOS), asserted by a stranger
+  taking the index and getting its own policy rather than the departed one's.
+- The **host-service allowlist** permits the broker's injector endpoint and denies everything else on
+  the host, asserted with credential injection actually working.
+- Enforcement is **reinstalled before the agent runs** on rootless podman, asserted across a
+  stop/start of the last sandbox in the netns.
 
-## The Linux half, measured on hardware (2026-08-07)
+**Every one pairs its negative with a positive control in the same run** (testing-principles §11), and
+the control must travel the **same protocol and path** as the test — three runs in this workstream
+recorded a reassuring "blocked" that was free because they probed with ICMP and controlled with TCP.
 
-Everything about slots, tables and sudo-call counts above is **macOS-only**. Linux has the same
-*hazard* — address-keyed state that outlives its sandbox — and a materially different shape. Measured
-on this host rather than reasoned about:
-
-**`ipset` is not on the host.** It ships *inside* the sandbox image (`Dockerfile` installs
-`iptables` and `ipset`), which is why the shipped `firewall.py` can use a single global set name
-`allowed-domains` — each netns has its own. The host has `iptables` v1.8.10 on the **nf_tables**
-backend, `ip6tables`, and `nft`; `ipset` is **absent**. So moving enforcement host-side either adds
-a new host dependency or uses **native nftables sets**, which are already present and need nothing
-installed. That is a decision this measurement forces and the macOS side never faced.
-
-It also kills the single global name: in the host root netns every sandbox shares one namespace, so
-`allowed-domains` becomes a collision rather than a convenience.
-
-| Property | Measured | Consequence |
-| --- | --- | --- |
-| nft set name length | ≥64 chars accepted | No naming cliff. Sandbox names cap at 56, so a per-sandbox set name fits — unlike the seatbelt socket path, where three bytes of tier decided it (DF169) |
-| Delete a set while a rule references it | **Refused**, `Device or resource busy` | Teardown is *ordered*: remove the rule, then the set. Reversed it fails, and a swallowed failure leaks the set |
-| Set survives its rule being removed | **Yes** | The orphan on Linux is the **whole container**, not an entry in it |
-| Empty set | **Fails closed** — destination unreachable, and reachable again once added, so the block was real and not a dead netns | Flush-then-populate is safe here too, same direction as macOS D4 |
-
-**Where the two platforms genuinely diverge, and it is not cosmetic:**
-
-- **No fixed pool.** Nothing on Linux forces reusable containers, so a **fresh set per sandbox**
-  is expressible — which satisfies rule 1b *by construction* rather than by remembering to flush.
-- **No capacity cap**, so no user-visible limit and no `doctor` slot reporting. The macOS 32-slot
-  ceiling is a consequence of D132's static ruleset, not a property of the problem.
-- **The leak is unbounded rather than fixed.** macOS leaks *entries* inside 32 permanent tables;
-  Linux leaks *sets*, one per sandbox that ever ran, forever. So the sweep is more valuable here even
-  though it is still not the security mechanism — and it has a distinct job: destroy orphaned sets,
-  in rule-then-set order.
-- **Rule 1 has a Linux analogue but a cheaper one.** The scrub becomes "remove any pre-existing rule
-  matching our source address" — O(rules), not O(pool), with no per-table `sudo` multiplier because
-  the host process is already privileged. The ~35-invocation cost is a macOS artifact of sudoers
-  matching one table per call.
-- **`nft -f` applies a whole ruleset file atomically.** The macOS acquisition sequence needs its
-  steps ordered because each `sudo pfctl` is a separate transaction with an observable gap; on Linux
-  the equivalent can be **one atomic transaction**, which removes that hazard rather than managing
-  it. Worth exploiting deliberately.
-
-### D3 reproduces on Linux — measured end to end, 2026-08-07
-
-Not inferred from rule-order semantics. Host-side nft rules were installed by hand (the shipped
-firewall is still in-container, so there is no host state to go stale yet), against real containers
-on the default bridge:
-
-1. **A** at `172.17.0.2`, allowlist `{1.1.1.1}`. Reached `1.1.1.1`, blocked from `8.8.8.8` — the
-   mechanism enforces, both directions.
-2. A destroyed, its rules deliberately left behind.
-3. **B** created, handed `172.17.0.2`, **no policy of its own**: blocked from `8.8.8.8` and
-   **reached `1.1.1.1`** — it inherited a dead sandbox's allowlist, and the reach doubles as the
-   control proving B had a working network.
-4. **C** created on the same address **with its own correct policy** (`allow 8.8.8.8`) appended after
-   the stale rules: **blocked from `8.8.8.8`** — the destination it was configured for — and
-   **reached `1.1.1.1`**, which was never its. The stale `drop` at handle 4 shadowed C's own accept
-   at handle 6.
-
-C lost its own policy *and* gained A's, which is D3's result exactly. The hazard is not
-platform-specific and the Linux mechanism is not more forgiving.
-
-### The macOS unevaluated-anchor finding has a Linux analogue, and it decides the chain type
-
-The macOS side found the worst shape of D6: `/etc/pf.conf`'s `anchor "com.apple/*"` line is what makes
-pf descend into our anchor, that line lives in a file we do not own, and `pfctl -F all` destroys it
-without restoring it. The anchor then holds every correct rule, the addresses sit in the right
-tables, pf is enabled — **and pf never looks at any of it**. Every start-path check passes.
-
-**Linux can reach the same state, but only by choosing the wrong chain type** — measured 2026-08-08:
-
-| Chain | Rules present | Enforced |
-| --- | --- | --- |
-| Regular chain (no hook), referenced by nothing | yes | **no** — destination reached |
-| Base chain (`type filter hook forward`), referenced by nothing | yes | **yes** — destination blocked |
-
-A base chain **self-registers with the netfilter hook**; nothing outside it needs to reference it,
-so no external actor can leave it present-and-inert. A regular chain is only reached by a `jump` from
-somewhere else, which is precisely pf's anchor-reference relationship and precisely as fragile.
-
-**So: our own table, our own base chain, at our own hook priority.** Concretely this rules out the
-otherwise-obvious implementation — hanging a rule in **`DOCKER-USER`**. That chain belongs to docker;
-if docker rebuilds it our jump vanishes, and we are back to correct rules that are never evaluated,
-with every existence check passing. The convenience of an established chain is not worth
-reintroducing the exact failure the macOS side had to discover by accident.
-
-This also sharpens what verification must check per platform. On Linux, with a base chain,
-*existence implies evaluation*, so checking our table and chain exist is sufficient. On macOS it is
-**not** — the anchor can exist, be correct, and be unreachable, so verification has to establish that
-pf actually descends into it.
-
-### Distro fragmentation, and the hazard it actually creates
-
-The backend layer has largely converged — modern distros ship `iptables` as an nf_tables front-end
-(this host: `iptables v1.8.10 (nf_tables)`, with `iptables-legacy` still present as an alternative).
-A custom `inet` table coexists with docker's own chains without interference; the whole experiment
-above ran alongside them.
-
-**The fragmentation that matters is the firewall *manager*, and the hazard is a full ruleset flush.**
-Verified on this host: `/etc/nftables.conf` begins with
-
-```
-flush ruleset
-```
-
-which is the Debian/Ubuntu convention. So `systemctl restart nftables` **destroys every table,
-including ours** — and it is an ordinary administrative action with no relationship to yoloAI.
-`nftables.service` happens to be disabled here and `ufw` is enabled, but neither fact is portable:
-firewalld (RHEL/Fedora/SUSE) has an analogous complete-reload, and a host may run any of them.
-
-**This is D6's fail-open mode with a concrete Linux trigger.** D6 measured on macOS that with the
-ruleset flushed and the table still populated, a sandbox reaches a denied destination — *"membership
-without rules is unenforced, and nothing distinguishes it from working isolation. VERIFY must check
-the RULES."* On Linux the same state is reachable by someone restarting a service.
-
-Two consequences the design must carry:
-
-- **Verification checks the rules, not just membership** — the same conclusion D6 forced, now
-  load-bearing on both platforms for different reasons.
-- **Enforcement can vanish under a *running* sandbox.** Every other failure in this plan is caught at
-  start; this one happens mid-life, silently, in the fail-open direction. Detecting it needs a
-  periodic or event-driven check that the rules still exist, closer to tart's net-health probe
-  (DF172) than to anything in the start path. **Undesigned** — and the first thing to design after
-  this, because a guarantee that can be switched off by an unrelated `systemctl` command is not one.
-
-### The macOS half of the same question — measured, and it fails the other way (2026-08-07)
-
-The Linux trigger above is real and unrelated to yoloAI, so the obvious next question was whether
-macOS has one. Seven candidates were run against a live enforcing apple sandbox, each judged on the
-anchor's rules, its membership, **and** live egress in both directions
-([`pf-midlife-wipe.txt`](../research/macos-isolation-spike/results/pf-midlife-wipe.txt)):
-
-| Candidate | Anchor |
-| --- | --- |
-| no-op control (the harness's own check against spurious verdicts) | survived |
-| Docker Desktop quit and restart | survived |
-| another tool running `pfctl -d` then `-e` | survived |
-| Tailscale (a VPN client) down and up | survived |
-| a macOS network-location switch and back | survived |
-| another tool running `pfctl -F all` | **rules and membership survived**; see below |
-| a main-ruleset reload, `pfctl -f /etc/pf.conf` | **rules and membership survived**; see below |
-
-**Nothing wiped the anchor.** `pf.conf` reload was the candidate expected to behave like
-`flush ruleset` — the file ends with `load anchor "com.apple" from "/etc/pf.anchors/com.apple"` and
-our anchor nests under `com.apple`, present in no file — and it left all 8 rules and the membership
-in place. `pfctl -F all` reported `0 tables deleted` and did not reach into the anchor either.
-
-**The last two do something else, and it took a second run to see what.** Both destroyed the *main*
-ruleset (4 → 0 rules), and vmnet's NAT lives there, so the guest lost egress entirely: `allow=000
-deny=000`. That was first written up as **fail-closed** — the opposite of Linux, and a comfortable
-conclusion. **It was wrong**, and the caveat recorded alongside it is what caught it: the run
-established *state* survival and never *enforcement* continuity, because a guest with no network
-cannot demonstrate either direction.
-
-**`pfctl -F all` is a fail-open trigger, in the same direction as Linux, and now measured as one**
-([`pf-flush-reference.txt`](../research/macos-isolation-spike/results/pf-flush-reference.txt) R0,
-which causes it from a named trigger in a single run rather than stitching three together):
-
-1. Sandbox enforcing: `allow=301 deny=000`, main ruleset holds 2 references to `com.apple/*`.
-2. Another tool runs `pfctl -F all`. Our anchor keeps all 8 rules and its membership — **and the
-   main ruleset's `anchor "com.apple/*"` line is destroyed with everything else**, so nothing
-   descends into the anchor any more. `main-refs` goes to 0.
-3. NAT is dead too, so the guest reaches nothing. *This is the state that looks fail-closed.*
-4. Restore only NAT — an apple daemon restart, which is what any user whose VMs stopped working
-   will do. Now: `allow=301 deny=301`, with the anchor still holding 8 correct rules and the
-   address still in its slot.
-
-So the fail-closed appearance is a **transient artifact of the collateral damage**, and it lifts the
-moment someone fixes the visible problem. The invisible one stays.
-
-**The platforms therefore have the same hazard, not opposite ones.** Linux reaches it through
-`systemctl restart nftables` destroying our table; macOS reaches it through any tool's `pfctl -F all`
-destroying the reference that makes our table matter. Both leave a running sandbox reaching denied
-destinations with nothing to distinguish it from working isolation. The earlier claim that macOS
-"only ever takes the network away" is withdrawn.
-
-**One candidate does behave well, and the distinction is worth keeping.** A `pf.conf` reload
-(W7) *restores* the anchor reference, because those lines are in the file — so it damages NAT and
-then leaves the ruleset sound. It is `-F all`, which loads nothing back, that is dangerous.
-
-**Four limits, because this is a negative result and a negative is only as wide as its search.**
-
-- **It is exactly seven candidates.** Not tried, and named so the gap is legible: a macOS system
-  update, a third-party firewall that writes pf (none installed on this host), Internet Sharing being
-  toggled, and — the sharpest — **anything that reloads the `com.apple` anchor itself**. The census
-  shows `200.AirDrop` and `250.ApplicationFirewall` nested in that same parent, so the system
-  components most likely to rewrite it were sitting in the output and were never exercised. That is
-  the next test, not a conclusion.
-- **The two destructive candidates established state survival, not enforcement continuity.** With no
-  guest network, neither a block nor a pass is attributable (DF172's vacuity, which the harness
-  refused to render a verdict under). Rules and membership were read directly from pf and were
-  present; that filtering *kept working across* the event is unproven, because the repair re-armed
-  the slot before egress could be retested.
-- **`pfctl -d` drops the existing reference token.** `References` went from `pfd`, held 3 days, to
-  `No pf starter references held`, and `-e` did not restore it. That is a measured answer to a
-  question `macos-pf-privileged-path.md` had left deliberately untested, and it cuts toward yoloAI
-  *not* relying on someone else's reference surviving.
-- **n=1, one host, one run**, like everything else in that directory.
-
-**What this does to the priority.** The mid-life check is undesigned, needed, and needed **equally
-on both platforms** — the asymmetry claimed in the first draft of this section does not exist. Both
-platforms have an ordinary, unrelated administrative action that silently unfilters a running
-sandbox. Design the detector once, for the property, and run it on both.
-
-### The parent-anchor family: measured, and it is the reassuring half
-
-The candidate named above as the sharpest untested one has now been run
-([`pf-parent-anchor.txt`](../research/macos-isolation-spike/results/pf-parent-anchor.txt)), and all
-three cases **survived with live enforcement verified and the slot never re-armed**:
-
-| Candidate | Result |
-| --- | --- |
-| `pfctl -a com.apple -f /etc/pf.anchors/com.apple` — a direct parent reload | survived, still filtering |
-| loading rules into a *sibling* sub-anchor | survived, still filtering |
-| toggling the macOS Application Firewall, which owns `com.apple/250.ApplicationFirewall` | survived, still filtering |
-
-So reloading a parent anchor does **not** purge its children, and Apple's own components writing
-into `com.apple` do not disturb a sibling. That closes the open question this plan filed, in the
-good direction: the danger is not the anchor hierarchy, it is the **main ruleset's reference into
-it**, which is a different object with different lifetime and different visibility.
-
-**A by-product worth keeping, because it constrains any repair path.** Restarting a *sandbox* does
-not make vmnet reinstall the bridge's NAT; only restarting the apple *daemon* does. And a daemon
-restart moves every guest's address, so repair and re-arm are inseparable on this backend.
-
-### Nothing heals it, and that sets how loud the detector has to be
-
-Every run up to this point repaired the moment it found the fault, so nobody knew how long a real
-user would sit unfiltered. Measured
-([`pf-main-ruleset-writers.txt`](../research/macos-isolation-spike/results/pf-main-ruleset-writers.txt)):
-
-- **Four minutes of polling after the break: nothing restored the reference.** Not a service, not a
-  timer, not the network.
-- **A sleep/wake cycle did not restore it either** — tested precisely because a wake rebuilding the
-  ruleset would have made sleep a repair rather than a hazard. It is neither.
-
-So the exposure window is **unbounded**: a host broken this way stays fail-open until a reboot or an
-explicit `pfctl -f /etc/pf.conf`. Every sandbox started in that window passes every check yoloAI can
-perform and is completely unfiltered.
-
-**The mechanism is visible in the wreckage, and it explains why.** After the flush, the main ruleset
-came back holding *only* `com.apple.internet-sharing`'s two lines — that service re-inserts its own
-anchors on its own, while `/etc/pf.conf`'s `com.apple/*` lines stay gone. macOS has a mechanism for
-re-adding a service's anchors and none for restoring the base ruleset. Nothing is coming to help.
-
-**Two more candidates cleared, on the healthy side.** A sleep/wake cycle left the reference, the
-anchor, the membership and live enforcement all intact — the guest even kept its address across the
-sleep. So did activating and deactivating **content caching**. The dangerous action remains a
-ruleset flush, not ordinary system activity.
-
-## Settled by review (2026-08-07)
-
-**The two platforms diverge, and the divergence is part of the model.** macOS uses a slot pool of
-numbered tables because D132's grant is a static ruleset over fixed table names — that is a
-consequence of the security boundary, not a preference. Linux has no such constraint and gets
-whatever unit fits it, unbounded. Neither is made to resemble the other.
-
-The consequence is **user-visible and must be surfaced rather than hidden**: macOS supports a bounded
-number of concurrently-isolated sandboxes (32 slots, measured to load as 64 rules), and Linux does
-not. So the 33rd concurrent isolated sandbox on macOS fails with an error naming the cap and how to
-free a slot, and `doctor` reports slot usage on the backends that have slots. A capability that
-exists on one platform and not the other belongs in the model as a difference; papering over it would
-mean either an invented cap on Linux or a silent failure on macOS.
-
-**The sweep is capacity and hygiene, not security** — see rule 2. It can be lazy.
-
-**Rule 1's ordering is already available, with room to spare.** It needs the sandbox's address before
-installing rules, which orders address discovery ahead of rule installation. That ordering exists:
-the container is created (address assigned), then the host installs enforcement, and **only then does
-the agent launch** — which is the whole point of
-[host-controlled-agent-launch.md](host-controlled-agent-launch.md). The window between address
-assignment and rules being up is a window in which the thing isolation exists to contain is not
-running.
-
-That slack is already an accepted boundary rather than a new claim: on the agent-free path the
-entrypoint runs `run_setup_commands` and writes `.substrate-ready` *before* the firewall goes up, so
-profile setup commands deliberately run with full network — provisioning is trusted, user-authored
-config, mirroring the Dockerfile build. See
-[tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md) § *Provisioning egress*.
-The requirement is therefore not "rules before the container exists" but **"rules before anything
-runs that isolation is meant to contain"**, and the agent-launch gate is exactly that line.
+---
 
 ## Open questions
 
-**One measurement outstanding, and it is cheap.** Whether reloading the **`com.apple` anchor itself**
-purges the sub-anchors nested under it. Every other mid-life candidate has been run; this is the one
-that would behave like Linux's `flush ruleset`, and the system components most likely to do it —
-AirDrop and the macOS Application Firewall — live in that same parent anchor. Until it is run, "no
-macOS mid-life wipe trigger is known" is a statement about seven candidates, not about the platform.
-
-Not blocking, because the design does not change shape either way: rule 1 already assumes nothing
-survives, and the mid-life detector is already required by the Linux half. It changes how urgent the
-macOS half of that detector is.
-
-The Linux unit's concrete shape (chain per sandbox, ipset per sandbox, or one chain
-with per-source rules) is an implementation choice to make against the code, not a design fork — all
-three satisfy rules 0–4, and the divergence above means it need not answer to the macOS shape.
-**One constraint the pass added to that choice:** whatever the unit, each sandbox needs its **own**
-allowlist set. macOS measured a cross-sandbox leak from contention alone — two acquisitions landing
-on one slot left both addresses in it with **both** destinations, and each guest reached the other's
-allowlisted destination (`results/pf-concurrent-acquire.txt`, X3). Linux has no slot pool to contend
-for, so it cannot reproduce that; but every harness in the Linux pass used a single shared `@allowed`
-set, and a shipped design that did the same would have the identical leak by construction, with no
-contention needed. Slot allocation on macOS must additionally be atomic above pf.
-
-### Opened by the pass, and not closed
-
-- ~~**Rootless podman cannot be enforced from the host at all.**~~ **Closed 2026-08-09 — the
-  enforcement point moves, the design does not.** See § *Rootless podman* below.
-- **Same-bridge sandbox-to-sandbox traffic is invisible to the host point as shipped.** `br_netfilter`
-  is not loaded by default and both Linux backends put every sandbox on one bridge, so those packets
-  are switched, not routed. Loading the module with `bridge-nf-call-iptables=1` makes them visible and
-  the policy then contains them (`results/l8-br-netfilter.txt`) — but both settings are host-wide, not
-  per-sandbox, and yoloAI sets neither. Until it does, the in-guest layer is the only thing covering
-  that traffic, which is an argument for keeping it rather than a gap to accept.
-- **Whether reloading the `com.apple` anchor purges sub-anchors nested under it** — carried over
-  unrun from the previous pass. Still not blocking, for the reason below.
+- **Does pf's `no state` give the Cilium shape on macOS?** If so the platforms converge completely and
+  the `-k` grant widening becomes unnecessary. Cheap, and it is the highest-value remaining experiment.
+- **Does the veth key work on CNI's own veths**, not just docker's? Mechanism should carry; untested.
+- **What is the terminal state when we lose the fight** to another firewall manager?
+- **Does the `RELATED` omission actually close the helper hole**, measured rather than argued?
+- **DF189's subnet collision.** Interface keying makes it survivable — two sandboxes with the same
+  address are still distinguishable — but the routing conflict remains and the subnet should still
+  move off `10.89.0.0/16`. `10.0.0.0`–`10.87.255.255` is outside every podman pool and every docker
+  local pool.
+- **DF190**, an apple sandbox losing egress when an unrelated sandbox reclaims its bridge index, is a
+  backend defect underneath all of this and is not addressed by any of it.
 
 ## Related
 
-- [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md) — the enforcement
-  points whose state this reclaims; its § *Where the enforcement point actually has to sit* is why
-  they are host-side at all.
-- [macos-pf-privileged-path.md](macos-pf-privileged-path.md) / D132 — the macOS grant, which
-  authorises exactly the membership mutations this design performs.
-- [DF172](../findings-unresolved.md) — the vacuity mode that makes conformance pass for free, and the
-  reason to key on the address rather than the interface name.
-- [DF182](../findings-unresolved.md) — the existing unlocked mutation path, the same lock this needs.
-- [DF179](../findings-unresolved.md) — what the move closes, and why it is worth this cost.
+- [macos-pf-privileged-path.md](macos-pf-privileged-path.md) / [D132](../../decisions/working-notes.md) — the macOS privileged path.
+- [D133](../../decisions/working-notes.md) — resolution happens in the guest's context; its central rejected alternative is still owed a re-measurement with `--dns` set.
+- [tamper-resistant-network-isolation.md](tamper-resistant-network-isolation.md) — the in-guest layer, which this does not replace.
+- [prior-art-egress-enforcement.md](../research/prior-art-egress-enforcement.md) — the first reading pass. **Treat with care:** an audit found it inadequate, and the source-reading round that followed it is where the load-bearing findings came from.
+- Raw runs: [`research/linux-enforcement/results/`](../research/linux-enforcement/results/) and [`research/macos-isolation-spike/results/`](../research/macos-isolation-spike/results/), both of which keep their invalidated runs deliberately.
