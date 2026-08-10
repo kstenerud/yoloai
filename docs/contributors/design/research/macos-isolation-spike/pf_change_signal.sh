@@ -126,8 +126,59 @@ printf '%s\n' "${KEYS[@]}" | sed 's/^/          /'
 : > "$WD/notify.txt"
 
 # ---------------------------------------------------------------------------
-say "S1/S3 THE EVENTS — log, notify, -s info and file mtime around each"
 LOGPRED='process == "pfctl" OR eventMessage CONTAINS[c] "packet filter" OR eventMessage CONTAINS[c] "pf ruleset"'
+
+say "S1a IS THE LOG QUERY ALIVE? — the proof S2a already gives the notify watcher"
+note "S1's result is a SILENCE, and a silence is only evidence if the instrument works. The notify"
+note "half establishes that by posting to itself. The log half had no equivalent, so an inert query"
+note "and a genuinely quiet subsystem produced identical output — and this directory has already"
+note "published one wrong predicate (pf-anchor-eval-run1-predicate-bug.txt) that read exactly so."
+note ""
+note "Two arms, because they fail for different reasons and only the pair is interpretable:"
+note "  A1  can this predicate match ANYTHING, in this window, through this command? A message is"
+note "      written specifically to satisfy it, so a miss is the instrument and not the subject."
+note "  A2  does the clause that would carry a real signal — process == \"pfctl\" — match a pfctl"
+note "      invocation made deliberately, right now?"
+note "Each is asked twice: at the default level, and with --info --debug. macOS withholds info and"
+note "debug records from \`log show\` by default, so 'not logged' and 'logged beneath the default"
+note "level' are different findings that the default form alone cannot separate."
+LOGSELF="yoloai-spike-selftest packet filter probe"
+LOGQ_OK=0
+lt0=$(date '+%Y-%m-%d %H:%M:%S')
+sleep 1
+logger "$LOGSELF"
+pfctl -s info >/dev/null 2>&1
+sleep 3
+logq() { log show --start "$lt0" --predicate "$1" --style compact ${2:-} 2>/dev/null; }
+a1=$(logq "$LOGPRED"                | grep -c "$LOGSELF" || true)
+a1d=$(logq "$LOGPRED" "--info --debug" | grep -c "$LOGSELF" || true)
+a2=$(logq 'process == "pfctl"'                | grep -c '^[0-9][0-9][0-9][0-9]-' || true)
+a2d=$(logq 'process == "pfctl"' "--info --debug" | grep -c '^[0-9][0-9][0-9][0-9]-' || true)
+note ""
+note "A1 self-emitted message found:  default=$a1   with --info --debug=$a1d"
+note "A2 entries from process pfctl:  default=$a2   with --info --debug=$a2d"
+if [ "$a1" -gt 0 ] || [ "$a1d" -gt 0 ]; then
+  LOGQ_OK=1
+  ok "S1a: the predicate and the query DO match a message emitted inside the window"
+  if [ "$a1" -eq 0 ]; then
+    note "     — but ONLY with --info --debug. S1 below runs the default form, so anything pf writes"
+    note "       below notice level is invisible to it, and its silence is exactly that narrow."
+  fi
+else
+  unk "S1a: nothing matched — not even a message written to match. S1's silence proves NOTHING,"
+  note "     and the entries it reports below cannot be read as a measurement of pf's behaviour."
+fi
+if [ "$a2" -gt 0 ] || [ "$a2d" -gt 0 ]; then
+  note "A2: pfctl DOES write to the unified log ($a2 default / $a2d with info+debug), so the"
+  note "    process clause is live and a silence from it during an event is about the event."
+else
+  note "A2: a deliberate pfctl invocation produced ZERO entries under process == \"pfctl\". That"
+  note "    clause cannot detect anything on this host, so S1's negative rests entirely on the two"
+  note "    eventMessage clauses — a materially narrower claim than the predicate's shape suggests."
+fi
+
+# ---------------------------------------------------------------------------
+say "S1/S3 THE EVENTS — log, notify, -s info and file mtime around each"
 
 snapshot() { pfctl -s info 2>/dev/null; pfctl -s Anchors 2>/dev/null; }
 
@@ -148,7 +199,7 @@ run_event() {   # $1 = label, $2 = shell command to trigger it
   local logn
   logn=$(log show --start "$t0" --predicate "$LOGPRED" --style compact 2>/dev/null \
          | grep -c '^[0-9][0-9][0-9][0-9]-' || true)
-  note "S1 unified log entries matching the pf predicate since the event: $logn"
+  note "S1 unified log entries matching the pf predicate since the event: $logn$([ "$LOGQ_OK" -eq 0 ] && echo '   (THE QUERY IS INERT — this number means nothing)')"
   if [ "$logn" -gt 0 ]; then
     log show --start "$t0" --predicate "$LOGPRED" --style compact 2>/dev/null \
       | head -4 | sed 's/^/            /'
