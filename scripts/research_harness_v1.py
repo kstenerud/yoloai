@@ -1,9 +1,14 @@
 #!/usr/bin/env python3
-# ABOUTME: Library for hardware-research harnesses. Makes a run's invariants
-# ABOUTME: structural: you record measurements and declare expectations over them,
+# ABOUTME: Version 1 of the hardware-research harness library. Makes a run's
+# ABOUTME: invariants structural: you record measurements and declare expectations,
 # ABOUTME: and the report is rendered from that data rather than written by hand.
 
 """A harness that will not let you write a verdict your data does not support.
+
+**This file is frozen.** Research written against it must keep working and keep
+reproducing, so v1's contract never changes. A new mandatory invariant -- which is
+what every newly-discovered failure mode becomes -- goes in `research_harness_v2.py`
+as a new file, and only new research adopts it. See D134.
 
 Why this exists, concretely. The 2026-08 host-enforcement research produced roughly
 a dozen invalid runs across two platforms, and they fell into two mechanical shapes:
@@ -40,6 +45,10 @@ import subprocess
 import sys
 from dataclasses import dataclass, field
 from typing import Callable, Sequence, TextIO
+
+
+HARNESS_VERSION = 1
+"""The contract version. A breaking change is a new file, never an edit to this one."""
 
 
 class HarnessError(RuntimeError):

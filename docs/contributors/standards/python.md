@@ -17,7 +17,7 @@ Python is a *single deliberate token spend* (`../principles/general-principles.m
 - The base Docker image already includes Python 3 + pip for agent installation (Claude Code, Codex, Gemini CLI all install via npm/pip-adjacent tooling). Adding Python *here* costs nothing additional.
 - The pluggable idle-detection design (D14) required structured types for `IdleSupport` strategies, and Python's typing + pytest made the W3/W4 architecture remediation possible.
 
-The token rule: no additional Python surfaces without a D-entry justifying the spend. One has since been added: `scripts/research_harness.py`, the library hardware-research harnesses build on, justified by [D134](../decisions/working-notes.md) — it lives in `scripts/` precisely so `make check`'s existing `mypy --strict` and pytest cover it.
+The token rule: no additional Python surfaces without a D-entry justifying the spend. One has since been added: `scripts/research_harness_v1.py`, the versioned library hardware-research harnesses build on, justified by [D134](../decisions/working-notes.md) — it lives in `scripts/` precisely so `make check`'s existing `mypy --strict` and pytest cover it.
 
 ## File layout
 

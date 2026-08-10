@@ -1663,7 +1663,7 @@ Two things make this worth an entry rather than a cleanup.
 
 ## D134 — hardware-research harnesses are Python on a shared library that enforces a run's invariants, not bash
 
-**Date:** 2026-08-10. **Status:** Active. **Consumers:** `scripts/research_harness.py`, `docs/contributors/design/research/**`, [testing-principles.md §11](../principles/testing-principles.md).
+**Date:** 2026-08-10. **Status:** Active. **Consumers:** `scripts/research_harness_v1.py`, `docs/contributors/design/research/**`, [testing-principles.md §11](../principles/testing-principles.md).
 
 **Why this is a decision record.** [standards/python.md](../standards/python.md) sets a token rule: *no additional Python surfaces without a D-entry justifying the spend.* A reusable research-harness library is a new surface, so it needs one. The reasoning also has to outlive the workstream that prompted it, because the next person doing hardware research will reasonably reach for bash — it is cheap, it is what the existing corpus is written in, and its problems are invisible until they are expensive.
 
@@ -1681,5 +1681,13 @@ Two things make this worth an entry rather than a cleanup.
 1. **Stay in bash with lexical gates.** A checker can find an `echo` of a verdict with no variable in it. It cannot tell that a control was satisfied by the wrong layer. Bash lets you check the *shape* of the output; rendering from data makes the bad output unrepresentable.
 2. **Go.** The domain is entirely subprocess-driven and a research harness is short-lived and frequently rewritten mid-run; Go's per-probe ceremony works against the iteration speed that makes measurement cheap. Go remains right for anything that ships.
 3. **Write research as pytest tests.** Tempting, and it gets assertions and reporting free. Rejected because these runs are not assertions about *our* code — they are measurements of someone else's system, and their durable output is a readable artifact under `results/` that a reader can audit years later. pytest's collection and pass/fail model fights that, and a failing research run is often the finding.
+
+**Versioned, because breaking changes are the expected case.** Every newly-discovered failure mode becomes a new *mandatory* invariant, and adding one is breaking by definition — it makes previously-valid harnesses invalid. So an additive-only compatibility promise cannot survive this library's own purpose. The contract is therefore pinned in the filename: `research_harness_v1.py` is **frozen**, and a new invariant goes in `research_harness_v2.py` as a new file. Research pins its version at the import line, where a reader sees it immediately.
+
+Three consequences worth stating:
+
+- **Old research keeps reproducing.** A harness written against v1 runs years later against the same contract. That matters because a results file is only explicable if the thing that produced it still means what it meant.
+- **The versioned tests are the load-bearing half.** `test_research_harness_v1.py` stays in `make check` permanently, so *"v1 still works"* is a checked property rather than a hope. This closes a gap that exists today: research harnesses under `docs/` are covered by no gate at all, so a library change would rot them invisibly.
+- **The hazard is versioning becoming a way to keep the version that does not catch your mistake.** New research is written by copying a nearby harness, which would silently inherit the old contract — including whatever weakness prompted the new version. The companion rule is that new research uses the newest version. A gate for it is deliberately **not** built yet: with one version it would have nothing to check, and a speculative gate is the kind of thing that gets disabled before it is ever useful.
 
 **What this does not address, stated so it is not oversold.** The most expensive failure class in that corpus was neither of the two above: it was **a correct measurement written up as a wider claim than it supports** — one nftables matcher becoming "no key exists on Linux", three docker cycles becoming "Linux names do not recycle". No library can see that. `not_tried()` is the partial answer, and it is required rather than optional because the pass that wrote bounding sections produced none of those errors and the pass that did not produced five.

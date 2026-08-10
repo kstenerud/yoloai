@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-# ABOUTME: Tests for the research harness. Each one pins an invariant that a real
-# ABOUTME: invalid run from the 2026-08 enforcement research violated, so a
-# ABOUTME: regression reproduces a failure we actually shipped into a design document.
+# ABOUTME: Tests for research harness v1. Each pins an invariant that a real invalid
+# ABOUTME: run from the 2026-08 enforcement research violated. They stay in make check
+# ABOUTME: permanently: they are what makes "v1 still works" a checked property.
 
 from __future__ import annotations
 
@@ -14,7 +14,12 @@ import pytest
 _REPO = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(_REPO / "scripts"))
 
-from research_harness import Harness, HarnessError, counter_moved  # noqa: E402
+from research_harness_v1 import (  # noqa: E402
+    HARNESS_VERSION,
+    Harness,
+    HarnessError,
+    counter_moved,
+)
 
 
 def _armed(name: str = "T") -> Harness:
@@ -128,3 +133,8 @@ def test_failures_lists_only_broken_expectations() -> None:
     h.expect("allowlisted host works", good)
     h.expect("denied host is blocked", bad, want=False)
     assert [e.claim for e in h.failures()] == ["denied host is blocked"]
+
+
+def test_version_is_pinned() -> None:
+    """v1's contract is frozen; a breaking change is a new file, not an edit here."""
+    assert HARNESS_VERSION == 1
