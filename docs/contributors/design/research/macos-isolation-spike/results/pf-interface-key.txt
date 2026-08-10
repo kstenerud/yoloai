@@ -1,5 +1,5 @@
 host: macOS 26.5.1 arm64
-date: 2026-08-09 21:43:02 CEST | anchor=com.apple/yoloai_i | egress=en0
+date: 2026-08-10 10:45:31 CEST | anchor=com.apple/yoloai_i | egress=en0
 
 == I0 SETUP — and the reachability baseline every block below is measured against ==
         main-refs=2
@@ -79,24 +79,69 @@ date: 2026-08-09 21:43:02 CEST | anchor=com.apple/yoloai_i | egress=en0
    PASS    I3: THE INGRESS TAG IS PER-SANDBOX. Two guests, one blocked and one not, under a ruleset
             containing no address at all — the same shape Linux's K1 established there.
 
+== I4 DOES A RULE SURVIVE ITS INTERFACE DISAPPEARING? — this decides what I2 costs ==
+        I2 showed the index is released whenever a sandbox detaches. What that COSTS depends entirely
+        on something nobody has measured: whether a loaded rule naming `bridgeN` re-attaches when a
+        bridge of that name comes back, or silently matches nothing from then on.
+          re-attaches  -> the exposure is the restart window, and a claim-time read plus teardown is
+                          close to sufficient.
+          goes inert   -> EVERY sandbox is unenforced after its first restart, with pf reporting a
+                          correct-looking ruleset throughout. That is the shadowed-anchor failure
+                          again, one level down, and it would not be visible to any rule inspection.
+        
+        I4a  will pf even accept a rule naming an interface that does not exist? (pre-loading a pool
+             of per-sandbox rules at install time depends on it)
+        loading a rule on bridge999 -> rc=0 <no output>
+   PASS    I4a: pf accepts a rule naming an absent interface (it resolves by name, not at load time)
+        
+        I4b  THE DECIDING ARM. A is enforced by an interface-keyed rule with no source address in it.
+             Nothing else is started, so the index is not raced — this is an ordinary restart alone.
+        before restart: A on bridge101  ->1.1.1.1=301  ->1.0.0.1=000  (need non-000 then 000)
+   PASS    I4b precondition: the interface-keyed rule enforces, with no source address in it
+        A stopped. bridge carrying its gateway now: 
+        the anchor's rules while the interface is GONE (pf keeps them, which is the trap):
+          pass in quick on bridge101 inet proto tcp from any to 1.1.1.1 flags S/SA keep state
+          block drop in quick on bridge101 proto tcp all
+        A restarted: bridge=bridge101 (was bridge101), address=192.168.65.4
+        NOTHING has been reloaded. Asking the same two questions again:
+        after restart:  ->1.1.1.1=301  ->1.0.0.1=000
+   PASS    I4b: the rule RE-ATTACHED. Same index, no reload, and the denied destination is still
+             blocked while the allowed one still reaches — and A's address changed to 192.168.65.4,
+             which the rule never named. pf resolves the interface by name at match time, so
+             I2's window is a window and not a permanent lapse.
+
 == VERDICT — composed from the values above, not asserted ==
         held index reassigned while live : yes
         allocator recycles at all        : yes
         restart/detach window            : hazard
         ingress tag per sandbox          : per_sandbox
+        rule survives its interface going away: yes
         
-   UNKNOWN SPLIT RESULT. The tag discriminates per sandbox, but the interface it is keyed on is not
-            stable across a restart, so the tag inherits that instability. Neither is usable alone;
-            what would be is a per-sandbox key that survives detach, and nothing here is one.
+   FAIL    macOS HAS the key, and ONE lifecycle rule is the whole price. Everything the key needs works:
+            a held index is never reassigned, the interface discriminates with no address in the
+            rule, the ingress tag is per-sandbox, and a rule re-attaches BY NAME when its interface
+            comes back — A's address changed underneath it and enforcement did not lapse.
+        
+            The single failure is the detach window. A sandbox that merely restarts gives up its
+            index, and a sandbox started in that window can take it — at which point the stale rule
+            governs a STRANGER, which is worse than not enforcing. So the key is usable if and only
+            if rule maintenance is bound to attach and detach: withdraw the rule when the interface
+            goes, re-read the real index and re-establish it when the interface returns.
+        
+            That is a lifecycle requirement, not a missing key, and it is a far smaller gap than
+            'there is no stable per-sandbox non-address key', which is what closed this on macOS.
+            The platforms are closer than the divergence suggested: Linux needs no such rule because
+            its names do not recycle, macOS needs one because its indices do.
 
 == WHAT WAS NOT TRIED ==
         - tart. Its guests share the vmnet bridges rather than getting one network each, so none of
           I1-I3 transfers to it; the question there is a different one and it is not asked here.
         - Concurrent starts. The detach window in I2 is opened by hand, one sandbox at a time. Two
           sandboxes racing for a freed index is the case a real pool would hit and it is not run.
-        - Whether a rule naming a bridge SURVIVES that bridge disappearing. pf accepts rules on
-          absent interfaces, but whether the rule re-attaches when the name comes back, or silently
-          matches nothing, is not measured — and I2's remedy depends on which.
+        - Whether the re-attach in I4 holds when a DIFFERENT sandbox takes the name. I4 restarts A
+          alone and A gets its own index back, so the rule re-attaches to the same sandbox. The
+          hazard I2 describes is the other case, and combining them -- stale rule, name reused by a
+          stranger -- is the experiment that would price the window rather than just naming it.
         - The tag namespace. Whether pf tags are a limited resource, and what happens at 32 of them,
           is unmeasured; K3 and I3 both use two.
         - Any of this under the shipped D132 grant. Every rule here is loaded as root. The grant
@@ -107,5 +152,5 @@ date: 2026-08-09 21:43:02 CEST | anchor=com.apple/yoloai_i | egress=en0
 == cleanup ==
    main-refs: before=2 after=2
 
-pass=5 fail=2 unknown=1
+pass=8 fail=3 unknown=0
 results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-interface-key.txt
