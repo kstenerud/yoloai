@@ -63,6 +63,9 @@ satisfied for free.
 | R6 | `r6-host-destined-traffic.txt` | **Forward-hook policy does not cover sandbox→host traffic at all.** |
 | K1 | `k1-interface-as-sole-key.txt` | **Refutes L1** — per-sandbox bridge is a sound, non-recycling key. |
 | K2 | `k2-veth-key-shared-bridge.txt` | The veth port keys per sandbox on a *shared* bridge. |
+| P1 | `p1-no-fastpath-correctness.txt` | Dropping the conntrack fast-path breaks nothing. |
+| P1b | `p1b-revocation-decay.txt` | **Revocation works only without the fast-path.** |
+| P2 | `p2-fastpath-cost.txt` | No measurable throughput cost, at any allowlist size. |
 
 **X1 and X2 are the macOS pass's extras asked on Linux**, after that pass landed. Both reproduce, and
 X1's fix — a bridge-scoped default-deny naming no address — works here too.
@@ -155,6 +158,31 @@ One harness blemish worth naming: `k2`'s status line prints `br_netfilter: MISSI
 was demonstrably loaded — physdev matching cannot work without it, and the rule counted 5 packets.
 The `lsmod` display check is wrong; the measurement is not.
 
+**P1/P1b/P2 settle the rule-shape choice** the source research opened (Calico keeps a
+`ct state established,related accept` in front of policy; Cilium evaluates policy on every packet and
+therefore needs no conntrack flush at all). Measured on a rig with no DNS in the path — three
+containers on one bridge, `br_netfilter` loaded, allowlisted and denied destinations both local
+servers proven to answer before any policy loads:
+
+- **Correctness is identical.** Both shapes: allowlisted 64 MB transfer completes in full (HTTP 200,
+  67108864 bytes), denied destination refused, DNS unaffected. Dropping the fast-path breaks nothing.
+- **Revocation works only without it.** With the fast-path, an in-flight transfer held **300 KB/s for
+  the full 30 s** after the allowlist element was removed, and the drop counter stayed at **0** — the
+  flow was never re-evaluated. Without it, the rate fell to **0 KB/s within 10 s** and the drop
+  counter read **12 packets**, which is what distinguishes "revocation took effect" from "the transfer
+  ended for some other reason".
+- **The cost is below the noise floor.** 35–42 Gbit/s across both shapes at allowlist sizes 1, 1000
+  and 10000; run-to-run variance on one configuration (36879 vs 40304) exceeds every difference
+  between configurations, and the no-policy baseline reads *lower* than some policy arms. The honest
+  statement is that this proxy cannot separate them, not that they are equal.
+
+**One correction P1 forced.** The harness predicted the reply direction would never traverse our
+chain, because every rule matches `ip saddr <guest>`. Wrong: the counter caught **1308 packets /
+67 MB**. Replies do traverse the chain — they simply match no rule and fall through to `policy
+accept`. The distinction matters, because it means **the chain policy must stay `accept`**; a chain
+defaulting to `drop` would kill all return traffic. The verdict line was phrased conditionally, which
+is the only reason the run reported the contradiction instead of asserting the prediction.
+
 ## Runs that were discarded, and why
 
 - **R1, R2 and R3's spoofing results were all free, and it took three runs to see it.** Every one
@@ -175,6 +203,16 @@ The `lsmod` display check is wrong; the measurement is not.
   found it: outbound traffic matched neither the hardcoded bridge nor `veth*`. The design consequence
   is real and not just a harness bug — **rule 0b's interface must be resolved per network at install
   time**, never hardcoded, since podman and docker both name bridges per-network.
+- **P1 run 1 was invalidated by the very problem under test** (`p1-no-fastpath-correctness-run1-invalid.txt`).
+  It allowlisted `speed.cloudflare.com` by resolving it once on the host and taking the first address;
+  the guest resolved independently and got a different address from the same CDN pool, so the
+  *allowlisted* destination was dropped in both arms. The denied-host control was a dead address, so
+  "blocked" was free as well — every cell was meaningless. It is a live instance of L9b's one-shot
+  snapshot problem: for a multi-address name, a single resolution is wrong immediately, not eventually.
+  The rebuilt rig removes DNS from the path entirely and aborts if either baseline control fails.
+- **P1 run 2 died on the rig, not the question.** alpine's busybox has no `httpd` applet
+  (`applet not found`), so both servers exited and the baseline abort fired correctly rather than
+  reporting free negatives. Servers switched to nginx.
 - **L1, first two attempts.** `nft -f` rejected a chain named `fwd` (reserved word), then failed
   on a cgroup path that did not yet exist because paths resolve at rule-load time, not match time.
   Neither run produced a usable counter. The second failure is informative on its own: because

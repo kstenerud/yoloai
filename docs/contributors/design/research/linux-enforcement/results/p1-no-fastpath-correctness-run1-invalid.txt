@@ -1,0 +1,50 @@
+guest=172.17.0.2  allowlisted=172.66.0.218 (speed.cloudflare.com)  resolver=1.1.1.1  denied=93.184.216.34
+
+=== BASELINE — no policy at all ===
+  https (5 MB down)  : 5000000 bytes
+  denied host        : blocked   <- must be REACHABLE with no policy
+
+=== ARM A — Calico shape: ct state established,related accept in front ===
+  https (small)      : 000   <- expect 200/301-ish
+  https (5 MB down)  : 0 bytes   <- expect ~5000000; tests sustained transfer + PMTU
+  dns via 1.1.1.1   : ok
+  icmp to allowlisted: ok
+  denied host        : blocked   <- CONTROL, must be blocked
+  counters:
+    ip saddr 172.17.0.2 ct state established,related counter packets 1 bytes 84 accept comment "fastpath"
+    ip saddr 172.17.0.2 ip daddr @allowed counter packets 2 bytes 164 accept comment "allowlisted"
+    ip saddr 172.17.0.2 counter packets 25 bytes 2080 drop comment "denied"
+
+=== ARM B — Cilium shape: no fast-path, destination matched on every packet ===
+  https (small)      : 000   <- expect 200/301-ish
+  https (5 MB down)  : 0 bytes   <- expect ~5000000; tests sustained transfer + PMTU
+  dns via 1.1.1.1   : ok
+  icmp to allowlisted: ok
+  denied host        : blocked   <- CONTROL, must be blocked
+  counters:
+    ip saddr 172.17.0.2 ip daddr @allowed counter packets 3 bytes 248 accept comment "allowlisted"
+    ip saddr 172.17.0.2 counter packets 27 bytes 2258 drop comment "denied"
+
+=== DOES THE REPLY DIRECTION EVER HIT OUR CHAIN? ===
+our rules all match 'ip saddr $guest', so replies (saddr = the peer) should not.
+  ip daddr 172.17.0.2 counter packets 0 bytes 0 comment "reply-direction"
+  READ: a non-zero count here means replies traverse the chain and the egress-only
+  reasoning is wrong. Zero means dropping the fast-path cannot affect return traffic.
+
+=== THE POINT OF THE EXERCISE — revocation under each shape ===
+sh: can't open /tmp/dl: no such file
+sh: can't open /tmp/dl: no such file
+  fastpath     after removing the allowlist element: stopped (0 -> 0)
+sh: can't open /tmp/dl: no such file
+sh: can't open /tmp/dl: no such file
+  nofastpath   after removing the allowlist element: stopped (0 -> 0)
+
+=== WHAT WAS NOT TRIED ===
+  - Any IPv6 path.
+  - Conntrack helpers (FTP/SIP). The RELATED hole this shape would close is not
+    exercised here; closing it is a claim about rule shape, not something measured.
+  - UDP long-flow behaviour under revocation (only TCP download tested here).
+  - Whether the client sees a clean error or hangs. Both shapes drop silently; the
+    RST-injection question is separate and untested.
+  - macOS. pf state semantics differ and none of this transfers.
+  - Per-packet cost. That is p2_fastpath_cost.sh.

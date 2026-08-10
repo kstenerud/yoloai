@@ -1,0 +1,41 @@
+client=172.17.0.3  server=172.17.0.2  (200 MB file, rate-limited to 300 KB/s)
+
+=== fastpath ===
+  pre-revoke: 2150400 bytes
+  --- allowlist element removed ---
+  t+5  s  total=3686400     delta=1536000    rate=300 KB/s
+  t+10 s  total=5222400     delta=1536000    rate=300 KB/s
+  t+15 s  total=6758400     delta=1536000    rate=300 KB/s
+  t+20 s  total=8294400     delta=1536000    rate=300 KB/s
+  t+25 s  total=9830400     delta=1536000    rate=300 KB/s
+  t+30 s  total=11366400    delta=1536000    rate=300 KB/s
+  drop counter (client->server packets refused after revocation):
+    ip saddr 172.17.0.3 counter packets 0 bytes 0 drop comment "post-revoke-drops"
+
+=== nofastpath ===
+  pre-revoke: 2150400 bytes
+  --- allowlist element removed ---
+  t+5  s  total=3376344     delta=1225944    rate=239 KB/s
+  t+10 s  total=3376344     delta=0          rate=0 KB/s
+  t+15 s  total=3376344     delta=0          rate=0 KB/s
+  t+20 s  total=3376344     delta=0          rate=0 KB/s
+  t+25 s  total=3376344     delta=0          rate=0 KB/s
+  t+30 s  total=3376344     delta=0          rate=0 KB/s
+  drop counter (client->server packets refused after revocation):
+    ip saddr 172.17.0.3 counter packets 12 bytes 720 drop comment "post-revoke-drops"
+
+=== READ ===
+  A rate that decays to 0 KB/s means revocation took effect; the transfer stalls
+  because the client's outbound packets are refused, not because the server stopped.
+  A rate that holds near 300 KB/s means the flow was never re-evaluated.
+  The drop counter distinguishes "the rule fired" from "the transfer ended for
+  some other reason" — a rate of 0 with a zero counter would be a free negative.
+
+WHAT WAS NOT TRIED
+  - Whether the client surfaces an error or hangs. curl is given -m 120; what a
+    real agent's HTTP stack does with a stalled socket is untested.
+  - UDP.
+  - The reply direction. Bulk data flows server->client and matches no rule here;
+    the chain policy is accept, so it falls through. If the policy were drop, that
+    traffic would be dropped and this measurement would look completely different.
+restored: br_netfilter unloaded

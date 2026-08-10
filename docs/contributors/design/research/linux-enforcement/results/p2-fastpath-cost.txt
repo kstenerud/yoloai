@@ -1,0 +1,33 @@
+
+=== rig: two containers on one bridge, br_netfilter loaded so the traffic is filtered ===
+(an off-host path would measure the internet, not the ruleset)
+server=172.17.0.2  client=172.17.0.3
+
+=== BASELINE — no policy loaded ===
+  no policy: 31145 Mbit/s, 36276 Mbit/s
+
+=== throughput by rule shape and allowlist size (Mbit/s, two runs each) ===
+  shape        set-size run1       run2      
+  fastpath     1        40164      41393     
+  nofastpath   1        40304      36879     
+  fastpath     1000     36955      36777     
+  nofastpath   1000     39293      39573     
+  fastpath     10000    37944      42165     
+  nofastpath   10000    39329      35074     
+
+=== sanity: the policy is actually being enforced, not bypassed ===
+  denied dst: blocked, so the chain is live
+  ip saddr 172.17.0.3 ip daddr @allowed counter packets 0 bytes 0 accept
+  ip saddr 172.17.0.3 counter packets 3 bytes 180 drop
+
+=== WHAT WAS NOT TRIED ===
+  - CPU time per packet. Throughput on an idle host with a short path is a proxy;
+    if the two shapes are close, that proxy cannot separate them and a perf/bpftrace
+    measurement would be needed to say anything sharper.
+  - Small-packet / high-connection-rate workloads. iperf3 is a bulk stream; the set
+    lookup happens per packet either way, but connection setup rate is untested.
+  - Set types other than a hashed interval set. A plain (non-interval) set may
+    perform differently and was not compared.
+  - Any IPv6 set.
+  - Whether br_netfilter itself changes the throughput baseline. Not isolated here.
+restored: br_netfilter unloaded

@@ -1,0 +1,71 @@
+
+=== rig — three containers on one bridge; allowlisted and denied are both local servers ===
+Unable to find image 'nginx:alpine' locally
+alpine: Pulling from library/nginx
+46519e7231d2: Pulling fs layer
+390dc935348d: Pulling fs layer
+46f977ee452f: Pulling fs layer
+62bec68d7c31: Pulling fs layer
+1223f016b4e4: Pulling fs layer
+3cd534fe98c6: Pulling fs layer
+d0008c891db4: Pulling fs layer
+d0008c891db4: Download complete
+46f977ee452f: Download complete
+390dc935348d: Download complete
+1223f016b4e4: Download complete
+3cd534fe98c6: Download complete
+62bec68d7c31: Download complete
+3cd534fe98c6: Pull complete
+46f977ee452f: Pull complete
+1223f016b4e4: Pull complete
+62bec68d7c31: Pull complete
+139c372786b9: Download complete
+d0008c891db4: Pull complete
+390dc935348d: Pull complete
+cd757d6c129e: Download complete
+46519e7231d2: Download complete
+46519e7231d2: Pull complete
+Digest: sha256:4a73073bd557c65b759505da037898b61f1be6cbcc3c2c3aeac22d2a470c1752
+Status: Downloaded newer image for nginx:alpine
+client=172.17.0.4   allowlisted server=172.17.0.2   denied server=172.17.0.3   (no DNS anywhere in this path)
+
+=== BASELINE — no policy. BOTH servers must answer, or nothing below means anything. ===
+  allowlisted server: HTTP 200, 67108864 bytes
+  denied server     : HTTP 200
+
+=== ARM A — Calico shape: ct state established,related accept in front ===
+  allowlisted server : HTTP 200, 67108864 bytes   <- must be 200 and ~67108864
+  denied server      : HTTP 000   <- must NOT be 200
+  dns (udp 53)       : ok
+    ip saddr 172.17.0.4 ct state established,related counter packets 1103 bytes 57558 accept comment "fastpath"
+    ip saddr 172.17.0.4 ip daddr @allowed counter packets 2 bytes 120 accept comment "allowlisted"
+    ip saddr 172.17.0.4 counter packets 9 bytes 540 drop comment "denied"
+
+=== ARM B — Cilium shape: no fast-path, destination matched on every packet ===
+  allowlisted server : HTTP 200, 67108864 bytes   <- must be 200 and ~67108864
+  denied server      : HTTP 000   <- must NOT be 200
+  dns (udp 53)       : ok
+    ip saddr 172.17.0.4 ip daddr @allowed counter packets 1927 bytes 100374 accept comment "allowlisted"
+    ip saddr 172.17.0.4 counter packets 9 bytes 540 drop comment "denied"
+
+=== DOES THE REPLY DIRECTION EVER HIT OUR CHAIN? ===
+  ip daddr 172.17.0.4 counter packets 1308 bytes 67177150 comment "reply-direction"
+  READ: zero means replies never traverse the chain, so dropping the fast-path
+  cannot affect return traffic. Non-zero means the egress-only reasoning is wrong.
+
+=== THE POINT — revocation while a transfer is in flight ===
+  fastpath     in-flight transfer after removing the allowlist element: STILL FLOWING (1846270 -> 4308782)
+  nofastpath   in-flight transfer after removing the allowlist element: STILL FLOWING (1846270 -> 2817504)
+
+=== WHAT WAS NOT TRIED ===
+  - IPv6.
+  - Conntrack helpers (FTP/SIP). The RELATED hole the no-fast-path shape would close
+    is a claim about rule shape and is NOT exercised here.
+  - Whether the client sees a clean error or hangs. Both shapes drop silently; the
+    RST-injection question Calico solves is separate and untested.
+  - UDP long flows under revocation. Only a TCP transfer is tested.
+  - Any off-host path. Everything here is bridge-local, deliberately, because run 1
+    was invalidated by DNS. That also means NAT and PMTU to the internet are untested
+    under the no-fast-path shape.
+  - macOS: pf state semantics differ and none of this transfers.
+restored: br_netfilter unloaded
