@@ -5,11 +5,14 @@
 # macOS: enforce the network allowlist from host `pf`
 
 - **Status:** PLANNED — mechanism, authorization and enforcement measured on hardware
-  2026-08-02/04, and **revised 2026-08-09 against a completed verification pass** (M1–M8 plus four
-  unqueued extras, run against a parallel Linux pass). Nothing built. The pass added two required
+  2026-08-02/04, **revised 2026-08-09 against a completed verification pass** (M1–M8 plus four
+  unqueued extras, run against a parallel Linux pass), and **re-run the same day against an audit
+  that found three of its conclusions unsupported**. Nothing built. The pass added two required
   mechanisms — a bridge-scoped default-deny and connection-state teardown — and settled the
-  verification, polling and pool-size questions with numbers. See § *What the verification pass
-  settled*.
+  verification, polling and pool-size questions with numbers. Two of those numbers then changed:
+  **connection-state teardown needs a `pfctl -k` grant after all**, and **the pool figures were 2×
+  too high**, which reopens the 8-slot decision. Read § *Audit remediation* before quoting anything
+  from § *What the verification pass settled*.
 - **Depends on:** tamper-resistant-network-isolation.md, host-controlled-agent-launch.md
 - **Decision:** [D132](../../decisions/working-notes.md#d132--macos-pf-is-driven-through-a-generated-nopasswd-sudoers-grant-that-authorizes-pf-table-membership-and-nothing-else) — the mechanism and the five rejected alternatives. Cite that, not this file.
 - **Rides:** **any** — the user-visible surface only gains capability. `--network-isolated` becomes
@@ -18,24 +21,64 @@
   is internal. If any phase ends up *withdrawing* isolation somewhere, that half is **breaking** and
   needs a `docs/BREAKING-CHANGES.md` entry.
 
-## ⚠ AUDIT SUSPENSION — 2026-08-09
+## AUDIT REMEDIATION — 2026-08-09, all three items re-run
 
-An independent re-derivation of every conclusion against the raw runs found three items here that do
-not follow from their data. The macOS harness discipline is otherwise the **stronger** of the two
-passes — every run ends with `WHAT WAS NOT TRIED`, and the results README actively refutes its own
-earlier rounds — and most macOS conclusions were confirmed sound.
+An independent re-derivation of every conclusion against the raw runs found three items here that did
+not follow from their data. All three have now been re-run on hardware. **Two were wrong in the
+direction the audit predicted; one was a measurement artifact.** The bodies below carry the corrected
+statements; this table is the index.
 
-| Claim | Status |
+| Claim | Resolution |
 | --- | --- |
-| X2: "a return-direction rule stops it… prefer that to amending D132 for `pfctl -k`" | **UNSUPPORTED — the deciding arm was never run.** The successful arm executes `-T delete` **and** `pfctl -k`. Three arms exist: no-kill/no-rule (survives), kill/no-rule (survives), kill+rule (stops). That proves the rule **necessary**, never **sufficient**. pf semantics predict rule-alone fails, since a packet matching existing state is not re-evaluated — which is why the in-only rules failed earlier. **It also contradicts the Linux half**, where the same finding was fixed by state teardown, while the synthesis calls them "one cause seen twice". Re-run with `pfctl -k` deleted. |
-| M8's pool-cost figures, and the 8-slot decision drawn from them | **SUSPENDED.** `pf-acquire-cost.txt` ran the identical call counts on the same host a day earlier and got **101 / 175 / 320 ms** against M8's **217 / 368 / 668 ms** — every point 2.09× apart, unexplained, and M8's own preamble quotes the old numbers without noticing. The earlier set is corroborated by an n=40 per-call breakdown (9.3 ms = 7.9 sudo + 1.4 pfctl); M8's fitted 18.81 ms/call is exactly double. On the lower numbers 32 slots is ~47% of a container create, not 99%, and the case for 8 over 16 largely dissolves. The headline "0.0% error" is a coincidence at the mean — the harness's own verdict says "LINEAR within 10%". **Re-run both harnesses back to back before the pool size stands.** |
-| M3 detector C, recommended and adopted | **FAILS OPEN.** It returns HEALTHY iff the probe's HTTP code is `000`, and the helper defaults to `000` — so it also reports HEALTHY when the network is down, the destination is unreachable, the container is gone, or the backend daemon is dead. That is a free-negative generator installed as production verification. It also mutates live policy (flush allowlist → probe → restore) and races acquisition. |
+| X2: "a return-direction rule stops it… prefer that to amending D132 for `pfctl -k`" | **CONFIRMED WRONG.** The missing arm was run (`pf-revocation.txt` R5a). Rule alone, kill removed: the transfer **survived**, 54→108 bytes, four states intact. Rule + kill: 45→45, stopped. The two are necessary *together*. The cheap fix does not exist, and the D132 amendment the plan avoided is back on the table — or `-K`, or a state timeout. See § *What the verification pass settled*, and D132's 2026-08-09 remediation amendment. |
+| M8's pool-cost figures, and the 8-slot decision drawn from them | **ARTIFACT, resolved.** The harness timed `sudo -u <user> -H sudo -n pfctl` — two nested sudo invocations per call, the drop *inside* the timed region. Both shapes run back to back: the difference is **7.95 ms/call** against 7.9 ms for one sudo. Corrected: **93 / 158 / 297 ms**, i.e. 14 / 25 / 46% of a container create. The audit's predicted "~47% not 99%" was right. **The 8-slot decision is open again.** |
+| M3 detector C, recommended and adopted | **CONFIRMED, fixed, and re-priced.** Both fault classes induced, with the old sentinel run beside the new one: guest cut off — old HEALTHY, new UNKNOWN; container gone — old HEALTHY, new UNKNOWN. The fix needs three probes, so the canary costs **320–385 ms, not 83–105**, with a 15.3 s worst case against a dropping path. Its policy mutation and acquisition race are now stated as adoption conditions. |
 
-Also noted: **M4's unified-log negative has no positive control** (the notify half does, exemplary — a
-post to itself; the log predicate has no demonstration it could ever match, and this directory has
-already been burned once by a wrong predicate). And **`pf-spoof-run2.txt` / `-run3.txt` carry no
-invalidation marker** while concluding, 7 PASS / 0 FAIL, that guests *cannot* spoof their source
-address — the exact inverse of the pass's most consequential result.
+Both housekeeping items are also closed. **M4's log predicate now has the positive control the notify
+half always had**, and it changed the finding's *scope*: the query and predicate do match a message
+emitted inside the window, so M4's silence is real — but `process == "pfctl"` matched **zero** entries
+for a deliberate pfctl invocation, at default and at `--info --debug`. That clause is inert on this
+host, so M4's negative rests entirely on its two `eventMessage` clauses and is narrower than the
+predicate's shape suggests. And **`pf-spoof-run2/3.txt` are renamed to `*-invalidated.txt`** with their
+causes recorded in the results README: run 2 measured a sandbox with no `CAP_NET_ADMIN`, run 3 had root
+but a `PATH` lacking `/sbin`. One capability bit and one PATH entry, each producing a confident, fully
+passing inverse of the truth.
+
+### And the cross-platform question, re-asked (new)
+
+Linux's refutation of "there is no stable per-sandbox non-address key" prompted re-asking it here.
+**macOS gets a split answer** (`pf-interface-key.txt`), and the deciding half is new:
+
+- **A held index is stable.** Four concurrently-held networks hold four distinct bridges, and two more
+  created against them collided with none. The allocator does recycle — a released index came back in
+  the control — so that negative is not free. K4c's "the index recycled" measured recycling *after
+  release*, which was never the question.
+- **But an ordinary restart releases it.** A network has no host bridge until a container attaches and
+  loses it on detach, so a sandbox that merely restarts opens a window. A new sandbox started in that
+  window **took the restarting sandbox's index**, and the original reclaimed it on return. A claim-time
+  read is therefore *not* sufficient, and the reason has nothing to do with K4c.
+- **The ingress tag is genuinely per-sandbox.** With one network per sandbox, a tag applied on the
+  bridge and matched on egress blocked one guest and not the other under a ruleset containing **no
+  address at all** — the same shape Linux's K1 established. But it is keyed on the interface, so it
+  inherits the instability above.
+
+So the platforms do **not** converge, and that divergence is now a measured constraint rather than an
+assumption: on Linux the interface is a per-sandbox key that holds; here it survives everything except
+the sandbox restarting, which is ordinary. Neither the interface nor the tag is usable alone. What
+would be is a per-sandbox key that survives detach, and nothing measured here is one.
+
+> **Unrelated defect found while measuring this, and it is not a pf problem.** When the restarting
+> sandbox reclaimed its index, the sandbox that had taken it **lost its egress entirely** — still
+> `state=running`, no policy loaded, its gateway on no host bridge, unable to reach a destination the
+> other sandbox reached from the same host at the same moment. A running sandbox silently losing its
+> network because an unrelated sandbox restarted is a backend defect independent of every keying
+> question on this page, and it is reproducible — three consecutive runs.
+>
+> **It is not yet filed, and that is a gap, not a decision.** Rule 7 sends it to
+> `design/findings-unresolved.md`, which the parallel Linux pass is actively writing (it holds DF189
+> as of this run). Filing it from here races that. It needs a `DF` allocated with
+> `scripts/next-id.sh DF` after a `git fetch`, by whichever pass writes to that file next. Recorded
+> here so it is not lost in the meantime — see `pf-interface-key.txt` I2c for the run.
 
 ## Why this exists
 
@@ -535,12 +578,30 @@ nothing about a stale address whose owner has exited; and the full-replace case 
 holding no address, which is UNKNOWN rather than a refusal.
 
 **Deleting an allowlist entry does not stop traffic already flowing (X2).** The transfer kept
-advancing after the delete while new connections were refused. `pfctl -k <guest>` does **not** fix
-it — the state dump shows it killing states sourced *from* the guest while the surviving state was
+advancing after the delete while new connections were refused. `pfctl -k <guest>` alone does **not**
+fix it — the state dump shows it killing states sourced *from* the guest while the surviving state was
 sourced from the *host*, created by an outbound packet matching no rule, because the pool is
-`in`-only. **A return-direction rule stops it** and leaves allowed traffic working. Prefer that to
-amending D132 for `-k`, which is unscoped and reaches every state on the machine. This is reaping
-rule 5; Linux found the same cause from the recycling side.
+`in`-only. A return-direction rule covers that outbound packet.
+
+**But the rule alone does not stop an established flow either, and the claim that it did was an
+artifact of the arm that tested it.** Re-run 2026-08-09 with the two arms separated
+(`pf-revocation.txt` R5a/R5b): with `pfctl -k` removed and everything else identical, the transfer
+**survived** — 54 bytes to 108 across the revocation, all four states intact and two still
+`ESTABLISHED`. Restoring the kill stopped it dead, 45 bytes to 45. pf does not re-evaluate rules for
+packets matching an existing state, so a rule loaded while that state exists cannot reach the
+connection; the rule's job is to stop a *new* state being created after the kill. **The two are
+necessary together, and neither is sufficient.** The 2×2 is now complete: no-kill/no-rule survives,
+kill/no-rule survives, no-kill/rule survives, kill+rule stops.
+
+So the macOS remedy costs a **D132 amendment for `pfctl -k`** — which is not anchor-scoped and
+reaches every state on the machine, including the user's own — or one of two alternatives nobody has
+measured: `pfctl -K` (kills by both endpoints, so a narrower grant), or a short `tcp.established`
+timeout inside the anchor, which bounds the window with no new grant at all. **The cheap fix does not
+exist**; what looked like one was the kill still being in the sequence.
+
+This **removes** the contradiction with Linux rather than creating one. Both platforms need state
+teardown, which is what the Linux half found and fixed. "One cause seen twice" was right about the
+cause; the macOS prescription had diverged from it, and the finding had not.
 
 **Slot allocation must be atomic above pf (X3).** Four concurrent acquisitions on *distinct* slots
 neither corrupt tables nor cross allowlists, and concurrency gives 2.8× over serial. But two
@@ -548,13 +609,37 @@ acquisitions on **one** slot leave both addresses in it with **both** destinatio
 then reaches the other's allowlisted destination — a cross-sandbox privilege leak from contention
 alone. Fail-closed to the outside, still wrong. Timing-dependent: treat as *reachable*, not *always*.
 
-**Verification must be behavioural, and the cheapest detector needs no grant (M3).** Under the
+**Verification must be behavioural, and the canary's price is not what was quoted (M3).** Under the
 shadowed fault — anchor reference present, a `pass quick all` ahead of it, denied destination
-answering 301 — `pfctl -s rules` reports **HEALTHY** while the canary reports BROKEN. Costs on a
-healthy host: reading the main ruleset 13–17 ms but needs a new grant line (refused today); the
-evaluation-counter delta 250–284 ms, needs `-vv` (refused today) and needs prior traffic, so it is a
-poll not a start check; **the canary 83–105 ms and no grant at all**. Most of that is process spawn,
-not network. **Adopt the canary.**
+answering 301 — `pfctl -s rules` reports **HEALTHY** while the canary reports BROKEN. That much
+holds. What did not is the canary as it was written and adopted.
+
+**It failed open.** It returned HEALTHY iff the probe's HTTP code was `000`, and the probe helper
+defaults to `000` on every failure — so a dead container, a dead backend daemon, or a guest with no
+egress at all also read HEALTHY. It reported the host sound for every fault except the one it was
+aimed at. Both arms are now induced, with the superseded sentinel running beside the fixed one on the
+same fault in the same run (`pf-liveness-detect.txt` V3b): guest blackholed, old **HEALTHY** / new
+**UNKNOWN**; container removed, old **HEALTHY** / new **UNKNOWN**.
+
+The fix separates *blocked* from *could-not-ask* using curl's exit status and `container exec`'s, and
+adds a positive control on the same path either side of the probe — from inside a guest, "pf blocked
+me" and "nothing routes" are otherwise identical. That costs three probes instead of one and
+**re-prices the detector: 320–385 ms, not 83–105.** (The 83 ms came from
+`pf-liveness-detect-run3.txt`, a superseded run still on disk; the file this document actually cited
+had a minimum of 90.8, and has since been overwritten in place by the re-run — those numbers are in
+git at `66dc3341`.) The canary is therefore in the
+evaluation-counter's league rather than an order below it. Needing **no grant at all** remains its
+distinguishing property, and is now the whole of its advantage.
+
+**Its worst case is much worse than its median.** Every figure above is against `block return`, which
+answers instantly with an RST. Against a `block drop` path the same detector took **15.3 seconds** —
+three probes each waiting out a 5 s timeout. The cost is a property of how the denial is delivered,
+not of the detector.
+
+Two properties that were never stated and bound where it can be used: it **mutates live policy**
+(flush the allowlist, probe, restore), so it **races every acquisition** by construction; and the
+restore is unguarded, so a host that dies mid-window leaves that sandbox with an empty allowlist and
+no egress. **Adopt the canary, but only behind the acquisition lock X3 already requires.**
 
 **Polling is forced (M4).** No signal exists: zero unified-log entries on a pf predicate, zero of
 nine watched notify(3) keys with the watcher proven alive in the same run, and `/etc/pf.conf`'s mtime
@@ -564,18 +649,34 @@ previous value catches a flush by seeing time run backwards. It cannot see a rel
 anchor line, which is the fault that defeats everything else. Poll costs: `-s info` 2.0 ms,
 `-s rules` 4.2 ms, plus ~9.3 ms of `sudo`.
 
-**Pool size is a real lever, and the denominator is the surprise (M8).** Acquisition is linear —
-fitted from n=8 and n=32, checked against n=16 at **0.0% error**; per-call 18.81 ms, fixed overhead
-10.2 ms. Measured: 8 slots 217 ms, 16 slots 368 ms, 32 slots 668 ms. Against that, `container run -d`
-averages **676 ms**, so acquisition at 32 slots costs as much again as the backend's own create, and
-at 8 slots about a third of it. Concurrency does not serialize, so a start *burst* is cheaper than
-the per-start figures suggest.
+**Pool size is a real lever, and the first figures for it were the harness's own (M8).** That run
+timed every call as `sudo -u <user> -H sudo -n pfctl` — the drop to the user **inside** the timed
+region, so two sudo invocations per call where the product issues one, from a process already running
+as the user. Both shapes have now been measured back to back in a single run
+(`pf-pool-scaling.txt` P1/P1b): the nested shape costs **7.95 ms per call** more, against an
+independently measured 7.9 ms for one sudo invocation. That is the entire 2.09× and nothing else
+differs. The tell needed no hardware — the fitted 18.81 ms/call was exactly twice a measured 9.3 —
+and no one compared the two harnesses' numbers.
 
-**Decided 2026-08-09 (owner): the default pool is 8 slots, with a configurable ceiling.** 217 ms
-against a 676 ms create is about a third; 16 would be +54% and 32 would double start latency, and
-every user pays it whether or not they ever open a second isolated sandbox. The asymmetry settles it:
-**too small is a visible, recoverable, configurable error** that names the cap and how to free a slot,
-while **too large is invisible latency nobody attributes to a pool they never use.**
+Corrected, on the shipped shape: **8 slots 93 ms, 16 slots 158 ms, 32 slots 297 ms**; per-call
+8.48 ms, fixed overhead ≈0. Against `container run -d` at **651 ms**, acquisition is **14% of a create
+at 8 slots, 25% at 16, and 46% at 32** — not the 99% the superseded numbers implied. Concurrency does
+not serialize, so a start *burst* is cheaper than the per-start figures suggest.
+
+Acquisition is linear, and the honest form of that claim is narrower than the one it replaces: the
+fit error at n=16 is **1.7% against a run-to-run spread of ±1.8% at that same point**. No departure
+from linearity is *visible*, which is not the same as the "0.0% error" previously quoted — that was a
+coincidence at the mean, below the noise the measurement carries.
+
+> **The 8-slot decision rests on the superseded set and is open again (owner).** It was taken on
+> "217 ms against a 676 ms create is about a third; 16 would be +54% and 32 would double start
+> latency." On the corrected numbers 8 slots is 93 ms (14% of a create), **16 slots costs 65 ms more
+> than 8** (25%), and 32 costs 204 ms more (46%) — so 32 no longer doubles anything and the gap
+> between 8 and 16 is a tenth of a container create. The *asymmetry* argument is untouched and may
+> well still decide it: **too small is a visible, recoverable, configurable error** that names the cap
+> and how to free a slot, while **too large is invisible latency nobody attributes to a pool they
+> never use.** But the latency half of the trade shrank by half, and the decision is the owner's to
+> re-take rather than this document's to re-derive.
 
 Three consequences that are not obvious and must survive into the build:
 

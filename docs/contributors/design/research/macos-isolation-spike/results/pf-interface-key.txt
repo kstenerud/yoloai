@@ -1,0 +1,111 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-09 21:43:02 CEST | anchor=com.apple/yoloai_i | egress=en0
+
+== I0 SETUP — and the reachability baseline every block below is measured against ==
+        main-refs=2
+        host->1.1.1.1=301  host->1.0.0.1=301  (both must answer, or nothing below is testable)
+   PASS    I0: both probe destinations answer from the host
+
+== I1 HELD vs RELEASED — is an index ever handed out while a sandbox still holds it? ==
+        K4c deleted the network before recreating it, so it measured recycling AFTER RELEASE. That is
+        not the question a claim-time check turns on. Here four networks are created and HELD (each
+        with a container attached, since N1b found the bridge exists only while something is), and
+        then new networks are created against them.
+        held: yb-i-a / ybi1 -> bridge101
+        held: yb-i-b / ybi2 -> bridge102
+        held: yb-i-c / ybi3 -> bridge103
+        held: yb-i-d / ybi4 -> bridge104
+        distinct bridges among the four held: 4 of 4
+   PASS    I1a: four concurrently-held networks hold four distinct bridge indices
+        
+        I1b  now create two MORE networks while all four are still held. If either is handed an index
+             that a live sandbox is using, interface keying is defeasible by an unrelated start.
+        new while four held: yb-i-e -> bridge105   yb-i-f -> bridge106
+        collisions against a held index: 0
+   PASS    I1b: NO held index was reassigned. Recycling happens on release, not under a live holder.
+        
+        I1c  THE CONTROL. A negative in I1b is only meaningful if this allocator recycles at all — if
+             it never reuses an index, I1b passed for free. Release two and create one.
+        released: yb-i-c (was bridge103), yb-i-d (was bridge104), yb-i-f (was bridge106)
+        next network created got: bridge103   (released set: bridge103 bridge104 bridge106)
+   PASS    I1c: a RELEASED index was reused — the allocator does recycle, so I1b's negative is real
+
+== I2 THE DETACH WINDOW — a sandbox that restarts releases its index without releasing itself ==
+        N1b: a network has no host bridge until a container attaches, and the bridge goes away on
+        detach. So an ordinary sandbox restart opens a window in which the index is free while the
+        sandbox still exists and its pf rule still names it. If another sandbox can take it there,
+        a claim-time read is NOT sufficient and interface keying fails on macOS for a reason that has
+        nothing to do with K4c.
+        sandbox A = ybi1 on yb-i-a, currently bridge101
+        A stopped. its bridge now: <gone, as N1b predicts>
+        creating a NEW sandbox inside A's detach window:
+        the sandbox started during the window got: bridge101
+        A restarted and came back on: bridge101  (it was bridge101)
+        the window sandbox is NOW on: <no bridge>  (it was bridge101 when it started)
+          => its index CHANGED while it was running and untouched. Whatever a rule named for it at
+             claim time no longer refers to it, without that sandbox doing anything at all.
+          egress with NO policy loaded: window sandbox->1.1.1.1=000   A->1.1.1.1=301
+   FAIL    I2c: A RUNNING SANDBOX LOST ITS EGRESS because an unrelated sandbox restarted. It is still
+             'running', it never asked for anything, and no policy is loaded. That is a backend
+             defect in its own right, separate from every keying question on this page.
+        
+        the state both readings came from, verbatim:
+          ybi1: state=running addr=192.168.65.3 gw=192.168.65.1
+          ybi5: state=running addr=192.168.68.2 gw=192.168.68.1
+          host bridges and their addresses:
+             127.0.0.1
+            bridge0 192.168.0.157
+            bridge0 100.107.208.103
+            bridge100 192.168.139.3
+            bridge102 192.168.66.1
+            bridge103 192.168.67.1
+            bridge101 192.168.65.1
+          the two gateways differ (192.168.65.1 vs 192.168.68.1), so the shared bridge NAME above is an index
+          reuse and not a subnet collision — the addresses stayed distinct.
+   FAIL    I2: THE WINDOW IS REAL — a new sandbox took A's index while A was merely restarting.
+            A rule naming bridge101 now governs a different sandbox, and A never released its network.
+
+== I3 THE INGRESS TAG, PER SANDBOX — K3's one positive result, re-asked on per-sandbox networks ==
+        K3 established that a tag applied on INGRESS, keyed on the bridge and on no address, survives
+        NAT and is matchable on the egress rule. It was applied on the shared default bridge, so it
+        tagged every guest identically and could not be a per-sandbox key. With one network per
+        sandbox each guest arrives on its own bridge, which is what would make the tag discriminate.
+        A=ybi1 on bridge101   B=ybi2 on bridge102   egress=en0
+        rules loaded: 3   (no address appears in any of them)
+        A->1.0.0.1 =000   (000 => A's own tag reached the egress rule)
+        B->1.0.0.1 =301   (non-000 => B was NOT caught by A's rule — this is the discrimination)
+        A->1.1.1.1=301  (non-000 => the tag did not blanket-block A — control)
+        host->1.0.0.1=301 (non-000 => untagged host traffic untouched — control)
+   PASS    I3: THE INGRESS TAG IS PER-SANDBOX. Two guests, one blocked and one not, under a ruleset
+            containing no address at all — the same shape Linux's K1 established there.
+
+== VERDICT — composed from the values above, not asserted ==
+        held index reassigned while live : yes
+        allocator recycles at all        : yes
+        restart/detach window            : hazard
+        ingress tag per sandbox          : per_sandbox
+        
+   UNKNOWN SPLIT RESULT. The tag discriminates per sandbox, but the interface it is keyed on is not
+            stable across a restart, so the tag inherits that instability. Neither is usable alone;
+            what would be is a per-sandbox key that survives detach, and nothing here is one.
+
+== WHAT WAS NOT TRIED ==
+        - tart. Its guests share the vmnet bridges rather than getting one network each, so none of
+          I1-I3 transfers to it; the question there is a different one and it is not asked here.
+        - Concurrent starts. The detach window in I2 is opened by hand, one sandbox at a time. Two
+          sandboxes racing for a freed index is the case a real pool would hit and it is not run.
+        - Whether a rule naming a bridge SURVIVES that bridge disappearing. pf accepts rules on
+          absent interfaces, but whether the rule re-attaches when the name comes back, or silently
+          matches nothing, is not measured — and I2's remedy depends on which.
+        - The tag namespace. Whether pf tags are a limited resource, and what happens at 32 of them,
+          is unmeasured; K3 and I3 both use two.
+        - Any of this under the shipped D132 grant. Every rule here is loaded as root. The grant
+          authorizes table membership, and an interface-keyed or tag-keyed design needs RULES to
+          change per sandbox, which the grant does not permit at all. That is the largest untested
+          consequence of a positive result here, and it is a D132 question rather than a pf one.
+
+== cleanup ==
+   main-refs: before=2 after=2
+
+pass=5 fail=2 unknown=1
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-interface-key.txt

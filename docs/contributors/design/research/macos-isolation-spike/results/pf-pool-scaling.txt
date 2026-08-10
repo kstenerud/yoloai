@@ -1,45 +1,65 @@
 host: macOS 26.5.1 arm64
-date: 2026-08-08 13:47:03 CEST | anchor=com.apple/yoloai_p
+date: 2026-08-09 21:31:00 CEST | anchor=com.apple/yoloai_p
 
 == P0 SETUP — the grant, in its shipped shape ==
    PASS    grant is live (the user can run a permitted pfctl without a password)
-        guest=192.168.64.34
+        guest=192.168.64.12
 
-== P1 ACQUISITION COST AT 8, 16 AND 32 SLOTS ==
-        5 repetitions each. The expected call count is N+3; a run whose count disagrees is
-        reported as broken rather than averaged in.
-        SLOTS  CALLS    MEAN ms    PER CALL ms  runs
-        8      11       217.1      19.73         212.8 213.4 222.0 214.7 222.4
-        16     19       367.6      19.35         375.7 367.9 366.1 366.8 361.6
-        32     35       668.5      19.10         674.1 660.4 664.6 678.5 665.0
+== P1 ACQUISITION COST AT 8, 16 AND 32 SLOTS — in both shapes, back to back on one host ==
+        5 repetitions each, the two shapes interleaved at every size so neither can be favoured by
+        drift in host state. The expected call count is N+3; a run whose count disagrees is reported
+        as broken rather than averaged in. Read the 'direct' rows: those are the shipped path.
+        SHAPE    SLOTS  CALLS    MEAN ms    PER CALL ms  runs
+        direct   8      11       93.2       8.48          101.1 91.8 90.8 91.0 91.5
+        nested   8      11       183.9      16.72         178.6 176.8 198.4 187.6 178.1
+        direct   16     19       158.4      8.34          156.9 159.2 159.0 161.4 155.6
+        nested   16     19       309.7      16.30         298.9 319.7 299.9 307.2 322.8
+        direct   32     35       296.7      8.48          287.6 300.4 311.7 292.0 291.9
+        nested   32     35       563.7      16.11         562.4 571.2 562.4 569.8 552.8
+        
+        P1b THE RECONCILIATION — the ratio between the two shapes, which is the whole discrepancy
+        SLOTS  direct     nested     ratio    extra ms/call
+        8      93.2       183.9      1.97     8.25
+        16     158.4      309.7      1.96     7.96
+        32     296.7      563.7      1.90     7.63
+        mean extra per call: 7.95 ms — one additional sudo invocation is 7.9 ms by
+        pf-acquire-cost.txt's own n=40 split, so this is that second sudo and nothing else.
+   PASS    P1b: both shapes measured on one host in one run; the ratio is attributable
 
 == P2 IS IT LINEAR? — the question the 'shrink the pool' lever depends on ==
         If cost = a + b*(N+3), then a and b fall straight out of two points and the third checks it.
+        Fitted on the DIRECT numbers, which are the shipped path. The check is stated against the
+        n=16 point's own run-to-run spread: an error far below the noise the measurement carries is
+        a coincidence at the mean, not a precision, and quoting it as one overstates the fit.
         fitted from n=8 and n=32:
-          per-call cost b   =  18.81 ms
-          fixed overhead a  =   10.2 ms
+          per-call cost b   =   8.48 ms
+          fixed overhead a  =   -0.1 ms
         check against the measured n=16 point:
-          predicted 367.6 ms, measured 367.6 ms, error 0.0 ms (0.0%)
-        => LINEAR within 10%. Cost is dominated by the per-call term, so pool size is a
-           real latency lever: halving the pool removes (N/2) sudo invocations.
+          predicted 161.0 ms, measured 158.4 ms, error -2.6 ms (-1.7%)
+          n=16 measured spread: 155.6-161.4 ms, i.e. +/-1.8% around the mean
+        => LINEAR to within the measurement's own noise. The fit error (1.7%) is SMALLER
+           than the run-to-run spread at this point, so it is not evidence of precision —
+           the honest statement is that no departure from linearity is visible at n=16.
+           Cost is dominated by the per-call term either way, so pool size is a real
+           latency lever: halving the pool removes (N/2) sudo invocations.
 
         What each size costs a sandbox start, using the fit:
-           4 slots ->  141.9 ms
-           8 slots ->  217.1 ms
-          16 slots ->  367.6 ms
-          32 slots ->  668.5 ms
+           4 slots ->   59.3 ms
+           8 slots ->   93.2 ms
+          16 slots ->  161.0 ms
+          32 slots ->  296.7 ms
 
 == P3 THE DENOMINATOR — what a sandbox start costs without any of this ==
         A latency lever is only worth pulling against the thing it is a fraction of. This measures
         `container run -d` — the backend's own create — which is the floor. A full `yoloai new` is
         larger (~2.4s in earlier runs), so the percentages below are the PESSIMISTIC framing: against
         a real sandbox start, acquisition is a smaller fraction than this section makes it look.
-        start 1: 715 ms
-        start 2: 679 ms
-        start 3: 633 ms
-        mean start: 676 ms
-        acquisition at 32 slots is 98.9% of that;
-        at 8 slots it is 32.1%.
+        start 1: 678 ms
+        start 2: 661 ms
+        start 3: 615 ms
+        mean start: 651 ms
+        acquisition at 32 slots is 45.6% of that;
+        at 8 slots it is 14.3%.
    PASS    P3: both axes of the pool-size decision now have numbers
 
 == P4 WHAT THE POOL SIZE ALSO BUYS — the axis that is not latency ==
@@ -65,7 +85,7 @@ date: 2026-08-08 13:47:03 CEST | anchor=com.apple/yoloai_p
         - The exhaustion policy. What the (N+1)th sandbox does is unmeasured and undecided.
 
 == cleanup ==
-   sudoers.d: []  main-refs: 2
+   sudoers.d: [yoloai-spike-session]  main-refs: 2
 
-pass=2 fail=0 unknown=0
+pass=3 fail=0 unknown=0
 results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-pool-scaling.txt

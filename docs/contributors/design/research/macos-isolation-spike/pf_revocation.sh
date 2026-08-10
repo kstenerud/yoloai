@@ -29,6 +29,11 @@
 #   R4 THE FIX       `pfctl -k` kills matching states. Does it stop the stream, and is it in the
 #                    shipped grant? (It is not — so the cost is a grant change, which is a
 #                    security-boundary decision and not a code detail.)
+#   R5a RULE ONLY    a rule covering the return direction, with NO state kill. This is the arm the
+#                    shipped prescription rests on and the one the first run never isolated: it
+#                    loaded the rule and ran `pfctl -k`, so it could only show the rule NECESSARY.
+#   R5b RULE + KILL  the same, with the kill restored, to reproduce that earlier combined result.
+#                    R5a and R5b together complete the 2x2 that decides whether D132 must widen.
 #
 # SAFETY: writes only into its own anchor; never touches the main ruleset.
 
@@ -240,6 +245,23 @@ note "\`-k\` is NONE of them, and it is not scoped to an anchor: 'pfctl -k <host
 note "state on the machine, including the user's own. Granting it is a materially wider permission"
 note "than table membership, so if R2 showed survival, the fix is a D132 amendment and not a patch."
 
+# R5 runs the same measurement twice with one variable changed, so the two arms share their
+# setup and teardown rather than being copied — a copied arm is how the two drift apart.
+RULE_ALONE=untested; RULE_KILL=untested
+arm_begin() {   # $1 = tag. Opens a fresh permitted stream, echoes bytes received after 5s.
+  kill "$CURLPID" 2>/dev/null
+  asuser container exec ybr1 sh -c "rm -f /tmp/$1.txt" >/dev/null 2>&1
+  asuser container exec ybr1 curl -sN --max-time 30 "http://$GW:$PORT/" -o "/tmp/$1.txt" \
+    >/dev/null 2>&1 &
+  CURLPID=$!
+  sleep 5
+  asuser container exec ybr1 sh -c "wc -c < /tmp/$1.txt 2>/dev/null || echo 0" 2>/dev/null | tr -d ' '
+}
+arm_end() {     # $1 = tag. Echoes bytes received after a further 6s.
+  sleep 6
+  asuser container exec ybr1 sh -c "wc -c < /tmp/$1.txt 2>/dev/null || echo 0" 2>/dev/null | tr -d ' '
+}
+
 say "R5 WHY DID IT SURVIVE THE KILL? — diagnosing, not asserting"
 note "R4 killed every state naming the guest and the transfer still advanced. That should not happen"
 note "if the block rule is reached, so something is re-permitting the flow. The leading hypothesis:"
@@ -249,6 +271,13 @@ note "the rest of the connection, including the guest's replies, straight past t
 note ""
 note "If that is right, a rule covering the return direction closes it. Tested, with the control that"
 note "legitimate allowed traffic must still work — a fix that blocks everything is not a fix."
+note ""
+note "TWO ARMS, because the first run of this section conflated them. It loaded the rule AND ran"
+note "\`pfctl -k\`, saw the transfer stop, and concluded \"the fix is a rule rather than a grant\"."
+note "The kill was still in the sequence, so that arm proves the rule NECESSARY and never SUFFICIENT."
+note "R5a is the rule alone. R5b restores the kill. Only both together complete the 2x2:"
+note "     no-kill / no-rule -> SURVIVED (R2/R3)        kill / no-rule -> SURVIVED (R4)"
+note "     no-kill / rule    -> R5a, below              kill + rule    -> R5b, below"
 pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T add "$GW" >/dev/null 2>&1
 { for ((i=0;i<SLOTS;i++)); do
     echo "table <yb_src_$i> persist"; echo "table <yb_dst_$i> persist"
@@ -263,33 +292,65 @@ ctl=$(asuser container exec ybr1 curl -s -o /dev/null -w '%{http_code}' --max-ti
 note "CONTROL with the return-direction rule loaded: allowed destination -> ${ctl:-000}"
 note "   (must still be non-000, or the rule is over-blocking and cannot be used)"
 if [ "${ctl:-000}" = 000 ]; then
-  unk "R5: the return-direction rule broke legitimate traffic; hypothesis untested"
+  unk "R5: the return-direction rule broke legitimate traffic; neither arm could be tested"
 else
-  kill "$CURLPID" 2>/dev/null
-  asuser container exec ybr1 sh -c 'rm -f /tmp/r5.txt' >/dev/null 2>&1
-  asuser container exec ybr1 curl -sN --max-time 30 "http://$GW:$PORT/" -o /tmp/r5.txt \
-    >/dev/null 2>&1 &
-  CURLPID=$!
-  sleep 5
-  b5=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/r5.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
-  note "stream running: $b5 bytes; states naming the guest: $(states "$IP")"
+  note ""
+  note "R5a  RULE ONLY — revoke the allowlist entry and do NOT run \`pfctl -k\`. This is the arm"
+  note "     the shipped prescription rests on, and the one that had never been run."
+  b5a=$(arm_begin r5a)
+  note "stream running: $b5a bytes; states naming the guest: $(states "$IP")"
   note "states, verbatim, before the revocation:"
   pfctl -s state 2>/dev/null | grep "$IP" | head -4 | sed 's/^/          /'
+  pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T delete "$GW" >/dev/null 2>&1
+  note "after revoke WITHOUT the kill, states naming the guest: $(states "$IP")"
+  pfctl -s state 2>/dev/null | grep "$IP" | head -4 | sed 's/^/          /'
+  a5a=$(arm_end r5a)
+  note "6s later: $a5a bytes (was $b5a)"
+  if [ "${a5a:-0}" -le "${b5a:-0}" ]; then
+    RULE_ALONE=stops
+    ok "R5a: the return-direction rule ALONE stops the transfer"
+  else
+    RULE_ALONE=survives
+    bad "R5a: the transfer SURVIVED the rule alone ($b5a -> $a5a)"
+    note "     pf does not re-evaluate rules for packets matching an existing state, so a rule"
+    note "     loaded while that state exists cannot reach this connection — the same mechanism"
+    note "     that made the in-only rules fail in R2/R3."
+  fi
+
+  note ""
+  note "R5b  RULE + KILL — the arm the earlier run actually ran, reproduced for comparison."
+  pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T add "$GW" >/dev/null 2>&1
+  b5b=$(arm_begin r5b)
+  note "stream running: $b5b bytes; states naming the guest: $(states "$IP")"
   pfctl -a "$ANCHOR" -t "yb_dst_$SLOT" -T delete "$GW" >/dev/null 2>&1
   pfctl -k "$IP" >/dev/null 2>&1
   note "after revoke + kill, states naming the guest: $(states "$IP")"
   pfctl -s state 2>/dev/null | grep "$IP" | head -4 | sed 's/^/          /'
-  sleep 6
-  a5=$(asuser container exec ybr1 sh -c 'wc -c < /tmp/r5.txt 2>/dev/null || echo 0' 2>/dev/null | tr -d ' ')
-  note "6s later: $a5 bytes (was $b5)"
-  if [ "${a5:-0}" -le "${b5:-0}" ]; then
-    ok "R5: HYPOTHESIS CONFIRMED. Covering the return direction stops the transfer, so what kept it"
-    note "    alive was a state created by the unmatched OUTBOUND packet. That makes the pool's"
-    note "    in-only rules incomplete for revocation, and the fix is a rule rather than a grant —"
-    note "    materially cheaper than widening D132 to allow \`pfctl -k\`."
+  a5b=$(arm_end r5b)
+  note "6s later: $a5b bytes (was $b5b)"
+  if [ "${a5b:-0}" -le "${b5b:-0}" ]; then
+    RULE_KILL=stops
+    ok "R5b: rule + kill stops the transfer"
   else
-    bad "R5: the transfer survived even with the return direction covered ($b5 -> $a5). The"
-    note "    hypothesis is wrong and the mechanism is still unexplained — do not design against it."
+    RULE_KILL=survives
+    bad "R5b: the transfer survived even rule + kill ($b5b -> $a5b)"
+  fi
+
+  note ""
+  note "R5 VERDICT — read off the two arms above, not asserted:"
+  note "     rule alone: $RULE_ALONE        rule + kill: $RULE_KILL"
+  if [ "$RULE_ALONE" = stops ]; then
+    ok "R5: the return-direction rule is SUFFICIENT. Dropping \`pfctl -k\` and shipping the rule is"
+    note "    sound, and D132 needs no amendment."
+  elif [ "$RULE_KILL" = stops ]; then
+    bad "R5: the rule is NECESSARY BUT NOT SUFFICIENT — only rule+kill stops an established flow."
+    note "    Every prescription that drops \`pfctl -k\` in favour of the rule is therefore WRONG."
+    note "    The remedy costs a D132 amendment, and \`-k\` is not anchor-scoped: 'pfctl -k <host>'"
+    note "    reaches every state on the machine, including the user's own. Two alternatives are"
+    note "    untested here: \`pfctl -K\` (kills by both endpoints, so a narrower grant), and a short"
+    note "    tcp.established timeout inside the anchor, which bounds the window with no new grant."
+  else
+    unk "R5: neither arm stopped the flow. The mechanism is unexplained — do not design against it."
   fi
 fi
 

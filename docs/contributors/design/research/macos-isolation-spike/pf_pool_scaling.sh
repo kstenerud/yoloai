@@ -21,6 +21,16 @@
 #   Run through the real path: the shipped grant installed, `sudo -n pfctl` issued as the user.
 #   Timing it as root would measure pfctl and miss the 85% that is sudo.
 #
+#   AND THE CORRECTION THIS FILE CARRIES. Run 1 got that last part wrong in a way its output could
+#   not show. It issued every timed call as `sudo -u <user> -H sudo -n pfctl` — the drop to the user
+#   INSIDE the timed region, and therefore two sudo invocations per call rather than one. Every
+#   figure it produced was 2.09x `pf-acquire-cost.txt`'s, which had run identical call counts on
+#   this host a day earlier, and the pool-size decision was taken on the inflated set. Both shapes
+#   are now measured back to back in P1 so the discrepancy is settled inside one run: `direct` is
+#   the shipped shape and the one every conclusion here uses, `nested` reproduces the old error.
+#   The tell was available without re-running anything — the fitted 18.81 ms/call was exactly twice
+#   a measured 9.3 — and nothing checked one harness's numbers against the other's.
+#
 # SAFETY: writes only into its own anchor; installs a spike-named grant and removes it at exit.
 
 set -u
@@ -115,12 +125,50 @@ load_pool() {   # $1 = slot count
   asuser sudo -n /sbin/pfctl -a "$ANCHOR" -f "$POOLCONF" 2>&1 | quiet_pf >/dev/null
 }
 
-# One full acquisition of SLOT in an N-slot pool, through sudo, exactly as the design specifies.
+# One full acquisition of SLOT in an N-slot pool, timed TWO WAYS — because this measurement and
+# `pf-acquire-cost.txt`'s ran identical call counts on this host a day apart and disagreed by a
+# uniform 2.09x, and the difference turned out to be in the instrument rather than in the thing.
+#
+#   direct   the shipped shape. yoloAI runs AS the user and issues one `sudo -n pfctl` per call;
+#            the drop to the user happens once, outside anything timed. This is what
+#            pf-acquire-cost.sh measured, and it is the number the product would see.
+#   nested   what THIS file did before: `sudo -u <user> -H sudo -n pfctl`, so every timed call pays
+#            TWO sudo invocations and the outer drop sits inside the timed region. That harness
+#            never runs in production. pf-acquire-cost.txt's own per-call split is 9.3 ms of which
+#            7.9 is sudo, so a second sudo predicts ~17 ms/call against a measured 18.81 — which is
+#            the entire discrepancy, and a pool-size decision was taken on the inflated set.
+#
+# Both are run, so the reconciliation lives in this file rather than in prose about two files.
+cat > /tmp/pfp.seq.py <<'PY'
+import subprocess, sys, time
+anchor, slot, n, addr, allow = sys.argv[1], int(sys.argv[2]), int(sys.argv[3]), sys.argv[4], sys.argv[5]
+DN = subprocess.DEVNULL
+calls = 0
+def pf(*a):
+    global calls
+    calls += 1
+    subprocess.run(["sudo", "-n", "/sbin/pfctl", "-a", anchor] + list(a), stdout=DN, stderr=DN)
+t0 = time.perf_counter()
+pf("-t", "yb_src_%d" % slot, "-T", "flush")
+pf("-t", "yb_dst_%d" % slot, "-T", "flush")
+for i in range(n):
+    if i != slot:
+        pf("-t", "yb_src_%d" % i, "-T", "delete", addr)
+pf("-t", "yb_src_%d" % slot, "-T", "add", addr)
+pf("-t", "yb_dst_%d" % slot, "-T", "add", allow)
+print("%.1f %d" % ((time.perf_counter() - t0) * 1000, calls))
+PY
+chmod 644 /tmp/pfp.seq.py
+
 # Returns elapsed ms and the number of sudo calls issued, and the two are checked against each
 # other by the caller — a sequence that silently issues fewer calls than it should would report a
 # beautiful number for doing nothing, which is how the collapse run was invalidated once already.
-acquire() {   # $1 = slot count, $2 = slot to claim; echoes "<ms> <calls>"
-  local n="$1" slot="$2" i calls=0 t0 t1
+acquire() {   # $1 = slot count, $2 = slot to claim, $3 = direct|nested; echoes "<ms> <calls>"
+  local n="$1" slot="$2" mode="$3" i calls=0 t0 t1
+  if [ "$mode" = direct ]; then
+    asuser python3 /tmp/pfp.seq.py "$ANCHOR" "$slot" "$n" "$IP" "$ALLOW"
+    return
+  fi
   t0=$(now)
   asuser sudo -n /sbin/pfctl -a "$ANCHOR" -t "yb_src_$slot" -T flush >/dev/null 2>&1; calls=$((calls+1))
   asuser sudo -n /sbin/pfctl -a "$ANCHOR" -t "yb_dst_$slot" -T flush >/dev/null 2>&1; calls=$((calls+1))
@@ -135,11 +183,12 @@ acquire() {   # $1 = slot count, $2 = slot to claim; echoes "<ms> <calls>"
   printf '%s %s' "$(python3 -c "print('%.1f' % (($t1-$t0)*1000))")" "$calls"
 }
 
-say "P1 ACQUISITION COST AT 8, 16 AND 32 SLOTS"
-note "$REPS repetitions each. The expected call count is N+3; a run whose count disagrees is"
-note "reported as broken rather than averaged in."
-printf '        %-6s %-8s %-10s %-12s %s\n' SLOTS CALLS "MEAN ms" "PER CALL ms" "runs"
-RES8=""; RES16=""; RES32=""
+say "P1 ACQUISITION COST AT 8, 16 AND 32 SLOTS — in both shapes, back to back on one host"
+note "$REPS repetitions each, the two shapes interleaved at every size so neither can be favoured by"
+note "drift in host state. The expected call count is N+3; a run whose count disagrees is reported"
+note "as broken rather than averaged in. Read the 'direct' rows: those are the shipped path."
+printf '        %-8s %-6s %-8s %-10s %-12s %s\n' SHAPE SLOTS CALLS "MEAN ms" "PER CALL ms" "runs"
+RES8=""; RES16=""; RES32=""; NRES8=""; NRES16=""; NRES32=""
 for n in 8 16 32; do
   load_pool "$n"
   loaded=$(pfctl -a "$ANCHOR" -s rules 2>/dev/null | grep -c . || true)
@@ -147,28 +196,62 @@ for n in 8 16 32; do
     unk "P1: pool of $n slots loaded $loaded rules, expected $((n*2)); skipping this size"
     continue
   fi
-  total=0; runs=""; badcalls=0; expect=$((n+3))
-  for _ in $(seq "$REPS"); do
-    r=$(acquire "$n" 1)
-    t=${r%% *}; c=${r##* }
-    [ "$c" -ne "$expect" ] && badcalls=$((badcalls+1))
-    runs="$runs $t"
-    total=$(python3 -c "print($total + $t)")
+  expect=$((n+3))
+  for mode in direct nested; do
+    total=0; runs=""; badcalls=0
+    for _ in $(seq "$REPS"); do
+      r=$(acquire "$n" 1 "$mode")
+      t=${r%% *}; c=${r##* }
+      [ "$c" -ne "$expect" ] && badcalls=$((badcalls+1))
+      runs="$runs $t"
+      total=$(python3 -c "print($total + $t)")
+    done
+    mean=$(python3 -c "print('%.1f' % ($total/$REPS))")
+    per=$(python3 -c "print('%.2f' % ($total/$REPS/$expect))")
+    printf '        %-8s %-6s %-8s %-10s %-12s %s\n' "$mode" "$n" "$expect" "$mean" "$per" "$runs"
+    [ "$badcalls" -gt 0 ] && bad "P1: $badcalls/$REPS $mode runs at n=$n issued the wrong call count"
+    if [ "$mode" = direct ]; then
+      case "$n" in 8) RES8=$mean;; 16) RES16=$mean; RUNS16=$runs;; 32) RES32=$mean;; esac
+    else
+      case "$n" in 8) NRES8=$mean;; 16) NRES16=$mean;; 32) NRES32=$mean;; esac
+    fi
   done
-  mean=$(python3 -c "print('%.1f' % ($total/$REPS))")
-  per=$(python3 -c "print('%.2f' % ($total/$REPS/$expect))")
-  printf '        %-6s %-8s %-10s %-12s %s\n' "$n" "$expect" "$mean" "$per" "$runs"
-  [ "$badcalls" -gt 0 ] && bad "P1: $badcalls/$REPS runs at n=$n issued the wrong number of calls"
-  case "$n" in 8) RES8=$mean;; 16) RES16=$mean;; 32) RES32=$mean;; esac
 done
+
+note ""
+note "P1b THE RECONCILIATION — the ratio between the two shapes, which is the whole discrepancy"
+if [ -n "$RES8" ] && [ -n "$NRES8" ] && [ -n "$RES32" ] && [ -n "$NRES32" ]; then
+  python3 - "$RES8" "$NRES8" "${RES16:-0}" "${NRES16:-0}" "$RES32" "$NRES32" <<'PY'
+import sys
+d8, n8, d16, n16, d32, n32 = (float(x) for x in sys.argv[1:7])
+rows = [("8", d8, n8, 11), ("16", d16, n16, 19), ("32", d32, n32, 35)]
+print("        %-6s %-10s %-10s %-8s %s" % ("SLOTS", "direct", "nested", "ratio", "extra ms/call"))
+for name, d, n, calls in rows:
+    if d and n:
+        print("        %-6s %-10.1f %-10.1f %-8.2f %.2f"
+              % (name, d, n, n / d, (n - d) / calls))
+extras = [(n - d) / c for _, d, n, c in rows if d and n]
+if extras:
+    print("        mean extra per call: %.2f ms — one additional sudo invocation is 7.9 ms by"
+          % (sum(extras) / len(extras)))
+    print("        pf-acquire-cost.txt's own n=40 split, so this is that second sudo and nothing else.")
+PY
+  ok "P1b: both shapes measured on one host in one run; the ratio is attributable"
+else
+  unk "P1b: one of the two shapes did not produce numbers at every size; no reconciliation"
+fi
 
 # ---------------------------------------------------------------------------
 say "P2 IS IT LINEAR? — the question the 'shrink the pool' lever depends on"
 if [ -n "$RES8" ] && [ -n "$RES16" ] && [ -n "$RES32" ]; then
   note "If cost = a + b*(N+3), then a and b fall straight out of two points and the third checks it."
-  python3 - "$RES8" "$RES16" "$RES32" <<'PY'
+  note "Fitted on the DIRECT numbers, which are the shipped path. The check is stated against the"
+  note "n=16 point's own run-to-run spread: an error far below the noise the measurement carries is"
+  note "a coincidence at the mean, not a precision, and quoting it as one overstates the fit."
+  python3 - "$RES8" "$RES16" "$RES32" "${RUNS16:-}" <<'PY'
 import sys
 t8, t16, t32 = (float(x) for x in sys.argv[1:4])
+runs16 = [float(x) for x in sys.argv[4].split()] if len(sys.argv) > 4 and sys.argv[4].strip() else []
 n8, n16, n32 = 11, 19, 35            # N+3 calls at each size
 b = (t32 - t8) / (n32 - n8)
 a = t8 - b * n8
@@ -180,11 +263,22 @@ print("        check against the measured n=16 point:")
 print("          predicted %.1f ms, measured %.1f ms, error %.1f ms (%.1f%%)"
       % (pred16, t16, t16 - pred16, 100 * (t16 - pred16) / t16 if t16 else 0))
 err = abs(t16 - pred16) / t16 * 100 if t16 else 0
-if err < 10:
-    print("        => LINEAR within 10%. Cost is dominated by the per-call term, so pool size is a")
-    print("           real latency lever: halving the pool removes (N/2) sudo invocations.")
+spread = None
+if len(runs16) > 1 and t16:
+    spread = 100 * (max(runs16) - min(runs16)) / t16
+    print("          n=16 measured spread: %.1f-%.1f ms, i.e. +/-%.1f%% around the mean"
+          % (min(runs16), max(runs16), spread / 2))
+if spread is not None and err < spread / 2:
+    print("        => LINEAR to within the measurement's own noise. The fit error (%.1f%%) is SMALLER"
+          % err)
+    print("           than the run-to-run spread at this point, so it is not evidence of precision —")
+    print("           the honest statement is that no departure from linearity is visible at n=16.")
+elif err < 10:
+    print("        => LINEAR within 10%%, fit error %.1f%%." % err)
 else:
     print("        => NOT linear within 10%. Refit before treating pool size as a latency lever.")
+print("           Cost is dominated by the per-call term either way, so pool size is a real")
+print("           latency lever: halving the pool removes (N/2) sudo invocations.")
 print()
 print("        What each size costs a sandbox start, using the fit:")
 for n in (4, 8, 16, 32):

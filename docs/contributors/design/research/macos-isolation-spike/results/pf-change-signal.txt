@@ -1,6 +1,6 @@
 host: macOS 26.5.1 arm64
-date: 2026-08-08 14:01:53 CEST
-pf:   Status: Enabled for 0 days 00:00:45           Debug: Urgent
+date: 2026-08-09 21:44:23 CEST
+pf:   Status: Enabled for 0 days 00:08:52           Debug: Urgent
 
 == S0 BASELINE ==
         main-refs=2
@@ -19,37 +19,66 @@ pf:   Status: Enabled for 0 days 00:00:45           Debug: Urgent
           state:/Network/Global/IPv4
           com.apple.system.config.sc_dynamicstore
 
+== S1a IS THE LOG QUERY ALIVE? — the proof S2a already gives the notify watcher ==
+        S1's result is a SILENCE, and a silence is only evidence if the instrument works. The notify
+        half establishes that by posting to itself. The log half had no equivalent, so an inert query
+        and a genuinely quiet subsystem produced identical output — and this directory has already
+        published one wrong predicate (pf-anchor-eval-run1-predicate-bug.txt) that read exactly so.
+        
+        Two arms, because they fail for different reasons and only the pair is interpretable:
+          A1  can this predicate match ANYTHING, in this window, through this command? A message is
+              written specifically to satisfy it, so a miss is the instrument and not the subject.
+          A2  does the clause that would carry a real signal — process == "pfctl" — match a pfctl
+              invocation made deliberately, right now?
+        Each is asked twice: at the default level, and with --info --debug. macOS withholds info and
+        debug records from `log show` by default, so 'not logged' and 'logged beneath the default
+        level' are different findings that the default form alone cannot separate.
+        
+        A1 self-emitted message found:  default=1   with --info --debug=1
+        A2 entries from process pfctl:  default=0   with --info --debug=0
+   PASS    S1a: the predicate and the query DO match a message emitted inside the window
+        A2: a deliberate pfctl invocation produced ZERO entries under process == "pfctl". That
+            clause cannot detect anything on this host, so S1's negative rests entirely on the two
+            eventMessage clauses — a materially narrower claim than the predicate's shape suggests.
+
 == S1/S3 THE EVENTS — log, notify, -s info and file mtime around each ==
         
         --- E1  pfctl -f /etc/pf.conf   (a benign reload) ---
-        S1 unified log entries matching the pf predicate since the event: 0
+        S1 unified log entries matching the pf predicate since the event: 1
+            Timestamp               Ty Process[PID:TID]
+            2026-08-09 21:44:38.513 Df log[78095:1978e66] [com.apple.log:] log run noninteractively, parent: 78094 (bash), args: 'log' 'show' '--start' '2026-08-09 21:44:35' '--predicate' 'process == "pfctl" OR eventMessage CONTAINS[c] "packet filter" OR eventMessage CONTAINS[c] "pf ruleset"' '--style' 'compact'
+            2026-08-09 21:44:39.180 Df log[78098:1978e6f] [com.apple.log:] log run noninteractively, parent: 77495 (bash), args: 'log' 'show' '--start' '2026-08-09 21:44:35' '--predicate' 'process == "pfctl" OR eventMessage CONTAINS[c] "packet filter" OR eventMessage CONTAINS[c] "pf ruleset"' '--style' 'compact'
         S2 notify keys that fired: 0
         S3 changed lines in 'pfctl -s info' + '-s Anchors': 10
-            < Status: Enabled for 0 days 00:00:49           Debug: Urgent
-            > Status: Enabled for 0 days 00:00:52           Debug: Urgent
-            <   searches                            3652           74.5/s
-            <   inserts                              126            2.6/s
-            <   removals                             130            2.7/s
-            >   searches                            3698           71.1/s
-            >   inserts                              126            2.4/s
-            >   removals                             130            2.5/s
+            < Status: Enabled for 0 days 00:09:04           Debug: Urgent
+            > Status: Enabled for 0 days 00:09:07           Debug: Urgent
+            <   current entries                      146               
+            <   searches                          516996          950.4/s
+            >   current entries                      135               
+            >   searches                          517728          946.5/s
+            <   removals                            2109            3.9/s
+            >   removals                            2120            3.9/s
         S4 /etc/pf.conf mtime changed: no
             main-refs now = 2
         
         --- E3  pfctl -d then pfctl -e  (disable/enable) ---
           pfctl: pf disabled
           pfctl: pf enabled
-        S1 unified log entries matching the pf predicate since the event: 0
+        S1 unified log entries matching the pf predicate since the event: 2
+            Timestamp               Ty Process[PID:TID]
+            2026-08-09 21:44:39.180 Df log[78098:1978e6f] [com.apple.log:] log run noninteractively, parent: 77495 (bash), args: 'log' 'show' '--start' '2026-08-09 21:44:35' '--predicate' 'process == "pfctl" OR eventMessage CONTAINS[c] "packet filter" OR eventMessage CONTAINS[c] "pf ruleset"' '--style' 'compact'
+            2026-08-09 21:44:43.909 Df log[78235:1978fa4] [com.apple.log:] log run noninteractively, parent: 78234 (bash), args: 'log' 'show' '--start' '2026-08-09 21:44:39' '--predicate' 'process == "pfctl" OR eventMessage CONTAINS[c] "packet filter" OR eventMessage CONTAINS[c] "pf ruleset"' '--style' 'compact'
+            2026-08-09 21:44:44.542 Df log[78334:1979052] [com.apple.log:] log run noninteractively, parent: 77495 (bash), args: 'log' 'show' '--start' '2026-08-09 21:44:39' '--predicate' 'process == "pfctl" OR eventMessage CONTAINS[c] "packet filter" OR eventMessage CONTAINS[c] "pf ruleset"' '--style' 'compact'
         S2 notify keys that fired: 0
-        S3 changed lines in 'pfctl -s info' + '-s Anchors': 12
-            < Status: Enabled for 0 days 00:00:53           Debug: Urgent
+        S3 changed lines in 'pfctl -s info' + '-s Anchors': 14
+            < Status: Enabled for 0 days 00:09:08           Debug: Urgent
             > Status: Enabled for 0 days 00:00:03           Debug: Urgent
             <   current entries                      111               
-            <   searches                            3766           71.1/s
-            <   inserts                              126            2.4/s
-            <   removals                             132            2.5/s
-            >   current entries                      103               
-            >   searches                            3916         1305.3/s
+            <   searches                          518195          945.6/s
+            <   inserts                             2058            3.8/s
+            <   removals                            2144            3.9/s
+            >   current entries                      104               
+            >   searches                          518348       172782.7/s
         S4 /etc/pf.conf mtime changed: no
             main-refs now = 2
         
@@ -58,21 +87,24 @@ pf:   Status: Enabled for 0 days 00:00:45           Debug: Urgent
           pfctl: nat cleared
           pfctl: dummynet cleared
           pfctl: 0 tables deleted.
-          pfctl: 103 states cleared
+          pfctl: 104 states cleared
           pfctl: source tracking entries cleared
           pfctl: pf: statistics cleared
           pfctl: pf: interface flags reset
-        S1 unified log entries matching the pf predicate since the event: 0
+        S1 unified log entries matching the pf predicate since the event: 1
+            Timestamp               Ty Process[PID:TID]
+            2026-08-09 21:44:48.243 Df log[78421:197910b] [com.apple.log:] log run noninteractively, parent: 78420 (bash), args: 'log' 'show' '--start' '2026-08-09 21:44:45' '--predicate' 'process == "pfctl" OR eventMessage CONTAINS[c] "packet filter" OR eventMessage CONTAINS[c] "pf ruleset"' '--style' 'compact'
+            2026-08-09 21:44:48.908 Df log[78474:197917a] [com.apple.log:] log run noninteractively, parent: 77495 (bash), args: 'log' 'show' '--start' '2026-08-09 21:44:45' '--predicate' 'process == "pfctl" OR eventMessage CONTAINS[c] "packet filter" OR eventMessage CONTAINS[c] "pf ruleset"' '--style' 'compact'
         S2 notify keys that fired: 0
-        S3 changed lines in 'pfctl -s info' + '-s Anchors': 12
-            < Status: Enabled for 0 days 00:00:04           Debug: Urgent
+        S3 changed lines in 'pfctl -s info' + '-s Anchors': 14
+            < Status: Enabled for 0 days 00:00:05           Debug: Urgent
             > Status: Enabled for 0 days 00:00:03           Debug: Urgent
-            <   current entries                      103               
-            <   searches                            4065         1016.2/s
-            <   inserts                              126           31.5/s
-            <   removals                             140           35.0/s
-            >   current entries                       73               
-            >   searches                              73           24.3/s
+            <   current entries                      104               
+            <   searches                          518400       103680.0/s
+            <   inserts                             2058          411.6/s
+            <   removals                            2151          430.2/s
+            >   current entries                       74               
+            >   searches                             115           38.3/s
         S4 /etc/pf.conf mtime changed: no
             main-refs now = 0
         
@@ -83,7 +115,7 @@ pf:   Status: Enabled for 0 days 00:00:45           Debug: Urgent
         'pfctl -s info' is already permitted by the shipped D132 grant, so a field that changes on a
         ruleset load would give a poll that costs no new privilege at all. Counters that always move
         (searches/inserts) are useless — they change whether or not anything happened.
-        uptime before a plain reload : 0 days 00:00:06  (4s)
+        uptime before a plain reload : 0 days 00:00:04  (4s)
         uptime after  a plain reload : 0 days 00:00:06  (6s)   a RELOAD is the dangerous quiet case
         uptime before -F all         : (6s)
         uptime after  -F all         : (0s)
@@ -108,7 +140,7 @@ pf:   Status: Enabled for 0 days 00:00:45           Debug: Urgent
 == S5 THE COST OF POLLING, since that is what a negative forces ==
         20 invocations of the granted read, as the user would issue them:
         pfctl -s info x20 (as root, no sudo): 2.0 ms each
-        pfctl -s rules x20 (the main-ruleset read a poll would need): 4.2 ms each
+        pfctl -s rules x20 (the main-ruleset read a poll would need): 4.3 ms each
         
         Add ~9.3 ms of sudo per call (pf-acquire-cost.txt, where 85% of a call was sudo and not pfctl).
         At a 5s interval that is a fraction of a percent of one core, and a 5s worst-case window of
@@ -131,5 +163,5 @@ pf:   Status: Enabled for 0 days 00:00:45           Debug: Urgent
    pf=Enabled  main-refs=2
    main ruleset references com.apple/* again
 
-pass=3 fail=0 unknown=0
+pass=4 fail=0 unknown=0
 results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-change-signal.txt
