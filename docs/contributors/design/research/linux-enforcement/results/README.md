@@ -66,6 +66,8 @@ satisfied for free.
 | P1 | `p1-no-fastpath-correctness.txt` | Dropping the conntrack fast-path breaks nothing. |
 | P1b | `p1b-revocation-decay.txt` | **Revocation works only without the fast-path.** |
 | P2 | `p2-fastpath-cost.txt` | No measurable throughput cost, at any allowlist size. |
+| K3 | `k3-veth-name-reuse.txt` | Rootless podman recycles veth names; docker and CNI do not. |
+| K3b | `k3b-veth-reuse-live-sibling.txt` | **A reused name re-points at a different live sandbox.** |
 
 **X1 and X2 are the macOS pass's extras asked on Linux**, after that pass landed. Both reproduce, and
 X1's fix — a bridge-scoped default-deny naming no address — works here too.
@@ -182,6 +184,15 @@ chain, because every rule matches `ip saddr <guest>`. Wrong: the counter caught 
 accept`. The distinction matters, because it means **the chain policy must stay `accept`**; a chain
 defaulting to `drop` would kill all return traffic. The verdict line was phrased conditionally, which
 is the only reason the run reported the contradiction instead of asserting the prediction.
+
+**K3/K3b correct a claim in the plan rewrite, written the same day.** The rewrite asserted "Linux
+needs no lifecycle rule because its names do not recycle" — from three docker cycles — while the same
+document noted that netavark lets the kernel assign the name. Measured: docker 6 distinct names over 6
+cycles, containerd/CNI 6 distinct, **rootless podman `veth0` every time**. And the reuse is not
+benign: with A on `veth0` and B on `veth1`, destroying A and starting C gave **C the name `veth0`**,
+so a rule still naming it matches a different sandbox with different policy. B kept its own name, so
+the DF190 variant — a running sandbox's identifier changing underneath it — does not occur here.
+Bounded by six *sequential* cycles; concurrent churn is untested and would be more adversarial.
 
 ## Runs that were discarded, and why
 

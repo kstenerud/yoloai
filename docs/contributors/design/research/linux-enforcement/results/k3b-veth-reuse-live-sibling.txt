@@ -1,0 +1,14 @@
+=== K3b — does a reused veth name re-point at a DIFFERENT live sandbox? ===
+sequential reuse is benign if nothing else is running. The hazard is a name
+freed and reissued while a sibling keeps its own.
+
+  two sandboxes running:  A=veth0   B=veth1
+  -- destroy A, leaving B running --
+  B is now: veth1 (was veth1)
+  -- start a NEW sandbox C --
+  C got: veth0     B is now: veth1
+
+=== VERDICT ===
+  C INHERITED A's veth name (veth0). A rule still naming veth0 now matches C —
+  a different sandbox, with different policy. This is macOS's I5 hazard on Linux.
+  B kept its name throughout, so a rule naming it stayed correct.
