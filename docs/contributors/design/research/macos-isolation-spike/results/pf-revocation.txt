@@ -1,8 +1,8 @@
 host: macOS 26.5.1 arm64
-date: 2026-08-08 14:04:15 CEST | anchor=com.apple/yoloai_r
+date: 2026-08-09 21:29:32 CEST | anchor=com.apple/yoloai_r
 
 == R0 SETUP ==
-        guest=192.168.64.7  host as seen from the guest=192.168.64.1
+        guest=192.168.64.11  host as seen from the guest=192.168.64.1
         streaming server up on 192.168.64.1:18643 (one line per second, 40s)
         allowed (the host) -> 200    denied (1.0.0.1) -> 000   (need non-000 then 000)
    PASS    R0: enforcement is live and the stream endpoint is the allowlisted destination
@@ -13,7 +13,7 @@ date: 2026-08-08 14:04:15 CEST | anchor=com.apple/yoloai_r
    PASS    R1: the stream is genuinely live and growing while permitted
 
 == R2 REVOKE MID-STREAM — the question ==
-        before revocation: 45 bytes received, 3 pf state(s) mentioning 192.168.64.7
+        before revocation: 45 bytes received, 3 pf state(s) mentioning 192.168.64.11
         revoking: pfctl -a com.apple/yoloai_r -t yb_dst_1 -T delete 192.168.64.1
         pfctl: No ALTQ support in kernel
         pfctl: ALTQ related functions disabled
@@ -32,11 +32,11 @@ date: 2026-08-08 14:04:15 CEST | anchor=com.apple/yoloai_r
 == R4 THE FIX — does killing states stop it, and what does that cost? ==
         pfctl -k kills state entries. If R2 showed survival, this is the missing step in every
         revocation path: reaping, liveness reinstall, and sandbox teardown alike.
-        stream re-established: 54 bytes; states mentioning 192.168.64.7: 4
-        pfctl -k 192.168.64.7 -> No ALTQ support in kernel ALTQ related functions disabled 
+        stream re-established: 45 bytes; states mentioning 192.168.64.11: 4
+        pfctl -k 192.168.64.11 -> No ALTQ support in kernel ALTQ related functions disabled 
         states now: 0
-        6s after the kill: 108 bytes (was 54)
-   FAIL    R4: the stream survived even a state kill (54 -> 108)
+        6s after the kill: 108 bytes (was 45)
+   FAIL    R4: the stream survived even a state kill (45 -> 108)
         
         and what it costs at the security boundary — the shipped D132 grant permits four forms:
           -a <anchor> -t <table> -T add|delete|flush|show ...   /   -a <anchor> -f <pinned file>
@@ -54,22 +54,51 @@ date: 2026-08-08 14:04:15 CEST | anchor=com.apple/yoloai_r
         
         If that is right, a rule covering the return direction closes it. Tested, with the control that
         legitimate allowed traffic must still work — a fix that blocks everything is not a fix.
+        
+        TWO ARMS, because the first run of this section conflated them. It loaded the rule AND ran
+        `pfctl -k`, saw the transfer stop, and concluded "the fix is a rule rather than a grant".
+        The kill was still in the sequence, so that arm proves the rule NECESSARY and never SUFFICIENT.
+        R5a is the rule alone. R5b restores the kill. Only both together complete the 2x2:
+             no-kill / no-rule -> SURVIVED (R2/R3)        kill / no-rule -> SURVIVED (R4)
+             no-kill / rule    -> R5a, below              kill + rule    -> R5b, below
         CONTROL with the return-direction rule loaded: allowed destination -> 200
            (must still be non-000, or the rule is over-blocking and cannot be used)
+        
+        R5a  RULE ONLY — revoke the allowlist entry and do NOT run `pfctl -k`. This is the arm
+             the shipped prescription rests on, and the one that had never been run.
         stream running: 54 bytes; states naming the guest: 4
         states, verbatim, before the revocation:
-          ALL tcp 192.168.64.1:18643 -> 192.168.64.7:55854       TIME_WAIT:TIME_WAIT
-          ALL tcp 192.168.64.1:18643 -> 192.168.64.7:44694       ESTABLISHED:ESTABLISHED
-          ALL tcp 192.168.64.1:18643 <- 192.168.64.7:34370       TIME_WAIT:TIME_WAIT
-          ALL tcp 192.168.64.1:18643 <- 192.168.64.7:60640       ESTABLISHED:ESTABLISHED
+          ALL tcp 192.168.64.1:18643 -> 192.168.64.11:46468       TIME_WAIT:TIME_WAIT
+          ALL tcp 192.168.64.1:18643 -> 192.168.64.11:43614       ESTABLISHED:ESTABLISHED
+          ALL tcp 192.168.64.1:18643 <- 192.168.64.11:33916       TIME_WAIT:TIME_WAIT
+          ALL tcp 192.168.64.1:18643 <- 192.168.64.11:39570       ESTABLISHED:ESTABLISHED
+        after revoke WITHOUT the kill, states naming the guest: 4
+          ALL tcp 192.168.64.1:18643 -> 192.168.64.11:46468       TIME_WAIT:TIME_WAIT
+          ALL tcp 192.168.64.1:18643 -> 192.168.64.11:43614       ESTABLISHED:ESTABLISHED
+          ALL tcp 192.168.64.1:18643 <- 192.168.64.11:33916       TIME_WAIT:TIME_WAIT
+          ALL tcp 192.168.64.1:18643 <- 192.168.64.11:39570       ESTABLISHED:ESTABLISHED
+        6s later: 108 bytes (was 54)
+   FAIL    R5a: the transfer SURVIVED the rule alone (54 -> 108)
+             pf does not re-evaluate rules for packets matching an existing state, so a rule
+             loaded while that state exists cannot reach this connection — the same mechanism
+             that made the in-only rules fail in R2/R3.
+        
+        R5b  RULE + KILL — the arm the earlier run actually ran, reproduced for comparison.
+        stream running: 45 bytes; states naming the guest: 5
         after revoke + kill, states naming the guest: 2
-          ALL tcp 192.168.64.1:18643 -> 192.168.64.7:55854       TIME_WAIT:TIME_WAIT
-          ALL tcp 192.168.64.1:18643 -> 192.168.64.7:44694       ESTABLISHED:ESTABLISHED
-        6s later: 54 bytes (was 54)
-   PASS    R5: HYPOTHESIS CONFIRMED. Covering the return direction stops the transfer, so what kept it
-            alive was a state created by the unmatched OUTBOUND packet. That makes the pool's
-            in-only rules incomplete for revocation, and the fix is a rule rather than a grant —
-            materially cheaper than widening D132 to allow `pfctl -k`.
+          ALL tcp 192.168.64.1:18643 -> 192.168.64.11:46468       TIME_WAIT:TIME_WAIT
+          ALL tcp 192.168.64.1:18643 -> 192.168.64.11:43614       TIME_WAIT:TIME_WAIT
+        6s later: 45 bytes (was 45)
+   PASS    R5b: rule + kill stops the transfer
+        
+        R5 VERDICT — read off the two arms above, not asserted:
+             rule alone: survives        rule + kill: stops
+   FAIL    R5: the rule is NECESSARY BUT NOT SUFFICIENT — only rule+kill stops an established flow.
+            Every prescription that drops `pfctl -k` in favour of the rule is therefore WRONG.
+            The remedy costs a D132 amendment, and `-k` is not anchor-scoped: 'pfctl -k <host>'
+            reaches every state on the machine, including the user's own. Two alternatives are
+            untested here: `pfctl -K` (kills by both endpoints, so a narrower grant), and a short
+            tcp.established timeout inside the anchor, which bounds the window with no new grant.
 
 == WHAT WAS NOT TRIED ==
         - UDP, and long-lived idle connections. Only an actively streaming TCP connection was used;
@@ -85,5 +114,5 @@ date: 2026-08-08 14:04:15 CEST | anchor=com.apple/yoloai_r
 == cleanup ==
    anchor rules: 0  main-refs: 2
 
-pass=3 fail=2 unknown=0
+pass=3 fail=4 unknown=0
 results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-revocation.txt
