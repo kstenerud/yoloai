@@ -703,6 +703,20 @@ following it. Measurement says otherwise on both platforms:
   same run), and `/etc/pf.conf`'s mtime unchanged by every event, so a file watcher is blind rather
   than weak.
 
+> **⚠ CORRECTED 2026-08-10 — the Linux half of this is wrong.** The claim above that the
+> whole-ruleset class "emits no signal" was reasoned from firewalld's D-Bus signal not covering it,
+> and generalised to the platform without testing the mechanism that does. **nftables has a netlink
+> multicast group and a flush is fully observable.** Verified on this host in a throwaway netns:
+> `nft flush ruleset` emits `delete rule` / `delete chain` / `delete table` per object, plus
+> `# new generation N by process <pid> (nft)` — attribution included. `iptables-nft` operations are
+> equally visible; **`iptables-legacy` emits nothing**, because it uses `setsockopt` with no multicast
+> channel. `github.com/google/nftables` already ships a `Monitor` joining `NFNLGRP_NFTABLES` (it has
+> no `NFT_MSG_NEWGEN` case, so the PID attribution needs custom parsing, but `DELSETELEM` *is*
+> covered — relevant if the allowlist is an nft set). So Linux liveness is a **subscription**, with a
+> probe as the `iptables-legacy` fallback and a startup backstop — not a poll. Nobody in the surveyed
+> corpus uses this; OpenSnitch, whose whole job is staying installed, polls at 10 s instead.
+> The macOS half below stands: that was tested directly and no signal of any kind exists there.
+
 **So: a behavioural probe on both platforms, polled.** macOS has a measured shape to copy — detector
 C, 83–105 ms, **no grant needed**, most of it process-spawn rather than network. One free extra on
 macOS: `pfctl -s info`'s *Enabled for* counter resets on `-F all` but not on a plain reload, and
