@@ -149,7 +149,7 @@ sleep 1
 logger "$LOGSELF"
 pfctl -s info >/dev/null 2>&1
 sleep 3
-logq() { log show --start "$lt0" --predicate "$1" --style compact ${2:-} 2>/dev/null; }
+logq() { log show --start "$lt0" --predicate "$1" --style compact "${@:2}" 2>/dev/null; }
 a1=$(logq "$LOGPRED"                | grep -c "$LOGSELF" || true)
 a1d=$(logq "$LOGPRED" "--info --debug" | grep -c "$LOGSELF" || true)
 a2=$(logq 'process == "pfctl"'                | grep -c '^[0-9][0-9][0-9][0-9]-' || true)

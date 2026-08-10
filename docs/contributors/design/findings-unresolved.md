@@ -1017,6 +1017,19 @@ earlier signal and records nothing else.
 - **Not measured:** whether the two allocators can be driven to hand out the same address *concurrently* to two live sandboxes (this run showed one live podman container on an address the other allocator has reserved, which is the same hazard but not the same demonstration); and whether yoloAI's own podman backend, which uses an explicit network, is exposed.
 - **Pointer:** `runtime/containerd/cni.go:44,77` (`cniSubnetCIDR`, `cniConflistTemplate`); `/usr/share/containers/containers.conf` `default_subnet_pools`; `enforcement-state-reaping.md` rule 1.
 
+### DF190 — an apple sandbox silently loses all egress when an unrelated sandbox restarts and reclaims its vmnet bridge index
+
+- **Discovered:** 2026-08-10, by the macOS agent while establishing whether the interface is a usable enforcement key (I2c) · **Workstream:** isolation / macOS apple backend
+- **Severity:** MEDIUM–HIGH. A running sandbox loses **all** network egress through no action of its own, while `state` still reports `running`. There is no error, no log surfaced to the user, and nothing to correlate it with — the sandbox simply stops being able to reach anything.
+- **Disposition:** PARKED — filed, not fixed. Filed on the macOS agent's behalf: it hit the finding but `findings-unresolved.md` is not its write surface, and allocating an ID from there would have raced this one.
+- **Rides:** **any.** It repairs behaviour that is already wrong; nothing user-visible is withdrawn.
+- **What was measured** (`design/research/macos-isolation-spike/results/pf-interface-key.txt`, I2c; three runs). Sandbox A was running on `bridge101`. A was stopped, releasing the index. A **new** sandbox created inside A's detach window was allocated `bridge101` — the allocator fills holes. A then restarted and came back on `bridge101`. The window sandbox was left **with no bridge at all**: its index changed while it was running and untouched. With **no policy loaded anywhere**, the window sandbox could not reach `1.1.1.1` (000) while A reached it from the same host in the same second (301). Both were `state=running`.
+- **It is independent of every keying question, which is why it is filed separately.** The interface-key investigation is what surfaced it, but nothing in the run had a rule loaded. This is the backend reassigning a live sandbox's bridge out from under it. Any enforcement design keyed on *anything* inherits it as a correctness problem, and a design keyed on nothing still has it as a connectivity bug.
+- **A symptom with no mechanism, stated as such.** No container-daemon log was read, so *why* the allocator reassigns an index that a running sandbox still holds is unknown. That is the first thing to establish, and it may turn out to be an Apple `container` defect rather than a yoloAI one — in which case the finding is still ours to detect and report, because the user sees a dead sandbox either way.
+- **Partial recovery exists but does not address this.** I5b showed that withdrawing a stale interface rule restores correct policy for the *stranger* that took a departed sandbox's index. That is about policy attribution; it does nothing for the displaced sandbox, which has lost its bridge rather than its rules.
+- **Scope:** apple backend only. tart has no per-sandbox networks, so this shape does not arise there; whether an equivalent exists on tart's shared network is unexamined.
+- **Pointer:** `runtime/apple/` (bridge/network lifecycle); `design/research/macos-isolation-spike/results/pf-interface-key.txt` I2c and its N1b precondition.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

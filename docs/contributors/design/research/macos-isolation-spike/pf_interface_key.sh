@@ -205,7 +205,7 @@ RELEASED="${HELD_BR[2]} ${HELD_BR[3]} ${br_f:-}"
 note "released: ${HELD_NET[2]} (was ${HELD_BR[2]}), ${HELD_NET[3]} (was ${HELD_BR[3]}), ${NETS[5]} (was ${br_f:-<none>})"
 mknet "${NETS[5]}"; mkguest "${GUESTS[5]}" "${NETS[5]}"; br_g=$(brofguest "${GUESTS[5]}")
 note "next network created got: ${br_g:-<none>}   (released set: $RELEASED)"
-if [ -n "$br_g" ] && printf '%s\n' $RELEASED | grep -qx "$br_g"; then
+if [ -n "$br_g" ] && printf '%s\n' "$RELEASED" | grep -qx "$br_g"; then
   ok "I1c: a RELEASED index was reused — the allocator does recycle, so I1b's negative is real"
   RECYCLES=yes
 else

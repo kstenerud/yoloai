@@ -86,8 +86,35 @@ because addresses are reused. All three are consequences of the key. A key that 
 that the guest cannot reassign makes them unnecessary rather than mitigated. **Rewriting the plan on
 that basis is the next phase and has not been done** — this section records the measurement only.
 
-**Scope, and it is narrow on purpose.** Docker only. Not run on containerd or rootless podman. Says
-nothing about macOS, where vmnet recycles bridge indices and M1's negative may well stand. The
+### macOS converges — with one lifecycle rule Linux does not need (2026-08-10)
+
+The Linux refutation prompted re-asking the question on macOS, and **the key exists there too**
+(`results/pf-interface-key.txt`). What M1/K4 had recorded as "the index recycles" turns out to have
+measured recycling **after release**, which was never the question.
+
+- **I1 — a held index is never reassigned.** Four held, two more created, zero collisions; the control
+  confirms the allocator *does* recycle, so the negative is not free.
+- **I3 — the ingress tag is genuinely per-sandbox** under one network per sandbox: one guest blocked,
+  one not, under a ruleset containing **no address at all**. The same shape as K1 here.
+- **I4 — a rule re-attaches by name when its interface returns.** No reload, still enforcing. pf also
+  accepts rules naming interfaces that do not exist yet.
+
+**But the detach window leaks, and that is the divergence.** An ordinary restart releases the index
+(I2), a stranger can take it, and **that stranger inherits the departed sandbox's policy whole** (I5)
+— it reached a destination only the departed sandbox was granted, and was refused its own. That is
+X3's cross-sandbox-leak class *plus* denial of the real policy, and it is invisible to inspection;
+the mechanism is first-match-with-`quick`, so the stale pass wins before the stranger's own is
+reached. **I5b measured the remedy rather than advising it:** withdrawing the stale rule restores
+correct policy exactly.
+
+**So macOS pays one lifecycle rule** — withdraw a sandbox's rule when its interface goes, re-read the
+real index when it returns. Linux needs no such rule because its names do not recycle. That is a
+lifecycle requirement, not a missing key, and it is far smaller than the address-keyed machinery it
+replaces.
+
+**Scope, and it is narrow on purpose.** Docker only on Linux. Not run on containerd or rootless
+podman. On macOS: **apple backend only** — tart has no per-sandbox networks, so none of I1–I5
+transfers there, which is a different question rather than a missing answer. The
 nftables `bridge`-family variant did **not** fire (0 packets); the likely reason is that routed
 traffic never traverses the bridge-family forward hook, but that was **not measured** and is stated
 here as a hypothesis, not a finding.
@@ -531,11 +558,37 @@ Scoping differs, and macOS's is the constrained one:
 
 - **Linux** — `conntrack -D -s <addr> -d <peer>` for revocation, `-s <addr>` at teardown and claim.
   Measured to stop the flow dead (3288 → 3288). It names the pair, so it reaches nothing else.
-- **macOS** — `pfctl -k <guest>` **does not work**, and the state dump says why: it kills states
-  sourced *from* the guest, while the surviving state was sourced from the *host*, created by an
-  outbound packet matching no rule because the pool is `in`-only. **A return-direction rule fixes
-  it**, and that is the form to adopt: `-k` is unscoped, reaches every state on the machine, and
-  would need a D132 amendment to permit. One rule beats a new grant.
+- **macOS** — **corrected 2026-08-10.** This entry previously said a return-direction rule fixes it
+  and that `-k` should therefore be avoided as an unscoped grant. **The rule alone does not fix it.**
+  With `pfctl -k` removed and everything else identical, the transfer survived (54 → 108 bytes, all
+  four states intact, two still ESTABLISHED); rule **and** kill together stopped it dead (45 → 45)
+  (`results/pf-revocation.txt` R5a/R5b). The original arm ran the delete *and* the kill, so it could
+  only ever have shown the rule **necessary** — never sufficient. Neither is sufficient alone.
+
+  **The form to adopt is `pfctl -k <guest> -k <gateway>`** (`results/pf-revocation-alt.txt`). It names
+  both endpoints, so the sudoers grant can pin the peer rather than permitting `-k <anything>` — the
+  grant must widen, but it can widen narrowly. Three properties, all measured:
+  - **It is directional, and the intuitive order is the broken one.** Guest-first kills the state and
+    stops the flow; gateway-first kills **zero** states, reports success, and the transfer continues.
+    The mechanism argument that produced the old wording — "the surviving state is sourced from the
+    host, so name the host first" — predicted the wrong order. **Pin the order; do not re-derive it.**
+  - **Scope was measured, not assumed:** a second sandbox streamed through every kill untouched.
+  - **Both no-grant escapes are dead.** An anchor accepts `set timeout` and *silently ignores it* —
+    `pfctl` exits 0, prints nothing, and the anchor still reports the global 86400 s against the 20 s
+    requested. And a timeout could not reach this case regardless: the busy state decayed 0 s over
+    20 s while an idle control decayed the full 20 s. `-K` was never a candidate — `pfctl(8)` says it
+    kills *source tracking* entries, not states; it killed 0 and the transfer continued.
+
+**So this rule is now symmetric, and that is the correction.** Both platforms need state teardown.
+"One cause seen twice" was right about the cause; the macOS *prescription* had diverged from it, not
+the finding from itself.
+
+**One interaction to carry into the design, currently untested.** "Pin the peer to our gateway" holds
+on the default network (one gateway, ten of ten observations) — but per-sandbox networks, which the
+interface-key result below recommends, get their **own** gateways from a hole-filling allocator
+(`.65.1`, `.66.1`, `.68.1` in one run). So the narrow grant is weakest exactly where interface keying
+is adopted. The two recommendations pull against each other and the combination has not been put
+through D132's permit/refuse matrix.
 
 **Consequence for rule 1.** "Clear before claim" must clear conntrack for the address, not only the
 rules. Clearing the rules alone leaves the UDP inheritance above intact and looks complete.
