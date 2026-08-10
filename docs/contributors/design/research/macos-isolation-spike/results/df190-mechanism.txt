@@ -1,0 +1,250 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-10 15:30:46 CEST
+container CLI: container CLI version 1.0.0 (build: release, commit: ee848e3)
+
+== D0 CO-TENANCY — can one host bridge carry two networks at once? ==
+        Asked because run 1's recovery line reported the displaced sandbox back on bridge101 while the
+        returning sandbox was also on bridge101. If one bridge can carry two networks' gateways, then
+        keying enforcement on the interface is NOT per-sandbox, and that claim is load-bearing in the
+        rewritten plan. Three concurrent networks, and every inet on every bridge printed.
+        every bridge and every address it carries:
+           127.0.0.1
+          bridge0 192.168.0.157
+          bridge0 100.107.208.103
+          bridge100 192.168.139.3
+          bridge101 192.168.65.1
+          bridge102 192.168.66.1
+          bridge103 192.168.67.1
+          ycot_g1: gw=192.168.65.1 -> bridge101
+          ycot_g2: gw=192.168.66.1 -> bridge102
+          ycot_g3: gw=192.168.67.1 -> bridge103
+        distinct bridges across 3 concurrent networks: 3
+   PASS    D0: three concurrent per-sandbox networks get three DISTINCT bridges, one gateway each. So
+            co-tenancy is not a thing here, and the interface key stays per-sandbox. Whatever run 1
+            saw was a bridge changing hands over time, not two networks sharing one.
+
+== D1 OWNERSHIP — reproduce with NO rule of ours anywhere ==
+        This is the arm that decides who owns DF190. If a sandbox loses its network while yoloAI has
+        loaded nothing, then nothing yoloAI does is involved and the defect belongs to Apple's
+        `container`. Asserting our anchors are empty rather than assuming it, because 'we did not load
+        anything this run' and 'nothing is loaded' are different claims and a previous section in this
+        directory has already conflated them.
+          anchor com.apple/yoloai_l holds 0 rule(s)
+          anchor com.apple/yoloai_n holds 0 rule(s)
+          anchor com.apple/yoloai_r holds 0 rule(s)
+          anchor com.apple/yoloai_v holds 0 rule(s)
+        total rules of ours loaded: 0 — anything that happens below happens without us
+        A: state=running  addr=192.168.65.2  gw=192.168.65.1  host bridge=bridge101
+        A egress before anything happens: 301  (need non-000)
+        
+        stopping A so its index is released, then creating W to take it
+        W: state=running  addr=192.168.66.2  gw=192.168.66.1  host bridge=bridge101
+        W egress: 301  (need non-000)
+        W has taken A's index (bridge101) — the precondition holds
+        
+        now starting A again. pf-lifecycle.txt L5 established that A reclaims its index off W.
+        A: state=running  addr=192.168.65.3  gw=192.168.65.1  host bridge=bridge101
+        W: state=running  addr=192.168.66.2  gw=192.168.66.1  host bridge=<NONE>
+        after A's return:  A -> 1.1.1.1 = 301     W -> 1.1.1.1 = 000
+           (the finding is A working and W not, with W still reporting `running`)
+   PASS    D1: DF190 REPRODUCES WITH ZERO RULES OF OURS LOADED. W reports `running`, holds an address,
+            and cannot reach a destination A reaches from the same host in the same second. No pf
+            anchor of ours exists — so this is a defect in Apple's `container`, not in yoloAI, and
+            it is not caused by or fixable in the enforcement design.
+
+== D2 THE STATE — what each side believes afterwards ==
+        "No egress" is not a bug report. This is what a maintainer would need to see.
+        host bridges and their addresses:
+           127.0.0.1
+          bridge0 192.168.0.157
+          bridge0 100.107.208.103
+          bridge100 192.168.139.3
+          bridge101 192.168.65.1
+        
+        the displaced sandbox's own view:
+          state    : running
+          address  : 192.168.66.2/24
+          gateway  : 192.168.66.1
+          network  : ydnet_w
+        
+        the network objects the daemon still lists:
+          NETWORK  SUBNET
+          default  192.168.64.0/24
+          ydnet_a  192.168.65.0/24
+          ydnet_w  192.168.66.0/24
+        
+        and from inside the displaced guest — does it even have a route?
+          1: lo: <LOOPBACK,UP,LOWER_UP> mtu 65536 qdisc noqueue state UNKNOWN group default qlen 1000
+              inet 127.0.0.1/8 scope host lo
+          2: eth0: <BROADCAST,UP,LOWER_UP> mtu 1280 qdisc pfifo_fast state UP group default qlen 1000
+              inet 192.168.66.2/24 scope global eth0
+          --- routes ---
+          default via 192.168.66.1 dev eth0 
+          192.168.66.0/24 dev eth0 proto kernel scope link src 192.168.66.2 
+        
+        can it reach its own gateway, one hop away?
+          W -> its gateway 192.168.66.1: 000
+
+== D3 THE LOG — the thing DF190 records as never having been read ==
+        `container system logs` across the window. Filtered to the two networks and the two sandboxes,
+        then shown unfiltered at the tail, because a filter that hides the relevant line is worse than
+        no filter at all.
+        captured 530 line(s) since 2026-08-10 15:31:07
+        
+        lines naming our networks, sandboxes, or a bridge:
+          2026-08-10 15:31:02.243869+0200 0x1d76164  Info        0x0                  32060  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] created vmnet network [id=ydnet_a]
+          2026-08-10 15:31:02.244057+0200 0x1d76164  Info        0x0                  32060  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] starting vmnet network [mode=nat] [id=ydnet_a]
+          2026-08-10 15:31:02.251115+0200 0x1d76164  Info        0x0                  32060  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] started vmnet network [id=ydnet_a] [mode=nat] [cidr=192.168.65.0/24] [cidrv6=fdea:1cd:9a50:1e07::/64]
+          2026-08-10 15:31:02.251176+0200 0x1d76164  Info        0x0                  32060  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] starting XPC server [id=ydnet_a]
+          2026-08-10 15:31:02.299616+0200 0x1d754d3  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] Registering plugin [id=com.apple.container.container-runtime-linux.yd_a]
+          2026-08-10 15:31:02.364382+0200 0x1d76175  Info        0x0                  32065  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting helper [name=container-runtime-linux] [uuid=yd_a]
+          2026-08-10 15:31:02.365376+0200 0x1d76175  Info        0x0                  32065  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] configuring XPC server [uuid=yd_a]
+          2026-08-10 15:31:02.365608+0200 0x1d76175  Info        0x0                  32065  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting XPC server [uuid=yd_a]
+          2026-08-10 15:31:02.371447+0200 0x1d76181  Info        0x0                  32065  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] created bundle [configPath=file:///Users/karlstenerud/Library/Application%20Support/com.apple.container/containers/yd_a] [uuid=yd_a]
+          2026-08-10 15:31:02.372394+0200 0x1d76166  Info        0x0                  32060  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] allocated attachment [ipv4Gateway=192.168.65.1] [hostname=yd_a] [id=ydnet_a] [macAddress=fa:1c:bf:a0:b8:24] [ipv4Address=192.168.65.2/24] [ipv6Address=fdea:1cd:9a50:1e07:f81c:bfff:fea0:b824/64]
+          2026-08-10 15:31:02.373461+0200 0x1d76181  Info        0x0                  32065  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] creating NATNetworkInterface with network reference [uuid=yd_a]
+          2026-08-10 15:31:12.374985+0200 0x1d76175  Info        0x0                  32065  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] init process exited [uuid=yd_a] [status=ExitStatus(exitCode: 137, exitedAt: 2026-08-10 13:31:12 +0000)]
+          2026-08-10 15:31:12.447339+0200 0x1d76175  Info        0x0                  32065  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] closing forwarders [uuid=yd_a]
+          2026-08-10 15:31:12.447341+0200 0x1d76175  Info        0x0                  32065  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] closed forwarders [uuid=yd_a]
+          2026-08-10 15:31:12.448014+0200 0x1d76182  Info        0x0                  32060  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] released session [id=ydnet_a] [allocations=1]
+          2026-08-10 15:31:12.448318+0200 0x1d754d3  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] shutting down runtime service [id=yd_a]
+          2026-08-10 15:31:12.448583+0200 0x1d751c8  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] container finished in exit monitor [id=yd_a] [rc=ExitStatus(exitCode: 137, exitedAt: 2026-08-10 13:31:12 +0000)]
+          2026-08-10 15:31:12.461603+0200 0x1d754d3  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] deregistered runtime service [id=yd_a]
+          2026-08-10 15:31:12.462101+0200 0x1d751c8  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] handling container exit [id=yd_a] [rc=ExitStatus(exitCode: 137, exitedAt: 2026-08-10 13:31:12 +0000)]
+          2026-08-10 15:31:15.535964+0200 0x1d754d3  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] Registering plugin [id=com.apple.container.container-network-vmnet.ydnet_w]
+          2026-08-10 15:31:15.594953+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] starting helper [name=container-network-vmnet] [id=ydnet_w]
+          2026-08-10 15:31:15.594959+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] configuring XPC server [id=ydnet_w]
+          2026-08-10 15:31:15.595438+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] creating vmnet network [id=ydnet_w]
+          2026-08-10 15:31:15.595439+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] created vmnet network [id=ydnet_w]
+          2026-08-10 15:31:15.595630+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] starting vmnet network [mode=nat] [id=ydnet_w]
+          2026-08-10 15:31:15.603319+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] started vmnet network [mode=nat] [cidr=192.168.66.0/24] [cidrv6=fd1e:a65d:de12:3416::/64] [id=ydnet_w]
+          2026-08-10 15:31:15.603391+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] starting XPC server [id=ydnet_w]
+          2026-08-10 15:31:15.675052+0200 0x1d751c8  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] Registering plugin [id=com.apple.container.container-runtime-linux.yd_w]
+          2026-08-10 15:31:15.733911+0200 0x1d7668c  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting helper [uuid=yd_w] [name=container-runtime-linux]
+          2026-08-10 15:31:15.734767+0200 0x1d7668c  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] configuring XPC server [uuid=yd_w]
+          2026-08-10 15:31:15.734925+0200 0x1d7668c  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting XPC server [uuid=yd_w]
+          2026-08-10 15:31:15.739714+0200 0x1d7668c  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] created bundle [uuid=yd_w] [configPath=file:///Users/karlstenerud/Library/Application%20Support/com.apple.container/containers/yd_w]
+          2026-08-10 15:31:15.740386+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] allocated attachment [macAddress=fe:34:a2:35:cb:6f] [id=ydnet_w] [ipv4Address=192.168.66.2/24] [hostname=yd_w] [ipv6Address=fd1e:a65d:de12:3416:fc34:a2ff:fe35:cb6f/64] [ipv4Gateway=192.168.66.1]
+          2026-08-10 15:31:15.740830+0200 0x1d76698  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] creating NATNetworkInterface with network reference [uuid=yd_w]
+          2026-08-10 15:31:21.556826+0200 0x1d751c8  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] Registering plugin [id=com.apple.container.container-runtime-linux.yd_a]
+          2026-08-10 15:31:21.612762+0200 0x1d768c8  Info        0x0                  32797  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting helper [name=container-runtime-linux] [uuid=yd_a]
+          2026-08-10 15:31:21.613871+0200 0x1d768c8  Info        0x0                  32797  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] configuring XPC server [uuid=yd_a]
+          2026-08-10 15:31:21.614057+0200 0x1d768c8  Info        0x0                  32797  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting XPC server [uuid=yd_a]
+          2026-08-10 15:31:21.617102+0200 0x1d768d5  Info        0x0                  32060  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] allocated attachment [hostname=yd_a] [ipv4Address=192.168.65.3/24] [ipv4Gateway=192.168.65.1] [id=ydnet_a] [ipv6Address=fdea:1cd:9a50:1e07:fcea:84ff:fe94:cb86/64] [macAddress=fe:ea:84:94:cb:86]
+          2026-08-10 15:31:21.617408+0200 0x1d768c8  Info        0x0                  32797  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] creating NATNetworkInterface with network reference [uuid=yd_a]
+        
+        lines carrying an error or warning, whether or not they name us:
+          2026-08-10 15:26:44.497108+0200 0x1c85b68  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g1 not found"] [route=containerDelete]
+          2026-08-10 15:26:44.548468+0200 0x1d689eb  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g2 not found"] [route=containerDelete]
+          2026-08-10 15:26:44.586452+0200 0x1d6c3fb  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g3 not found"] [route=containerDelete]
+          2026-08-10 15:26:56.116715+0200 0x1d6fd2e  Error       0x0                  21961  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] timeout waiting for IO to complete for process ycot_g1: CancellationError() [uuid=ycot_g1]
+          2026-08-10 15:26:56.116715+0200 0x1d6fd3a  Error       0x0                  21961  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] timeout waiting for IO to complete for process ycot_g1: CancellationError() [uuid=ycot_g1]
+          2026-08-10 15:27:01.042270+0200 0x1c85b68  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID yd_a not found"] [route=containerDelete]
+          2026-08-10 15:27:01.069781+0200 0x1d6c3fb  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID yd_w not found"] [route=containerDelete]
+          2026-08-10 15:27:14.351286+0200 0x1d70403  Error       0x0                  22601  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] timeout waiting for IO to complete for process yd_a: CancellationError() [uuid=yd_a]
+          2026-08-10 15:27:14.351286+0200 0x1d70402  Error       0x0                  22601  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] timeout waiting for IO to complete for process yd_a: CancellationError() [uuid=yd_a]
+          2026-08-10 15:28:57.276991+0200 0x1d689eb  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g1 not found"] [route=containerDelete]
+          2026-08-10 15:28:57.324922+0200 0x1c85b68  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g2 not found"] [route=containerDelete]
+          2026-08-10 15:28:57.358993+0200 0x1d689eb  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g3 not found"] [route=containerDelete]
+          2026-08-10 15:29:10.768128+0200 0x1c85b68  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID yd_a not found"] [route=containerDelete]
+          2026-08-10 15:29:10.795861+0200 0x1d689eb  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID yd_w not found"] [route=containerDelete]
+          2026-08-10 15:30:26.452786+0200 0x1d75041  Error       0x0                  28459  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] timeout waiting for IO to complete for process yd_a: CancellationError() [uuid=yd_a]
+          2026-08-10 15:30:26.452786+0200 0x1d75042  Error       0x0                  28459  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] timeout waiting for IO to complete for process yd_a: CancellationError() [uuid=yd_a]
+          2026-08-10 15:30:48.685525+0200 0x1d74d3d  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g1 not found"] [route=containerDelete]
+          2026-08-10 15:30:48.731680+0200 0x1d74d3d  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g2 not found"] [route=containerDelete]
+          2026-08-10 15:30:48.766767+0200 0x1d751c8  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID ycot_g3 not found"] [route=containerDelete]
+          2026-08-10 15:31:02.089567+0200 0x1d754d3  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID yd_a not found"] [route=containerDelete]
+          2026-08-10 15:31:02.121117+0200 0x1d75ec3  Error       0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] route handler threw an error [error=notFound: "container with ID yd_w not found"] [route=containerDelete]
+        
+        last 15 lines unfiltered:
+          2026-08-10 15:31:15.675052+0200 0x1d751c8  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] Registering plugin [id=com.apple.container.container-runtime-linux.yd_w]
+          2026-08-10 15:31:15.733911+0200 0x1d7668c  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting helper [uuid=yd_w] [name=container-runtime-linux]
+          2026-08-10 15:31:15.734767+0200 0x1d7668c  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] configuring XPC server [uuid=yd_w]
+          2026-08-10 15:31:15.734925+0200 0x1d7668c  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting XPC server [uuid=yd_w]
+          2026-08-10 15:31:15.739714+0200 0x1d7668c  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] created bundle [uuid=yd_w] [configPath=file:///Users/karlstenerud/Library/Application%20Support/com.apple.container/containers/yd_w]
+          2026-08-10 15:31:15.740386+0200 0x1d7667a  Info        0x0                  32595  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] allocated attachment [macAddress=fe:34:a2:35:cb:6f] [id=ydnet_w] [ipv4Address=192.168.66.2/24] [hostname=yd_w] [ipv6Address=fd1e:a65d:de12:3416:fc34:a2ff:fe35:cb6f/64] [ipv4Gateway=192.168.66.1]
+          2026-08-10 15:31:15.740830+0200 0x1d76698  Info        0x0                  32600  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] creating NATNetworkInterface with network reference [uuid=yd_w]
+          2026-08-10 15:31:16.235376+0200 0x1d751c8  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] registering container with exit monitor
+          2026-08-10 15:31:21.556826+0200 0x1d751c8  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] Registering plugin [id=com.apple.container.container-runtime-linux.yd_a]
+          2026-08-10 15:31:21.612762+0200 0x1d768c8  Info        0x0                  32797  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting helper [name=container-runtime-linux] [uuid=yd_a]
+          2026-08-10 15:31:21.613871+0200 0x1d768c8  Info        0x0                  32797  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] configuring XPC server [uuid=yd_a]
+          2026-08-10 15:31:21.614057+0200 0x1d768c8  Info        0x0                  32797  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] starting XPC server [uuid=yd_a]
+          2026-08-10 15:31:21.617102+0200 0x1d768d5  Info        0x0                  32060  0    container-network-vmnet: [com.apple.container:NetworkVmnetHelper] allocated attachment [hostname=yd_a] [ipv4Address=192.168.65.3/24] [ipv4Gateway=192.168.65.1] [id=ydnet_a] [ipv6Address=fdea:1cd:9a50:1e07:fcea:84ff:fe94:cb86/64] [macAddress=fe:ea:84:94:cb:86]
+          2026-08-10 15:31:21.617408+0200 0x1d768c8  Info        0x0                  32797  0    container-runtime-linux: [com.apple.container:RuntimeLinuxHelper] creating NATNetworkInterface with network reference [uuid=yd_a]
+          2026-08-10 15:31:21.936272+0200 0x1d75ec3  Info        0x0                  61160  0    container-apiserver: [com.apple.container:APIServer] registering container with exit monitor
+
+== D4 RECOVERY — is the displaced sandbox recoverable, and by what? ==
+        An unrecoverable state is a different severity from a self-healing one, and the difference
+        decides whether the product can paper over this or has to avoid causing it.
+        after a further 10s with no intervention: W -> 1.1.1.1 = 000
+        W after a stop/start: state=running  addr=192.168.66.3  gw=192.168.66.1  host bridge=bridge101
+        A after W's stop/start: state=running  addr=192.168.65.3  gw=192.168.65.1  host bridge=<NONE>
+        bridges at this moment:
+             127.0.0.1
+            bridge0 192.168.0.157
+            bridge0 100.107.208.103
+            bridge100 192.168.139.3
+            bridge101 192.168.66.1
+        after W's stop/start:  W -> 1.1.1.1 = 301     A -> 1.1.1.1 = 000
+   FAIL    D4: the 'recovery' MOVED THE DEFECT. W has egress again and A has now lost it — the bridge
+             changed hands rather than being rebuilt, so restarting the victim just picks a new
+             victim. Run 1 reported this as a clean recovery because it only checked W.
+
+== D5 THE MECHANISM — is it the surviving NETWORK that causes the collision? ==
+        D3's log shows the vmnet helper for the departing sandbox's network STAYING ALIVE across the
+        stop -- `released session [allocations=1]`, not a shutdown -- and then re-allocating on the same
+        network id when the sandbox returns. D0 showed three networks created fresh never collide. So
+        the candidate mechanism is the network object outliving its last container and re-creating its
+        vmnet interface on an index that has since been handed to someone else.
+        
+        That is testable rather than inferable: run the same sequence but DELETE the network while it is
+        empty, so no helper survives to re-attach. If the collision disappears, the surviving network is
+        the cause. If it still happens, it is not, and the log reading above is a coincidence.
+        A is on bridge101
+        removing the container AND deleting its network, so no helper survives
+        networks the daemon lists now:
+          NETWORK  SUBNET
+          default  192.168.64.0/24
+        W is on bridge101 (A had held bridge101)
+        now recreating A's network and sandbox from scratch
+        A (recreated): state=running  addr=192.168.66.2  gw=192.168.66.1  host bridge=bridge102
+        W (incumbent): state=running  addr=192.168.65.2  gw=192.168.65.1  host bridge=bridge101
+        bridges:
+             127.0.0.1
+            bridge0 192.168.0.157
+            bridge0 100.107.208.103
+            bridge100 192.168.139.3
+            bridge101 192.168.65.1
+            bridge102 192.168.66.1
+        A -> 1.1.1.1 = 301     W -> 1.1.1.1 = 301   (both must be non-000)
+   PASS    D5: with the network DELETED rather than left empty, the returning sandbox does NOT displace
+            the incumbent — both keep egress. So the collision is caused by the network object (and
+            its vmnet helper) outliving its last container and re-attaching onto an index handed out
+            in the meantime. That is a mechanism, and it is also a WORKAROUND: delete the network
+            when its last sandbox goes, and this defect does not arise.
+
+== WHAT WAS NOT TRIED ==
+        - Any privileged tracing. No dtrace, no vmnet-level instrumentation, no attach to the
+          daemon. `container system logs` is whatever the daemon chose to emit, and if it emits
+          nothing about the displacement then this run cannot say why it happens -- only that it
+          does, and that we do not cause it.
+        - More than one displaced sandbox. One incumbent, one returner.
+        - Whether the same thing happens when the incumbent is BUSY rather than idle. Both sandboxes
+          here run `sleep`; a sandbox holding open connections may be treated differently, and that
+          is the case the product actually has.
+        - tart. This is an `apple` backend defect as far as this run goes, and nothing here says
+          whether tart's networking has an equivalent.
+        - Whether the address, as opposed to the bridge, is what is lost. The two are not separated
+          here.
+        - Reporting it upstream. Nothing here has been checked against Apple's issue tracker for a
+          known duplicate.
+
+== cleanup ==
+   host bridges now:
+      127.0.0.1
+     bridge0 192.168.0.157
+     bridge0 100.107.208.103
+     bridge100 192.168.139.3
+
+pass=3 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/df190-mechanism.txt
