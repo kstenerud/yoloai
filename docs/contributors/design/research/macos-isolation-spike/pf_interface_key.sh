@@ -40,6 +40,14 @@
 #                        egress — the one positive result in that run. It was applied on the SHARED
 #                        default bridge, so it could not be per-sandbox. Re-asked with one network
 #                        per sandbox, which is what would make the tag a per-sandbox key.
+#   I5 THE TWO COMBINED  I2 and I4 together predict that a rule left behind by one sandbox governs
+#                        whoever takes its name. Only the direction follows deductively, and the
+#                        direction is not the interesting part: a stale BLOCK over-restricts a
+#                        stranger, while a stale PASS hands it someone else's allowlist, which is a
+#                        cross-sandbox privilege leak. Both rules end up on one interface name and pf
+#                        is first-match-with-quick, so which one wins is an ordering question that
+#                        neither earlier section can answer. I5b then runs the plan's own remedy —
+#                        withdraw the rule at detach — so the fix is measured and not just advised.
 #
 # METHOD NOTES
 #   Every reachability check is TCP/HTTP from inside a guest, and every control is the same protocol
@@ -58,8 +66,9 @@ ANCHOR="com.apple/yoloai_i"
 IMG=yoloai-base:latest
 ALLOW=1.1.1.1; DENY=1.0.0.1
 PASS=0; FAIL=0; UNKNOWN=0
-NETS=(yb-i-a yb-i-b yb-i-c yb-i-d yb-i-e yb-i-f)
-GUESTS=(ybi1 ybi2 ybi3 ybi4 ybi5 ybi6)
+NETS=(yb-i-a yb-i-b yb-i-c yb-i-d yb-i-e yb-i-f yb-i-s)
+GUESTS=(ybi1 ybi2 ybi3 ybi4 ybi5 ybi6 ybi7)
+SNET=yb-i-s; SGUEST=ybi7   # I5's stranger: the sandbox that takes a name it was never given
 MAINREFS0=0
 
 RESULTS="$HERE/results/pf-interface-key.txt"
@@ -408,12 +417,112 @@ else
 fi
 
 # ---------------------------------------------------------------------------
+say "I5 THE COMBINED HAZARD — a stale rule, and a stranger holding the same name"
+note "I2 says a sandbox that restarts gives up its index and a stranger can take it. I4 says a rule"
+note "re-attaches by name. Put together they predict that a rule left behind by one sandbox will"
+note "govern a different one — but the DIRECTION is all that follows deductively, and the direction"
+note "is not the part that matters. What matters is which policy the stranger ends up under:"
+note "  a stale BLOCK inherited -> the stranger is over-restricted. Wrong, visible, not a leak."
+note "  a stale PASS inherited  -> the stranger reaches a destination from SOMEONE ELSE'S allowlist,"
+note "                             which is a cross-sandbox privilege leak and the same class as X3."
+note "Neither follows from I2 and I4; both rules end up loaded on one interface name and pf is"
+note "first-match-with-quick, so the outcome is an ordering question nobody has watched."
+note ""
+note "Both sandboxes get a REAL policy and the two allowlists are disjoint, because that is what"
+note "makes a leak observable at all: with no policy every destination answers, so 'the stranger"
+note "reached it' would prove nothing. A is allowed $ALLOW and denied everything else; the stranger"
+note "is allowed $DENY and denied everything else. If the stranger reaches $ALLOW, it reached a"
+note "destination its own policy forbids, using a grant that belongs to a sandbox that is not running."
+a5=$(brofguest "$a_guest")
+STALE_EFFECT=untested; REMEDY=untested
+if [ -z "$a5" ]; then
+  unk "I5: sandbox A has no bridge; the collision cannot be built"
+else
+  load "$(printf '%s\n' \
+    "pass  in quick on $a5 proto tcp to $ALLOW" \
+    "block drop in quick on $a5 proto tcp to any")" | sed 's/^/        pfctl: /'
+  p5a=$(gtry "$a_guest" "$ALLOW"); p5d=$(gtry "$a_guest" "$DENY")
+  note "A under its own policy on $a5: ->$ALLOW=$p5a  ->$DENY=$p5d  (need non-000 then 000)"
+  if [ "$p5a" = 000 ] || [ "$p5d" != 000 ]; then
+    unk "I5: A's policy is not enforcing before the handover; nothing below would be attributable"
+  else
+    ok "I5 precondition: A is enforced by an interface-keyed rule, allowlist = $ALLOW"
+    asuser container stop "$a_guest" >/dev/null 2>&1; sleep 4
+    note ""
+    note "A stopped, and its rule is DELIBERATELY left loaded. That IS the lifecycle bug being"
+    note "priced — the plan's remedy is to withdraw it here, and I5b below runs that arm."
+    mknet "$SNET"; mkguest "$SGUEST" "$SNET"
+    s_br=$(brofguest "$SGUEST"); s_ip=$(netfield "$SGUEST" ipv4Address)
+    note "the stranger came up on: ${s_br:-<none>}   (A held $a5)   addr=$s_ip"
+    if [ "$s_br" != "$a5" ]; then
+      unk "I5: the stranger did not take A's index this run, so the collision does not exist and"
+      note "     nothing below is a measurement of it. I2 reproduced it three times; re-run."
+    else
+      ok "I5: the collision is real — a live stranger is holding the name A's rule still points at"
+      note ""
+      note "I5a  BOTH rules loaded on one name: A's stale pair first (it was never withdrawn), the"
+      note "     stranger's own pair appended at its claim, exactly as a running system would have it."
+      load "$(printf '%s\n' \
+        "pass  in quick on $a5 proto tcp to $ALLOW" \
+        "block drop in quick on $a5 proto tcp to any" \
+        "pass  in quick on $a5 proto tcp to $DENY" \
+        "block drop in quick on $a5 proto tcp to any")" | sed 's/^/        pfctl: /'
+      note "the anchor, in evaluation order:"
+      pfctl -a "$ANCHOR" -s rules 2>/dev/null | sed 's/^/          /'
+      s_allow=$(gtry "$SGUEST" "$ALLOW"); s_deny=$(gtry "$SGUEST" "$DENY")
+      note "stranger ->$ALLOW (A's allowlist, NOT its own) = $s_allow"
+      note "stranger ->$DENY  (its OWN allowlist)          = $s_deny"
+      if [ "$s_allow" != 000 ] && [ "$s_deny" = 000 ]; then
+        bad "I5a: THE STRANGER INHERITED A'S POLICY WHOLE. It reached $ALLOW — a destination its own"
+        note "     allowlist forbids, granted by a rule belonging to a sandbox that is not running —"
+        note "     and was refused $DENY, which its own allowlist permits. A cross-sandbox privilege"
+        note "     leak AND a denial of the sandbox's real policy, from one un-withdrawn rule."
+        STALE_EFFECT=leak_and_deny
+      elif [ "$s_allow" != 000 ]; then
+        bad "I5a: THE STRANGER LEAKED. It reached $ALLOW, which only A was granted."
+        STALE_EFFECT=leak
+      elif [ "$s_deny" = 000 ]; then
+        bad "I5a: the stranger was refused its OWN allowlisted destination by A's stale block. Not a"
+        note "     leak — the stranger is over-restricted by a rule that is not about it."
+        STALE_EFFECT=over_restricted
+      else
+        ok "I5a: the stranger got its own policy despite A's stale rule sitting ahead of it"
+        STALE_EFFECT=none
+      fi
+
+      note ""
+      note "I5b  THE REMEDY, measured rather than recommended. Same collision, same stranger, with"
+      note "     A's rule WITHDRAWN as the plan's lifecycle rule requires. Only the stranger's own"
+      note "     pair is loaded. If this is clean, the lifecycle rule is sufficient for this hazard."
+      load "$(printf '%s\n' \
+        "pass  in quick on $a5 proto tcp to $DENY" \
+        "block drop in quick on $a5 proto tcp to any")" | sed 's/^/        pfctl: /'
+      r_allow=$(gtry "$SGUEST" "$ALLOW"); r_deny=$(gtry "$SGUEST" "$DENY")
+      note "stranger ->$ALLOW (must now be refused) = $r_allow"
+      note "stranger ->$DENY  (must now reach)      = $r_deny"
+      if [ "$r_allow" = 000 ] && [ "$r_deny" != 000 ]; then
+        ok "I5b: withdrawing the stale rule restores the stranger's own policy exactly. The"
+        note "     lifecycle rule the plan recommends is sufficient for this hazard, measured."
+        REMEDY=sufficient
+      else
+        bad "I5b: withdrawing the stale rule did NOT restore correct policy (allow=$r_allow"
+        note "     deny=$r_deny). The recommended remedy does not close this and the design needs"
+        note "     more than an attach/detach discipline."
+        REMEDY=insufficient
+      fi
+    fi
+  fi
+fi
+
+# ---------------------------------------------------------------------------
 say "VERDICT — composed from the values above, not asserted"
 note "held index reassigned while live : ${HELD_SAFE:-untested}"
 note "allocator recycles at all        : ${RECYCLES:-untested}"
 note "restart/detach window            : ${WINDOW:-untested}"
 note "ingress tag per sandbox          : ${TAGKEY:-untested}"
 note "rule survives its interface going away: ${RULE_SURVIVES:-untested}"
+note "what a stale rule does to a stranger: ${STALE_EFFECT:-untested}"
+note "withdrawing it restores correct policy: ${REMEDY:-untested}"
 note ""
 if [ "${HELD_SAFE:-no}" = yes ] && [ "${RECYCLES:-no}" = yes ] && [ "${WINDOW:-x}" = stable ]; then
   ok "macOS HAS a usable per-sandbox non-address key, unconditionally. An index is stable for as"
@@ -425,16 +534,21 @@ elif [ "${TAGKEY:-no}" = per_sandbox ] && [ "${RULE_SURVIVES:-no}" = yes ]; then
   note "    rule, the ingress tag is per-sandbox, and a rule re-attaches BY NAME when its interface"
   note "    comes back — A's address changed underneath it and enforcement did not lapse."
   note ""
-  note "    The single failure is the detach window. A sandbox that merely restarts gives up its"
-  note "    index, and a sandbox started in that window can take it — at which point the stale rule"
-  note "    governs a STRANGER, which is worse than not enforcing. So the key is usable if and only"
-  note "    if rule maintenance is bound to attach and detach: withdraw the rule when the interface"
-  note "    goes, re-read the real index and re-establish it when the interface returns."
+  note "    The single failure is the detach window, and I5 prices it rather than naming it. A"
+  note "    sandbox that merely restarts gives up its index; a sandbox started in that window takes"
+  note "    it; and the rule left behind then does BOTH bad things at once (measured:"
+  note "    ${STALE_EFFECT}). The stranger reached a destination only the departed sandbox was"
+  note "    granted — a cross-sandbox privilege leak of X3's class — AND was refused the"
+  note "    destination its own allowlist permits, because pf is first-match-with-quick and the"
+  note "    stale pair sits ahead of its own. Not 'unenforced': wrongly enforced, in both"
+  note "    directions, with every rule present and correct-looking to any inspection."
   note ""
-  note "    That is a lifecycle requirement, not a missing key, and it is a far smaller gap than"
-  note "    'there is no stable per-sandbox non-address key', which is what closed this on macOS."
-  note "    The platforms are closer than the divergence suggested: Linux needs no such rule because"
-  note "    its names do not recycle, macOS needs one because its indices do."
+  note "    The remedy is measured and not merely advised (I5b: ${REMEDY}). Withdrawing the stale"
+  note "    rule restores the stranger's own policy exactly. So: withdraw a sandbox's rule when its"
+  note "    interface goes, re-read the real index when it returns. That is a lifecycle"
+  note "    requirement, not a missing key, and it is a far smaller gap than 'there is no stable"
+  note "    per-sandbox non-address key', which is what closed this on macOS. Linux needs no such"
+  note "    rule because its names do not recycle; macOS needs one because its indices do."
 elif [ "${TAGKEY:-no}" = per_sandbox ] && [ "${WINDOW:-x}" != stable ]; then
   unk "SPLIT RESULT. The tag discriminates per sandbox, but the interface it is keyed on is not"
   note "    stable across a restart and it is NOT established that a rule re-attaches when the name"
@@ -451,10 +565,13 @@ cat <<'EOF'
           I1-I3 transfers to it; the question there is a different one and it is not asked here.
         - Concurrent starts. The detach window in I2 is opened by hand, one sandbox at a time. Two
           sandboxes racing for a freed index is the case a real pool would hit and it is not run.
-        - Whether the re-attach in I4 holds when a DIFFERENT sandbox takes the name. I4 restarts A
-          alone and A gets its own index back, so the rule re-attaches to the same sandbox. The
-          hazard I2 describes is the other case, and combining them -- stale rule, name reused by a
-          stranger -- is the experiment that would price the window rather than just naming it.
+        - Whether ORDER changes I5a's outcome. A's stale pair was loaded first, which is what a real
+          system produces, and pf is first-match-with-quick so it wins twice over. A stranger whose
+          rules landed FIRST is a different arm and is not run -- it would say whether the leak is a
+          property of staleness or only of ordering, and the remedy is the same either way.
+        - Recovery for the sandbox displaced in I2c. I5b withdraws the stale rule and the STRANGER
+          becomes correct; what happens to the original sandbox when it returns to find its name
+          taken is not measured, and it is the other half of the lifecycle rule.
         - The tag namespace. Whether pf tags are a limited resource, and what happens at 32 of them,
           is unmeasured; K3 and I3 both use two.
         - Any of this under the shipped D132 grant. Every rule here is loaded as root. The grant
