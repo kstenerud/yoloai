@@ -1,0 +1,37 @@
+host: Linux 6.8.0-136-generic x86_64 | nft v1.0.9
+date: 2026-08-11 12:38:57 UTC
+harness: research_harness_v1 (D134)
+answers: the lifecycle of the device-bound chain R10 found, before the brief adopts it
+note: an earlier execution printed the derived label 'stale-and-live' directly beneath
+      its own data saying inherits=False. The measurements were right; the label was
+      computed from the Measurement object measure() returns, and a dataclass is
+      always truthy. It went to stdout and was never written to a results file, so
+      there is no run-1 artifact to keep -- only this note.
+
+=== R11 ===
+Does a netdev chain outlive its device, and does a returning device inherit the departed one's policy?
+
+-- controls (all held, or this would not render) --
+  ICMP works on this path before any policy: True   (without this every 'blocked' below is free)
+  the netdev rule fired: True   (2 packets)
+  the recreated device is a genuinely new one: True   (same name, new ifindex — the k3b hazard's precondition)
+
+-- measurements --
+  the netdev chain blocks while its device is present: True
+  the chain still exists after its device is deleted: True   (nft's own view; whether it is ATTACHED to anything is the next arm)
+  a NEW device under the old name inherits the departed chain's policy: False   (reachable=True, counter 0 -> 0. Both conditions are required: a blocked probe with a frozen counter would mean something else stopped it)
+  the chain is therefore: 'stale-but-inert'   (stale-and-live is the k3b/I5 hazard and needs the lifecycle rule; stale-but-inert means no inheritance but silent non-enforcement on return; reaped means reaping is free)
+
+-- expectations, rendered from the values above --
+  [PASS] a device-bound chain enforces  <- the netdev chain blocks while its device is present=True
+
+-- WHAT WAS NOT TRIED --
+  - any container backend. This is a hand-built veth pair precisely because docker does not recycle names and so cannot produce the collision; whether rootless podman's `veth0` reuse hits this in practice is a separate run
+  - the ifindex. The two devices share a name and nothing here records whether nft binds by name or by index — which is the mechanism behind whatever was observed
+  - a chain attached while its device is ABSENT, i.e. whether enforcement can be installed before the sandbox exists (the pre-agent hook's question)
+  - TCP. Every probe is ICMP, consistently, with a baseline — but a netdev chain may treat protocols differently and nothing here checks
+  - the reply direction and the egress hook
+  - concurrent create/destroy, and more than one device
+  - whether a guest with CAP_NET_ADMIN inside its own netns can influence a chain bound to the host-side device
+
+-- all expectations held --

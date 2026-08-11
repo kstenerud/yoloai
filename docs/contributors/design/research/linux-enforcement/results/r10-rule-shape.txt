@@ -1,0 +1,39 @@
+host: Linux 6.8.0-136-generic x86_64 | docker 29.6.1 | nft v1.0.9
+date: 2026-08-11 12:36:33 UTC
+harness: research_harness_v1 (D134)
+answers: whether the plan's reject-over-drop recommendation holds on Linux (it was read
+         across from macOS), and whether the br_netfilter dependency can be dropped
+
+=== R10 ===
+Linux rule shape: reject vs drop, and a br_netfilter-free key
+
+-- controls (all held, or this would not render) --
+  the denied host is reachable with no policy: True   (in 0.11s — the timing baseline for part A)
+  the drop rule fired: True   (5 packets)
+  the reject rule fired: True   (1 packets)
+  with the forward table gone, the denied host is reachable again: True   (part B must not inherit part A's enforcement)
+  the netdev rule fired: True   (9 packets — a blocked probe against a zero counter would be a free negative)
+  the SECOND sandbox is untouched: True   (the chain is bound to A's veth only, so this is the discrimination control)
+
+-- measurements --
+  drop: blocked: True   (took 5.09s)
+  reject: blocked: True   (took 0.06s)
+  reject fails fast where drop waits out the timeout: True   (reject 0.06s vs drop 5.09s (curl -m 5))
+  netdev ingress on the veth blocks, with no br_netfilter: True
+
+-- expectations, rendered from the values above --
+  [PASS] reject blocks as well as drop does  <- reject: blocked=True
+  [PASS] and it turns a black hole into an immediate error  <- reject fails fast where drop waits out the timeout=True
+  [PASS] a netdev ingress hook keys per-sandbox without br_netfilter  <- netdev ingress on the veth blocks, with no br_netfilter=True
+
+-- WHAT WAS NOT TRIED --
+  - whether a netdev chain SURVIVES the veth going away and coming back. A chain bound to a device is the lifecycle question in a new form and it is untouched
+  - whether the guest can influence it. The guest cannot name the host-side veth (k1), but a netdev chain is a different object from a filter rule and nothing here probes it
+  - the reply direction, and egress hook (`hook egress`) as the counterpart
+  - sets, allowlists at size, and any of the throughput questions p2 asked of the forward hook. This is a single-address deny
+  - reject's ICMP variants and what a rejected UDP flow does — part A is TCP only
+  - whether `reject` is available in a netdev chain at all; part B uses drop
+  - rootless podman, containerd/CNI, and every VM backend
+  - kernel-version sensitivity. netdev ingress needs >= 4.2 and this host runs one kernel; nothing here says what a supported older target does
+
+-- all expectations held --

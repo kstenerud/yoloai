@@ -60,6 +60,46 @@ produced four distinct bridge names: **they do not recycle.**
 `yoloai0`, so the per-network variant does not apply there. With `br_netfilter` loaded,
 `iptables -m physdev --physdev-in <veth>` discriminated one sandbox from another on `docker0`.
 
+**And on CNI's own veths, not just docker's** (`r9-cni-veth-key.txt`, 2026-08-11). The reach table
+previously said the mechanism was measured on docker and "should carry" to CNI, which is the form of
+reasoning this workstream has retracted five times. Two containerd sandboxes on one shared CNI
+bridge: the physdev-keyed rule blocked A's denied destination (drop counter 5), left A's allowlisted
+destination reachable, and left B untouched.
+
+### A better Linux key: bind the chain to the device (2026-08-11)
+
+`physdev` has a dependency the plan calls unowned, and **`r8-inert-rule-detection.txt` measured what
+its absence costs**: with `br_netfilter` unloaded, a correct-looking physdev rule counted **0** while
+a bridge-keyed rule counted 17 packets of the same traffic. It does not fail — it goes quietly
+inert. Loading the module revived the same rule (counter +17). So `br_netfilter` is precisely what
+gates this key, and anything on the host can unload it.
+
+**A netdev ingress chain avoids the dependency entirely** (`r10-rule-shape.txt`). With
+`br_netfilter` **not** loaded, a chain attached to one sandbox's veth blocked that sandbox (counter
+5) and left a second sandbox on the same bridge reachable. **The key stops being a match and becomes
+the attachment**: a chain bound to one device is per-sandbox by construction, and it runs before
+bridging or routing decide anything.
+
+**Its lifecycle is the trade, and it is measured** (`r11-netdev-lifecycle.txt`). On a hand-built veth
+pair, so the same name could be destroyed and recreated on demand — docker does not recycle names and
+therefore cannot produce the collision at all:
+
+| | result |
+| --- | --- |
+| chain enforces while its device exists | yes (counter 2) |
+| chain survives the device being deleted | **yes** |
+| a NEW device under the same name inherits the old policy | **no** — reachable, counter frozen at 0 |
+
+**So netdev trades one hazard for the other.** It is immune to the `k3b`/macOS-I5 inheritance
+hazard — a returning `veth0` does *not* pick up a departed sandbox's allowlist, which is exactly what
+rootless podman's name reuse makes dangerous for every other key. What it gets instead is a
+**stale-but-inert** chain: still listed, still reading correctly, enforcing nothing. That is class 8,
+and it is why `r8`'s counter detector is a prerequisite rather than a nicety.
+
+**Consequence for the build:** enforcement must be **reinstalled when a sandbox's device is
+recreated**, and its absence is invisible to rule inspection. That is a second, independent reason for
+the pre-agent hook the rootless-podman row already required.
+
 **Measured, macOS** (`pf-interface-key.txt`): a held bridge index is never reassigned; an ingress tag
 keyed on the bridge is per-sandbox under one network per sandbox, under a ruleset containing no
 address; and a rule re-attaches by name when its interface returns. What the earlier pass recorded as
@@ -302,11 +342,14 @@ of the conclusions this workstream has had to retract. It is now a measurement.
 **The complete sever shape is both hooks**: forward deny-all *plus* an input allowlist holding the
 broker and nothing else. The forward half alone leaves every other host service reachable.
 
-**Deny with `reject`, not `drop`.** A dropped flow is a black hole until TCP timeout — measured here
-as a 25 s stall — which is what makes a severed agent fail confusingly. macOS already measured the
-fix: `block return` answers instantly with an RST, costs the canary a round trip instead of a timeout,
-and *"agents' blocked connections stop hanging too"* (`pf-canary-probe.txt` C3). nftables `reject` is
-the same move.
+**Deny with `reject`, not `drop` — now measured on Linux too** (`r10-rule-shape.txt`). This was
+previously a macOS result plus Calico's RST injection, read across; both are evidence about other
+systems, and a platform read-across is how both of this plan's rule-shape errors happened. Same
+denied destination, same probe, one keyword different: **`drop` blocked in 5.06 s (the full curl
+timeout), `reject` blocked in 0.10 s** — with a counter on each proving the rule fired rather than
+the probe failing for its own reasons. Both block; only one turns a black hole into an immediate,
+handleable error. macOS's own measurement said the same and added that *"agents' blocked connections
+stop hanging too"* (`pf-canary-probe.txt` C3).
 
 **None of this transfers to macOS**, and the reason is structural: there the rules sit on the bridge
 and the working shape blocks in **both** directions, so the gateway is *inside* the enforced surface
@@ -319,8 +362,8 @@ across to pf is how both of this plan's rule-shape errors happened.
 
 | Backend | Key available | Notes |
 | --- | --- | --- |
-| docker | per-network bridge, or veth via `physdev` | measured; names do not recycle over 6 cycles |
-| containerd | veth via `physdev` (one shared `yoloai0`) | mechanism measured on docker's veths, **not on CNI's**; CNI names do not recycle over 6 cycles |
+| docker | per-network bridge, veth via `physdev`, or a **netdev chain bound to the veth** | measured; names do not recycle over 6 cycles |
+| containerd | veth via `physdev` (one shared `yoloai0`), or a netdev chain | **measured on CNI's own veths** 2026-08-11 (`r9`), not extrapolated; CNI names do not recycle over 6 cycles |
 | rootless podman | inside its own netns | the host netns cannot reach it at all; enforcement installs in the rootless netns, which the guest cannot enter (`CAP_SYS_ADMIN` absent, netns path invisible). **Veth names recycle here** — needs the lifecycle rule |
 | apple | bridge index under one network per sandbox | needs the lifecycle rule below |
 | tart | **none reachable** | right in effect, **wrong in its former reason**. tart *does* give each VM its own host-side `vmenetN` in both shared NAT and Softnet — the same shape as `k2`. What fails is pf: a rule on the member interface blocks nothing (counter 0) while the same rule on the bridge blocks **both** VMs (counter 12), and OpenBSD's `received-on` — pf's `physdev` — is a syntax error here, with a control proving the anchor loads (`tart-net-key.txt`) |
@@ -331,9 +374,12 @@ tart's networking, and apple — also a VM backend — is reachable. It also lea
 `--net-softnet-allow` / `--net-softnet-block` per-VM CIDR lists as the only enforcement surface that
 backend has. Nothing in this design mentions them and nobody has tested them.
 
-**`br_netfilter` is unowned.** The veth variant needs it, docker only enables it for `icc=false`, and
-neither CNI nor netavark mentions it at all. It is a **host-wide** setting that changes packet paths
-for every bridge on the machine. It needs an explicit preflight assertion, not an assumption.
+**`br_netfilter` is unowned, and its absence is silent** (`r8`). The `physdev` variant needs it,
+docker only enables it for `icc=false`, and neither CNI nor netavark mentions it at all. It is a
+**host-wide** setting that changes packet paths for every bridge on the machine, and with it unloaded
+a physdev rule counts zero while looking entirely correct. If `physdev` is the chosen key it needs an
+explicit preflight assertion; **the netdev variant removes the dependency instead**, which is the
+stronger reason to prefer it.
 
 **Rootless podman's enforcement dies with the last sandbox** — the netns is destroyed and the rules
 with it — so installation is per bring-up, before the agent runs.

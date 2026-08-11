@@ -1,0 +1,35 @@
+host: Linux 6.8.0-136-generic x86_64 | containerd v2.2.5 | nerdctl 2.2.1
+date: 2026-08-11 12:34:23 UTC
+harness: research_harness_v1 (D134)
+answers: the reach table's containerd row, which said the veth mechanism was measured
+         on docker's veths and not on CNI's
+
+=== R9 ===
+Does the veth key discriminate on CNI's veths, not just docker's?
+
+-- controls (all held, or this would not render) --
+  both sandboxes sit on the SAME bridge, so the per-network key cannot apply: True   (otherwise this measures the docker shape wearing CNI's name)
+  A reaches the denied host before any policy: True
+  A reaches the allowlisted host before any policy: True
+  B reaches the denied host before any policy: True
+  B is untouched by A's rule: True   (the discrimination control: if B is also blocked the key is not per-sandbox)
+  the drop rule actually fired: True   (5 packets — a blocked probe against a zero counter would be a free negative)
+
+-- measurements --
+  A -> denied, keyed on A's CNI veth: False
+  A -> allowlisted, under the same policy: True
+
+-- expectations, rendered from the values above --
+  [PASS] a CNI veth is a usable per-sandbox key on a shared bridge  <- A -> denied, keyed on A's CNI veth=False
+  [PASS] and it does not cost the sandbox its allowlisted traffic  <- A -> allowlisted, under the same policy=True
+
+-- WHAT WAS NOT TRIED --
+  - yoloAI's OWN CNI conflist. This uses nerdctl's bridge — same CNI bridge plugin and veth path, which is the mechanism question, but not a test of `yoloai0` or of the plugin chain yoloAI configures (firewall, portmap, host-local IPAM)
+  - name recycling on CNI under churn. k3 measured 6 distinct names over 6 sequential cycles; this run creates two sandboxes once and says nothing about reuse
+  - Kata. containerd's VM isolation runs the guest in a VM, and whether the host-side veth is the same object in that configuration is unexamined
+  - the nft equivalent (`meta ibrname`), which might key on the bridge port without br_netfilter at all — R8 flagged it and nothing has tried it
+  - IPv6, UDP, and the reply direction
+  - concurrency: two sandboxes, created in sequence, on an idle host
+  - what happens when br_netfilter is absent — R8 measured that separately and the answer is that this whole key goes inert, silently
+
+-- all expectations held --
