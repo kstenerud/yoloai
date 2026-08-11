@@ -112,9 +112,9 @@ Originally established in D22.
 
 ## §3. Don't reinvent the wheel — ecosystem-first
 
-> **Rule.** Before designing a feature, check whether git, Docker, unix tools, or the runtime already provide the workflow; build the glue (the composition), not the primitives.
+> **Rule.** Before designing a feature, check whether git, Docker, unix tools, or the runtime already provide the workflow; build the glue (the composition), not the primitives. And before *verifying* a design on hardware, check whether the industry converged on a different shape — prior art gates the round (D136).
 >
-> **Bites when:** about to hand-build something git / docker / unix already does. · **See also:** GEN §2.
+> **Bites when:** about to hand-build something git / docker / unix already does; about to spend days of hardware time on a mechanism the field abandoned. · **See also:** GEN §2, [`procedures/verification-rounds.md`](../procedures/verification-rounds.md).
 
 **Principle.** Before designing a feature, check whether git, Docker, unix tools, or the runtime already provide a workflow that solves it. yoloAI's value is the *composition* — copy/diff/apply on top of git, sandboxes on top of Docker / Podman / Tart, idle detection on top of agent hooks. Build the glue, not the primitives.
 
@@ -131,9 +131,19 @@ For every proposed feature: (a) is there an existing tool that solves this? (b) 
 - **In-sandbox monitoring** uses `tmux` panes for session logging + screen capture (`docs/contributors/design/bugreport.md`). The alternative — a bespoke terminal multiplexer — would have been weeks of work to reach feature parity with tmux.
 - **`yoloai system disk` / `system prune` (and `--images`)** (D21, D35) surface backend-native disk/cache information rather than reimplementing inventory. Compose with `docker system df`, `podman system df`, etc.
 
+### The second reading: prior art also gates *verification* (D136, 2026-08-11)
+
+The rule above is about **building**. It has a sharper application to **measuring**, added because the project paid for it.
+
+Reading costs hours and prunes the design space. A hardware round costs days and resolves one cell. Run in that order and cheap results discard expensive ones; run in the other order and expensive results get discarded by cheap ones — which is what "our design keeps reversing when compared against existing solutions in the wild" actually is.
+
+The specimen is exact. `../design/research/prior-art-egress-enforcement.md` landed 2026-08-08 under the commit subject *"find the prior art, and one of it corrects my own advice"*, stating plainly that Cilium's approach pointed away from where the design was heading. The rewrite it pointed at ran 2026-08-11 — three days of hardware time spent arriving independently at a correction already on disk, already read, and already labelled as one.
+
+So: **prior art is a gate on opening a verification round, not a research item that runs beside it.** And a convergence away from your design is a *constraint on the plan*, not a note next to it — the strongest single result of that whole pass was filed as research and left there. Procedure: [`procedures/verification-rounds.md`](../procedures/verification-rounds.md) §1.
+
 ### Cost-vs-benefit
 
-Cost of applying: discipline at design time + research into what exists. Damage prevented: reimplementation cost, ongoing maintenance of the duplicate primitive, divergence from ecosystem conventions, user confusion ("why doesn't `yoloai diff` accept `--stat` like git does?"). Threshold: when the existing tool's failure modes are bounded and documented, compose; when they aren't, consider reimplementing as a token spend (§2).
+Cost of applying: discipline at design time + research into what exists. Damage prevented: reimplementation cost, ongoing maintenance of the duplicate primitive, divergence from ecosystem conventions, user confusion ("why doesn't `yoloai diff` accept `--stat` like git does?"), and — on the verification side — days of hardware time spent re-deriving a published conclusion. Threshold: when the existing tool's failure modes are bounded and documented, compose; when they aren't, consider reimplementing as a token spend (§2).
 
 ### Sources
 
