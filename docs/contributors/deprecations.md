@@ -4,6 +4,14 @@
 
 # Deprecations
 
+## Environment v3→v4 DNS snapshot / library v6→v7
+
+- **Incurred:** 2026-08-11
+- **Shipped:** v0.12.0 (pending)
+- **Due:** 2027-02-11
+- **Retire when:** both record and library ladder floors rise past these forms.
+- **Code:** `store/environment.go`, `internal/orchestrator/migrate_dns.go`, `migration.go`, `internal/config/schema.go`.
+
 Every entry is something the code carries **only** so an older install keeps working: a
 migration rung, a compatibility reader, an alias. Each was cheap to add and is invisible once
 added, which is exactly why they accumulate — nothing in a codebase ever announces that it has

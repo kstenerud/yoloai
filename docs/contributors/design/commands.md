@@ -200,7 +200,8 @@ Options:
 - `--agent <name>`: Agent to use (`aider`, `claude`, `codex`, `gemini`, `opencode`, `shell`, `test`). Overrides `agent` from config.
 - `--network-isolated`: Allow only the agent's required API traffic. The agent can function but cannot access other external services, download arbitrary binaries, or exfiltrate code.
 - `--network-allow <domain>`: Allow traffic to specific additional domains (can be repeated). Implies `--network-isolated`. Added to the agent's default allowlist (see below).
-- `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is useful for testing container setup without agent execution or for agents with locally-hosted models.
+- `--network-none`: Run without network access (agent API calls will also fail). Docker and Podman enforce it; Apple Container rejects it before setup because that backend has no enforcing adapter. Seatbelt’s native policy is separate from Apple Container. Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints.
+- `--dns <IPv4>`: Repeatable Apple Container runtime resolver override. `--dns system` clears an inherited override. Explicit values replace profile/default `network.dns`; they are not image-builder DNS settings and custom DNS may be combined with `--network-isolated`.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --abandon-unapplied`.
 - `--backend <name>`: Runtime backend to use (see `yoloai system backends`). Overrides the config default.
 - `--no-profile`: Use the base image even when config sets a default profile.
@@ -1022,4 +1023,3 @@ The cache persists across `stop`/`start` cycles and is destroyed with `yoloai de
 ### Image Cleanup
 
 Docker images (`yoloai-base`, `yoloai-cli-<profile>`) accumulate indefinitely. A cleanup mechanism is needed but deferred pending research into Docker's image lifecycle: base images are shared parents of profile images, profile images may have running containers, layer caching means "removing" doesn't necessarily free space, and `docker image prune` vs `docker rmi` have different semantics. Half-baked pruning could break running sandboxes or nuke images the user spent time building.
-

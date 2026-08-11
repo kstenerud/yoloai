@@ -89,6 +89,13 @@
 4. Add a blank import in the appropriate platform file (`client.go` for all platforms, or a `_linux.go` / `_darwin.go` file for platform-specific backends)
 5. Backend is selectable via `--backend` flag (on new/build/setup) or `backend` config. Lifecycle commands read backend from sandbox `environment.json`
 
+**Add a creation-time runtime setting:** parse the CLI form in
+`internal/cli/lifecycle/new.go`, keep configuration presence/merge semantics in
+`internal/config`, resolve capability policy once in `internal/orchestrator/create`,
+snapshot the effective value in `store.Environment`, and map it through
+`state.State` → `launch.buildInstanceConfig` → the backend adapter. Recreation
+must restore the metadata snapshot rather than rereading defaults.
+
 **Add capability checks for a backend:**
 1. Create `runtime/<name>/caps.go` with `HostCapability` constructors
 2. List the modes in your descriptor's `SupportedIsolationModes` field — it is data on
@@ -103,4 +110,3 @@
 **Add MCP tools for outer agents:**
 1. Add tool registration in `internal/mcpsrv/tools.go`
 2. Tool handlers use `orchestrator.Engine` for all sandbox operations
-

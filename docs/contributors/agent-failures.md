@@ -1561,3 +1561,26 @@ as scarce as the failures and twice as useful.
   code — a `for` loop over a full glob with its totals printed — not a listing read by eye. Concretely
   here: `for f in *.txt; do ...; done | sort | uniq -c` prints 52/7 and cannot be truncated into
   agreement.
+
+### A40 — treated “Apple” as one backend and shipped the Seatbelt mechanism on Apple Container (2026-08-13)
+
+- **Claimed:** Apple Container could preserve `--network-none` by passing the vendor’s native
+  `--network none` adapter. I rewrote the implementation, tests, shipped help, design records, and
+  PR description around that claim, then pushed the branch.
+- **True:** “Apple” names two different backends in this repository. Seatbelt supports a native
+  no-network policy; Apple Container does not. The DNS change must reject Apple Container
+  `--network-none` before setup rather than transplanting Seatbelt’s capability onto it.
+- **Source of the false belief:** DF198 called its measured subject “apple” and proposed
+  `container run --network none` as the remedy. I treated that backend label as proof of the
+  product/runtime intersection instead of re-establishing which Apple mechanism the result
+  described. The shared platform name hid the backend boundary.
+- **Caught by:** the owner naming the ambiguity directly: “Apple” can mean Seatbelt or Container.
+  No local test could catch the mistake because I had rewritten the fake-binary expectation to
+  certify the same false adapter.
+- **Cost:** two commits pushed to the fork and a complete PR body drafted around the wrong
+  behavior; PR creation failed independently before the claim reached the base repository.
+- **Class:** coherence pressure across same-platform siblings — one backend’s demonstrated
+  mechanism inherited by another because both were called “Apple.”
+- **Gated now?** No. The concrete check is to name the backend type and executable in every
+  platform-level network claim: `seatbelt`/SBPL versus `apple`/`container`. A test derived from the
+  mistaken adapter cannot establish that distinction.

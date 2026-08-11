@@ -33,6 +33,22 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+### Apple Container `--network-none` is rejected
+
+**Previous behavior:** Apple Container accepted `--network-none` without an enforcing adapter.
+**New behavior:** Apple Container creation fails before setup. **Impact:** Apple Container users can
+no longer create a sandbox that only appeared to have no network. **Remedy:** use an
+enforcing backend until a separate Apple Container adapter is designed. **Rationale:** DF198.
+
+
+### DNS snapshots require schema migration
+
+**Previous behavior:** v0.11.0 data uses library schema 6 and environment metadata
+v3. **New behavior:** v0.12.0 requires schema 7 and metadata v4 DNS snapshots.
+**Impact:** an existing data directory must migrate before use and v0.11.0 cannot
+read it afterwards. **Remedy:** run `yoloai system migrate`; v3 records receive
+system DNS. Downgrade before migration while the directory remains schema 6.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running

@@ -23,13 +23,15 @@ the comment on `create.Run` — it is the authority on this split.
 ```
 NewNewCmd (internal/cli/lifecycle/new.go)
   → newCreateClient → yoloai.Client.CreateSandbox (client.go)
-      → Engine.EnsureSetup (internal/orchestrator/engine.go): scaffold dirs, defaults, base image
-      → Engine.Create (internal/orchestrator/engine_lifecycle.go)
+      → Engine.Create (internal/orchestrator/engine_lifecycle.go): opens backend + cheap scaffold
         → create.Run (internal/orchestrator/create/create.go)
           → prepareSandboxState:
               validateAndLoadConfig                    (name/agent)
-              → resolveProfileAndArchetype → applyConfigDefaults → resolveAndApplyArchetype
+              → resolveProfileConfig → applyConfigDefaults → DNS policy → runtime setup
+              → resolveRuntimeAndArchetype
                   (internal/orchestrator/create/prepare_archetype.go)
+              → resolveDNSPolicy → RuntimeSetup → ensureProfileImage
+                  (DNS snapshot is validated before expensive/destructive work)
               → replaceSandboxIfNeeded                 (--replace teardown)
               → parseAndValidateDirs                   (internal/orchestrator/create/prepare_dirs.go)
               → createAndSeedSandbox                   ← SEED runs before workdir copy
@@ -38,7 +40,7 @@ NewNewCmd (internal/cli/lifecycle/new.go)
               → buildConfigAndEnvironment
                   → invocation.ReadPrompt / ResolveModel / BuildAgentCommand
               → writeStatFiles
-                  → store.SaveEnvironment / store.SaveSandboxState
+                  → store.SaveEnvironment / store.SaveSandboxState (including DNS snapshot)
                   → envsetup.WriteContextFiles (internal/envsetup/context.go)
           (returns — no container exists yet)
 
@@ -46,6 +48,7 @@ NewNewCmd (internal/cli/lifecycle/new.go)
 Sandbox.Start → Engine.Start → lifecycle.Start (internal/orchestrator/lifecycle/start.go)
   → StatusRemoved branch → recreateContainer (internal/orchestrator/lifecycle/restart.go)
     → launch.LaunchContainer (internal/orchestrator/launch/launch.go)
+        → buildInstanceConfig → Apple `container create --dns …` when snapshotted
         → envsetup.ResolveSecretEnv → brokerCredentials → envsetup.StageSecretEnv   (D63)
         → mounts.Build (internal/orchestrator/mounts/mounts.go)
         → buildAndStart → rt.Create → rt.Start → verifyInstanceRunning

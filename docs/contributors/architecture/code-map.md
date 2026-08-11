@@ -475,7 +475,7 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 | File | Purpose |
 |------|---------|
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName(principal, name)` — principal-aware runtime handle: `yoloai-<principal>-<name>` (the CLI's principal is `cli`; the empty principal is invalid and panics per D126). `LegacyCLIInstanceName(name)` — the pre-D126 `yoloai-<name>` form, used only by migrations. `Dir()`, `WorkDir()`, `RequireSandboxDir()`. No `:overlay` path helper survives here: the one the flatten migrator still needed moved to `internal/config/pretier`, which freezes the pre-tier layout the migrators read. `ValidateName()` delegates to `config.ParseSandboxName` (containerd-conformant grammar). Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
-| `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.BackendType` records which runtime backend was used; `Environment.Principal` records the owning principal (D62). |
+| `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — substrate sandbox metadata persistence as `environment.json`, including backend, principal, directories, creation snapshot DNS, and launch provenance. Agent/model and network policy live in sibling records, not this file. |
 | `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Environment` which is immutable after creation. |
 
 ### `internal/workspace/`
@@ -508,7 +508,7 @@ High-level public API for library consumers. Wraps `orchestrator.Engine` and a `
 Central orchestrator. Holds a `runtime.Backend`, backend name, logger, and I/O streams. All sandbox operations go through it: `Create()`, `Start()`, `Stop()`, `Destroy()`, `Reset()`, `Clone()`, `Inspect()`, `List()`, `EnsureSetup()`. The backend name is stored so it can be persisted in `Environment` at sandbox creation time.
 
 ### `store.Environment` / `store.WorkdirEnvironment` / `store.DirEnvironment`
-Persisted as `environment.json` in each sandbox dir. Records creation-time state: agent, model, profile, workdir path/mode/baseline SHA, auxiliary directories (via `Directories` field), network mode/allow, ports, resources, mounts, backend. Each directory (workdir and aux dirs) has its own `DirEnvironment` with host path, mount path, mode, and baseline SHA. Lives in `store`. The public `yoloai.Environment` read-model (carried on `Info.Environment`) is a hand-written field-for-field mirror.
+Persisted as `environment.json` in each sandbox dir. Records creation-time substrate state: profile, workdir path/mode/baseline SHA, auxiliary directories, ports, resources, mounts, backend, and DNS snapshot. Agent/model and network mode/allow are sibling records. Each directory (workdir and aux dirs) has its own `DirEnvironment` with host path, mount path, mode, and baseline SHA. Lives in `store`. The public `yoloai.Environment` read-model (carried on `Info.Environment`) is a hand-written field-for-field mirror.
 
 ### `store.SandboxState`
 Per-sandbox runtime state persisted as `sandbox-state.json` (legacy: `state.json`). Tracks mutable state like `agent_files_initialized` (boolean). Separate from `Environment` which is immutable after creation. Lives in `store`.
@@ -609,4 +609,3 @@ Host context: `IsRoot`, `IsWSL2`, `InContainer`, `KVMGroup`. Detected once per i
 | `yoloai ls` / `log` / `exec` / `vscode` | `cli/sandboxcmd/aliases.go` | Shortcuts that delegate to the matching `sandbox <verb>` impl in the same subpackage |
 | `yoloai x` | `cli/xcmd/x.go:NewCmd` | User-defined extensions from `~/.yoloai/cli/extensions/` |
 | `yoloai version` | `cli/versioncmd/version.go:NewCmd` | Prints build-time version info (reads `cliutil.Version` etc.) |
-

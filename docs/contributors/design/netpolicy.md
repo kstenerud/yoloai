@@ -78,13 +78,12 @@ So **`none` is the only hard network boundary today** *for `ip-filter`-class bac
 `ip-filter` honestly and not over-promise (a wrong security claim is the worst kind — our own critique
 principle).
 
-**`none` DOES hold on macOS (verified 2026-06-24, D92 — a reviewed false alarm corrected).** `mode: none` is
-enforced *natively*, independent of the in-sandbox iptables path: **seatbelt** via SBPL `(deny default)` (the
-profile simply omits `(allow network*)`); **tart** via `--net-softnet-block=0.0.0.0/0` + `::/0` at the VM
-level. So `none` is a hard boundary on *every* backend — only `isolated` (the allowlist) is the seatbelt/tart
-gap. Fail-mode is already **fail-closed** (`entrypoint.py` aborts before launching the agent if rules can't
-install); the carve must **preserve** that — enforcement failing to apply must refuse the launch, never fail
-open (for the metered-JV-key + adversarial case, fail-open is a credential-exfil event).
+**`none` is backend-specific, not universally enforced** ([DF198](findings-unresolved.md),
+[DF199](findings-unresolved.md)). Docker and Podman enforce it natively; Apple Container rejects
+the request because that backend has no enforcing adapter. Seatbelt has a separate native policy,
+although the current sandbox startup path has the Unix-socket defect DF199 records. Containerd and
+Tart currently leave networking enabled. Enforcement must fail closed: a backend that cannot apply
+the requested boundary must refuse the launch rather than start an agent with egress.
 
 **`ip-filter` is the re-home target for `entrypoint.py:isolate_network`** ([DF41](findings-unresolved.md)) — the
 existing in-container enforcement *is* this strategy, lifted to a Go-driven step over the neutral keep-alive.

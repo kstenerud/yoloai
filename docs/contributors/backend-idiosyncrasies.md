@@ -46,6 +46,7 @@ inclusion test first, then add a row to the index.
 | Brokered agent on podman-macOS hangs on first API call; one-shot curl to the injector works | [Podman Machine: gvproxy stalls streaming](#podman-machine-macos-gvproxy-host-forward-passes-a-one-shot-curl-but-stalls-the-agents-streaming-connection) |
 | A healthy apple/tart guest suddenly resolves nothing (`UNRESOLVED` for every name) with no change to the guest; the host resolves fine; someone just flushed DNS or ran `killall -HUP mDNSResponder` | [macOS: restarting mDNSResponder takes guest DNS down through the vmnet gateway](#macos-restarting-the-hosts-mdnsresponder-takes-guest-dns-down-through-the-vmnet-gateway) |
 | `docker network create` fails with `iptables: No chain/target/match by that name` for `DOCKER-FORWARD`; existing containers unaffected; something recently ran a host-wide nftables flush | [Docker: `nft flush ruleset` destroys Docker's own chains](#nft-flush-ruleset-destroys-dockers-own-chains-and-docker-does-not-notice-until-the-next-network-operation) |
+| Apple Container guest DNS fails through vmnet while direct public DNS works | [Apple: vmnet forwarding failures can be worked around with opt-in runtime DNS](#apple-vmnet-forwarding-failures-can-be-worked-around-with-opt-in-runtime-dns) |
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
@@ -3196,6 +3197,19 @@ on macOS — but the failure mode and on-disk residue differ.
 
 **Code:** `runtime/docker/resources/entrypoint.py` (`apply_overlays`, the
 `overlay.virtofs_fallback` / `overlay.local_upper` branch).
+
+## Apple: vmnet forwarding failures can be worked around with opt-in runtime DNS
+
+Apple Container guests normally inherit a host-integrated resolver through
+vmnet. A forwarding failure and a stale vmnet epoch are distinct failures: an
+explicit public resolver can bypass the former for a sandbox, but it does not
+repair vmnet or restore the host-integrated split-horizon path. yoloAI therefore
+keeps vendor DNS as the default and exposes the workaround only as repeatable
+runtime `--dns <IPv4>` options (or `network.dns`), not as a global default.
+
+**Code:** `runtime/apple/apple.go` and
+`internal/orchestrator/create/create.go` (validated runtime DNS); the separate
+stale-epoch diagnostic remains below.
 
 ## macOS: restarting the host's `mDNSResponder` takes guest DNS down through the vmnet gateway
 

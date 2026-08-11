@@ -399,6 +399,14 @@ yoloai new task ./project --network-allow api.example.com
 # Disable network access entirely
 yoloai new task ./project --network-none
 
+# Apple Container only: custom resolvers are ordered and persist with the sandbox.
+yoloai new task ./project --dns 1.1.1.1 --dns 8.8.8.8
+yoloai new task ./project --dns system
+
+# YAML defaults/profiles: [] or [system] explicitly clears inherited DNS.
+# network:
+#   dns: [1.1.1.1, 8.8.8.8]
+
 # Credential brokering is on by default (key stays host-side). Opt out / require it:
 yoloai new task ./project --no-broker   # deliver the key directly into the sandbox
 yoloai new task ./project --broker      # require brokering (error if unsupported)
@@ -906,7 +914,9 @@ Isolation modes are silently ignored on non-container backends (tart, seatbelt).
 
 - **Requires macOS 26 (Tahoe) or newer on Apple Silicon.** yoloAI gates on `macOS ≥ 26`; on older macOS the `--isolation vm` error explains the upgrade path. Some features (e.g. Rosetta-backed amd64) want **M3 or newer**.
 - **Strong isolation, fast.** Each container gets a real VM boundary (the host kernel isn't shared), yet VMs start sub-second.
-- **Network isolation is enforced by the in-VM Linux kernel.** The sandbox installs the rules itself, so it holds `NET_ADMIN` and an agent that tries can flush them. Same mechanism as podman and containerd. Docker is the one backend that installs the rules from outside the sandbox and withholds `NET_ADMIN`, so only there does the allowlist hold against an agent that works at it. Treat it here as a guardrail against careless egress, and use `--network-none` when you need a guarantee.
+- **Network isolation is enforced by the in-VM Linux kernel.** The sandbox installs the rules itself, so it holds `NET_ADMIN` and an agent that tries can flush them. Same mechanism as podman and containerd. Docker is the one backend that installs the rules from outside the sandbox and withholds `NET_ADMIN`, so only there does the allowlist hold against an agent that works at it. Treat it here as a guardrail against careless egress, and use `--network-none` when you need a guarantee. Some backends (Apple Container) reject `--network-none` because there is no enforcing adapter.
+- **Custom DNS is opt-in.** Repeat `--dns <IPv4>` (or set `network.dns` in YAML) to replace Apple’s host-integrated resolver; `--dns system` and `network.dns: []` clear inherited values. It composes with network isolation, which opens TCP and UDP 53 only to the selected resolvers.
+- **Configuration precedence.** Explicit `--dns` replaces profile/default values. A child profile replaces its parent resolver list, and `network.dns: []` clears it. `network.dns` is a YAML-edited collection (not supported by `yoloai config set`); IPv4 literals are the only accepted custom values. Existing sandboxes retain their captured resolver list when recreated, while later defaults affect only new or replaced sandboxes. Apple builder DNS remains separate from sandbox runtime DNS.
 - **No suspend/resume and no VS Code "Attach to Running Container".** `container` has no checkpoint or docker-compat API; `exec`-based attach (`yoloai attach`) works normally.
 - **Memory is not released back to the host** until the VM stops (virtio-balloon) — minor for ephemeral sandboxes.
 - **Profile Dockerfiles are built via Apple's own builder** (`container build`, same as `docker build`/`podman build`) — a profile's `yoloai-cli-<profile>` image is built and cached automatically, no manual step needed. One gap versus Docker/Podman: no `--secret` build-secret support, so an auto-detected secret (e.g. `~/.npmrc`) is reported and dropped rather than passed into the build.

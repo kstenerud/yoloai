@@ -91,6 +91,7 @@ env: {}                               # Environment variables forwarded to conta
 # network:                            # Network isolation settings
 #   isolated: false                   # true to enable network isolation by default
 #   allow: []                         # additional domains to allow (additive with agent defaults)
+#   dns: []                           # Apple runtime IPv4 resolvers; [] uses vendor DNS
 # resources:                          # Container resource limits
 #   cpus: 4                           # docker --cpus
 #   memory: 8g                        # docker --memory
@@ -109,7 +110,7 @@ Settings are managed via `yoloai config get/set` or by editing the file directly
 - `env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set env.NAME value`. In profiles, `env` merges with baked-in defaults (profile values win on conflict).
 - `agent_args` sets per-agent default CLI args. Map of agent name → arg string. Args are inserted between the model flag and CLI passthrough (`--` args), so passthrough always wins. Set via `yoloai config set agent_args.aider "--no-auto-commits"`. In profiles, `agent_args` merges with baked-in defaults (profile values win on conflict per agent key).
 - `resources` sets container resource limits. `resources.cpus` (e.g., `"4"`, `"2.5"`) maps to `--cpus`. `resources.memory` (e.g., `"8g"`, `"512m"`) maps to `--memory`. CLI `--cpus` and `--memory` override config. Profile overrides individual values.
-- `network` controls network isolation. `network.isolated: true` enables network isolation for all sandboxes. `network.allow` lists additional allowed domains (additive with agent defaults). Non-empty `network.allow` implies `network.isolated: true`. CLI `--network-isolated` and `--network-allow` override config.
+- `network` controls network isolation. `network.isolated: true` enables network isolation for all sandboxes. `network.allow` lists additional allowed domains (additive with agent defaults). `network.dns` is an Apple-only ordered IPv4 resolver list; it replaces (rather than appends to) an inherited list, and explicit `[]` clears an inherited custom list back to vendor DNS. Non-empty `network.allow` implies `network.isolated: true`. CLI `--network-isolated` and `--network-allow` override config.
 - `mounts` specifies bind mounts added at container run time (e.g., `~/.gitconfig:/home/yoloai/.gitconfig:ro`). In profiles, mounts are additive (merged with baked-in defaults).
 - `auto_commit_interval` sets the interval in seconds between automatic git commits in `:copy` directories inside the container. Disabled by default (`0`). When enabled, a background loop periodically runs `git add -A && git commit` in each `:copy` directory, providing recovery checkpoints for unattended runs. Only affects `:copy` dirs (`:overlay` has its own mechanism; `:rw` is the user's live repo). Profile overrides baked-in default.
 - `agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run (see below).
@@ -170,6 +171,12 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 **Name validation:** Profile names must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. Profile names become Docker image tags (`yoloai-cli-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
 
 **Implemented profile fields:** `agent`, `model`, `os`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `isolation`, `cap_add`, `devices`, `setup`, `auto_commit_interval`. Unknown fields are an error — `yoloai new` fails with a clear message listing the unrecognized keys. This catches typos and fields that have been renamed.
+
+| Profile network field | Merge behavior |
+| --- | --- |
+| `network.isolated` | Profile value replaces the inherited boolean. |
+| `network.allow` | Additive with inherited allowed domains. |
+| `network.dns` | Replaces the inherited resolver list; `[]` or `[system]` explicitly clears it to vendor DNS. An absent key inherits. |
 
 **Machine-specific fields — fail loudly if prerequisites are absent.** `isolation` and `os` select runtime environments that may not be available on every machine. `isolation: vm` uses Kata Containers on Linux (requires KVM) and Tart on macOS (requires Tart installed). `isolation: vm-enhanced` is Linux-only and additionally requires Firecracker. `isolation: container-privileged` requires a container backend (Docker/Podman) and runs on both Linux and macOS hosts via that backend's Linux VM; it is only unavailable with `os: mac` (Seatbelt/Tart have no privileged mode). `os: linux` is the default and works everywhere. `os: mac` requires a macOS host; the specific backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). All other isolation levels may also have prerequisites (e.g. `container-enhanced` requires gVisor). If the required prerequisites are not present, `yoloai new` fails with a clear error — it does not silently fall back to a different mode. A profile that specifies `isolation` or `os` will not work everywhere.
 
@@ -286,4 +293,3 @@ CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with pr
 - `yoloai profile create <name>` — Create a profile directory with a scaffold `config.yaml` containing commented-out examples of all supported fields. [DEFERRED] `--template <tpl>` flag with language-specific scaffolds (`go`, `node`, `python`, `rust`).
 - `yoloai profile list` — List all profiles in `~/.yoloai/profiles/`.
 - `yoloai profile delete <name>` — Delete a profile directory. Asks for confirmation if any sandbox references the profile.
-
