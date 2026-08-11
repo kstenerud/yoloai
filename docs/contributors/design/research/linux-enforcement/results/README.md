@@ -99,6 +99,17 @@ one did not, and its absence is the root cause of every over-broad conclusion be
 run ends with a `WHAT WAS NOT TRIED` block; no Linux run here has one. Retrofitting per-run blocks is
 pending; this is the index-level version.
 
+> **Two runs here are harness ports, not new experiments** (2026-08-11, D134).
+> `k1-interface-as-sole-key-harness.txt` and `p1b-revocation-decay-harness.txt` re-run K1 and P1b on
+> `scripts/research_harness_v1.py`, against the same hardware and with the same rules as their bash
+> originals, which are kept alongside. Both reproduced their original result — including P1b's drop
+> counter, 12 originally and 11 on the port. Read them as a check on the *library*, not as
+> independent evidence for the design: two runs of the same experiment on one host are one
+> measurement repeated, and the second inherits every blind spot of the first. Their value is that
+> a rewrite from scratch landed on the same numbers, and that the port's controls fired on a
+> mistake the port introduced — a premise check that counted `ip daddr` (the allowlist itself)
+> as though it identified the sandbox.
+
 - **L1 does not support "there is no per-sandbox non-address key on Linux."** It tested one matcher
   family (`socket cgroupv2`). `meta cgroup` was never executed as a rule — the evidence is a
   `[ -d /sys/fs/cgroup/net_cls ]` directory test. Untried: per-sandbox docker network →

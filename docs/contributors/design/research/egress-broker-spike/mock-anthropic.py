@@ -23,14 +23,14 @@ SSE = (
 
 
 class H(http.server.BaseHTTPRequestHandler):
-    def _log(self):
+    def _log(self) -> None:
         # The agent must arrive here (redirect worked) carrying a placeholder
         # credential the real injector would strip + replace with the live key.
         auth = self.headers.get("authorization") or self.headers.get("x-api-key") or "(none)"
         sys.stderr.write(f"[MOCK] {self.command} {self.path} auth={auth!r}\n")
         sys.stderr.flush()
 
-    def do_POST(self):
+    def do_POST(self) -> None:
         ln = int(self.headers.get("content-length") or 0)
         self.rfile.read(ln)
         self._log()
@@ -45,14 +45,14 @@ class H(http.server.BaseHTTPRequestHandler):
             self.end_headers()
             self.wfile.write(b"{}")
 
-    def do_GET(self):
+    def do_GET(self) -> None:
         self._log()
         self.send_response(200)
         self.send_header("content-type", "application/json")
         self.end_headers()
         self.wfile.write(b"{}")
 
-    def log_message(self, *a):
+    def log_message(self, *a: object) -> None:
         pass
 
 

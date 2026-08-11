@@ -20,6 +20,7 @@ import subprocess
 import sys
 import time
 import uuid
+from typing import Literal, overload
 
 from coherence_guest import SHAPES  # single source of truth for the shape list
 
@@ -31,8 +32,33 @@ GUEST_DIRS = {
 LIB = os.path.expanduser("~/.yoloai/library/sandboxes")
 
 
-def guest_exec(backend, sandbox, argv, background=False, log=None):
-    """Run argv inside the guest. Bypasses `yoloai exec` so a 'done' agent still works."""
+@overload
+def guest_exec(
+    backend: str, sandbox: str, argv: list[str]
+) -> subprocess.CompletedProcess[str]: ...
+
+
+@overload
+def guest_exec(
+    backend: str, sandbox: str, argv: list[str], *, background: Literal[True], log: str
+) -> subprocess.Popen[bytes]: ...
+
+
+def guest_exec(
+    backend: str,
+    sandbox: str,
+    argv: list[str],
+    *,
+    background: bool = False,
+    log: str | None = None,
+) -> subprocess.CompletedProcess[str] | subprocess.Popen[bytes]:
+    """Run argv inside the guest. Bypasses `yoloai exec` so a 'done' agent still works.
+
+    The overloads pair `background=True` with a required `log`, which the comment
+    below had asked for and nothing enforced — a background call without one raised
+    `TypeError` inside `open`, from a line that only runs on the path where the guest
+    is already misbehaving. Annotating this file for mypy is what surfaced it.
+    """
     if backend == "tart":
         cmd = ["tart", "exec", "yoloai-cli-" + sandbox] + argv
     elif backend == "apple":
@@ -43,12 +69,13 @@ def guest_exec(backend, sandbox, argv, background=False, log=None):
         # Never discard the guest's stderr: a guest that dies on startup is otherwise
         # indistinguishable from a guest that is merely slow, and both look like
         # "STARTED never appeared".
+        assert log is not None  # guaranteed by the overloads
         fh = open(log, "wb")
         return subprocess.Popen(cmd, stdout=fh, stderr=subprocess.STDOUT)
     return subprocess.run(cmd, capture_output=True, text=True)
 
 
-def host_action(shape, d, i):
+def host_action(shape: str, d: str, i: int) -> None:
     """Perform the host side of one round. Mirrors satisfied() in coherence_guest.py."""
     if shape == "create":
         open(os.path.join(d, "GO_%d" % i), "w").write("go")
@@ -75,7 +102,7 @@ def host_action(shape, d, i):
         raise SystemExit("unknown shape " + shape)
 
 
-def precondition(shape, d, i):
+def precondition(shape: str, d: str, i: int) -> None:
     """Files that must exist BEFORE the guest starts, so no negative cache is involved."""
     if shape in ("overwrite_inplace", "overwrite_rename"):
         open(os.path.join(d, "BAR_%d" % i), "w").write("wait")
@@ -85,7 +112,7 @@ def precondition(shape, d, i):
         open(os.path.join(d, "APP_%d" % i), "w").write("")
 
 
-def main():
+def main() -> None:
     ap = argparse.ArgumentParser()
     ap.add_argument("--backend", required=True, choices=sorted(GUEST_DIRS))
     ap.add_argument("--sandbox", required=True)
@@ -141,7 +168,7 @@ def main():
           % (args.backend, args.sandbox, args.reps, args.poll, args.deadline))
     print()
 
-    results = {s: [] for s in shapes}
+    results: dict[str, list[tuple[dict[str, float | None], float]]] = {s: [] for s in shapes}
     for i, shape in enumerate(plan):
         time.sleep(args.settle)  # NOTE: host rtt = guest_elapsed - settle. Sweep to expose a tick.
         t = time.time()
@@ -163,7 +190,7 @@ def main():
                 proc.kill()
                 sys.exit("FAIL: ACK_%d never became readable (%s)" % (i, shape))
             time.sleep(0.001)
-        per = {}
+        per: dict[str, float | None] = {}
         for tok in body.split():
             name, _, val = tok.partition("=")
             per[name] = None if val == "-" else float(val)

@@ -22,6 +22,7 @@
 import os
 import sys
 import time
+from typing import Callable
 
 SHAPES = (
     "create",
@@ -34,7 +35,7 @@ SHAPES = (
 )
 
 
-def _read(path):
+def _read(path: str) -> str:
     try:
         with open(path) as fh:
             return fh.read().strip()
@@ -42,14 +43,14 @@ def _read(path):
         return ""
 
 
-def _size(path):
+def _size(path: str) -> int:
     try:
         return os.stat(path).st_size
     except OSError:
         return -1
 
 
-def predicates(shape, d, i):
+def predicates(shape: str, d: str, i: int) -> dict[str, Callable[[], bool]]:
     """Return {name: callable} — every way a guest could notice this host action."""
     if shape == "create":
         p = os.path.join(d, "GO_%d" % i)
@@ -78,14 +79,14 @@ def predicates(shape, d, i):
     raise SystemExit("unknown shape %r" % shape)
 
 
-def _listdir(d):
+def _listdir(d: str) -> list[str]:
     try:
         return os.listdir(d)
     except OSError:
         return []
 
 
-def main():
+def main() -> None:
     d = sys.argv[1]
     poll = float(sys.argv[2]) if len(sys.argv) > 2 else 0.001
     deadline_s = float(sys.argv[3]) if len(sys.argv) > 3 else 20.0
@@ -98,7 +99,7 @@ def main():
 
     for i, shape in enumerate(plan):
         preds = predicates(shape, d, i)
-        first = {name: None for name in preds}
+        first: dict[str, float | None] = {name: None for name in preds}
         t0 = time.time()
         while time.time() - t0 < deadline_s:
             for name, fn in preds.items():

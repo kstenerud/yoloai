@@ -289,9 +289,16 @@ python-test: python-typecheck
 ## while python.md claimed the opposite (D117). Anything added under runtime/ or
 ## scripts/ is now covered the moment it is tracked.
 ##
-## Scope note: docs/**/*.py is excluded on purpose — the only one is a research
-## spike (design/research/egress-broker-spike/mock-anthropic.py) that no code
-## references and nothing ships.
+## Scope note, rewritten 2026-08-11. Research Python under docs/ used to be excluded
+## "because the only one is a spike that no code references and nothing ships" — a
+## justification that had already gone stale (there were five) and that stops being
+## true at all now that research runs against `scripts/research_harness_v1.py`. The
+## whole argument for moving research off bash is that bash fails silently; porting
+## it to Python that nothing typechecks trades one silent failure mode for another
+## with more apparent rigour. Bringing the existing five under mypy --strict cost 20
+## annotations and immediately found a real defect: `coherence_host.py`'s
+## `guest_exec(background=True)` would raise TypeError without a `log`, on the path
+## that only runs when the guest is already misbehaving.
 ##
 ## Two invocations: the monitor surface and the smoke harness each have their
 ## own tests/conftest.py, which mypy would otherwise reject as a duplicate
@@ -305,10 +312,12 @@ python-test: python-typecheck
 ## .gitignore via --exclude-standard keeps scratch files out.
 PY_RUNTIME = $(shell git ls-files --cached --others --exclude-standard '*.py' | grep '^runtime/')
 PY_SCRIPTS = $(shell git ls-files --cached --others --exclude-standard '*.py' | grep '^scripts/')
+PY_RESEARCH = $(shell git ls-files --cached --others --exclude-standard '*.py' | grep '^docs/contributors/design/research/')
 
 python-typecheck: ensure-python-venv
 	$(MYPY) --strict $(PY_RUNTIME)
 	$(MYPY) --strict $(PY_SCRIPTS)
+	MYPYPATH=scripts $(MYPY) --strict $(PY_RESEARCH)
 
 ## setup-dev-python: explicitly provision the uv-managed venv with lockfile-pinned
 ## dev tools. Optional for local dev (the python-* targets self-provision via

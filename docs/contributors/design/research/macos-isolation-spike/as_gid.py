@@ -16,7 +16,7 @@ import os
 import sys
 
 
-def main():
+def main() -> None:
     if len(sys.argv) < 4:
         sys.exit("usage: as_gid.py <gid> <uid> <argv...>")
     gid, uid, argv = int(sys.argv[1]), int(sys.argv[2]), sys.argv[3:]

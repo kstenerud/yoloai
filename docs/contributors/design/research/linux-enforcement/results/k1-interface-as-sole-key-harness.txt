@@ -1,0 +1,42 @@
+host: Linux 6.8.0-136-generic x86_64 | docker 29.6.1 | nft v1.0.9
+date: 2026-08-11 07:17:56 UTC
+harness: research_harness_v1 (D134) — port of k1_interface_as_sole_key.sh
+
+=== K1 ===
+Is a per-sandbox interface a usable key on Linux, with no address in the rule?
+
+-- controls (all held, or this would not render) --
+  A reaches the allowlisted host before any policy: True
+  A reaches the denied host before any policy: True
+  B reaches the denied host before any policy: True
+  no rule identifies the sandbox by address: True   (otherwise the run measures address keying wearing an interface's name)
+  B is untouched by A's policy: True   (the discrimination control: if B is also blocked the key is not per-sandbox)
+  A actually holds the spoofed address: True   (without this the next measurement is free)
+  A's MAC actually changed: True   (MAC is now 02:11:22:33:44:55)
+
+-- measurements --
+  A -> allowlisted, under policy: True
+  A -> denied, under policy: False
+  distinct bridge names over sequential create/destroy: True   (4 distinct out of 4: br-04914bfbbd48 br-d522cdfb8f89 br-4d935c9e2659 br-0c2eb7ba0f30)
+  A -> denied, sourced from an address the policy never names: False
+  A -> denied, after changing its MAC: False
+  host-side devices visible to A: ['eth0', 'lo']   (it cannot name the bridge or the veth peer, so it cannot move off the key)
+
+-- expectations, rendered from the values above --
+  [PASS] an interface-keyed allow still reaches its destination  <- A -> allowlisted, under policy=True
+  [PASS] an interface-keyed deny blocks its destination  <- A -> denied, under policy=False
+  [PASS] docker bridge names do not recycle across sequential cycles  <- distinct bridge names over sequential create/destroy=True
+  [PASS] adding an address does not defeat an interface-keyed rule  <- A -> denied, sourced from an address the policy never names=False
+  [PASS] changing the MAC does not defeat an interface-keyed rule  <- A -> denied, after changing its MAC=False
+
+-- WHAT WAS NOT TRIED --
+  - veth-level keying on a SHARED bridge (physdev / nft bridge family) — that is k2
+  - ct mark / meta mark at claim time: circular unless the mark is itself applied by interface or cgroup, so it is downstream of this result
+  - eBPF cgroup_skb/egress (systemd's IPAddressAllow mechanism) — different toolchain, and it cannot cover the VM backends
+  - whether bridge names collide across a docker daemon restart, or across hosts
+  - concurrent create/destroy: part 2 is sequential, which bounds rather than proves
+  - podman and containerd — docker only. containerd shares one CNI bridge, so a per-sandbox bridge key does not exist there as configured
+  - any claim about macOS: vmnet recycles bridge indices and this run says nothing about it
+  - IPv6 and UDP throughout, other than the DNS accept the policy needs to function
+
+-- all expectations held --

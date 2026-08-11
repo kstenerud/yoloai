@@ -45,7 +45,7 @@ _libc.msync.restype = ctypes.c_int
 _libc.msync.argtypes = [ctypes.c_void_p, ctypes.c_size_t, ctypes.c_int]
 
 
-def invalidate(path):
+def invalidate(path: str) -> str | None:
     """Drop the guest's cached pages for path. Returns None, or an error string."""
     fd = os.open(path, os.O_RDONLY)
     try:
@@ -65,7 +65,7 @@ def invalidate(path):
         os.close(fd)
 
 
-def digest(path):
+def digest(path: str) -> str:
     h = hashlib.sha256()
     with open(path, "rb") as fh:
         for chunk in iter(lambda: fh.read(1 << 16), b""):
@@ -73,7 +73,7 @@ def digest(path):
     return h.hexdigest()
 
 
-def refresh(path, want):
+def refresh(path: str, want: str) -> tuple[str, int]:
     """Invalidate and re-read until the guest's bytes hash to want. Returns (verdict, passes)."""
     got = digest(path)
     if got == want:
@@ -88,7 +88,7 @@ def refresh(path, want):
     return "MISMATCH:" + got, MAX_PASSES
 
 
-def main():
+def main() -> int:
     args = sys.argv[1:]
     if not args or len(args) % 2:
         sys.stderr.write("usage: msync_refresh.py <sha256> <path> [<sha256> <path> ...]\n")

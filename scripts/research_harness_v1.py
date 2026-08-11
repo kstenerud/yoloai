@@ -35,6 +35,19 @@ that produced it. That was the most expensive failure class in the same corpus a
 library can see it. `not_tried()` is the partial answer -- enumerate the untested, so
 the gap is visible on the page.
 
+KNOWN DEFECTS IN v1, found by porting two real experiments onto it (D134). Not fixed
+here, because the contract is frozen and a fix is what v2 is for -- but a v1 user has
+to know them, and the first one bites hardest:
+
+  * `expect()` judges TRUTHINESS, so pass it a bool and nothing else. Given a string
+    it does the wrong thing in both directions: a value of `"blocked"` FAILS the claim
+    "the host is blocked", and a value of `""` -- a probe whose command produced no
+    output at all -- PASSES it. A probe that never ran certifies containment. Record
+    `proc.returncode == 0`, never `proc.stdout`.
+  * A failed control raises before anything is printed, so the measurements that would
+    explain the failure are lost with it.
+  * `require()` voids the whole run. There is no way to void one arm of several.
+
 See `docs/contributors/principles/testing-principles.md` §11.
 """
 
