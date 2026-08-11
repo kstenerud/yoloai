@@ -100,6 +100,29 @@ and it is why `r8`'s counter detector is a prerequisite rather than a nicety.
 recreated**, and its absence is invisible to rule inspection. That is a second, independent reason for
 the pre-agent hook the rootless-podman row already required.
 
+**It expresses the real policy, not just a one-line deny** (`r12-netdev-allowlist.txt`). R10 and R11
+recommended netdev on the strength of a single-address `drop`, which implies nothing about an
+allowlist. Measured, all in one netdev chain bound to one veth, with `br_netfilter` unloaded
+throughout:
+
+| | result |
+| --- | --- |
+| a named `set` as the allowlist | works — allowlisted reachable (accept counter 6), everything else denied (deny counter 5) |
+| DNS survives the default deny | yes — the policy judges IPv4 only and lets ARP/IPv6 past the chain policy |
+| the gateway carve-out credential injection needs | expressible as a set-independent accept |
+| revocation | a **live set delete**, no chain reload — and reversible by re-adding |
+| `reject` | available **and effective**: 0.06 s vs 5.09 s for `drop`, with the counter to prove it fired |
+
+So the netdev key is not a downgrade on any axis the design cares about. **Its cost is the
+stale-but-inert chain above, which makes `r8`'s host-side counter detector a prerequisite rather
+than a nicety.**
+
+> **A free negative, caught by its control.** Run 1 reported *"`reject` is not available in a netdev
+> chain"*. It was not: the probe was a one-line table definition `nft` cannot parse, so it failed on
+> a brace and never reached the verdict keyword. The identical rule with `drop` failed the same way,
+> which is what exposed it. Recorded because the run whose subject is free negatives produced one,
+> and because the wrong answer would have argued for keeping the `br_netfilter` dependency.
+
 **Measured, macOS** (`pf-interface-key.txt`): a held bridge index is never reassigned; an ingress tag
 keyed on the bridge is per-sandbox under one network per sandbox, under a ruleset containing no
 address; and a rule re-attaches by name when its interface returns. What the earlier pass recorded as
