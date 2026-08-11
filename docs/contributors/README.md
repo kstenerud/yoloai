@@ -17,6 +17,7 @@ come back here to route.
 | Open a PR | [`procedures/pull-requests.md`](procedures/pull-requests.md) |
 | Review a PR from outside the project | [`procedures/outside-contributions.md`](procedures/outside-contributions.md) |
 | File or triage an issue | [`procedures/issues.md`](procedures/issues.md) |
+| Settle a design question on real hardware | [`procedures/verification-rounds.md`](procedures/verification-rounds.md) |
 | Find the files a change touches | [`architecture/where-to-change.md`](architecture/where-to-change.md) |
 | Understand the package layout | [`architecture/README.md`](architecture/README.md) |
 | Diagnose a backend problem | [`backend-idiosyncrasies.md`](backend-idiosyncrasies.md) — **read before diagnosing** |
@@ -39,7 +40,7 @@ come back here to route.
   and standards cite them by number.
 - **`design/`** — the shaping cluster: feature specs, `design/plans/` (designed but not yet
   built), `design/research/`, and the review queues.
-- **`procedures/`** — how we work: PRs, issues.
+- **`procedures/`** — how we work: PRs, issues, hardware-verification rounds.
 - **`backend-idiosyncrasies.md`** — backend behaviour that contradicts its own documentation.
   Has a symptom index. Add an entry when you find a new one.
 - **`archive/`** — completed or abandoned work, frozen. Kept for archaeology ("did we consider

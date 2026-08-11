@@ -1778,3 +1778,78 @@ A fourth observation is a *property worth keeping*: `report()` prints `-- WHAT W
 - **Rewrite after the sandbox has actually started**, never before. Recording the weaker set and then failing to start would leave a sandbox claiming less than it has, and the next start would accept that weaker set without asking.
 
 **Not breaking under rule 1**, despite being a newly-rejected start: the enforcement record does not exist yet, so no invocation that works today is refused. It ships with the feature that creates the guarantee in the first place.
+
+## D136 — a verification round is a fixed item set opened by prior art, closed once, and probed by harnesses that must show they can report failure
+
+**Date:** 2026-08-11. **Status:** Active. **Consumers:** [`procedures/verification-rounds.md`](../procedures/verification-rounds.md), `scripts/research_harness_v2.py`, `design/research/*/results/README.md`, [GEN §3](../principles/general-principles.md), [GEN §12](../principles/general-principles.md), [D134](#d134--hardware-research-harnesses-are-python-on-a-shared-library-that-enforces-a-runs-invariants-not-bash).
+
+**The symptom this answers.** The 2026-08 host-enforcement pass ping-ponged: each optimal design was invalidated by the next hardware run, some positions reversed twice, and at least one was reversed by prior art that had already been read. The owner's own summary was that the design could not be trusted because of the thrash — which is the correct reading, and the reason work on the build brief stopped to fix this first. The analysis is [`design/research/verification-method.md`](../design/research/verification-method.md), an outside reading of the corpus; this entry is what the project adopts, and it diverges from that document in three places, each noted below.
+
+**The finding that reorganises everything else: these are two mechanisms with opposite remedies, and they present identically from inside the loop as *the last run was wrong*.**
+
+- **Harness defects.** A run is invalidated because the probe was broken, not because the world surprised anyone. **More runs make this worse** — each one is another chance to record a confident wrong answer.
+- **Design overfitting.** A conclusion reverses because the design was re-derived to optimality against an incomplete fact set, and the next fact broke the fit. **More runs make this better**, but only if they land together.
+
+Because the two are indistinguishable in the moment, the loop cannot tell which remedy it needs, and its instinct — *measure more* — is right for one and actively harmful for the other. Everything below exists to separate them.
+
+### The calibration count (2026-08-11, one-time, and it changed the plan)
+
+Counted by hand across both results READMEs, classifying each row from the reason the row itself states. Two numbers, and the *first* correction is that these are two populations that must not be totalled together:
+
+- **Invalidated runs** — a run whose output was thrown away: **~29, of which 28 trace to a harness defect.** One (`pf-liveness-detect.txt`'s detector B, which reported BROKEN then HEALTHY on the same fault) is genuinely unexplained. **Zero** were invalidated by the world differing from the model. The source analysis estimated three to one; the real figure is closer to twenty-eight to one, because it was totalling invalidated runs together with design reversals.
+- **Design reversals** — a position in a plan replaced by a later one: **~8**, and these are the overfitting population. They are not failures of measurement; each was correct on the facts available when written.
+
+**So "measure more before deciding" is the wrong instinct, and by a wider margin than anyone thought.** Nearly every invalidated run in this corpus was the rig, not the world.
+
+**And the direction is asymmetric, which is the sharpest result of the count.** Of the invalidated runs that rendered a verdict at all, **29 confirmed the hypothesis in play and 8 contradicted it** — roughly 3.6 to 1. The mechanism is visible in which ones got caught: every contradicting bad run was investigated quickly, *because a contradicting result makes you look*. `l10`'s "REACHABLE (unexpected)" and R4's dead counter were both chased within the round. The confirming ones sat — `pf-spoof` run 2 recorded 7 PASS / 0 FAIL for the exact inverse of the truth, and read as a security result. **A bad run that agrees with you is the one that survives.** That is not a bias to resist by intention; it is the argument for the mechanism in the next section.
+
+**These counts are recorded here, dated, and never maintained.** Per `agent-failures.md`'s rule — cite the entries, never a total — a stored count drifts on the next entry and nothing enforces it. Recomputing means re-counting; the fields added below make that a `grep -c`.
+
+### 1. A probe must demonstrate it can report failure — not declare that it could
+
+**Adopted, and this is the first divergence from the source analysis.** That document proposes a `REFUTES=` declaration naming the observation that would make the design wrong, with a guard aborting if it is unreachable. Rejected as insufficient on its own: **the declaration is prose written by the same author the frame captured**, so a captured author writes a refutation that is reachable and still the wrong one. It shrinks the class; it does not close it. Its claim to make the wrong state unrepresentable is overstated, and an overstated poka-yoke is one people stop looking at.
+
+**What is adopted instead is already in the tree twice, ad hoc.** `pf-grant-matrix.txt` runs as root, removes its own blanket sudo grant for the duration, and refuses to report anything until `sudo -n /usr/bin/true` is *shown* to fail. `r15_unelevated_install.py` controls on *"plain `nft` is refused to this user, so the helper is doing real work."* Both do the same thing: **they exhibit the negative before trusting the positive.**
+
+Generalised: **every expectation rests on a probe whose baseline was taken with the mechanism absent and came out the other way.** Not a claim that it would; the recorded observation that it did, in the same run, from the same callable. A probe that cannot produce the opposite answer has not been shown to be a probe at all.
+
+This is the class §11 does not reach. §11 asks whether the mechanism under test was present; this asks whether the *instrument* discriminates. `pf-spoof` run 2 passes §11 cleanly — the sandbox existed, the commands ran, the outputs were real — and is still the exact inverse of the truth.
+
+It lands as a mandatory invariant in `scripts/research_harness_v2.py`, which is precisely the shape D134 says a new invariant takes: v1 is frozen, a new mandatory invariant is breaking by definition, so it is a new file. Some measurements have no mechanism-absent state — a capability probe, a census — so v2 takes an explicit waiver carrying a reason, rendered in the report beside `WHAT WAS NOT TRIED`. The waiver is the escape hatch; silence is not.
+
+### 2. Prior art gates the opening of a round
+
+**Adopted as written** (the analysis's R6), and the evidence is worse than that document states. `prior-art-egress-enforcement.md` landed **2026-08-08** under the commit subject *"find the prior art, and one of it corrects my own advice"*; the netdev/interface-key rewrite it pointed at ran **2026-08-11**. So the correction was found, written down, described as a correction — and then three days of hardware time were spent arriving at it independently.
+
+Reading costs hours and prunes the design space. A hardware round costs days and resolves one cell. Run in that order and cheap results discard expensive ones, which is the entire "reversed against existing solutions in the wild" complaint. So prior art is **a gate on opening a round**, not an item that runs beside it, and [GEN §3](../principles/general-principles.md) is extended accordingly: *don't reinvent the wheel* has always been read as "check whether a library already does it", and it also has to mean **check whether the industry converged on a different shape.**
+
+### 3. A round is defined by a queue file, and the plan is not touched until it closes
+
+**Adopted with the half the analysis does not state.** R4 says run the round, then synthesize once — correct, and the Linux half already does it (*"Synthesis applied these results on 2026-08-09 — cite those documents, not this index"*). But **"round" is undefined and self-declared**, and an agent told to batch until the round ends will batch until it feels finished, which is the state the instruction was supposed to fix. Asking for restraint fires on a state that does not exist.
+
+So the round gets an external definition: **a queue file naming the item set, written before any run.** `archive/plans/enforcement-verification-queue.md` was exactly this and it worked — the Linux half ran against it and synthesized once; the macOS half went item-by-item without one and now carries three generations of position with a reader instruction about which section supersedes which. The 10-vs-18 split in invalidation markers between the two directories is the same asymmetry.
+
+Results land in `results/` continuously — that directory is a fact store and keeps doing what it does. The **plan** is untouched until the queue is exhausted or its remaining items are explicitly dropped. `agent-failures.md` sets its own bar at *reached a durable artifact*; the same bar applied to a design is the whole rule: **a mechanism choice that will be revisited before the round ends has not earned a place in the plan.**
+
+Its companion, from the analysis's R5: a plan keeps **invariants** (what the mechanism must achieve) visibly apart from **mechanisms** (how). *Revocation must stop an in-flight transfer* survived the entire pass unchanged; `-k` versus a return rule versus a stateless bidirectional shape is where all the thrash lived. [GEN §12](../principles/general-principles.md) already says a design is a hypothesis until implementation verifies it, but a plan that does not mark which of its claims that applies to gives an invariant and a mechanism guess identical authority — so a mechanism reversing reads as the plan failing rather than the plan working.
+
+### 4. `Class:` and `Direction:` are assigned when a run is invalidated, never swept afterwards
+
+**Adopted, reordered.** The analysis puts this first as the cheapest thing on its list. It is cheap, and doing it *retroactively* is the failure it is diagnosing: classifying twenty-nine of one's own bad runs is an interpretive act performed by the same reader whose interpretation produced them — the A31 shape recursing. The one-time calibration above is recorded as exactly that, with its method stated, and is not repeated.
+
+The durable rule is that the two fields are written **by whoever invalidates the run, at the moment they invalidate it**, when the cause is in hand and the classification is a recollection rather than a reconstruction. `Class:` from the six in `verification-method.md` § *The classes §11 does not reach*, plus `free-negative` for the §11 class itself, which that table omits because §11 covers it and which the count shows is still the largest single bucket. `Direction:` is `confirmed` or `contradicted` — whether the bad run agreed with the hypothesis in play.
+
+Aggregates are a `grep -c`, computed on demand and never stored.
+
+**Rejected.**
+1. **`REFUTES=` as a prose declaration alone.** See §1: written by the captured author, so it admits the specimens it exists to stop. Adopted in its demonstrated form instead. This is a strengthening of the proposal, not a rejection of its aim.
+2. **Retroactively classifying the existing corpus as the durable mechanism.** Done once for calibration and labelled as such. As an ongoing practice it manufactures the appearance of data from the same judgement that failed, and the appearance is worse than the gap.
+3. **Storing the harness-defect ratio as a maintained field.** It drifts on the next entry, nothing enforces it, and `agent-failures.md` already learned this. Cite the entries.
+4. **A gate that checks harnesses for the negative self-test.** Considered and deferred: with the invariant inside v2, a harness that skips it does not render, which is stronger than a lexical check and needs no second mechanism. A gate becomes worth building if research appears that pins v1 to avoid v2 — the hazard D134 already named.
+5. **Asking the agent to hold designs rougher.** The reason the structural fixes exist. An agent has facts and no model of what is still unmeasured, so it cannot estimate the slack to leave, and re-deriving to optimality after each result is the only move available to it. A rule that fires on a state the reader cannot represent does nothing.
+
+**Consequences.**
+- `scripts/research_harness_v2.py` is written now rather than at next need, because the enforcement build brief is the next round and it opens under these rules. v1 stays frozen and its research keeps reproducing (D134).
+- The three known v1 defects ride along in v2, per D134's own specification: `expect()` rejects a non-`bool`, a failed control prints its measurements before voiding the verdict, and an arm can be voided without voiding the run.
+- New research uses the newest harness version. Still no gate for it — with two versions a lexical check is now *possible*, but D134's argument stands that a speculative gate gets disabled before it is useful. Revisit at v3.
+- **The enforcement build brief's own status is unchanged by this.** D136 governs how the next round runs; it does not retroactively invalidate the netdev result, which was measured under controls that held. What it does change is that the brief's parts open against a queue.
