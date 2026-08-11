@@ -1384,3 +1384,38 @@ as scarce as the failures and twice as useful.
   re-run with that rule absent and confirm the outcome changes. Both A33 and this are the same
   underlying habit — asserting a mechanism that fits the observation instead of the one that produced
   it — and the corpus now says a stated mechanism is exactly as unreliable as a stated severity.
+
+### A35 — spent three days measuring my way to a correction I had already found, written down, and labelled as one (2026-08-11)
+
+- **What happened:** on 2026-08-08 I committed `prior-art-egress-enforcement.md` under the subject
+  *"find the prior art, and one of it corrects my own advice"*. It states plainly that Cilium's
+  approach points away from where the design was heading. On 2026-08-11 the Linux mechanism was
+  rewritten from an address key to a netdev interface key — arriving, from hardware measurement, at
+  the shape that document had described three days earlier. In between: R7 through R15, a full
+  measurement pass.
+- **Source of the false belief:** there wasn't one, and that is what makes this different from A33
+  and A34. Nothing I believed was false. The prior art was read, understood, correctly summarised,
+  and correctly labelled as a correction to my own advice. It simply had **no standing** — it was
+  filed as research, and research sits beside a plan rather than gating it. So the design went on
+  being derived from measurement while the answer sat one directory away.
+- **Why the existing rules did not fire:** GEN §3 is *don't reinvent the wheel*, and every reading of
+  it in this repo is about **building** — check whether a library already does it. Nothing said the
+  same discipline applies to **measuring**. And the failure is invisible from inside: each individual
+  run was well-formed, controlled, and produced a real result. There is no moment where the loop
+  notices it is re-deriving, because re-deriving and deriving are the same activity.
+- **Caught by:** an outside analysis the owner commissioned (`design/research/verification-method.md`),
+  after the owner reported the symptom as *the design keeps reversing and I don't trust it*. Not by
+  me, and not by any gate. Consistent with this corpus's own count: **the owner's report remains the
+  detector with the highest catch rate**, and this is the first specimen where the correcting evidence
+  was already inside the repo, written by me, at the time of the error.
+- **Cost:** roughly three days of hardware time, and — larger — it is one of the reversals that made
+  the owner distrust a design whose measurements were sound. The thrash was the deliverable's real
+  defect, not any of its results. Fixing that is [D136](decisions/working-notes.md), which cost a day
+  the build brief had already been scheduled against.
+- **The rule:** **prior art gates opening a verification round; it does not run beside it.** Reading
+  costs hours and prunes the design space, a round costs days and resolves one cell, and in that order
+  cheap results discard expensive ones. Now in [GEN §3](principles/general-principles.md) as its
+  second reading and in [`procedures/verification-rounds.md`](procedures/verification-rounds.md) §1.
+  The generalisation worth carrying past this instance: **a document with no standing is not evidence
+  the loop can act on.** Filing something correct in a place nothing consults is indistinguishable
+  from not having found it — and it feels *better*, because the finding is on the record.
