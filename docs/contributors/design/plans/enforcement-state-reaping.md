@@ -282,6 +282,37 @@ not a blanket deny, because the sandbox is supposed to reach the credential brok
 on the gateway address. Getting that backwards breaks credential injection on every bridge backend at
 once.
 
+### Measured 2026-08-11 (`r7-host-service-allowlist.txt`), and it settles the sever design
+
+Two things this document previously reasoned its way to. Both now have runs, each with a counter
+proving the deciding rule fired rather than a probe failing for its own reasons.
+
+| | measured |
+| --- | --- |
+| Under a forward-hook **deny-all**, does the sandbox still reach the host gateway? | **yes** — external egress stops (drop counter 4), the gateway stays reachable |
+| Can an **input-hook allowlist** permit only the broker port? | **yes** — broker reachable (accept counter 6), every other host service denied (drop counter 4) |
+
+**Consequence: on Linux, "fail closed" for a running sandbox can mean *sever*, not *kill*.** Because
+host-destined traffic never enters the forward hook, dropping everything there cuts internet egress
+while leaving the agent's path to the credential broker intact — and a brokered agent therefore keeps
+working through a sever, seeing only "some destinations now refuse". That was previously an inference
+joining R6's input/forward split to `applyBrokerEnv`'s use of `DialHost`, which is precisely the shape
+of the conclusions this workstream has had to retract. It is now a measurement.
+
+**The complete sever shape is both hooks**: forward deny-all *plus* an input allowlist holding the
+broker and nothing else. The forward half alone leaves every other host service reachable.
+
+**Deny with `reject`, not `drop`.** A dropped flow is a black hole until TCP timeout — measured here
+as a 25 s stall — which is what makes a severed agent fail confusingly. macOS already measured the
+fix: `block return` answers instantly with an RST, costs the canary a round trip instead of a timeout,
+and *"agents' blocked connections stop hanging too"* (`pf-canary-probe.txt` C3). nftables `reject` is
+the same move.
+
+**None of this transfers to macOS**, and the reason is structural: there the rules sit on the bridge
+and the working shape blocks in **both** directions, so the gateway is *inside* the enforced surface
+rather than outside it. macOS must allowlist its gateway explicitly. Reading a Linux hook result
+across to pf is how both of this plan's rule-shape errors happened.
+
 ---
 
 ## Per-backend reach
@@ -437,6 +468,11 @@ recorded a reassuring "blocked" that was free because they probed with ICMP and 
   chain policy is `accept`, so a one-way inbound flow has no ACK to strangle.
 - **The preflight assertion for the index range** — what yoloAI does when a sandbox lands outside the
   pinned superset. Today's answer is silent non-enforcement.
+- **Does the input-hook allowlist hold against a hostile guest?** R7 answered the shape with a
+  cooperative `curl`; nothing has tested an agent trying to defeat it. Same for the reply path, which
+  R7 assumed leaves via output/postrouting rather than measuring it.
+- **The same two questions on rootless podman and containerd.** R7 is docker-only, and rootless
+  podman's netns changes what "the host gateway" even means.
 - **Does the veth key work on CNI's own veths**, not just docker's? Mechanism should carry; untested.
 - **What is the terminal state when we lose the fight** to another firewall manager?
 - **Does the `RELATED` omission actually close the helper hole**, measured rather than argued?
