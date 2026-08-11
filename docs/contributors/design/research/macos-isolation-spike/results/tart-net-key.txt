@@ -1,0 +1,208 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-11 08:31:25 CEST
+tart: 2.32.1   softnet: error: unexpected argument '--version' found
+
+== T0 BASELINE — the host's interfaces before any VM exists ==
+        the apple backend is stopped first, so its bridges cannot be mistaken for tart's
+          IF lo0
+            127.0.0.1
+          IF gif0
+          IF stf0
+          IF anpi1
+          IF anpi0
+          IF en3
+          IF en4
+          IF en1
+          IF en2
+          IF bridge0
+          IF utun0
+          IF utun1
+          IF ap1
+          IF en0
+            192.168.0.157
+          IF utun2
+            100.107.208.103
+          IF awdl0
+          IF utun3
+          IF utun4
+          IF llw0
+          IF vmenet0
+          IF bridge100
+            192.168.139.3
+        interfaces at baseline: 21
+        cloned yoloai-base -> ytartkey_a, ytartkey_b
+
+== T0b DOES THIS pf HAVE A MEMBER-INTERFACE MATCHER AT ALL? ==
+        Asked before spending two VM boots on it. OpenBSD pf has `received-on <iface>`, which is the
+        exact primitive needed to key on a bridge MEMBER while filtering on the bridge -- pf's answer to
+        what Linux does with `physdev`. If this pf has it, T5's rule form is the wrong one and a
+        negative there would be about my syntax rather than about tart.
+        
+        Checked by loading it, not by reading about it: an anchor accepts `set timeout` and silently
+        ignores it (pf-revocation-alt.txt T1), so exit status alone decides nothing without a control.
+        received-on form: pfctl said: /tmp/ttk.yDhkAY/ro.rules:1: syntax error
+pfctl: Syntax error in config file: pf rules not loaded
+                          rules in the anchor afterwards: 0
+        CONTROL, a plain rule in the same anchor: 1 rule(s) — proves the anchor loads at all
+        man 5 pf.conf mentions received-on: 0 time(s)
+   PASS    T0b: received-on is a syntax error here and the control loads, so the absence is real rather
+             than a broken anchor. `on <member>` is therefore the ONLY member-interface form
+             available on this pf, which makes T5's result a closed question rather than a bounded one.
+
+== T1 SHARED NAT, ONE VM — what appears on the host? ==
+        This is the mode every earlier tart result in this directory used, without ever asking what
+        host interface it produces.
+        new interface(s): bridge101 vmenet1 
+   PASS    T1: a tart VM in shared NAT does produce a host-side interface
+          IF vmenet1
+          IF bridge101
+            192.168.64.1
+
+== T2 SHARED NAT, TWO VMs — one interface or two? ==
+        The per-sandbox key question, asked of tart in exactly the form it was asked of apple. If both
+        VMs land on one interface, no rule keyed on that interface can tell them apart and the plan's
+        'none' is right for this mode.
+        second VM's new interface(s): vmenet2 
+   PASS    T2: each VM in shared NAT gets its OWN host interface. The plan's 'tart: none' is WRONG for
+            this mode and tart converges with the other bridge backends.
+        all interfaces with addresses now:
+          IF lo0
+            127.0.0.1
+          IF gif0
+          IF stf0
+          IF anpi1
+          IF anpi0
+          IF en3
+          IF en4
+          IF en1
+          IF en2
+          IF bridge0
+          IF utun0
+          IF utun1
+          IF ap1
+          IF en0
+            192.168.0.157
+          IF utun2
+            100.107.208.103
+          IF awdl0
+          IF utun3
+          IF utun4
+          IF llw0
+          IF vmenet0
+          IF bridge100
+            192.168.139.3
+          IF vmenet1
+          IF bridge101
+            192.168.64.1
+          IF vmenet2
+
+== T3/T4 SOFTNET — a mode nothing here has ever run ==
+        Softnet routes the VM through a subprocess over socketpair(2), and carries its own per-VM
+        destination allowlist (--net-softnet-allow / --net-softnet-block). Two things follow that the
+        plan does not currently say: there may be NO host interface to key on at all, and tart may
+        already have the enforcement this whole workstream is trying to add.
+        interfaces after both VMs stopped: 21
+        new interface(s) under softnet: bridge101 vmenet1 
+        second softnet VM's new interface(s): vmenet2
+        all interfaces with addresses under two softnet VMs:
+          IF lo0
+            127.0.0.1
+          IF gif0
+          IF stf0
+          IF anpi1
+          IF anpi0
+          IF en3
+          IF en4
+          IF en1
+          IF en2
+          IF bridge0
+          IF utun0
+          IF utun1
+          IF ap1
+          IF en0
+            192.168.0.157
+          IF utun2
+            100.107.208.103
+          IF awdl0
+          IF utun3
+          IF utun4
+          IF llw0
+          IF vmenet0
+          IF bridge100
+            192.168.139.3
+          IF vmenet1
+          IF bridge101
+            192.168.2.1
+          IF vmenet2
+   PASS    T3/T4: each Softnet VM gets its own host interface. tart has a per-VM key in this mode.
+
+== T5 KEYABILITY — an interface EXISTING is not pf being able to key on it ==
+        T1-T4 found a per-VM interface. That is not the same claim as 'tart converges', and run 1's
+        verdict made exactly that leap. Both VMs share ONE bridge with per-VM MEMBER interfaces, which
+        is the shape Linux hit in k2-veth-key-shared-bridge.txt -- and there it took `physdev` matching
+        plus `br_netfilter` before a member interface could discriminate anything. Whether macOS pf
+        evaluates rules on a bridge member at all is the question, and nothing above asks it.
+        
+        Restarting both VMs in the DEFAULT mode, since that is the one a product would adopt.
+        A's member interface: vmenet1   B's: vmenet2   shared bridge: bridge101
+        
+        waiting for the guest agent in both VMs (tart exec needs it; up to 240s)
+        guest agents reachable: yes after 1s
+        baseline egress: A -> 301   B -> 301   (both must be non-000 or nothing below is readable)
+        
+        RULE ON THE MEMBER INTERFACE: block drop in quick on vmenet1 to 1.1.1.1
+        A -> 301   B -> 301     rule packet counter: 0
+          (blocking vmenet1 should silence exactly one VM; which one also confirms the mapping,
+           which was inferred from start order and never verified)
+        
+        CONTROL — the same rule on the SHARED BRIDGE, which must silence BOTH:
+        A -> 000   B -> 000     rule packet counter: 12
+          (without this control, 'the member rule blocked nothing' cannot be told apart from
+           'pf never sees this traffic at all')
+        
+        after flushing: A -> 301   B -> 301   (both back to non-000, or the run drifted)
+   FAIL    T5: the member rule blocked NOTHING (counter 0) while the bridge rule blocked BOTH. pf
+             evaluates this traffic on the bridge only, so tart hands out per-VM interfaces that
+             this rule form cannot key on -- the wall Linux cleared with `physdev`.
+             And T0b established that `on <member>` is the ONLY such form this pf has: OpenBSD's
+             `received-on` is a syntax error here, with a control proving the anchor loads. So this
+             is a closed question for macOS pf as shipped, not a gap in what was tried.
+
+== T6 VERDICT — what the plan's tart row should say ==
+          per-VM interface, shared NAT : two
+          per-VM interface, softnet    : per-vm
+          pf can key on it             : no
+        
+        The middle line is what run 1 answered and the bottom line is what the plan's row turns on.
+        They are different claims and run 1 conflated them.
+   PASS    T6: 'tart: none' is right in EFFECT but wrong in its reason. It is not that tart has no
+            per-sandbox networks -- it hands out a per-VM member interface in both modes -- it is
+            that pf evaluates the traffic on the shared bridge and cannot key on the member at all --
+            `on <member>` does not match and `received-on` does not exist here (T0b). tart is out of
+            reach for interface keying because of macOS pf, NOT because of tart's networking, and
+            that distinction matters: tart's own --net-softnet-allow/-block is then the only
+            enforcement surface it has, and nothing has tested whether it works.
+
+== WHAT WAS NOT TRIED ==
+        - `--net-bridged`. It puts the VM on the physical LAN, which is a different threat model and
+          almost certainly not something yoloAI would adopt, so it is not exercised. That leaves one
+          of tart's three modes unmeasured.
+        - Whether Softnet's own --net-softnet-allow/--net-softnet-block actually enforce. Their
+          existence is read from `tart run --help`, not from a run: nothing here starts a VM with a
+          blocked CIDR and confirms it is unreachable from inside. If tart's own allowlist is the
+          answer for that backend, it needs the same treatment every pf rule in this directory got.
+        - Any member-interface matcher beyond the two T0b and T5 cover. `on <member>` loads and does
+          not match; `received-on` does not parse. If some third form exists it was not found, but
+          the two that the pf literature offers are both accounted for.
+        - Anything but one destination over TCP/80 from inside the guests. `tart exec` reaches both
+          VMs and T5 uses it, but only to fetch 1.1.1.1. No UDP, no DNS, no second destination.
+        - Whether the interfaces seen are stable across VM restart, which is the question that
+          produced the whole lifecycle rule on the apple backend. Moot while pf cannot key on them,
+          and live again the moment a working rule form is found.
+        - More than two VMs, and any allocator behaviour.
+
+== cleanup ==
+   VMs now: 0 of ours remain
+
+pass=5 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/tart-net-key.txt
