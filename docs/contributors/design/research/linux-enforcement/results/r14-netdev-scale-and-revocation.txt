@@ -1,0 +1,37 @@
+host: Linux 6.8.0-136-generic x86_64 | docker 29.6.1 | nft v1.0.9
+date: 2026-08-11 14:52:47 UTC
+harness: research_harness_v1 (D134)
+answers: the two arms R12 declined -- allowlist cost at 1/1000/10000, and revocation
+         of a transfer already in flight (p1b's shape, on a netdev chain)
+
+=== R14 ===
+What does a netdev allowlist cost at size, and does it revoke a transfer already in flight?
+
+-- controls (all held, or this would not render) --
+  the transfer works with no policy at all: True   ([0.14, 0.13, 0.13] s for 100 MB)
+  the allowlist was in force during the timings: True   (allow counter 3098 — timing an unenforced path would price nothing at all)
+
+-- measurements --
+  100 MB with a 1-element allowlist: [0.16, 0.15, 0.17]   (seconds, per repetition)
+  100 MB with a 1000-element allowlist: [0.14, 0.2, 0.15]   (seconds, per repetition)
+  100 MB with a 10000-element allowlist: [0.21, 0.19, 0.21]   (seconds, per repetition)
+  this proxy can separate the sizes: False   (between-size spread 0.05s vs within-size 0.05s. p2 reached the opposite answer for the forward hook and reporting it as a non-result is the honest outcome)
+  the in-flight transfer stops after the set delete: True   (KB/s across the window: [188, 0, 0, 0, 0, 0])
+  and the deny rule is what stopped it: True   (deny counter 0 -> 8. p1b's fast-path arm held 300 KB/s with this counter at 0)
+  cost verdict: 'not separable by this proxy'
+
+-- expectations, rendered from the values above --
+  [PASS] a netdev chain revokes a transfer already in flight  <- the in-flight transfer stops after the set delete=True
+  [PASS] with the counter to prove the rule decided it  <- and the deny rule is what stopped it=True
+
+-- WHAT WAS NOT TRIED --
+  - set sizes above 10000, and the nft SET TYPE. This uses a plain hash set of /32s; an interval set or a different backing structure may price differently and the product's allowlist is domains resolved to addresses, which churn
+  - how long loading a 10000-element set TAKES. Only steady-state transfer is timed, and set-load latency lands on every acquisition
+  - concurrency. One client, one flow, one device — and the hook is per-device, so N sandboxes mean N chains, which nothing here prices
+  - whether the drop counter's growth rate matches the transfer's, i.e. whether the sandbox is being dropped efficiently or is retrying hard
+  - the reply direction, and what the SERVER's veth sees
+  - IPv6, UDP, and any non-HTTP protocol
+  - rootless podman and containerd, where the chain lives elsewhere
+  - a run-to-run comparison against the physdev/forward shape on the same hardware, which is what would say whether netdev costs MORE than the alternative rather than what it costs in absolute terms
+
+-- all expectations held --

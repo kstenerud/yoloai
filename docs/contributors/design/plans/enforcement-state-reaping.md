@@ -123,6 +123,26 @@ than a nicety.**
 > which is what exposed it. Recorded because the run whose subject is free negatives produced one,
 > and because the wrong answer would have argued for keeping the `br_netfilter` dependency.
 
+**It works on the backend that actually recycles names, and needs no privilege there**
+(`r13-rootless-netdev.txt`). Every other netdev run is docker or a hand-built veth pair, so R11's
+no-inheritance result established the *mechanism* and not the *backend*. Rootless podman is the one
+that can produce the collision: a keeper container held the netns open, A was blocked by a chain
+bound to its `veth1` (counter 5) while the keeper stayed reachable, A was destroyed, and **C came
+back on `veth1`** — the reuse `k3b` measured. C did not inherit A's policy: reachable, counter frozen.
+The chain was installed with `podman unshare --rootless-netns`, **no sudo anywhere**, because the
+user owns that namespace.
+
+**Cost at size is not separable, which is the same honest non-result `p2` reached**
+(`r14-netdev-scale-and-revocation.txt`). 100 MB pulled through allowlists of 1, 1000 and 10000
+entries, three repetitions each: between-size spread **0.00 s** against within-size spread **0.02 s**.
+The allow counter (2636) confirms the policy was in force rather than the timings pricing an
+unenforced path. **This proxy cannot separate the sizes** — it does not show they are equal.
+
+**And it revokes a transfer already in flight** — the arm that mattered most in this whole workstream.
+`p1b` found the conntrack fast-path holding a revoked transfer at 300 KB/s for 30 s with the deny
+counter at **0**. A netdev ingress chain sits before conntrack, and a live set delete stopped the
+transfer inside one sample window (50 → 0 KB/s) with the deny counter moving 0 → 7.
+
 **Measured, macOS** (`pf-interface-key.txt`): a held bridge index is never reassigned; an ingress tag
 keyed on the bridge is per-sandbox under one network per sandbox, under a ruleset containing no
 address; and a rule re-attaches by name when its interface returns. What the earlier pass recorded as
@@ -387,7 +407,7 @@ across to pf is how both of this plan's rule-shape errors happened.
 | --- | --- | --- |
 | docker | per-network bridge, veth via `physdev`, or a **netdev chain bound to the veth** | measured; names do not recycle over 6 cycles |
 | containerd | veth via `physdev` (one shared `yoloai0`), or a netdev chain | **measured on CNI's own veths** 2026-08-11 (`r9`), not extrapolated; CNI names do not recycle over 6 cycles |
-| rootless podman | inside its own netns | the host netns cannot reach it at all; enforcement installs in the rootless netns, which the guest cannot enter (`CAP_SYS_ADMIN` absent, netns path invisible). **Veth names recycle here** — needs the lifecycle rule |
+| rootless podman | netdev chain on its veth, **inside its own netns** | the host netns cannot reach it at all; enforcement installs in the rootless netns, which the guest cannot enter (`CAP_SYS_ADMIN` absent, netns path invisible) — and needs **no sudo**, because the user owns that namespace. **Veth names recycle here**, measured; a netdev chain does not transfer to the successor (`r13`), so the lifecycle rule is about *reinstalling* rather than about withdrawing |
 | apple | bridge index under one network per sandbox | needs the lifecycle rule below |
 | tart | **none reachable** | right in effect, **wrong in its former reason**. tart *does* give each VM its own host-side `vmenetN` in both shared NAT and Softnet — the same shape as `k2`. What fails is pf: a rule on the member interface blocks nothing (counter 0) while the same rule on the bridge blocks **both** VMs (counter 12), and OpenBSD's `received-on` — pf's `physdev` — is a syntax error here, with a control proving the anchor loads (`tart-net-key.txt`) |
 | seatbelt | out of scope here | parked, see `seatbelt-host-pf-enforcement.md` |

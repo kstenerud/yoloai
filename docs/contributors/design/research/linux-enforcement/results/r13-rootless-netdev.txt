@@ -1,0 +1,36 @@
+host: Linux 6.8.0-136-generic x86_64 | podman 4.9.3 | nft v1.0.9
+date: 2026-08-11 14:54:14 UTC
+harness: research_harness_v1 (D134)
+answers: whether the netdev key works on the ONE backend that recycles veth names,
+         and whether it needs any privilege there
+
+=== R13 ===
+Does the netdev key work unprivileged in rootless podman's netns, and does it resist that backend's veth-name reuse?
+
+-- controls (all held, or this would not render) --
+  A reaches the denied host with no policy: True
+  the keeper reaches it too: True
+  the netdev rule fired: True   (5 packets)
+  the keeper is untouched: True   (the discrimination control: the chain is bound to A's veth only)
+
+-- measurements --
+  the netdev chain blocks A, installed with no sudo: True
+  the chain outlives the sandbox it was installed for: True
+  C took A's veth name: True   (A was veth1, C is veth1)
+  C inherits A's policy through the reused name: False   (reachable=True, counter 0 -> 0. Both are required: a blocked probe with a frozen counter would mean something else stopped it)
+
+-- expectations, rendered from the values above --
+  [PASS] a netdev chain enforces inside the rootless netns, unprivileged  <- the netdev chain blocks A, installed with no sudo=True
+  [PASS] this backend recycles the name, so the hazard is reachable at all  <- C took A's veth name=True
+  [PASS] a departed sandbox's netdev chain does NOT capture its successor  <- C inherits A's policy through the reused name=False
+
+-- WHAT WAS NOT TRIED --
+  - netns TEARDOWN. The keeper deliberately holds the netns open, so this says nothing about the last-sandbox case where the whole namespace goes — which the plan already records as needing reinstall per bring-up
+  - whether C is ENFORCED. It is not captured by A's chain, which is the question asked; installing C's own chain and checking it works is a different arm and was not run
+  - the ifindex, again. C reuses the NAME; whether nft bound to the old index is the mechanism behind the result and nothing here reads it
+  - pasta vs slirp4netns. This host's rootless podman put a bridge and veth in the netns for a named network; the default no-network path had only tap0, and that shape is untested
+  - a hostile guest. The agent cannot enter this netns (CAP_SYS_ADMIN absent, path invisible) per r2, but nothing here re-tests that against a netdev chain
+  - IPv6, UDP, allowlist sets, and revocation — all measured on docker only
+  - concurrency, and more than one departing sandbox
+
+-- all expectations held --
