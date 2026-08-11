@@ -144,6 +144,22 @@ missing withdraws a working defense against the primary threat.
 - **Where it must appear:** at create, and in the sandbox's ongoing status — not only at create,
   because the tier can drop at runtime (trampling, drift) and a create-time line has scrolled away
   by then.
+- **A downgrade is refused** ([D135 amendment](../../decisions/working-notes.md)). Never-refuse
+  governs what a sandbox can be *given* at first create; it does not govern *withdrawing* what this
+  sandbox already had. A sandbox created with host-side enforcement and restarted where only
+  in-guest filtering is available is refused, with the remedy named and an explicit flag to accept
+  the downgrade deliberately. **Reboot is the ordinary path into this**, since elevation is not
+  sticky, so the check belongs on every start rather than on an explicit restart. An *upgrade* is
+  taken silently and announced.
+- **The recorded tier must live in the host tier.** `netpolicy.json` already does. A tier recorded
+  anywhere guest-writable would let a hostile agent downgrade its own sandbox by editing the file —
+  DF193's class, and the reason this is a placement requirement rather than a detail.
+- **On Linux, no user elevation is needed for docker** (`r15-unelevated-install.txt`): a helper
+  container in the host netns with **`NET_ADMIN` alone** — not `--privileged` — installs the chain,
+  and enforcement survives the helper being destroyed because the chain lives in the host namespace.
+  **Say which privilege is being borrowed rather than implying none is:** it is the docker daemon's,
+  reached through the user's docker-group membership, which is already root-equivalent on any host.
+  rootless podman needs nothing at all (r13); containerd already runs yoloAI as root for CNI.
 - **Runtime response stays sever, not kill.** Measured (r7): host-destined traffic never enters the
   forward hook, so a brokered agent keeps its API path and sees only that some destinations now
   refuse. Deny with `reject` (0.06 s vs 5.09 s). **On macOS this does not hold** — the rules sit on

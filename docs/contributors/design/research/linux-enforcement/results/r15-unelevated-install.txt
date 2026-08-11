@@ -1,0 +1,35 @@
+host: Linux 6.8.0-136-generic x86_64 | docker 29.6.1 | nft v1.0.9
+date: 2026-08-11 15:20:44 UTC
+harness: research_harness_v1 (D134)
+answers: where Linux privilege actually comes from -- every other Linux run in this
+         corpus used 'sudo nft' directly and so could not tell
+
+=== R15 ===
+Can host-netns enforcement be installed by borrowing the container runtime's privilege, with yoloAI unelevated?
+
+-- controls (all held, or this would not render) --
+  plain nft is refused to this user, so the helper is doing real work: True   (if an unelevated nft already worked, the helper would prove nothing)
+  A reaches the denied host before any policy: True
+  B reaches it too: True
+  the rule fired: True   (5 packets)
+  B is untouched: True   (the discrimination control)
+  enforcement survives the helper being destroyed: True   (proves the chain is in the host namespace rather than the helper's own)
+
+-- measurements --
+  NET_ADMIN alone is enough for the helper: True
+  A is blocked by a chain installed without elevating yoloAI: True
+
+-- expectations, rendered from the values above --
+  [PASS] host-side enforcement is reachable on docker with no user elevation  <- A is blocked by a chain installed without elevating yoloAI=True
+
+-- WHAT WAS NOT TRIED --
+  - whether being in the `docker` group is acceptable as the privilege source. It is already root-equivalent on any host — this run measures that the mechanism works, not that it is a good idea, and the tier story should say which privilege it is borrowing rather than implying none is involved
+  - rootless docker, where the daemon is NOT root and this whole route disappears
+  - containerd, which already requires yoloAI to run as root for CNI, so the question does not arise there in the same form
+  - SELinux and AppArmor hosts, which may refuse `--network host` + NET_ADMIN
+  - the helper's own lifecycle: it is created and destroyed here by hand, and nothing measures what happens if it dies mid-install
+  - whether a hostile agent in ANOTHER sandbox could reach the helper or the docker socket — out of scope here, but it is the obvious next question
+  - macOS, where Docker Desktop's daemon runs in a VM and `--network host` does not mean the same thing at all
+  - IPv6, UDP, allowlist sets — all covered on the sudo path and not re-run here
+
+-- all expectations held --

@@ -1744,3 +1744,22 @@ A fourth observation is a *property worth keeping*: `report()` prints `-- WHAT W
 2. **Degrade silently.** The status quo, and the thing the threat model explicitly names as benefiting a rogue agent. It is also how a user ends up trusting a sandbox they should not.
 3. **Prompt at create.** Teardown has no tty (`yoloai stop`, signal handlers, MCP calls, crash sweeps) — the same reason D132 rejected a runtime prompt — and a prompt on every create is friction that trains people to dismiss it.
 4. **A capability flag in `yoloai doctor` only.** Doctor is opt-in and consulted when something is already wrong. The user who needs this information is the one who never runs doctor.
+
+### D135 amendment (2026-08-11) — a *downgrade* is refused, and that is not an exception to the rule above
+
+**Never refusing applies to what yoloAI can offer a sandbox at first create. It does not apply to withdrawing a guarantee this sandbox already had.** If a sandbox was created — or last ran — with host-side enforcement, and it is restarted somewhere that can only give it in-guest filtering, that start is **refused**.
+
+**Why this is the same principle rather than a carve-out.** D135 refuses to withdraw a *working* defense against the primary threat; this refuses to withdraw a defense the user was already relying on. In both cases the question is "which choice leaves the user with an accurate picture of what protects them", and the answers differ because the situations do:
+
+- At first create there is no prior guarantee. Running degraded-and-disclosed leaves the user better off than not running at all, and they learn the tier before they trust it.
+- At restart there **is** one. The sandbox has accumulated state under it — work in progress, whatever it fetched, whatever credentials passed through it. Silently running it weaker is the exact case the threat model names as benefiting a rogue agent, made worse by the user having had a legitimate basis for the stronger belief. A user who is told "this is contained" once should not have that quietly become false at the next `start`.
+
+**Reboot is the case that makes it concrete.** Elevation is not sticky: a sandbox created with elevated privileges, then started after a reboot without them, is the ordinary path into this — not an exotic one. So the check belongs on every start, not only on an explicit restart.
+
+**The tier is recorded in `netpolicy.json`, and its tier matters.** That record lives in the **host** tier, whose contract is that nothing under it is ever shared into a guest on any backend. That is load-bearing rather than incidental: a tier recorded anywhere the guest could write would let a hostile agent downgrade its own sandbox by editing the file, which is [DF193](../design/findings-unresolved.md)'s class exactly. Record it there, and never read it back from anything guest-writable.
+
+**An explicit escape exists, because the alternative is a trap.** Someone who uninstalls the grant, moves a library between machines, or changes backends must be able to proceed. The refusal names the remedy and a flag accepts the downgrade deliberately — loudly, and recorded on the sandbox so its history says the guarantee was lowered and when. What must not exist is a silent path.
+
+**Direction matters: an upgrade is not a downgrade.** A sandbox created with in-guest filtering and later started with host-side enforcement available should take it and say so. Only the lowering is refused.
+
+**Not breaking under rule 1**, despite being a newly-rejected start: the tier concept does not exist yet, so no invocation that works today is refused. It ships with the feature that creates the guarantee in the first place.
