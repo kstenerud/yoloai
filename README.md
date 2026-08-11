@@ -31,7 +31,7 @@ You                          Sandbox                        Your project
 Permission prompts exist because agents make mistakes. After the hundredth approve/deny you stop reading them, and `--dangerously-skip-permissions` is one confused agent away from a very bad day. yoloAI shrinks the blast radius until the prompts are unnecessary:
 
 - **Your files are safe.** The agent works on an isolated copy of your project. `diff` shows exactly what changed, `apply` patches your real project while preserving individual commits, and your originals never change until you apply.
-- **Your secrets are safe.** The sandbox starts from a minimal, locally built environment; host environment variables stay on the host. Credentials arrive as read-only file mounts, never environment variables. Where credential brokering applies (Claude today, on by default), the API key stays host-side entirely: a local proxy injects it on the way to the provider, so even a fully compromised agent has nothing to exfiltrate.
+- **Your secrets are safe.** The sandbox starts from a minimal, locally built environment; host environment variables stay on the host. Credentials arrive as read-only file mounts, never environment variables. Where credential brokering applies (Claude, Gemini, and Codex today, on by default), the API key stays host-side entirely: a local proxy injects it on the way to the provider, so even a fully compromised agent has nothing to exfiltrate.
 - **Your network is yours.** `--network-isolated` restricts egress to the agent's API endpoints plus domains you allow. `--network-none` removes the network entirely.
 - **Your machine is isolated.** Pick your comfort level, from Linux namespaces through gVisor to hardware VMs.
 
@@ -142,7 +142,7 @@ https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
 **Credentials**
 
 - Picks up your existing agent logins automatically: API keys, subscription credentials, macOS Keychain.
-- Credential brokering keeps the API key host-side (Claude today); other credentials are delivered as read-only file mounts.
+- Credential brokering keeps the API key host-side (Claude, Gemini, and Codex today); Aider and OpenCode credentials are delivered as read-only file mounts.
 
 **Workflow**
 
