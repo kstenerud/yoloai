@@ -148,14 +148,26 @@ One target is worth knowing by name, because its failure is the least self-expla
 lint cannot see that class — `unused` counts a test caller as a caller — so this is the only
 thing standing between the tree and API that nothing calls.
 
-**It is not all of CI.** CI runs three jobs on every PR:
+**It is not all of CI.** CI runs these jobs:
 
-| Job | Runs |
-| --- | --- |
-| `check` | `make setup-dev-python`, `make check` |
-| `commits` | `scripts/lint_commits.py` over your PR's commits (PR events only) |
-| `integration` | `make base-image`, `make integration`, `make e2e` |
-| `integration-podman` | `make integration-podman` |
+| Job | Runs | When |
+| --- | --- | --- |
+| `check` | `make setup-dev-python`, `make check` | PR and push |
+| `commits` | `scripts/lint_commits.py` over your PR's commits | PR only |
+| `content-gates` | `check_breaking_changes.py`, `check_research_bounds.py` | PR **and push** |
+| `revert-red` | `check_revert_red.py` — reverts each changed file, requires a red | PR only |
+| `integration` | `make base-image`, `make integration`, `make e2e` | PR and push |
+| `integration-podman` | `make integration-podman` | PR and push |
+
+The `commits` / `content-gates` split is load-bearing. The two content gates judge *files*, so
+they have to see every path a file reaches `main` by, and this repo sends small fixes straight
+there. They previously sat in `commits` and inherited its PR-only guard, so a file pushed direct
+to `main` was examined by nothing at all.
+
+`revert-red` is the mechanical form of rule 10. If it reports a file under *"Changed with nothing
+to notice"*, the change is real and no test disagrees with undoing it. Where that is genuinely
+true — a symptom only `make smoketest` reproduces, a path the single-principal CLI cannot reach —
+say so with a **`Verified-By:`** trailer naming what you ran, rather than relabelling the commit.
 
 `make check`'s `test` target is a bare `go test ./...`, which skips every
 `//go:build integration` and `//go:build e2e` file. A green `make check` does **not** predict

@@ -128,8 +128,12 @@ the newest and belongs about third.
    (D128, D129). *Every* is the load-bearing word: count the behavior changes, then count the
    tests that would go red on revert, and make the numbers match. Not "the package has tests",
    and not "the headline fix has one" — the second change in a PR is the one that escapes.
-   Actually revert each and watch it fail; a test that merely covers the line looks identical
-   until you try. **Red-on-revert is necessary and not sufficient**: reverting a line inside a
+   **Now gated on the PR** (`scripts/check_revert_red.py`): it reverts each changed file and
+   requires something to fail, so you no longer have to remember to try. It judges only files
+   touched by a `feat`/`fix`/`perf` commit, and a change that genuinely cannot go red in the
+   suite — a smoketest-only symptom, a path the single-principal CLI cannot reach — is declared
+   with a **`Verified-By:` trailer** naming what you actually ran. That is a claim on the record,
+   not a bypass; without it the only route past the gate would be mislabelling the commit. **Red-on-revert is necessary and not sufficient**: reverting a line inside a
    function nothing can reach still turns its test red, so the check proves a test is wired to the
    code, never that the code is wired to the program. A fake is free to invent a capability
    combination the product does not contain, and when it does, its tests certify a dead path — six
