@@ -1,0 +1,36 @@
+
+=== docker — random hex, 3-attempt collision probe, name persisted by the daemon ===
+
+  docker
+    observed: veth3810c28 veth00211bd veth3c3c8ee veth46e3bc3 vethcbd435a veth5dcd138
+    6 names over 6 create/destroy cycles, 6 distinct
+    => names do NOT recycle in this window
+
+=== rootless podman — netavark passes an empty name, so the KERNEL assigns it ===
+
+  rootless podman
+    observed: veth0 veth0 veth0 veth0 veth0 veth0
+    6 names over 6 create/destroy cycles, 1 distinct
+    => names DO RECYCLE. A stale match rule can re-point at a different sandbox.
+
+=== containerd / CNI — RandomVethName, 4 random bytes, 10 attempts, NOT persisted ===
+
+  containerd/CNI
+    observed: veth49313655 veth211f3fd6 vethbb72f729 veth2799803e vethba04bf79 vethbe448a6b
+    6 names over 6 create/destroy cycles, 6 distinct
+    => names do NOT recycle in this window
+
+=== WHY THIS MATTERS ===
+  Rule identity comes from the sandbox ID, so REAPING is unaffected by name reuse.
+  What reuse breaks is the MATCH: a rule still loaded, naming a veth that a later
+  sandbox now owns, silently applies one sandbox's policy to another. That is the
+  macOS I5 hazard, and the rewrite asserts Linux does not have it.
+
+WHAT WAS NOT TRIED
+  - Concurrent create/destroy. This is strictly sequential, which is the friendliest
+    case for a lowest-free allocator; interleaving would be more adversarial.
+  - More than six cycles. A larger sample could find reuse this one misses, so a
+    "does not recycle" result here bounds the claim rather than proving it.
+  - ifindex reuse as distinct from name reuse. A rule compiled to an index rather
+    than a name would depend on the index, which was not captured.
+  - Reuse across a daemon restart or a reboot.

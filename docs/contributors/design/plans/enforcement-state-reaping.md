@@ -237,9 +237,9 @@ once.
 
 | Backend | Key available | Notes |
 | --- | --- | --- |
-| docker | per-network bridge, or veth via `physdev` | measured |
-| containerd | veth via `physdev` (one shared `yoloai0`) | mechanism measured on docker's veths, **not on CNI's** |
-| rootless podman | inside its own netns | the host netns cannot reach it at all; enforcement installs in the rootless netns, which the guest cannot enter (`CAP_SYS_ADMIN` absent, netns path invisible) |
+| docker | per-network bridge, or veth via `physdev` | measured; names do not recycle over 6 cycles |
+| containerd | veth via `physdev` (one shared `yoloai0`) | mechanism measured on docker's veths, **not on CNI's**; CNI names do not recycle over 6 cycles |
+| rootless podman | inside its own netns | the host netns cannot reach it at all; enforcement installs in the rootless netns, which the guest cannot enter (`CAP_SYS_ADMIN` absent, netns path invisible). **Veth names recycle here** — needs the lifecycle rule |
 | apple | bridge index under one network per sandbox | needs the lifecycle rule below |
 | tart | **none** | no per-sandbox networks; a different question, not a missing answer |
 | seatbelt | out of scope here | parked, see `seatbelt-host-pf-enforcement.md` |
@@ -253,7 +253,7 @@ with it — so installation is per bring-up, before the agent runs.
 
 ---
 
-## macOS: one lifecycle rule Linux does not need
+## The lifecycle rule, wherever interface names recycle
 
 An ordinary restart releases a bridge index, a stranger can take it, and **that stranger inherits the
 departed sandbox's policy whole** — it reached a destination only the departed sandbox was granted and
@@ -262,7 +262,20 @@ is reached, and it is invisible to inspection. Withdrawing the stale rule restor
 exactly (measured, not advised).
 
 **So: withdraw a sandbox's rule when its interface goes; re-read the real index when it returns.**
-Linux needs no equivalent because its names do not recycle.
+
+> **Corrected 2026-08-10 — this is not macOS-only.** This section originally said "Linux needs no
+> equivalent because its names do not recycle", which contradicted this document's own note that
+> netavark lets the kernel assign the name. Measured (`k3-veth-name-reuse.txt`,
+> `k3b-veth-reuse-live-sibling.txt`): over six create/destroy cycles docker produced 6 distinct veth
+> names and containerd/CNI produced 6 — neither recycles. **Rootless podman produced `veth0` every
+> time.** And the reuse re-points at a *live* sandbox: with A on `veth0` and B on `veth1`, destroying
+> A and starting C gave **C the name `veth0`**, so a rule still naming `veth0` now matches a different
+> sandbox with different policy. B kept its own name throughout, so the macOS variant where a running
+> sandbox's identifier changes underneath it (DF190) does **not** occur here.
+>
+> **The lifecycle rule is therefore required on rootless podman as well**, for the same reason and
+> with the same remedy. It is not required on docker or containerd — bounded by six sequential cycles,
+> which is a bound rather than a proof, and concurrent churn was not tested.
 
 **macOS also still needs state teardown for revocation**, which Linux does not once the fast-path is
 gone. The rule-alone arm was run and failed: the transfer survived, all four states intact. The form
