@@ -5,7 +5,10 @@
 # Plan: host-side per-sandbox egress enforcement
 
 - **Status:** PLANNED — no production code. Rewritten 2026-08-10 on a different basis from the
-  2026-08-06 draft; see § *Why this was rewritten*.
+  2026-08-06 draft; see § *Why this was rewritten*. **Corrected 2026-08-11** from the macOS
+  post-rewrite runs, which withdrew the `pfctl -k` requirement, found that the rewrite had dropped a
+  rule the retired draft carried, and found that interface keying did not fit D132 at all. Each
+  correction is marked in place rather than folded in silently.
 - **Depends on:** tamper-resistant-network-isolation.md, macos-pf-privileged-path.md
 - **Rides:** **any.** It adds enforcement to a mechanism that does not ship yet; nothing user-visible
   is withdrawn.
@@ -86,6 +89,34 @@ attribute of a key that is not.
 particular under rootless podman's userspace stack, and on macOS where the equivalent is Cilium's
 per-endpoint constant rather than a route lookup. Assume nothing.
 
+### On macOS the pool must be inverted, or the key does not fit the privileged path
+
+**Added 2026-08-11.** Interface keying and D132 were designed against each other and neither document
+noticed. D132 is defensible precisely because the unprivileged side changes **table membership** and
+reloads one pinned file that root wrote — it can never author rule text. But an interface-keyed rule
+*names a bridge*, and indices are dynamic, per-sandbox, and change across a restart, with the
+lifecycle rule reloading on every transition. All three routes to installing such a rule are refused,
+correctly (`pf-grant-matrix.txt` G4): loading our own file, rewriting the pinned file, and an inline
+ruleset on stdin. **A clean refusal on all three is the problem, not the reassurance it resembles.**
+
+**The fix keeps the model: invert the pool.** One slot per **bridge index** rather than per sandbox.
+The pinned file enumerates every index the host could hand out, each with its own table; claiming a
+sandbox means adding its allowlist to the table named after the index it landed on. Rules stay
+static, membership stays the only thing the unprivileged side touches, and the key stays the
+interface. Only the grant's table regex widens — a pattern change, not a model change. Measured, not
+proposed: 164 rules covering `bridge100`–`bridge140` load, and two real sandboxes get independent
+policy with **no rule text written at any point** (G5).
+
+pf interface *groups* would have been cleaner and macOS does not have them — `ifconfig` answers
+`group: bad value` and the man page never mentions them. Closed by measurement, not assumed.
+
+**Two hazards this creates.** A sandbox landing on an index **outside** the pinned range meets no
+rule and is silently unenforced — **fail-open, the worst direction**, and it needs a preflight
+assertion that does not exist. And the superset makes the unpriced cost worse: every packet is now
+evaluated against a first-match list dominated by rules for interfaces that do not exist. Linux
+measured the fast-path free at allowlist sizes 1/1000/10000; **nothing prices per-packet evaluation
+on pf at any size**, so "it costs nothing" is a Linux result only.
+
 ---
 
 ## 2. No conntrack fast-path
@@ -131,6 +162,11 @@ authorising a connection the allowlist never approved. Not accepting `RELATED` o
 traverse the chain (1308 packets, 67 MB in `p1-no-fastpath-correctness.txt`) — they simply match no
 rule, because every rule matches on the guest's side. A chain defaulting to `drop` would kill all
 return traffic.
+
+**On macOS the same observation has the opposite consequence**, and reading this section across would
+build the wrong ruleset. There, a reply matching no rule meets pf's default *pass*, which mints
+bidirectional state and defeats `no state` outright — so pf needs an explicit egress block that Linux
+must not have. See § *The macOS price is a rule shape, not a keyword*.
 
 **The sandbox gets a stall, not an error.** The transfer sat at 0 KB/s for 25 s rather than failing.
 Calico's BPF mode injects RSTs for exactly this reason, because a silently dropped flow is a black
@@ -241,8 +277,13 @@ once.
 | containerd | veth via `physdev` (one shared `yoloai0`) | mechanism measured on docker's veths, **not on CNI's**; CNI names do not recycle over 6 cycles |
 | rootless podman | inside its own netns | the host netns cannot reach it at all; enforcement installs in the rootless netns, which the guest cannot enter (`CAP_SYS_ADMIN` absent, netns path invisible). **Veth names recycle here** — needs the lifecycle rule |
 | apple | bridge index under one network per sandbox | needs the lifecycle rule below |
-| tart | **none** | no per-sandbox networks; a different question, not a missing answer |
+| tart | **none reachable** | right in effect, **wrong in its former reason**. tart *does* give each VM its own host-side `vmenetN` in both shared NAT and Softnet — the same shape as `k2`. What fails is pf: a rule on the member interface blocks nothing (counter 0) while the same rule on the bridge blocks **both** VMs (counter 12), and OpenBSD's `received-on` — pf's `physdev` — is a syntax error here, with a control proving the anchor loads (`tart-net-key.txt`) |
 | seatbelt | out of scope here | parked, see `seatbelt-host-pf-enforcement.md` |
+
+**The tart row cannot be widened to "VM backends are out of scope."** The obstacle is macOS pf, not
+tart's networking, and apple — also a VM backend — is reachable. It also leaves tart's own
+`--net-softnet-allow` / `--net-softnet-block` per-VM CIDR lists as the only enforcement surface that
+backend has. Nothing in this design mentions them and nobody has tested them.
 
 **`br_netfilter` is unowned.** The veth variant needs it, docker only enables it for `icc=false`, and
 neither CNI nor netavark mentions it at all. It is a **host-wide** setting that changes packet paths
@@ -263,6 +304,24 @@ exactly (measured, not advised).
 
 **So: withdraw a sandbox's rule when its interface goes; re-read the real index when it returns.**
 
+**The withdraw half is measured against a live restart** (`pf-lifecycle.txt`). It wins the race by
+783 ms: the backend takes 5212 ms to actually release an index — not our cost — detection plus
+withdrawal completes 33 ms after release, and a stranger attaches at 816 ms. The control arm, with no
+mechanism running, reproduces the inheritance hazard, so the good arm is not a stranger who would
+have been fine anyway.
+
+**Do not read that margin as a guarantee.** It is one measurement on an idle host with a 50 ms poll
+that was never varied, and the canary this design adopts polls at 320–385 ms. Folding detection into
+that loop consumes most of the margin. The mechanism is shown to have won here, not to win by
+construction. A killed VM or a daemon restart may release an index differently, and that is the
+dangerous case.
+
+**The re-read half could not be exercised at all.** It exists for "a stranger holds the old index, so
+the sandbox returns on a different one" — and that case does not arise: a returning sandbox reclaims
+its old index *off the incumbent*, which is DF190 seen from the other side. Whether the re-read is
+therefore unnecessary or merely untested is undecided, and it should not be built as though the
+question were settled.
+
 > **Corrected 2026-08-10 — this is not macOS-only.** This section originally said "Linux needs no
 > equivalent because its names do not recycle", which contradicted this document's own note that
 > netavark lets the kernel assign the name. Measured (`k3-veth-name-reuse.txt`,
@@ -277,16 +336,49 @@ exactly (measured, not advised).
 > with the same remedy. It is not required on docker or containerd — bounded by six sequential cycles,
 > which is a bound rather than a proof, and concurrent churn was not tested.
 
-**macOS also still needs state teardown for revocation**, which Linux does not once the fast-path is
-gone. The rule-alone arm was run and failed: the transfer survived, all four states intact. The form
-that works is `pfctl -k <guest> -k <gateway>`, guest first — gateway-first kills zero states and
-reports success. **Whether pf's `no state` gives the Cilium shape on macOS, removing this asymmetry,
-is untested and is the obvious next experiment.**
+> **Corrected 2026-08-11 — `pfctl -k` is withdrawn entirely.** This section required state teardown
+> on macOS and named `pfctl -k <guest> -k <gateway>` as the working form. Both statements were true of
+> the ruleset they were measured against and false of the one this document now specifies. Revocation
+> under the stateless shape is a table delete and nothing else, which is already inside D132's shipped
+> grant (`pf-no-state.txt`, `pf-grant-matrix.txt` G3). **The platforms converge: no `-k`, no grant
+> widening, and the gateway-pinning tension that pulled against per-sandbox networks dissolves with
+> it.** The `-k` recommendation is now a *simplification* of the boundary rather than a cost.
 
-**Also unresolved:** "pin the `-k` peer to our gateway" holds on the default network but weakens
-exactly where per-sandbox networks are adopted, since those get their own gateways from a hole-filling
-allocator. The two recommendations pull against each other and the combination has not been through
-D132's permit/refuse matrix.
+### The macOS price is a rule shape, not a keyword
+
+`no state` alone does nothing, and this is the part that would have been got wrong by reading the
+Cilium result across. **Every rule in an interface-keyed design is `in` on the bridge.** The host's
+reply travels `out`, matches no rule, and meets pf's default pass — and a passed packet creates
+state, which is bidirectional and carries the guest's forward packets past rule evaluation entirely.
+Adding a return rule reaches a genuine zero-state census under a live transfer and **revocation still
+fails**, because the download direction is never evaluated against a block at all. A sandbox has a
+permitted direction regardless of its allowlist.
+
+Both cells of each row measured (`pf-no-state.txt` N2–N4), on the host-terminated gateway path *and*
+on the NAT'd external path, each with its own control:
+
+| | no egress block | with egress block |
+| --- | --- | --- |
+| stateless (`no state`) | survives | **stops** |
+| stateful (`keep state`) | survives | survives |
+
+**Neither ingredient is sufficient.** The working shape is a `no state` pass **and** a block, in
+**both** directions — four rules per slot, not two. The egress block is the piece this rewrite did
+not have: the retired address-keyed draft carried `block return out quick to <src>` and dropping it
+was unnoticed. The translated state created on `en0` by rules outside our anchor survives the
+revocation and does **not** rescue the flow, which closes the floating-state question.
+
+**`block drop out` is not free.** It denies host-initiated traffic to the sandbox as well as replies,
+so **every sandbox's allowlist must contain its own gateway or credential injection breaks.** That is
+the same requirement the § *What the forward hook does not cover* section reaches from the Linux
+side, arrived at independently — which is the strongest reason to believe it.
+
+**Linux is not known to need the same.** Its revocation was measured with ingress-keyed rules only
+and worked, counter and all (`p1b-revocation-decay.txt`). The asymmetry is now the reverse of what
+this section used to claim, and it is a difference in hook semantics rather than in capability. But
+the macOS finding does raise a Linux question nobody has asked: **inbound packets from a revoked
+destination match no rule on Linux either**, and the chain policy is `accept` by design. TCP stalls
+because the guest's own ACKs are dropped; a one-way inbound UDP flow has no such lever. Untested.
 
 ---
 
@@ -304,6 +396,12 @@ Each of these must fail when the change it covers is reverted.
   asserted by reconciling and then checking a fresh sandbox gets only its own allowlist.
 - Rules for a sandbox whose interface has gone are **withdrawn** (macOS), asserted by a stranger
   taking the index and getting its own policy rather than the departed one's.
+- On macOS, revocation is **a table delete and nothing else** — no `pfctl -k`, no reload — asserted on
+  the **egress** block counter incrementing. The ingress counter stays at 0 in the shape that works,
+  so asserting on it would be a free negative.
+- A sandbox that lands on a bridge index **outside the pinned superset fails closed**, asserted by
+  forcing an out-of-range index rather than by reading the preflight's own report. Today it fails
+  open silently, which is why this one is on the list before the code exists.
 - The **host-service allowlist** permits the broker's injector endpoint and denies everything else on
   the host, asserted with credential injection actually working.
 - Enforcement is **reinstalled before the agent runs** on rootless podman, asserted across a
@@ -317,17 +415,30 @@ recorded a reassuring "blocked" that was free because they probed with ICMP and 
 
 ## Open questions
 
-- **Does pf's `no state` give the Cilium shape on macOS?** If so the platforms converge completely and
-  the `-k` grant widening becomes unnecessary. Cheap, and it is the highest-value remaining experiment.
+- **What does per-packet evaluation cost on pf?** Unpriced at any allowlist size, and the pinned
+  superset enlarges the question. The Linux "it costs nothing" result does not transfer.
+- **UDP, on both platforms.** Every rule and probe in `pf-no-state.txt` is `proto tcp`, and DNS rides
+  on UDP. On Linux the open half is inbound: a revoked destination's packets match no rule and the
+  chain policy is `accept`, so a one-way inbound flow has no ACK to strangle.
+- **The preflight assertion for the index range** — what yoloAI does when a sandbox lands outside the
+  pinned superset. Today's answer is silent non-enforcement.
 - **Does the veth key work on CNI's own veths**, not just docker's? Mechanism should carry; untested.
 - **What is the terminal state when we lose the fight** to another firewall manager?
 - **Does the `RELATED` omission actually close the helper hole**, measured rather than argued?
+- **tart's `--net-softnet-allow`/`-block`**, the one enforcement surface that backend has and the one
+  nothing here has touched.
 - **DF189's subnet collision.** Interface keying makes it survivable — two sandboxes with the same
   address are still distinguishable — but the routing conflict remains and the subnet should still
   move off `10.89.0.0/16`. `10.0.0.0`–`10.87.255.255` is outside every podman pool and every docker
   local pool.
-- **DF190**, an apple sandbox losing egress when an unrelated sandbox reclaims its bridge index, is a
-  backend defect underneath all of this and is not addressed by any of it.
+- **DF190 is Apple's, and now has a mechanism** (`df190-mechanism.txt`). It reproduces with zero rules
+  of ours loaded and every anchor asserted empty first, so nothing in this design causes it or can fix
+  it. The departing network's vmnet helper stays alive across the stop — `released session
+  [allocations=1]`, not a shutdown — and re-allocates on the same network id when its sandbox returns,
+  onto an index handed out in the meantime; deleting the network while empty removes the displacement
+  entirely. **The workaround is therefore ours: delete the network when its last sandbox goes.** Its
+  severity was understated in the safe direction — a stop/start does not recover, it *moves* the
+  defect to whichever sandbox holds the index next.
 
 ## Related
 
