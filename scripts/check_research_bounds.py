@@ -55,6 +55,26 @@ def _git(*args: str) -> str:
     ).stdout
 
 
+def rev_exists(ref: str) -> bool:
+    """Whether git can resolve `ref` to a commit.
+
+    Called before diffing because the failure it prevents is silent. `git diff`
+    against an unresolvable ref writes to stderr and produces **no stdout**, so a
+    gate that reads stdout sees an empty file list and reports a clean pass. CI
+    supplied exactly that for a year: the workflow interpolated
+    `origin/${{ github.base_ref }}`, which on a `push` event is the empty string, so
+    the gate ran as `--base origin/` and passed having examined nothing.
+    """
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
 def added_files(base: str, head: str) -> list[str]:
     """Paths added between base and head. A modified file is not our business."""
     out = _git("diff", "--diff-filter=A", "--name-only", f"{base}...{head}")
@@ -88,6 +108,16 @@ def main() -> int:
     ap.add_argument("--head", default="HEAD")
     ap.add_argument("--root", default=".", help="repo root (tests override this)")
     args = ap.parse_args()
+
+    for name, ref in (("--base", args.base), ("--head", args.head)):
+        if not rev_exists(ref):
+            print(f"{name} {ref!r} is not a commit this repository can resolve.")
+            print(
+                "Refusing to run: diffing against an unresolvable ref produces an empty\n"
+                "file list, which is indistinguishable from a clean branch. A gate that\n"
+                "cannot see its input must fail, not pass."
+            )
+            return 1
 
     bad = offenders(added_files(args.base, args.head), Path(args.root))
     if not bad:

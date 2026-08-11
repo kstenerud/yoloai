@@ -14,6 +14,7 @@ sys.path.insert(0, str(_REPO / "scripts"))
 from check_research_bounds import (  # noqa: E402
     needs_bounds,
     offenders,
+    rev_exists,
     states_bounds,
 )
 
@@ -74,6 +75,34 @@ def test_offenders_flags_only_the_unbounded_new_result(tmp_path: Path) -> None:
 def test_a_path_that_does_not_exist_is_skipped(tmp_path: Path) -> None:
     """A file added then removed in the same branch must not crash the gate."""
     assert offenders([LINUX], tmp_path) == []
+
+
+def test_an_unresolvable_ref_is_recognised_as_such() -> None:
+    assert rev_exists("HEAD") is True
+    assert rev_exists("origin/") is False
+    assert rev_exists("") is False
+
+
+def test_the_gate_refuses_to_run_rather_than_passing_on_a_bad_ref() -> None:
+    """The exact invocation CI used on every push to main, for a year.
+
+    `origin/${{ github.base_ref }}` interpolates to `origin/` on a push event. git
+    reports the unresolvable ref on stderr and writes nothing to stdout, so the gate
+    saw an empty file list and exited 0 — a green that had examined nothing. Passing
+    here would be indistinguishable from a branch that added no results files, which
+    is why the check is on the exit code and not on the message.
+    """
+    import subprocess
+
+    done = subprocess.run(
+        [sys.executable, str(_REPO / "scripts/check_research_bounds.py"), "--base", "origin/"],
+        cwd=_REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 1, "the gate passed on a ref it could not resolve"
+    assert "resolve" in (done.stdout + done.stderr)
 
 
 def test_the_real_corpus_newest_results_carry_bounds() -> None:

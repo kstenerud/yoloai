@@ -69,6 +69,24 @@ def _git(*args: str) -> str:
     return subprocess.run(["git", *args], capture_output=True, text=True, check=False).stdout
 
 
+def rev_exists(ref: str) -> bool:
+    """Whether git can resolve `ref` to a commit.
+
+    Guards the same silent failure `check_research_bounds.py` documents: git writes
+    an unresolvable ref to stderr and produces no stdout, so every derived name set
+    comes back empty and this gate reports "nothing was removed" without having read
+    anything. CI supplied `--base origin/` on every push to main.
+    """
+    return (
+        subprocess.run(
+            ["git", "rev-parse", "--verify", "--quiet", f"{ref}^{{commit}}"],
+            capture_output=True,
+            check=False,
+        ).returncode
+        == 0
+    )
+
+
 def config_keys_at(ref: str) -> set[str]:
     """The config keys declared at ref."""
     return set(CONFIG_KEY.findall(_git("show", f"{ref}:{CONFIG_KEYS_FILE}")))
@@ -148,6 +166,16 @@ def main() -> int:
     ap.add_argument("--base", required=True, help="ref the branch forked from")
     ap.add_argument("--head", default="HEAD")
     args = ap.parse_args()
+
+    for name, ref in (("--base", args.base), ("--head", args.head)):
+        if not rev_exists(ref):
+            print(f"{name} {ref!r} is not a commit this repository can resolve.", file=sys.stderr)
+            print(
+                "Refusing to run: every name set derived from an unresolvable ref is\n"
+                "empty, which this gate would read as 'nothing was removed'.",
+                file=sys.stderr,
+            )
+            return 1
 
     if touched(args.base, args.head, BREAKING_CHANGES):
         return 0  # an entry was written; whether it is a GOOD entry is review's job

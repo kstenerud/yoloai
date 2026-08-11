@@ -68,9 +68,12 @@ jobs:
       - name: Run checks
         run: make check
 
-  # Commit messages are a PR-only concern: the range base..HEAD only exists for a
-  # PR, and fork PRs never run .claude/hooks, so this is the only place the rules
-  # in AGENTS.md get enforced for an outside contribution.
+  # Commit messages stay PR-only, and unlike the content gates below that is a
+  # deliberate scope rather than an inherited one. This repo lands most work by
+  # merging a local branch and pushing, so a push range re-lints a whole branch's
+  # history at merge time — commits their own PR already judged, or that predate the
+  # convention. `make lint-commits` is the local half; this is the half that covers
+  # an outside contribution, whose fork PR never runs .claude/hooks.
   commits:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
@@ -85,26 +88,65 @@ jobs:
             --base "origin/${{ github.base_ref }}" \
             --head "${{ github.event.pull_request.head.sha }}"
 
+  # These two judge FILES, so they must see every path a file reaches main by —
+  # and this repo sends small fixes straight there. They previously lived in the
+  # `commits` job and silently inherited its `pull_request` guard, which was
+  # written for commit linting and justified by a claim ("the range only exists for
+  # a PR") that is untrue of a push. A results file pushed direct to main was never
+  # examined by anything, and `k3b-veth-reuse-live-sibling.txt` is the specimen.
+  #
+  # Worse than not running: with `github.base_ref` empty on a push, the gates would
+  # have run as `--base origin/` and EXITED 0, because git reports an unresolvable
+  # ref on stderr and returns no stdout. Both scripts now refuse an unresolvable
+  # ref instead of reading the resulting empty diff as a clean branch.
+  content-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0 # need the base commit to diff against
+
+      - name: Resolve the range to examine
+        id: range
+        run: |
+          set -euo pipefail
+          if [ "${{ github.event_name }}" = "pull_request" ]; then
+            base="origin/${{ github.base_ref }}"
+            head="${{ github.event.pull_request.head.sha }}"
+          else
+            base="${{ github.event.before }}"
+            head="${{ github.sha }}"
+            # A branch's first push, and a force-push whose old tip was garbage
+            # collected, both leave `before` unresolvable. Fall back to the parent
+            # rather than to something that silently diffs nothing.
+            if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+              base="$head~1"
+            fi
+          fi
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
+          echo "examining $base..$head"
+
       # Rule 1, at the end where the entry is owed. The release workflow's
       # BREAKING-CHANGES check runs on a tag and asserts `## Unreleased` is EMPTY
       # — it proves entries that exist got drained, and cannot see one that was
       # never written, so it passes most loudly in the failure case. This is the
-      # other half, and it needs the same base ref the commit linter does.
+      # other half.
       - name: Require a BREAKING-CHANGES entry for a removed user-visible name
         run: |
           python3 scripts/check_breaking_changes.py \
-            --base "origin/${{ github.base_ref }}" \
-            --head "${{ github.event.pull_request.head.sha }}"
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}"
 
       # A results file whose bounds are unstated gets read wider than its run. The
       # two 2026-08 research passes are the controlled experiment: the one that wrote
       # these sections produced no over-broad conclusions, the one that did not
-      # produced five. Same base ref as the gates above.
+      # produced five.
       - name: Require a bounding section on new research results
         run: |
           python3 scripts/check_research_bounds.py \
-            --base "origin/${{ github.base_ref }}" \
-            --head "${{ github.event.pull_request.head.sha }}"
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}"
 
   integration:
     runs-on: ubuntu-latest

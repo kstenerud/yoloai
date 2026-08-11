@@ -16,6 +16,7 @@ from check_breaking_changes import (  # noqa: E402
     _vanished,
     config_keys_at,
     flags_at,
+    rev_exists,
 )
 
 
@@ -82,3 +83,33 @@ def test_an_empty_head_set_is_a_lost_oracle_not_a_mass_deletion() -> None:
 
 def test_an_added_name_is_not_a_break() -> None:
     assert _vanished({"agent"}, {"agent", "new_key"}) == set()
+
+
+# --- the input set -----------------------------------------------------------
+
+
+def test_an_unresolvable_ref_is_recognised_as_such() -> None:
+    assert rev_exists("HEAD") is True
+    assert rev_exists("origin/") is False
+
+
+def test_the_gate_refuses_to_run_rather_than_passing_on_a_bad_ref() -> None:
+    """CI ran this gate as `--base origin/` on every push to main and it exited 0.
+
+    Note that `_vanished` alone cannot catch it: an unresolvable ref yields an empty
+    set at BOTH ends, and the lost-oracle rule above deliberately treats an empty
+    head as a non-event. The two safeguards are correct individually and combine
+    into a gate that reads nothing and reports success, so the refusal has to happen
+    before any name set is derived.
+    """
+    import subprocess
+
+    done = subprocess.run(
+        [sys.executable, str(_REPO / "scripts/check_breaking_changes.py"), "--base", "origin/"],
+        cwd=_REPO,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    assert done.returncode == 1, "the gate passed on a ref it could not resolve"
+    assert "resolve" in (done.stdout + done.stderr)

@@ -12,3 +12,23 @@ freed and reissued while a sibling keeps its own.
   C INHERITED A's veth name (veth0). A rule still naming veth0 now matches C —
   a different sandbox, with different policy. This is macOS's I5 hazard on Linux.
   B kept its name throughout, so a rule naming it stayed correct.
+
+=== WHAT WAS NOT TRIED ===
+  Added 2026-08-11. This file was written before the bounding discipline existed
+  and pushed direct to main, where the gate that requires this section could not
+  see it (the gate ran PR-only). Both halves of that are now fixed. The bounds
+  below are read off the script, not off a re-run.
+
+  - Any backend but ROOTLESS PODMAN. The name reuse measured here is netavark
+    letting the kernel pick `vethN`. docker and containerd/CNI produced 6
+    distinct names over 6 cycles in k3, so this shape is not shown for them —
+    and 6 sequential cycles is a bound, not a proof.
+  - Whether the inherited rule actually MISDIRECTS TRAFFIC. This run measured
+    name reuse only: that C got `veth0`. No policy was loaded, so nothing here
+    shows C receiving A's allowlist. The macOS I5 arm did demonstrate that end
+    to end; this one argues by analogy and says so.
+  - Concurrency. One destroy, one create, in sequence, on an idle host. Whether
+    two simultaneous creates can collide on a name is untested.
+  - More than one live sibling, and reuse of a name held by a sandbox that is
+    still running — B was never a candidate for reissue here.
+  - IPv6, UDP, and every other traffic property. This is a naming observation.
