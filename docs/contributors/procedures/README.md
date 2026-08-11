@@ -12,6 +12,7 @@ docs are the detail behind them.
 | [`pull-requests.md`](pull-requests.md) | Branching, breaking changes, the name sweep, commits, the quality gate, CI jobs, required tooling, test tiers. |
 | [`issues.md`](issues.md) | What an issue needs to be actionable. |
 | [`outside-contributions.md`](outside-contributions.md) | **Maintainer-side.** Reviewing a contribution from outside the project, then re-reading the review as evidence about whether the contributor docs work. |
+| [`verification-rounds.md`](verification-rounds.md) | Running a hardware-verification round: prior art as the opening gate, the queue file that fixes the item set, the negative self-test every probe owes, and when the plan is allowed to move. |
 
 Releases are cut by the maintainer. `docs/BREAKING-CHANGES.md`'s `## Unreleased` entries are
 **drained** into a new `## vX.Y.Z` heading beneath the marker — the marker itself stays, now

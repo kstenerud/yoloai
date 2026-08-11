@@ -35,6 +35,21 @@ The rule is the same one `next-release.md` applies to itself, for the same reaso
 add the line to `next-release.md` § *In flight* before starting the new thing. The items are not what
 gets lost — the stack is.
 
+**Every spike below opens a verification round, and rounds have rules now**
+([D136](../../decisions/working-notes.md), [`procedures/verification-rounds.md`](../../procedures/verification-rounds.md)).
+This is not process for its own sake — it is the direct remedy for the thrash that produced the
+design this brief builds from, where 28 of ~29 invalidated runs were the rig rather than the world.
+Three things bind before a spike starts:
+
+- **Read the prior art first.** It gates opening the round. The last pass spent three days measuring
+  its way to a correction that was already written down.
+- **Write a queue file** naming the items, what each decides, and its cost — before the first run.
+  The round closes when every item has run or been explicitly dropped, in writing. **The plan is not
+  edited until then**; intermediate optima are working state.
+- **Harnesses use `scripts/research_harness_v2.py`**, whose mandatory invariant is that a probe must
+  be shown reporting failure — baselined with the mechanism absent, answering the other way — before
+  any expectation may rest on it.
+
 ## What is already settled, so nobody re-derives it
 
 Three decisions, and the evidence behind each is in `enforcement-state-reaping.md`. **Do not rebuild
