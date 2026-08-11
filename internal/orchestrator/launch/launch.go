@@ -14,6 +14,7 @@ import (
 	"net"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -982,14 +983,8 @@ func patchKeepaliveOnly(sandboxDir string, keepalive bool) error {
 func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, bro brokerOutcome, sidecarFirewall bool, baseChecksum string) (runtime.InstanceConfig, error) {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	caps := desc.Capabilities
-
-	if st.NetworkMode == "isolated" {
-		// Whether the allowlist can actually be enforced is a netpolicy decision:
-		// it composes the backend's capability with the isolation mode's in-sandbox
-		// iptables honoring (gVisor refuses). See netpolicy.CanEnforce.
-		if ok, reason := netpolicy.CanEnforce(netpolicy.StrategyIPFilter, caps, desc.Type, st.Isolation); !ok {
-			return runtime.InstanceConfig{}, errors.New(reason)
-		}
+	if err := validateInstanceNetwork(desc, st); err != nil {
+		return runtime.InstanceConfig{}, err
 	}
 
 	// The container's effective network mode is the user's, unless brokering needs
@@ -1024,6 +1019,7 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 		Mounts:       mnts,
 		Ports:        ports,
 		NetworkMode:  networkMode,
+		DNS:          slices.Clone(st.DNS),
 		UseInit:      true,
 		Labels:       instanceLabels(st.Layout.Principal, st.Name, baseChecksum),
 		ContainerEnv: containerEnv,
@@ -1055,6 +1051,27 @@ func buildInstanceConfig(desc runtime.BackendDescriptor, st *state.State, mnts [
 	instanceCfg.Snapshotter = runtime.IsolationSnapshotter(st.Isolation)
 
 	return instanceCfg, nil
+}
+
+// validateInstanceNetwork repeats creation policy at the runtime boundary so
+// lifecycle and internal callers cannot launch an unsupported combination.
+func validateInstanceNetwork(desc runtime.BackendDescriptor, st *state.State) error {
+	caps := desc.Capabilities
+	if desc.RejectsNetworkNone() && st.NetworkMode == "none" {
+		return yoerrors.NewUsageError("Apple Container backend does not support --network-none")
+	}
+	if st.NetworkMode == "isolated" {
+		// Whether the allowlist can actually be enforced is a netpolicy decision:
+		// it composes the backend's capability with the isolation mode's in-sandbox
+		// iptables honoring (gVisor refuses). See netpolicy.CanEnforce.
+		if ok, reason := netpolicy.CanEnforce(netpolicy.StrategyIPFilter, caps, desc.Type, st.Isolation); !ok {
+			return errors.New(reason)
+		}
+	}
+	if len(st.DNS) > 0 && (!caps.CustomDNS || st.NetworkMode == "none") {
+		return yoerrors.NewUsageError("custom DNS is not supported by this network/backend combination")
+	}
+	return nil
 }
 
 // instanceLabels builds the runtime instance labels recording sandbox identity

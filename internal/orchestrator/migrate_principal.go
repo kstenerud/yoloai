@@ -257,13 +257,13 @@ func (p *PrincipalRename) applyBackendOp(ctx context.Context, rt runtime.Backend
 // migrator, since each of those runs performs a backend rename (DF164).
 func (p *PrincipalRename) restampPrincipal(name string) error {
 	path := pretier.EnvironmentPath(p.layout.SandboxDir(name))
-	env, err := store.LoadEnvironmentFrom(path)
+	env, err := store.LoadEnvironmentV3ForMigrationFrom(path)
 	if err != nil {
 		return fmt.Errorf("load environment for %q: %w", name, err)
 	}
 	env.Principal = p.layout.Principal
 	env.ImageRef = restampedImageRef(p.layout, env.ImageRef)
-	if err := store.SaveEnvironmentTo(path, env); err != nil {
+	if err := store.SaveEnvironmentV3ForMigrationTo(path, env); err != nil {
 		return fmt.Errorf("re-stamp principal for %q: %w", name, err)
 	}
 	return nil
@@ -318,7 +318,7 @@ func (p *PrincipalRename) unmigratedSandboxNames() ([]string, error) {
 		if _, err := os.Stat(pretier.EnvironmentPath(sandboxDir)); errors.Is(err, fs.ErrNotExist) {
 			continue // not a sandbox dir at all — nothing here claims to be one
 		}
-		env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(sandboxDir))
+		env, err := store.LoadEnvironmentV3ForMigrationFrom(pretier.EnvironmentPath(sandboxDir))
 		if err != nil {
 			// A dir that HAS an environment.json we cannot read is never
 			// skippable. Skipping it drops it from the unit of work while Apply
@@ -341,7 +341,7 @@ func (p *PrincipalRename) unmigratedSandboxNames() ([]string, error) {
 
 // backendType reads the backend that created name from its environment.
 func (p *PrincipalRename) backendType(name string) runtime.BackendType {
-	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(p.layout.SandboxDir(name)))
+	env, err := store.LoadEnvironmentV3ForMigrationFrom(pretier.EnvironmentPath(p.layout.SandboxDir(name)))
 	if err != nil {
 		return ""
 	}

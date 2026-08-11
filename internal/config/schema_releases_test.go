@@ -23,7 +23,8 @@ func TestPriorReleaseRange(t *testing.T) {
 		// v5 directory at all, sending someone upgrading FROM v5 to downgrade
 		// INTO the version they are upgrading to.
 		{"schema 5 -> bounded once v0.11.0 shipped schema 6", 5, "v0.9.0", "v0.11.0", true},
-		{"schema 6 -> newest, so open-ended", 6, "v0.11.0", "", true},
+		{"schema 6 -> newest until the release drain records schema 7", 6, "v0.11.0", "", true},
+		{"unreleased schema 7 has no published downgrade target", 7, "", "", false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			from, to, ok := PriorReleaseRange(tc.onDisk)

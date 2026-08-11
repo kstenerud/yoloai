@@ -51,6 +51,7 @@ type State struct {
 	PromptSourcePath  string // overrides default prompt.txt path for /yoloai/prompt.txt mount
 	NetworkMode       string
 	NetworkAllow      []string
+	DNS               []string
 	Ports             []string
 	ConfigMounts      []string // extra bind mounts from config/profile (host:container[:ro])
 	TmuxConf          string

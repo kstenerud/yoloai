@@ -120,6 +120,57 @@ agent: claude
 	}
 }
 
+func TestMergeProfileChain_DNSInheritsReplacesAndClears(t *testing.T) {
+	home := t.TempDir()
+	layout := NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(CLIPrincipal)
+	profiles := map[string]string{
+		"parent":  "network:\n  dns: [1.1.1.1, 8.8.8.8]\n",
+		"child":   "extends: parent\nnetwork:\n  dns: [9.9.9.9]\n",
+		"inherit": "extends: child\n",
+		"clear":   "extends: child\nnetwork:\n  dns: []\n",
+	}
+	for name, content := range profiles {
+		dir := filepath.Join(layout.ProfilesDir(), name)
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600); err != nil {
+			t.Fatal(err)
+		}
+	}
+	baseDNS := []string{"4.4.4.4"}
+	base := &YoloaiConfig{Network: &NetworkConfig{DNS: &baseDNS}}
+
+	merged, err := MergeProfileChain(layout, base, []string{"parent"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := *merged.Network.DNS; strings.Join(got, ",") != "1.1.1.1,8.8.8.8" {
+		t.Fatalf("parent DNS = %v, want parent replacement", got)
+	}
+	merged, err = MergeProfileChain(layout, base, []string{"parent", "child"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := *merged.Network.DNS; strings.Join(got, ",") != "9.9.9.9" {
+		t.Fatalf("child DNS = %v, want replacement", got)
+	}
+	merged, err = MergeProfileChain(layout, base, []string{"parent", "child", "inherit"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := *merged.Network.DNS; strings.Join(got, ",") != "9.9.9.9" {
+		t.Fatalf("omitted child DNS = %v, want inherited child value", got)
+	}
+	merged, err = MergeProfileChain(layout, base, []string{"parent", "child", "clear"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if merged.Network.DNS == nil || len(*merged.Network.DNS) != 0 {
+		t.Fatalf("clear DNS = %v, want explicit empty", merged.Network.DNS)
+	}
+}
+
 func TestLoadProfile_Workdir(t *testing.T) {
 	yaml := `
 workdir:

@@ -17,6 +17,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 func TestBuildBaseImage_ErrorCarriesOutputTail(t *testing.T) {
@@ -38,6 +39,33 @@ func TestBuildBaseImage_ErrorCarriesOutputTail(t *testing.T) {
 		"the error names the operation and exit code")
 	assert.Contains(t, err.Error(), cause,
 		"the build tool's own diagnostic rides on the error, not only the stream (DF144/DF145)")
+}
+
+func TestCreate_PassesOrderedDNSBeforeImageAndRejectsNoneBeforeDelete(t *testing.T) {
+	deletedPath := filepath.Join(t.TempDir(), "deleted")
+	script := "#!/bin/sh\n" +
+		"if [ \"$1\" = delete ]; then touch " + deletedPath + "; exit 0; fi\n" +
+		"[ \"$#\" -eq 8 ] && [ \"$1\" = create ] && [ \"$2\" = --name ] && [ \"$3\" = box ] && [ \"$4\" = --dns ] && [ \"$5\" = 1.1.1.1 ] && [ \"$6\" = --dns ] && [ \"$7\" = 8.8.8.8 ] && [ \"$8\" = image ]\n"
+	r := newFakeContainerRuntime(t, script)
+	err := r.Create(context.Background(), runtime.InstanceConfig{Name: "box", ImageRef: "image", DNS: []string{"1.1.1.1", "8.8.8.8"}})
+	require.NoError(t, err)
+
+	systemScript := "#!/bin/sh\n" +
+		"if [ \"$1\" = delete ]; then exit 0; fi\n" +
+		"case \"$*\" in *--dns*) exit 1;; esac\n"
+	r = newFakeContainerRuntime(t, systemScript)
+	err = r.Create(context.Background(), runtime.InstanceConfig{Name: "box", ImageRef: "image"})
+	require.NoError(t, err)
+
+	require.NoError(t, os.Remove(deletedPath))
+	r = newFakeContainerRuntime(t, script)
+	err = r.Create(context.Background(), runtime.InstanceConfig{Name: "box", ImageRef: "image", NetworkMode: "none"})
+	assert.ErrorContains(t, err, "support --network-none")
+	assert.NoFileExists(t, deletedPath, "Apple Container no-network must fail before stale-instance deletion")
+
+	err = r.Create(context.Background(), runtime.InstanceConfig{Name: "box", ImageRef: "image", DNS: []string{"::1"}})
+	assert.ErrorContains(t, err, "must be an IPv4 address")
+	assert.NoFileExists(t, deletedPath, "invalid DNS must fail before stale-instance deletion")
 }
 
 // newFakeContainerRuntime builds a Runtime whose containerBin runs script

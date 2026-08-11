@@ -50,6 +50,18 @@ func TestSandboxCreateOptions_toInternal_PreservesExplicitWorkdir(t *testing.T) 
 	assert.True(t, in.Workdir.AllowDirty, "per-directory AllowDirty is preserved")
 }
 
+func TestSandboxCreateOptions_toInternal_PreservesDNSIntent(t *testing.T) {
+	unset := (SandboxCreateOptions{}).toInternal()
+	assert.Nil(t, unset.DNS, "nil DNS inherits configuration")
+
+	system := (SandboxCreateOptions{DNS: DNSResolvers{}}).toInternal()
+	assert.NotNil(t, system.DNS, "explicit empty DNS selects system resolver")
+	assert.Empty(t, system.DNS)
+
+	custom := (SandboxCreateOptions{DNS: DNSResolvers{"1.1.1.1", "8.8.8.8"}}).toInternal()
+	assert.Equal(t, []string{"1.1.1.1", "8.8.8.8"}, custom.DNS)
+}
+
 // A2/A3 (D74): Backend is OPTIONAL. A backend-less Client constructs cleanly —
 // it serves host-only reads and, via System(), cross-backend admin. The
 // no-open-at-construction guarantee now lives on the Engine and is pinned by

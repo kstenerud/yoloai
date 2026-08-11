@@ -24,7 +24,7 @@ import (
 // explicit per-sandbox pass run by `yoloai system migrate` (see
 // orchestrator.MigrateAgentConfigs). LoadEnvironment balks on any record below
 // v3 rather than migrating on read (D61: no write-on-read).
-const metaVersion = 3
+const metaVersion = 4
 
 // Environment holds sandbox configuration captured at creation time.
 type Environment struct {
@@ -74,6 +74,8 @@ type Environment struct {
 	BrokerCredentials  bool                   `json:"broker_credentials,omitempty"` // forced-on: --broker (D106). Sticky across restart so the key isn't silently re-delivered direct
 	BrokerDisabled     bool                   `json:"broker_disabled,omitempty"`    // forced-off: --no-broker (D106). Sticky opt-out of the default-on brokering. At most one of these two is set
 	Archetype          string                 `json:"archetype,omitempty"`          // resolved environment archetype (simple, compose, devcontainer, apple)
+	// DNS is the resolved custom resolver snapshot; absent means backend DNS.
+	DNS []string `json:"dns,omitempty"`
 }
 
 // DirEnvironment stores resolved directory state at creation time, for every
@@ -238,6 +240,20 @@ func MigrateEnvironment(meta *Environment) error {
 	return migrate(meta)
 }
 
+// MigrateEnvironmentDNS upgrades the v3 record shape to the v4 DNS snapshot.
+// It is intentionally called only by the framework migration, never by readers.
+func MigrateEnvironmentDNS(meta *Environment) error {
+	if meta.Version == 4 {
+		return nil
+	}
+	if meta.Version != 3 {
+		return fmt.Errorf("environment DNS migration requires metadata v3 or v4, got v%d", meta.Version)
+	}
+	meta.DNS = nil
+	meta.Version = 4
+	return nil
+}
+
 // SaveEnvironment writes environment.json to the given directory path, durably
 // and atomically.
 //
@@ -268,7 +284,13 @@ func SaveEnvironment(dir string, meta *Environment) error {
 // migrating FROM — see internal/config/pretier and DF164. Everything else calls
 // SaveEnvironment, which resolves the current layout and creates its tier.
 func SaveEnvironmentTo(path string, meta *Environment) error {
-	meta.Version = metaVersion
+	return SaveEnvironmentVersionTo(path, meta, metaVersion)
+}
+
+// SaveEnvironmentVersionTo writes a migration-era record at a known supported
+// version. Only framework migrators use this to preserve an intermediate rung.
+func SaveEnvironmentVersionTo(path string, meta *Environment, version int) error {
+	meta.Version = version
 	data, err := json.MarshalIndent(meta, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal %s: %w", EnvironmentFile, err)
@@ -277,6 +299,34 @@ func SaveEnvironmentTo(path string, meta *Environment) error {
 		return fmt.Errorf("write %s: %w", EnvironmentFile, err)
 	}
 	return nil
+}
+
+// LoadEnvironmentV3ForMigrationFrom is the sole reader for a v3 environment
+// record while framework migrations are in progress. Ordinary readers must use
+// LoadEnvironmentFrom, which rejects v3 until the DNS snapshot rung completes.
+func LoadEnvironmentV3ForMigrationFrom(path string) (*Environment, error) {
+	data, err := os.ReadFile(path) //nolint:gosec // trusted migration layout
+	if err != nil {
+		return nil, fmt.Errorf("read %s: %w", EnvironmentFile, err)
+	}
+	var meta Environment
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return nil, fmt.Errorf("parse %s: %w", EnvironmentFile, err)
+	}
+	if meta.Version != 3 && meta.Version != 4 {
+		return nil, fmt.Errorf("migration expected environment metadata v3 or v4, got v%d", meta.Version)
+	}
+	return &meta, nil
+}
+
+// SaveEnvironmentV3ForMigrationTo durably preserves the v3 record shape while
+// an earlier framework migrator changes layout or runtime state. Only the v6→v7
+// DNS migrator may advance this record to v4.
+func SaveEnvironmentV3ForMigrationTo(path string, meta *Environment) error {
+	if meta.Version != 3 && meta.Version != 4 {
+		return fmt.Errorf("migration expected environment metadata v3 or v4, got v%d", meta.Version)
+	}
+	return SaveEnvironmentVersionTo(path, meta, meta.Version)
 }
 
 // ContainerUser returns the appropriate user string for docker exec

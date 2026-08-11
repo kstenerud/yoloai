@@ -87,7 +87,7 @@ func (t *TierLayout) Cleanup() {
 // cannot be live on a machine that cannot run tart or seatbelt. That is also
 // what keeps a Linux host able to migrate those sandboxes at all.
 func (t *TierLayout) runningReason(ctx context.Context, name string) string {
-	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(t.layout.SandboxDir(name)))
+	env, err := store.LoadEnvironmentV3ForMigrationFrom(pretier.EnvironmentPath(t.layout.SandboxDir(name)))
 	if err != nil || env.BackendType == "" {
 		return ""
 	}
@@ -390,10 +390,14 @@ func (t *TierLayout) verifyStagedTree(dst string) error {
 
 // verifyStagedRecords loads each per-sandbox record from the staged tree through
 // the live builders — which is correct here and nowhere else in a migrator: the
-// staged tree IS the current layout, so the current builders are exactly what
-// must be able to read it. That is the whole assertion.
+// staged tree is the current layout, while the following DNS migration still
+// owns the legacy environment-record upgrade. The layout records must be
+// readable here without prematurely requiring the later record version.
 func verifyStagedRecords(name, staged string) error {
-	if _, err := store.LoadEnvironment(staged); err != nil {
+	// The following v6->v7 rung owns the v3->v4 DNS record upgrade. Tiering
+	// must therefore verify the legacy record with its migration-only reader,
+	// not the ordinary current reader that correctly refuses it until that rung.
+	if _, err := store.LoadEnvironmentV3ForMigrationFrom(store.EnvironmentFilePath(staged)); err != nil {
 		return fmt.Errorf("verify %q: environment.json unreadable after tiering: %w", name, err)
 	}
 	if _, err := store.LoadSandboxState(staged); err != nil {

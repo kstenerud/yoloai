@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net/netip"
 	"os"
 	"os/exec"
 	goruntime "runtime"
@@ -66,6 +67,7 @@ var descriptor = runtime.BackendDescriptor{
 		// in-guest iptables (own per-VM kernel) — verified. IPv4 only; vmnet
 		// hands the guest a ULA and no ip6tables rules exist (DF104).
 		NetworkIsolation:   true,
+		CustomDNS:          true,
 		CapAdd:             true,
 		HostFilesystem:     false,
 		FilesystemLocality: runtime.LocalityHostSide,
@@ -190,9 +192,33 @@ func (r *Runtime) AttachCommand(tmuxSocket string, _ int, _ int, _ runtime.Isola
 // instance.json; Start just references the name. The image's ENTRYPOINT runs as
 // the workload (we pass no command), matching the docker backend.
 func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
+	if err := validateCreateConfig(cfg); err != nil {
+		return err
+	}
 	// Pre-clear any stale container with this name from a previous failed run.
 	_, _ = r.runContainer(ctx, "delete", "--force", cfg.Name)
 
+	args := buildCreateArgs(cfg)
+	if _, err := r.runContainer(ctx, args...); err != nil {
+		return fmt.Errorf("create container: %w", err)
+	}
+	return nil
+}
+
+func validateCreateConfig(cfg runtime.InstanceConfig) error {
+	if cfg.NetworkMode == "none" {
+		return yoerrors.NewUsageError("Apple Container does not support --network-none")
+	}
+	for _, resolver := range cfg.DNS {
+		address, err := netip.ParseAddr(resolver)
+		if err != nil || !address.Is4() {
+			return yoerrors.NewUsageError("DNS resolver %q must be an IPv4 address", resolver)
+		}
+	}
+	return nil
+}
+
+func buildCreateArgs(cfg runtime.InstanceConfig) []string {
 	args := []string{"create", "--name", cfg.Name}
 	if cfg.WorkingDir != "" {
 		args = append(args, "-w", cfg.WorkingDir)
@@ -232,15 +258,15 @@ func (r *Runtime) Create(ctx context.Context, cfg runtime.InstanceConfig) error 
 			args = append(args, "-c", strconv.FormatInt(cpus, 10))
 		}
 	}
+	for _, resolver := range cfg.DNS {
+		args = append(args, "--dns", resolver)
+	}
 	// NetworkMode "isolated" is enforced by in-guest iptables (entrypoint.py),
 	// not a container network, so we leave networking at the per-VM default —
 	// same as the docker backend.
 	args = append(args, cfg.ImageRef)
 
-	if _, err := r.runContainer(ctx, args...); err != nil {
-		return fmt.Errorf("create container: %w", err)
-	}
-	return nil
+	return args
 }
 
 // Start starts a created/stopped container. Idempotent: an already-running

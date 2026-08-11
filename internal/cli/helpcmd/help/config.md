@@ -30,6 +30,7 @@ KEY SETTINGS
   os                 Target OS: linux (default), mac
   tmux_conf          Tmux config mode: default+host, default, host, none
   env.<NAME>         Environment variable forwarded to container
+  network.dns        YAML-edited resolver list; [] or system selects vendor DNS
 
 EXAMPLES
 
@@ -41,5 +42,8 @@ EXAMPLES
      yoloai config reset model
 
   You can also edit ~/.yoloai/config.yaml directly.
+  network.dns is a collection and cannot be written with 'config set'. On Apple
+  Container it accepts IPv4 literals only; repeat --dns <IPv4> for one create,
+  or use --dns system to clear an inherited list.
 
 More info: https://github.com/kstenerud/yoloai/blob/main/docs/GUIDE.md#configuration

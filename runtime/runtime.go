@@ -101,7 +101,8 @@ type InstanceConfig struct {
 	WorkingDir  string
 	Mounts      []MountSpec
 	Ports       []PortMapping
-	NetworkMode string // "" = default, "none" = no network, "isolated" = allowlist only
+	NetworkMode string   // "" = default, "none" = no network, "isolated" = allowlist only
+	DNS         []string // validated ordered custom IPv4 resolvers; empty uses backend default
 	Resources   *ResourceLimits
 
 	// Labels are key/value metadata attached to the instance (e.g.
@@ -278,9 +279,15 @@ type BackendDescriptor struct {
 	VersionString func(ctx context.Context) string
 }
 
+// RejectsNetworkNone reports the one backend-specific policy that cannot be
+// expressed as a general capability: Apple Container advertises a network API
+// but has no adapter that enforces the product's no-network contract.
+func (d BackendDescriptor) RejectsNetworkNone() bool { return d.Type == BackendApple }
+
 // BackendCaps declares what features a runtime backend supports.
 // Each backend returns its capabilities via BackendDescriptor.Capabilities.
 type BackendCaps struct {
+	CustomDNS        bool
 	NetworkIsolation bool   // supports --network=isolated (iptables domain filtering)
 	CapAdd           bool   // supports cap_add, devices, and setup commands
 	HostFilesystem   bool   // true when sandbox state lives on the host (seatbelt, future SSH)

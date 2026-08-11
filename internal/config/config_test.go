@@ -93,6 +93,60 @@ func TestLoadConfig_ModelOverride(t *testing.T) {
 	assert.Equal(t, "o3", cfg.Model)
 }
 
+func TestLoadConfig_NetworkDNSPreservesIntentAndRejectsMalformedShapes(t *testing.T) {
+	tests := []struct {
+		name    string
+		yaml    string
+		want    []string
+		present bool
+		wantErr string
+	}{
+		{"absent", "network:\n  isolated: true\n", nil, false, ""},
+		{"ordered custom", "network:\n  dns: [1.1.1.1, 8.8.8.8]\n", []string{"1.1.1.1", "8.8.8.8"}, true, ""},
+		{"system", "network:\n  dns: [system]\n", []string{}, true, ""},
+		{"empty", "network:\n  dns: []\n", []string{}, true, ""},
+		{"null", "network:\n  dns: null\n", nil, false, "network.dns"},
+		{"scalar", "network:\n  dns: 1.1.1.1\n", nil, false, "network.dns"},
+		{"mapping", "network:\n  dns: {resolver: 1.1.1.1}\n", nil, false, "network.dns"},
+		{"non-string", "network:\n  dns: [1.1.1.1, 4]\n", nil, false, "network.dns"},
+		{"hostname", "network:\n  dns: [dns.google]\n", nil, false, "network.dns"},
+		{"ipv6", "network:\n  dns: ['::1']\n", nil, false, "network.dns"},
+		{"mixed system", "network:\n  dns: [system, 1.1.1.1]\n", nil, false, "network.dns"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, layout := configDir(t)
+			require.NoError(t, os.WriteFile(layout.DefaultsConfigPath(), []byte(tt.yaml), 0600))
+			cfg, err := LoadConfig(layout)
+			if tt.wantErr != "" {
+				assert.ErrorContains(t, err, tt.wantErr)
+				return
+			}
+			require.NoError(t, err)
+			require.NotNil(t, cfg.Network)
+			if tt.present {
+				require.NotNil(t, cfg.Network.DNS)
+				assert.Equal(t, tt.want, *cfg.Network.DNS)
+			} else {
+				assert.Nil(t, cfg.Network.DNS)
+			}
+		})
+	}
+}
+
+func TestMergeNetwork_DNSReplacesAndExplicitEmptyClears(t *testing.T) {
+	baseDNS := []string{"1.1.1.1"}
+	overrideDNS := []string{"8.8.8.8"}
+	merged := mergeNetwork(&NetworkConfig{DNS: &baseDNS}, &NetworkConfig{DNS: &overrideDNS})
+	require.NotNil(t, merged.DNS)
+	assert.Equal(t, []string{"8.8.8.8"}, *merged.DNS)
+
+	empty := []string{}
+	merged = mergeNetwork(&NetworkConfig{DNS: &baseDNS}, &NetworkConfig{DNS: &empty})
+	require.NotNil(t, merged.DNS)
+	assert.Empty(t, *merged.DNS, "an explicit empty child returns to system DNS")
+}
+
 func TestLoadConfig_EnvMap(t *testing.T) {
 	dir, layout := configDir(t)
 
@@ -583,6 +637,7 @@ func TestIsKnownConfigPath(t *testing.T) {
 		"resources.cpus",
 		"network",
 		"network.allow",
+		"network.dns",
 		"agent_files",
 		"env",
 		"env.OLLAMA_API_BASE",
@@ -607,6 +662,30 @@ func TestIsKnownConfigPath(t *testing.T) {
 	for _, path := range invalid {
 		assert.False(t, IsKnownConfigPath(path), path)
 	}
+}
+
+// network.dns is intentionally YAML-edited collection data. It must still be
+// discoverable, readable, and resettable through the shared config surface.
+func TestNetworkDNS_ConfigKnownPathGetAndReset(t *testing.T) {
+	dir, layout := configDir(t)
+	const content = "network:\n  dns: [1.1.1.1, 8.8.8.8]\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	assert.True(t, IsKnownConfigPath("network.dns"))
+	assert.False(t, IsSettableConfigPath("network.dns"), "collections are edited as YAML, not config set")
+	value, found, err := GetConfigValue(layout, "network.dns")
+	require.NoError(t, err)
+	assert.True(t, found)
+	assert.Contains(t, value, "1.1.1.1")
+	assert.Contains(t, value, "8.8.8.8")
+
+	require.NoError(t, DeleteConfigField(layout, "network.dns"))
+	_, found, err = GetConfigValue(layout, "network.dns")
+	require.NoError(t, err)
+	assert.False(t, found, "reset removes the explicitly configured collection")
+	data, err := os.ReadFile(layout.DefaultsConfigPath())
+	require.NoError(t, err)
+	assert.NotContains(t, string(data), "dns:")
 }
 
 func TestIsSettableConfigPath(t *testing.T) {

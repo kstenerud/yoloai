@@ -28,7 +28,7 @@ import (
 // never ahead of the data (the truth invariant). MigrateLibrary must NOT advance
 // the stamp past libraryFrozenVersion, or it would green the gate over
 // un-migrated sandboxes.
-const LibrarySchemaVersion = SchemaTiered
+const LibrarySchemaVersion = SchemaDNSSnapshot
 
 // libraryFrozenVersion is the ceiling of the sealed MigrateLibrary +
 // MigrateAgentConfigs ladder (the v2->v3 agent.json split and earlier). Framework
@@ -73,6 +73,8 @@ const (
 	// than a list that can drift (DF136, DF148). It runs LAST, which is what lets
 	// every migrator below it address a flat sandbox (DF164).
 	SchemaTiered = 6
+	// SchemaDNSSnapshot is the target of the v6->v7 environment DNS snapshot.
+	SchemaDNSSnapshot = 7
 )
 
 // LaunchPrefixResolver maps a sandbox's stored backend type (the "backend"
@@ -181,6 +183,20 @@ func WriteSchemaVersion(path string, version int) error {
 		return fmt.Errorf("write schema version: %w", err)
 	}
 	return nil
+}
+
+// AdvanceSchemaVersion advances a schema stamp from exactly from to to. It
+// refuses stale or newer stamps so a migration can never overwrite a realm
+// another migrator has already advanced.
+func AdvanceSchemaVersion(path string, from, to int) error {
+	current, _, err := ReadSchemaVersion(path)
+	if err != nil {
+		return err
+	}
+	if current != from {
+		return fmt.Errorf("advance schema version: expected v%d, got v%d", from, current)
+	}
+	return WriteSchemaVersion(path, to)
 }
 
 // CreateFreshLibrary initializes the library realm's DataDir at the current

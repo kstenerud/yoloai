@@ -71,8 +71,15 @@ NETWORK ISOLATION
   On tart and seatbelt there is no network isolation at all --
   --network-isolated is refused rather than silently unenforced.
 
-  --network-none does not depend on any of this: it removes the network
-  instead of filtering it, so it holds on every backend.
+  Apple Container rejects --network-none because that backend has no
+  enforcing adapter. Seatbelt's native no-network policy is a separate
+  backend mechanism; the shared Apple platform name does not imply parity.
+
+  On Apple Container, custom --dns values compose with
+  --network-isolated. The guest
+  allows UDP and TCP port 53 only to those selected resolvers before broad
+  allowlist rules. The existing NET_ADMIN caveat still applies: an agent can
+  change in-guest rules on Apple Container.
 
   IPv6 IS NOT FILTERED. The allowlist is enforced with IPv4 iptables
   rules only; no ip6tables rules are installed on any backend. On the

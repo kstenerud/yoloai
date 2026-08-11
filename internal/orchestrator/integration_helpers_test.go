@@ -9,6 +9,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -34,7 +35,7 @@ import (
 // point, building the same Deps the Engine would (F5.2d dissolved
 // Engine.Create). EnsureSetup is already performed by integrationSetup.
 func createSandbox(ctx context.Context, mgr *orchestrator.Engine, opts orchestrator.CreateOptions) (string, error) {
-	return create.Run(ctx, state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}, opts)
+	return create.Run(ctx, state.Deps{Runtime: mgr.Runtime(), Layout: mgr.Layout(), Input: strings.NewReader("")}, opts, func(context.Context, io.Writer) error { return nil })
 }
 
 func stopSandbox(ctx context.Context, mgr *orchestrator.Engine, name string) error {

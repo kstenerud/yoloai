@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"slices"
 
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/orchestrator/invocation"
@@ -69,4 +70,8 @@ func patchConfigDebug(sandboxDir string, debug bool) error {
 // field, and writes it back. Used by network-allow to persist domain changes.
 func PatchConfigAllowedDomains(sandboxDir string, domains []string) error {
 	return patchRuntimeConfig(sandboxDir, func(cfg *runtimeconfig.ContainerConfig) { cfg.AllowedDomains = domains })
+}
+
+func patchConfigDNS(sandboxDir string, resolvers []string) error {
+	return patchRuntimeConfig(sandboxDir, func(cfg *runtimeconfig.ContainerConfig) { cfg.DNS = slices.Clone(resolvers) })
 }

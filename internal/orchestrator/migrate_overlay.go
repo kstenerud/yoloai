@@ -87,7 +87,7 @@ func (o *OverlayFlatten) backendFor(ctx context.Context, name string) (runtime.B
 // LoadEnvironment defaults a legacy empty backend to docker, so this is never
 // empty for a real sandbox.
 func (o *OverlayFlatten) sandboxBackend(name string) (runtime.BackendType, error) {
-	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(o.layout.SandboxDir(name)))
+	env, err := store.LoadEnvironmentV3ForMigrationFrom(pretier.EnvironmentPath(o.layout.SandboxDir(name)))
 	if err != nil {
 		return "", fmt.Errorf("load environment for %q: %w", name, err)
 	}
@@ -316,7 +316,7 @@ func (o *OverlayFlatten) flattenRunning(ctx context.Context, name string) (migra
 // capture and abandon paths; the enumerate/mkdir/copy scaffolding is shared.
 func (o *OverlayFlatten) buildWork(name, dst string, srcFor func(sandboxDir string, dir store.DirEnvironment) (string, error)) error {
 	sandboxDir := o.layout.SandboxDir(name)
-	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(sandboxDir))
+	env, err := store.LoadEnvironmentV3ForMigrationFrom(pretier.EnvironmentPath(sandboxDir))
 	if err != nil {
 		return fmt.Errorf("load environment for %q: %w", name, err)
 	}
@@ -478,7 +478,7 @@ func (o *OverlayFlatten) quarantine(name string) (migrate.Report, error) {
 // reading the old.
 func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
 	envPath := pretier.EnvironmentPath(newDir)
-	env, err := store.LoadEnvironmentFrom(envPath)
+	env, err := store.LoadEnvironmentV3ForMigrationFrom(envPath)
 	if err != nil {
 		return fmt.Errorf("load staged environment: %w", err)
 	}
@@ -496,7 +496,7 @@ func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
 			env.Dirs[i].InceptionSHA = ""
 		}
 	}
-	if err := store.SaveEnvironmentTo(envPath, env); err != nil {
+	if err := store.SaveEnvironmentV3ForMigrationTo(envPath, env); err != nil {
 		return fmt.Errorf("write copy-mode environment: %w", err)
 	}
 	return nil
@@ -506,7 +506,7 @@ func (o *OverlayFlatten) writeCopyModeEnv(newDir string) error {
 // the durable "flattened" form the promotion recovery reads. A missing
 // environment.json (the new dir before repopulate copies it in) is "not ready".
 func (o *OverlayFlatten) isCopyMode(dir string) (bool, error) {
-	env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(dir))
+	env, err := store.LoadEnvironmentV3ForMigrationFrom(pretier.EnvironmentPath(dir))
 	if err != nil {
 		if errors.Is(err, fs.ErrNotExist) {
 			return false, nil
@@ -540,7 +540,7 @@ func (o *OverlayFlatten) overlaySandboxNames() ([]string, error) {
 		if _, err := os.Stat(pretier.EnvironmentPath(sandboxDir)); errors.Is(err, fs.ErrNotExist) {
 			continue // not a sandbox dir at all — nothing here claims to be one
 		}
-		env, err := store.LoadEnvironmentFrom(pretier.EnvironmentPath(sandboxDir))
+		env, err := store.LoadEnvironmentV3ForMigrationFrom(pretier.EnvironmentPath(sandboxDir))
 		if err != nil {
 			// Same reasoning as PrincipalRename.unmigratedSandboxNames: a dir
 			// holding an environment.json we cannot read must stop the run, not

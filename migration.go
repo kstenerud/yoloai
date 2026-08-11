@@ -169,10 +169,11 @@ func (s *System) frameworkMigrators() ([]migrate.Migrator, func()) {
 	// running — and degrades to "not running" when the backend cannot be built
 	// here, which is what lets a Linux host migrate tart and seatbelt sandboxes.
 	tier := orchestrator.NewTierLayout(s.layout, s.layout.DataDir, s.layout.SandboxesDir(), runtimeFor)
+	dns := orchestrator.NewDNSSnapshotMigration(s.layout)
 	cleanup := func() {
 		flatten.Cleanup()
 		rename.Cleanup()
 		tier.Cleanup()
 	}
-	return []migrate.Migrator{flatten, rename, tier}, cleanup
+	return []migrate.Migrator{flatten, rename, tier, dns}, cleanup
 }

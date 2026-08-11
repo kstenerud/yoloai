@@ -362,6 +362,8 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 		assert.Error(t, err, "exec into a stopped instance must error")
 	})
 
+	mutating("CustomDNS", func(t *testing.T, b InterfaceBackend) { assertCustomDNS(t, b, boot) })
+
 	// --- Read-only exec (shared one instance, or one-per-subtest in parallel) ---
 
 	readOnly := []struct {
@@ -522,6 +524,19 @@ func RunInterfaceConformance(t *testing.T, setup InterfaceSetupFunc) {
 		parallelize(t)
 		assertSandboxTiers(t, probe, boot)
 	})
+}
+
+// assertCustomDNS proves a declared runtime capability through the real
+// interface, preventing a fake-only capability combination from passing.
+func assertCustomDNS(t *testing.T, b InterfaceBackend, boot func(*testing.T, InterfaceBackend, runtime.InstanceConfig) string) {
+	t.Helper()
+	if !b.Runtime.Descriptor().Capabilities.CustomDNS {
+		t.Skip("backend does not advertise custom DNS")
+	}
+	name := boot(t, b, runtime.InstanceConfig{DNS: []string{"1.1.1.1", "8.8.8.8"}})
+	res, err := b.Runtime.Exec(b.Ctx, name, []string{"sh", "-c", "awk '/^nameserver / {print $2}' /etc/resolv.conf"}, "")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1.1.1.1", "8.8.8.8"}, strings.Fields(res.Stdout))
 }
 
 // assertSandboxTiers is the sandbox-tier section's body, split out of the suite

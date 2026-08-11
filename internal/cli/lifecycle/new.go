@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net/netip"
 	goruntime "runtime"
 	"strconv"
 	"strings"
@@ -52,6 +53,7 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("no-profile", false, "Use base image even if config sets a default profile")
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
+	cmd.Flags().StringArray("dns", nil, "Custom Apple IPv4 resolver (repeatable; use --dns system to clear config)")
 	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (IPv4 iptables allowlist; IPv6 unfiltered; a guardrail, not containment for a hostile agent — see 'yoloai help security')")
 	cmd.Flags().StringSlice("network-allow", nil, "Extra domain to allow when network-isolated (repeatable, implies --network-isolated)")
 	cmd.Flags().StringSlice("port", nil, "Port mapping (host:container)")
@@ -188,29 +190,17 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	promptFile, _ := cmd.Flags().GetString("prompt-file")
 	model := cliutil.ResolveModel(cmd)
 	agentName := cliutil.ResolveAgent(cmd)
-	networkNone, _ := cmd.Flags().GetBool("network-none")
-	networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
-	networkAllow, _ := cmd.Flags().GetStringSlice("network-allow")
 	rawPorts, _ := cmd.Flags().GetStringSlice("port")
 	rawDirs, _ := cmd.Flags().GetStringSlice("dir")
-
-	if len(networkAllow) > 0 {
-		networkIsolated = true
+	networkMode, networkAllow, dns, ports, err := resolveNetworkOptions(cmd, rawPorts)
+	if err != nil {
+		return yoloai.SandboxCreateOptions{}, err
 	}
 
 	replace, _ := cmd.Flags().GetBool("replace")
 	abandonUnapplied, _ := cmd.Flags().GetBool("abandon-unapplied")
 	if abandonUnapplied {
 		replace = true
-	}
-
-	if networkNone && len(rawPorts) > 0 {
-		return yoloai.SandboxCreateOptions{}, yoerrors.NewUsageError("--port is incompatible with --network-none")
-	}
-
-	ports, err := parsePortFlags(rawPorts)
-	if err != nil {
-		return yoloai.SandboxCreateOptions{}, err
 	}
 
 	cpus, _ := cmd.Flags().GetString("cpus")
@@ -247,13 +237,6 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		}
 	}
 
-	networkMode := yoloai.NetworkModeDefault
-	if networkNone {
-		networkMode = yoloai.NetworkModeNone
-	} else if networkIsolated {
-		networkMode = yoloai.NetworkModeIsolated
-	}
-
 	return yoloai.SandboxCreateOptions{
 		Name:                 name,
 		Workdir:              workdirSpec,
@@ -265,6 +248,7 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		PromptFile:           promptFile,
 		Network:              networkMode,
 		NetworkAllow:         networkAllow,
+		DNS:                  dns,
 		Ports:                ports,
 		Replace:              replace,
 		AbandonUnappliedWork: abandonUnapplied,
@@ -284,6 +268,57 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		// to widen it, so --yes (gone from this command) can't paper over it.
 		AllowDirtyWorkdir: false,
 	}, nil
+}
+
+// resolveNetworkOptions parses the related network flags together so the
+// create-options mapper stays a value assembly boundary.
+func resolveNetworkOptions(cmd *cobra.Command, rawPorts []string) (yoloai.NetworkMode, []string, yoloai.DNSResolvers, []yoloai.PortMapping, error) {
+	networkNone, _ := cmd.Flags().GetBool("network-none")
+	networkIsolated, _ := cmd.Flags().GetBool("network-isolated")
+	networkAllow, _ := cmd.Flags().GetStringSlice("network-allow")
+	dnsValues, _ := cmd.Flags().GetStringArray("dns")
+	dns, err := parseDNSFlags(dnsValues, cmd.Flags().Changed("dns"))
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+	if len(networkAllow) > 0 {
+		networkIsolated = true
+	}
+	if networkNone && len(rawPorts) > 0 {
+		return "", nil, nil, nil, yoerrors.NewUsageError("--port is incompatible with --network-none")
+	}
+	ports, err := parsePortFlags(rawPorts)
+	if err != nil {
+		return "", nil, nil, nil, err
+	}
+	networkMode := yoloai.NetworkModeDefault
+	if networkNone {
+		networkMode = yoloai.NetworkModeNone
+	} else if networkIsolated {
+		networkMode = yoloai.NetworkModeIsolated
+	}
+	return networkMode, networkAllow, dns, ports, nil
+}
+
+func parseDNSFlags(values []string, changed bool) (yoloai.DNSResolvers, error) {
+	if !changed {
+		return nil, nil
+	}
+	if len(values) == 1 && values[0] == "system" {
+		return yoloai.DNSResolvers{}, nil
+	}
+	resolvers := make(yoloai.DNSResolvers, 0, len(values))
+	for _, value := range values {
+		if value == "system" {
+			return nil, yoerrors.NewUsageError("--dns system cannot be mixed with addresses")
+		}
+		address, err := netip.ParseAddr(value)
+		if err != nil || !address.Is4() {
+			return nil, yoerrors.NewUsageError("--dns value %q must be an IPv4 address", value)
+		}
+		resolvers = append(resolvers, address.String())
+	}
+	return resolvers, nil
 }
 
 // parsePortFlags parses --port "host:container" strings into typed PortMappings

@@ -166,6 +166,61 @@ func TestStop_SandboxNotFound(t *testing.T) {
 	assert.ErrorIs(t, err, store.ErrSandboxNotFound)
 }
 
+// TestRecreateContainer_DNSSnapshotRepairsConflictingRuntimeConfig proves the
+// lifecycle path takes DNS only from environment.json. The runtime config is
+// deliberately seeded with a different resolver; recreation must launch with
+// metadata A and persist that repair so the next restart sees the same value.
+func TestRecreateContainer_DNSSnapshotRepairsConflictingRuntimeConfig(t *testing.T) {
+	tmpDir := t.TempDir()
+	name := "dns-recreate"
+	createTestSandbox(t, tmpDir, name, "/tmp/project", "rw")
+	d := newLifecycleDeps(nil, tmpDir)
+	sandboxDir := d.Layout.SandboxDir(name)
+	meta, err := store.LoadEnvironment(sandboxDir)
+	require.NoError(t, err)
+	meta.DNS = []string{"1.1.1.1"}
+	require.NoError(t, store.SaveEnvironment(sandboxDir, meta))
+	require.NoError(t, os.MkdirAll(filepath.Dir(store.RuntimeConfigFilePath(sandboxDir)), 0o750))
+	require.NoError(t, os.WriteFile(store.RuntimeConfigFilePath(sandboxDir), []byte(`{"dns":["8.8.8.8"]}`), 0o600))
+
+	var launched runtime.InstanceConfig
+	mock := &lifecycleMockRuntime{
+		descriptor: runtime.BackendDescriptor{Type: runtime.BackendApple, Capabilities: runtime.BackendCaps{CustomDNS: true}},
+		createFn: func(_ context.Context, cfg runtime.InstanceConfig) error {
+			launched = cfg
+			return nil
+		},
+		startFn: func(context.Context, string) error { return nil },
+		inspectFn: func(context.Context, string) (runtime.InstanceInfo, error) {
+			return runtime.InstanceInfo{Running: true}, nil
+		},
+	}
+	d.Runtime = mock
+	originalLaunch := launchContainer
+	defer func() { launchContainer = originalLaunch }()
+	var launchedState *state.State
+	launchContainer = func(_ context.Context, _ state.Deps, st *state.State) error {
+		launchedState = st
+		return mock.Create(context.Background(), runtime.InstanceConfig{DNS: st.DNS})
+	}
+
+	err = recreateContainer(context.Background(), d, name, meta, false, nil, &notices{})
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1.1.1.1"}, launched.DNS)
+	require.NotNil(t, launchedState)
+	var launchedConfig runtimeconfig.ContainerConfig
+	require.NoError(t, json.Unmarshal(launchedState.ConfigJSON, &launchedConfig))
+	assert.Equal(t, []string{"1.1.1.1"}, launchedConfig.DNS)
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
+	require.NoError(t, err)
+	assert.Contains(t, string(data), `"1.1.1.1"`)
+	assert.NotContains(t, string(data), `"8.8.8.8"`)
+	var repaired runtimeconfig.ContainerConfig
+	require.NoError(t, json.Unmarshal(data, &repaired))
+	assert.Equal(t, []string{"1.1.1.1"}, repaired.DNS)
+
+}
+
 // Start tests
 
 func TestStart_AlreadyRunning(t *testing.T) {

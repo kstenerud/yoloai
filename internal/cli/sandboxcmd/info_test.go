@@ -82,3 +82,16 @@ func TestPrintSandboxNetwork_NoNetHealthLineWhenUnprobed(t *testing.T) {
 	printSandboxNetwork(&buf, netHealthTestInfo("", ""))
 	assert.NotContains(t, buf.String(), "Net health:")
 }
+
+func TestPrintSandboxNetwork_RendersCustomDNSOnly(t *testing.T) {
+	info := netHealthTestInfo("", "")
+	info.Environment.DNS = yoloai.DNSResolvers{"1.1.1.1", "8.8.8.8"}
+	var custom bytes.Buffer
+	printSandboxNetwork(&custom, info)
+	assert.Contains(t, custom.String(), "DNS:         1.1.1.1, 8.8.8.8\n")
+
+	info.Environment.DNS = nil
+	var system bytes.Buffer
+	printSandboxNetwork(&system, info)
+	assert.NotContains(t, system.String(), "DNS:")
+}

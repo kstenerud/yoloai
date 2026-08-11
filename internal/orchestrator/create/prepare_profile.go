@@ -31,6 +31,7 @@ type profileResult struct {
 	devices            []string
 	setup              []string
 	autoCommitInterval int
+	dns                []string
 	isolation          runtime.IsolationMode
 	isolationExplicit  bool // true when isolation was set via --isolation flag (not config/profile default)
 	userAliases        map[string]string
@@ -38,8 +39,7 @@ type profileResult struct {
 	archetypeDockerDRequired bool // true when archetype requires dockerd auto-start
 }
 
-// resolveProfileConfig resolves the profile chain, merges config, and builds
-// the profile image if needed. Returns a profileResult with all merged values.
+// resolveProfileConfig resolves the profile chain and merged configuration.
 func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agentDef **agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*profileResult, error) {
 	pr := &profileResult{
 		env:                ycfg.Env,
@@ -47,6 +47,9 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 		agentFiles:         ycfg.AgentFiles,
 		autoCommitInterval: ycfg.AutoCommitInterval,
 		userAliases:        gcfg.ModelAliases,
+	}
+	if ycfg.Network != nil && ycfg.Network.DNS != nil {
+		pr.dns = append([]string{}, (*ycfg.Network.DNS)...)
 	}
 
 	if opts.Profile == "" {
@@ -70,6 +73,9 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 	if err := config.ValidateProfileBackend(merged.Backend, string(backend)); err != nil {
 		return nil, err
 	}
+	if merged.Network != nil && merged.Network.DNS != nil {
+		pr.dns = append([]string{}, (*merged.Network.DNS)...)
+	}
 
 	homeDir := d.Layout.HomeDir
 	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir, d.Layout.Env().EnvForConfigInterpolation()); err != nil {
@@ -79,13 +85,17 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 	pr.name = opts.Profile
 	pr.imageRef = config.ResolveProfileImage(d.Layout, opts.Profile, chain)
 
-	// Build profile image if needed (Docker only)
-	logger := slog.Default()
-	if err := profiles.EnsureProfileImage(ctx, d.Runtime, d.Layout, opts.Profile, profiles.AutoBuildSecrets(d.Layout.HomeDir), outputFor(opts.Output), logger, false); err != nil {
-		return nil, fmt.Errorf("build profile image: %w", err)
-	}
-
 	return pr, nil
+}
+
+func ensureProfileImage(ctx context.Context, d state.Deps, opts Options, pr *profileResult) error {
+	if pr.name == "" {
+		return nil
+	}
+	if err := profiles.EnsureProfileImage(ctx, d.Runtime, d.Layout, pr.name, profiles.AutoBuildSecrets(d.Layout.HomeDir), outputFor(opts.Output), slog.Default(), false); err != nil {
+		return fmt.Errorf("build profile image: %w", err)
+	}
+	return nil
 }
 
 // applyMergedProfileToOpts applies merged profile values to opts and pr.

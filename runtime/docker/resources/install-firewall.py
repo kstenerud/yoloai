@@ -52,7 +52,7 @@ def main() -> None:
     allowed_ips = firewall.resolve_domains(domains, log_error)
     nameservers = firewall.read_nameservers(log_error)
     try:
-        firewall.apply_firewall(allowed_ips, nameservers, injector, log_info, log_error)
+        firewall.apply_firewall(allowed_ips, nameservers, False, injector, log_info, log_error)
     except firewall.NetworkIsolationError as e:
         log_error("network.install_failed", "firewall installation failed", error=str(e))
         sys.exit(1)

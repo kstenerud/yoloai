@@ -458,7 +458,8 @@ integration-containerd:
 ## macOS 26 + Apple Silicon + the `container` CLI). On any other host the suite
 ## skips cleanly via TestMain. The full base-image build is gated behind
 ## YOLOAI_TEST_APPLE_BASE=1 (slow); the conformance + lifecycle tests use a tiny
-## alpine sleep image and run whenever the backend is available.
+## alpine sleep image. DNS coverage requires a live resolver and is enabled by
+## YOLOAI_TEST_APPLE=1 with the orchestrator suite.
 ##
 ## The second invocation is apple's share of the multi-backend orchestrator
 ## package (the C1 malicious-filter containment test). It needs no docker since

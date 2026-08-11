@@ -6,7 +6,9 @@ package config
 import (
 	"fmt"
 	"maps"
+	"net/netip"
 	"os"
+	"slices"
 	"sort"
 	"strconv"
 	"strings"
@@ -56,8 +58,9 @@ type ResourceLimits struct {
 
 // NetworkConfig holds network isolation settings.
 type NetworkConfig struct {
-	Isolated bool     `yaml:"isolated" json:"isolated,omitempty"`
-	Allow    []string `yaml:"allow" json:"allow,omitempty"`
+	Isolated bool      `yaml:"isolated" json:"isolated,omitempty"`
+	Allow    []string  `yaml:"allow" json:"allow,omitempty"`
+	DNS      *[]string `yaml:"-" json:"dns,omitempty"`
 }
 
 // GlobalConfig holds user preferences from ~/.yoloai/config.yaml.
@@ -114,6 +117,7 @@ var knownCollectionSettings = []knownCollectionSetting{
 	{"mounts", yaml.SequenceNode},
 	{"ports", yaml.SequenceNode},
 	{"network.allow", yaml.SequenceNode},
+	{"network.dns", yaml.SequenceNode},
 	{"cap_add", yaml.SequenceNode},
 	{"devices", yaml.SequenceNode},
 	{"setup", yaml.SequenceNode},
@@ -281,9 +285,39 @@ func handleYoloaiNetwork(cfg *YoloaiConfig, val *yaml.Node, _ map[string]string)
 					cfg.Network.Allow = append(cfg.Network.Allow, item.Value)
 				}
 			}
+		case "dns":
+			resolvers, err := parseDNSNode(val.Content[k+1])
+			if err != nil {
+				return fmt.Errorf("network.dns: %w", err)
+			}
+			cfg.Network.DNS = &resolvers
 		}
 	}
 	return nil
+}
+
+func parseDNSNode(node *yaml.Node) ([]string, error) {
+	if node.Kind != yaml.SequenceNode {
+		return nil, fmt.Errorf("must be a sequence")
+	}
+	resolvers := make([]string, 0, len(node.Content))
+	for _, item := range node.Content {
+		if item.Kind != yaml.ScalarNode || item.Tag != "!!str" || strings.TrimSpace(item.Value) == "" {
+			return nil, fmt.Errorf("contains a non-string or blank resolver")
+		}
+		if item.Value == "system" {
+			if len(node.Content) != 1 {
+				return nil, fmt.Errorf("system cannot be mixed with addresses")
+			}
+			return []string{}, nil
+		}
+		address, err := netip.ParseAddr(item.Value)
+		if err != nil || !address.Is4() {
+			return nil, fmt.Errorf("%q must be an IPv4 address", item.Value)
+		}
+		resolvers = append(resolvers, address.String())
+	}
+	return resolvers, nil
 }
 
 func handleYoloaiAgentFiles(cfg *YoloaiConfig, val *yaml.Node, _ map[string]string) error {
@@ -471,10 +505,18 @@ func mergeNetwork(base, override *NetworkConfig) *NetworkConfig {
 	if base != nil {
 		result.Isolated = base.Isolated
 		result.Allow = append(result.Allow, base.Allow...)
+		if base.DNS != nil {
+			copied := slices.Clone(*base.DNS)
+			result.DNS = &copied
+		}
 	}
 	if override != nil {
 		result.Isolated = override.Isolated
 		result.Allow = append(result.Allow, override.Allow...)
+		if override.DNS != nil {
+			copied := slices.Clone(*override.DNS)
+			result.DNS = &copied
+		}
 	}
 	if len(result.Allow) == 0 {
 		result.Allow = nil

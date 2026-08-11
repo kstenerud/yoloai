@@ -33,6 +33,8 @@ type lifecycleMockRuntime struct {
 	inspectFn          func(ctx context.Context, name string) (runtime.InstanceInfo, error)
 	execFn             func(ctx context.Context, name string, cmd []string, user string) (runtime.ExecResult, error)
 	gitExecFn          func(ctx context.Context, instance, user, workDir string, args ...string) (string, error)
+	createFn           func(ctx context.Context, cfg runtime.InstanceConfig) error
+	descriptor         runtime.BackendDescriptor
 	recreateAdvisoryFn func(ctx context.Context) string
 	// locality controls the backend's declared FilesystemLocality; zero value
 	// (LocalityHostSide) suits host-side reset/baseline tests, SandboxSide the
@@ -84,7 +86,11 @@ func (m *lifecycleMockRuntime) Setup(_ context.Context, _ config.Layout, _ strin
 	return nil
 }
 func (m *lifecycleMockRuntime) IsReady(_ context.Context) (bool, error) { return false, nil }
-func (m *lifecycleMockRuntime) Create(_ context.Context, _ runtime.InstanceConfig) error {
+
+func (m *lifecycleMockRuntime) Create(ctx context.Context, cfg runtime.InstanceConfig) error {
+	if m.createFn != nil {
+		return m.createFn(ctx, cfg)
+	}
 	return errMockNotImplemented
 }
 
@@ -129,6 +135,9 @@ func (m *lifecycleMockRuntime) AttachCommand(_ string, _, _ int, _ runtime.Isola
 	return nil
 }
 func (m *lifecycleMockRuntime) Descriptor() runtime.BackendDescriptor {
+	if m.descriptor.Type != "" {
+		return m.descriptor
+	}
 	return runtime.BackendDescriptor{
 		Type:         "mock",
 		BaseModeName: runtime.IsolationModeContainer,

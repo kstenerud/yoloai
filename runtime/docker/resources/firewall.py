@@ -141,9 +141,20 @@ def read_nameservers(log_error: LogFn) -> list[str]:
     return nameservers
 
 
+def verified_nameservers(expected: list[str], log_error: LogFn) -> list[str]:
+    """Return resolver destinations, rejecting a guest resolver mismatch."""
+    actual = read_nameservers(log_error)
+    if expected and actual != expected:
+        raise NetworkIsolationError(
+            f"custom DNS does not match /etc/resolv.conf: expected {expected}, got {actual}"
+        )
+    return expected if expected else actual
+
+
 def apply_firewall(
     allowed_ips: set[tuple[str, str]],
     nameservers: list[str],
+    strict_dns: bool,
     injector_endpoint: str | None,
     log_info: LogFn,
     log_error: LogFn,
@@ -189,6 +200,12 @@ def apply_firewall(
             run_strict(["iptables", "-A", "OUTPUT", "-d", ns, "-p", proto,
                         "--dport", "53", "-j", "ACCEPT"],
                        log_error, "network.iptables_dns_failed", nameserver=ns, proto=proto)
+    # Only an explicitly verified custom resolver set needs strict port-53
+    # rejects. System mode retains its historic discovered-resolver behavior.
+    if strict_dns:
+        for proto in ("udp", "tcp"):
+            run_strict(["iptables", "-A", "OUTPUT", "-p", proto, "--dport", "53", "-j", "REJECT"],
+                       log_error, "network.iptables_dns_reject_failed", proto=proto)
     # Allow traffic to allowlisted IPs — via ipset match if available, else
     # individual per-IP rules. iptables-nft may lack xt_set even when the ipset
     # binary works (e.g. Podman Machine on macOS), so catch failure here too and

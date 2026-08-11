@@ -5,6 +5,7 @@ package orchestrator
 
 import (
 	"context"
+	"io"
 	"os"
 	"path/filepath"
 	"strings"
@@ -16,12 +17,31 @@ import (
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/create"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
+	"github.com/kstenerud/yoloai/runtime"
 )
 
 func TestBackendCaps(t *testing.T) {
 	assert.True(t, mustDescriptor(t, "docker").Capabilities.CapAdd)
 	assert.False(t, mustDescriptor(t, "tart").Capabilities.CapAdd)
 	assert.False(t, mustDescriptor(t, "seatbelt").Capabilities.CapAdd)
+}
+
+func TestBackendCaps_CustomDNSIsAppleOnly(t *testing.T) {
+	for _, backend := range []runtime.BackendType{"docker", "podman", "tart", "seatbelt"} {
+		desc, ok := runtime.Descriptor(backend)
+		if !ok {
+			continue // platform-specific backend; its package's tests assert the same contract
+		}
+		assert.False(t, desc.Capabilities.CustomDNS, "%s must reject custom DNS", backend)
+	}
+	apple, ok := runtime.Descriptor(runtime.BackendApple)
+	if ok {
+		assert.True(t, apple.Capabilities.CustomDNS)
+	}
+	containerd, ok := runtime.Descriptor("containerd")
+	if ok {
+		assert.False(t, containerd.Capabilities.CustomDNS)
+	}
 }
 
 func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
@@ -47,7 +67,7 @@ func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 		Workdir: create.DirSpec{Path: tmpDir},
 		Agent:   "test",
 		Version: "test",
-	})
+	}, func(context.Context, io.Writer) error { return nil })
 	// Will fail for other reasons (no API key etc.), but must NOT be ErrSandboxExists
 	assert.NotErrorIs(t, err, ErrSandboxExists)
 }
@@ -71,7 +91,7 @@ func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 		Workdir: create.DirSpec{Path: filepath.Join(tmpDir, "nonexistent")},
 		Agent:   "test",
 		Version: "test",
-	})
+	}, func(context.Context, io.Writer) error { return nil })
 	require.Error(t, err)
 
 	// Sandbox directory should not exist (cleaned up on failure)

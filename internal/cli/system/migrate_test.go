@@ -39,6 +39,7 @@ func seedFlatV0(t *testing.T, top string) {
 	require.NoError(t, os.WriteFile(filepath.Join(top, "sandboxes", "box1", "marker"), []byte("x"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(top, "extensions", "demo.yaml"), []byte("action: echo hi\n"), 0600))
 	require.NoError(t, os.WriteFile(filepath.Join(top, "state.yaml"), []byte("setup_complete: true\n"), 0600))
+	seedPreV3Record(t, top)
 }
 
 func runMigrate(t *testing.T) (string, error) {
@@ -60,8 +61,7 @@ func TestMigrate_FlatV0_RelocatesAndStamps(t *testing.T) {
 	assert.Contains(t, out, "migrated successfully")
 
 	// Library-owned content relocated under TOP/library.
-	assert.FileExists(t, filepath.Join(top, "library", "config.yaml"))
-	assert.FileExists(t, filepath.Join(top, "library", "sandboxes", "box1", "marker"))
+	assert.FileExists(t, filepath.Join(top, "library", "sandboxes", "box1", "host", "marker"))
 	// CLI-owned content relocated under TOP/cli.
 	assert.FileExists(t, filepath.Join(top, "cli", "extensions", "demo.yaml"))
 	// The flat originals are gone.

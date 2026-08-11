@@ -6,6 +6,7 @@ package lifecycle
 import (
 	"testing"
 
+	yoloai "github.com/kstenerud/yoloai"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -138,4 +139,24 @@ func TestParseEnvSlice(t *testing.T) {
 		require.NoError(t, err)
 		assert.Equal(t, map[string]string{"A": "1", "B": "two", "C": ""}, m)
 	})
+}
+
+func TestParseDNSFlags(t *testing.T) {
+	unset, err := parseDNSFlags(nil, false)
+	require.NoError(t, err)
+	assert.Nil(t, unset)
+
+	system, err := parseDNSFlags([]string{"system"}, true)
+	require.NoError(t, err)
+	assert.NotNil(t, system)
+	assert.Empty(t, system)
+
+	resolvers, err := parseDNSFlags([]string{"1.1.1.1", "8.8.8.8"}, true)
+	require.NoError(t, err)
+	assert.Equal(t, yoloai.DNSResolvers{"1.1.1.1", "8.8.8.8"}, resolvers)
+
+	_, err = parseDNSFlags([]string{"system", "1.1.1.1"}, true)
+	assertUsageError(t, err, "cannot be mixed")
+	_, err = parseDNSFlags([]string{"2001:4860:4860::8888"}, true)
+	assertUsageError(t, err, "must be an IPv4")
 }

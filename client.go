@@ -231,9 +231,6 @@ func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (
 	if internal.Output == nil {
 		internal.Output = c.output // seed the per-call progress writer from the Client's Output (F8)
 	}
-	if err := c.engine.EnsureSetup(ctx, c.output); err != nil {
-		return nil, err
-	}
 	if _, err := c.engine.Create(ctx, internal); err != nil {
 		return nil, err
 	}

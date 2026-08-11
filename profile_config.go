@@ -60,6 +60,7 @@ type ProfileResources struct {
 type ProfileNetwork struct {
 	Isolated bool     `json:"isolated,omitempty"`
 	Allow    []string `json:"allow,omitempty"`
+	DNS      []string `json:"dns,omitempty"`
 }
 
 // ProfileAgentFiles holds a profile's agent_files setting. Exactly one form
@@ -117,6 +118,9 @@ func resolvedProfileConfigFromMerged(m *config.MergedConfig) *ResolvedProfileCon
 		pc.Network = &ProfileNetwork{
 			Isolated: m.Network.Isolated,
 			Allow:    m.Network.Allow,
+		}
+		if m.Network.DNS != nil {
+			pc.Network.DNS = append([]string{}, (*m.Network.DNS)...)
 		}
 	}
 	if m.AgentFiles != nil {

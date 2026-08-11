@@ -17,6 +17,8 @@ CREATING SANDBOXES (yoloai new)
   --dir, -d <path>    Auxiliary directory (repeatable)
   --port <h:c>        Port mapping (host:container)
   --network-none      Disable network access
+  --dns <IPv4>        Custom Apple resolver (repeatable; use --dns system to
+                      clear)
   --network-isolated  Allow only agent API traffic (IPv4 iptables allowlist;
                       IPv6 is not filtered)
   --network-allow     Extra domain to allow (repeatable, implies --network-isolated)

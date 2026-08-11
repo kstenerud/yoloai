@@ -420,6 +420,10 @@ func mergedConfigFromBase(base *YoloaiConfig) *MergedConfig {
 			merged.Network.Allow = make([]string, len(base.Network.Allow))
 			copy(merged.Network.Allow, base.Network.Allow)
 		}
+		if base.Network.DNS != nil {
+			copied := slices.Clone(*base.Network.DNS)
+			merged.Network.DNS = &copied
+		}
 	}
 	if len(base.Mounts) > 0 {
 		merged.Mounts = make([]string, len(base.Mounts))
@@ -492,6 +496,10 @@ func applyProfileToMerged(merged *MergedConfig, profile *ProfileConfig) {
 		}
 		merged.Network.Isolated = profile.Network.Isolated
 		merged.Network.Allow = append(merged.Network.Allow, profile.Network.Allow...)
+		if profile.Network.DNS != nil {
+			copied := slices.Clone(*profile.Network.DNS)
+			merged.Network.DNS = &copied
+		}
 	}
 }
 

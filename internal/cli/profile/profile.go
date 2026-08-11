@@ -8,6 +8,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"slices"
 	"sort"
 	"strings"
 	"text/tabwriter"
@@ -339,6 +340,9 @@ func printProfileInfoResources(out io.Writer, merged *yoloai.ResolvedProfileConf
 		}
 		fmt.Fprintf(out, "Network:     %s\n", s) //nolint:errcheck
 	}
+	if merged.Network != nil {
+		fmt.Fprintf(out, "DNS:         %s\n", formatDNS(merged.Network.DNS)) //nolint:errcheck
+	}
 }
 
 // printProfileDiff renders the human-readable diff output for `profile info --diff`.
@@ -388,6 +392,13 @@ func anyDiff(vals ...bool) bool {
 		}
 	}
 	return false
+}
+
+func formatDNS(resolvers []string) string {
+	if len(resolvers) == 0 {
+		return "system"
+	}
+	return strings.Join(resolvers, ", ")
 }
 
 // printScalarDiff prints a scalar field diff. Returns true if printed.
@@ -555,6 +566,10 @@ func printNetworkDiff(out io.Writer, old, new *yoloai.ProfileNetwork) bool {
 	hasDiff := false
 	if new.Isolated != old.Isolated {
 		fmt.Fprintf(out, "  ~ %-12s %v → %v\n", "Isolated:", old.Isolated, new.Isolated) //nolint:errcheck
+		hasDiff = true
+	}
+	if !slices.Equal(old.DNS, new.DNS) {
+		fmt.Fprintf(out, "  ~ %-12s %s → %s\n", "DNS:", formatDNS(old.DNS), formatDNS(new.DNS)) //nolint:errcheck
 		hasDiff = true
 	}
 

@@ -10,6 +10,7 @@ import (
 	"io"
 	"io/fs"
 	"log/slog"
+	"net/netip"
 	"os"
 	"path/filepath"
 	"slices"
@@ -96,6 +97,7 @@ type Options struct {
 	Headless             bool                  // launch the agent in its own headless mode (yoloai run); requires a prompt (D100)
 	Network              NetworkMode           // network access policy
 	NetworkAllow         []string              // --network-allow flags
+	DNS                  []string              // nil inherits config; empty explicitly selects system DNS
 	Ports                []string              // --port flags (e.g., ["3000:3000"])
 	Replace              bool                  // --replace flag (safe: errors if unapplied work exists)
 	AbandonUnappliedWork bool                  // let Replace destroy a sandbox holding unapplied work (skips the safety check; CLI --abandon-unapplied)
@@ -117,6 +119,33 @@ type Options struct {
 	Output io.Writer
 }
 
+// RuntimeSetup performs the backend-dependent, potentially expensive setup after
+// creation policy has accepted the requested sandbox.
+type RuntimeSetup func(context.Context, io.Writer) error
+
+func resolveDNSPolicy(requested, configured []string, network NetworkMode, descriptor runtime.BackendDescriptor) ([]string, error) {
+	dns := configured
+	if requested != nil {
+		dns = requested
+	}
+	for _, resolver := range dns {
+		address, err := netip.ParseAddr(resolver)
+		if err != nil || !address.Is4() {
+			return nil, yoerrors.NewUsageError("DNS resolver %q must be an IPv4 address", resolver)
+		}
+	}
+	if descriptor.RejectsNetworkNone() && network == NetworkModeNone {
+		return nil, yoerrors.NewUsageError("selected backend does not support --network-none")
+	}
+	if len(dns) > 0 && network == NetworkModeNone {
+		return nil, yoerrors.NewUsageError("custom DNS cannot be used with --network-none")
+	}
+	if len(dns) > 0 && !descriptor.Capabilities.CustomDNS {
+		return nil, yoerrors.NewUsageError("backend %q does not support custom DNS", descriptor.Type)
+	}
+	return slices.Clone(dns), nil
+}
+
 // outputFor resolves a create-pipeline progress writer: the per-call
 // Options.Output when set, otherwise io.Discard. Never returns nil, so
 // leaf writers can't panic on a nil io.Writer regardless of which create helper
@@ -131,8 +160,10 @@ func outputFor(o io.Writer) io.Writer {
 
 // Run creates and optionally starts a new sandbox.
 // Returns the sandbox name on success (empty on no-start).
-// EnsureSetup is assumed to have already been called by the caller.
-func Run(ctx context.Context, d state.Deps, opts Options) (name string, err error) {
+func Run(ctx context.Context, d state.Deps, opts Options, setup RuntimeSetup) (name string, err error) {
+	if setup == nil {
+		return "", errors.New("create runtime setup is required")
+	}
 	unlock, lockErr := store.AcquireLock(d.Layout, opts.Name)
 	if lockErr != nil {
 		return "", lockErr
@@ -161,7 +192,7 @@ func Run(ctx context.Context, d state.Deps, opts Options) (name string, err erro
 		}
 	}
 
-	sandboxState, err := prepareSandboxState(ctx, d, opts)
+	sandboxState, err := prepareSandboxState(ctx, d, opts, setup)
 	if err != nil {
 		return "", err
 	}
@@ -227,14 +258,8 @@ func unappliedWorkError(ctx context.Context, g *git.Git, name, workDir, baseline
 
 // prepareSandboxState handles validation, safety checks, directory
 // creation, workdir copy, git baseline, and meta/config writing.
-func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*state.State, error) {
-	agentDef, sandboxDir, ycfg, gcfg, err := validateAndLoadConfig(d, opts)
-	if err != nil {
-		return nil, err
-	}
-
-	// Phase 1: Resolve profile, runtime base, archetype, and mounts.
-	ri, err := resolveProfileAndArchetype(ctx, d, &opts, agentDef, ycfg, gcfg)
+func prepareSandboxState(ctx context.Context, d state.Deps, opts Options, setup RuntimeSetup) (*state.State, error) {
+	agentDef, sandboxDir, ycfg, gcfg, _, ri, err := resolveCreateInputs(ctx, d, &opts, setup)
 	if err != nil {
 		return nil, err
 	}
@@ -282,6 +307,44 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, model, networkMode, networkAllow, ri, configData, tmuxConf, d.Layout, d.Layout.HomeDir), nil
 }
 
+// resolveCreateInputs completes every read-only and setup phase before the
+// pipeline can replace a sandbox or create its directory.
+func resolveCreateInputs(ctx context.Context, d state.Deps, opts *Options, setup RuntimeSetup) (*agent.Definition, string, *config.YoloaiConfig, *config.GlobalConfig, *profileResult, *resolvedCreateInputs, error) {
+	agentDef, sandboxDir, ycfg, gcfg, err := validateAndLoadConfig(d, *opts)
+	if err != nil {
+		return nil, "", nil, nil, nil, nil, err
+	}
+
+	// Resolve only cheap configuration before accepting policy. Runtime bases,
+	// archetypes, profile images, replacement, and sandbox files come after it.
+	pr, err := resolveProfileConfig(ctx, d, opts, &agentDef, ycfg, gcfg)
+	if err != nil {
+		return nil, "", nil, nil, nil, nil, err
+	}
+	if err := applyConfigDefaults(opts, ycfg, pr); err != nil {
+		return nil, "", nil, nil, nil, nil, err
+	}
+	resolvedDNS, err := resolveDNSPolicy(opts.DNS, pr.dns, opts.Network, d.Runtime.Descriptor())
+	if err != nil {
+		return nil, "", nil, nil, nil, nil, err
+	}
+	opts.DNS = resolvedDNS
+	if setup == nil {
+		return nil, "", nil, nil, nil, nil, errors.New("create runtime setup is required")
+	}
+	if err := setup(ctx, outputFor(opts.Output)); err != nil {
+		return nil, "", nil, nil, nil, nil, err
+	}
+	if err := ensureProfileImage(ctx, d, *opts, pr); err != nil {
+		return nil, "", nil, nil, nil, nil, err
+	}
+	ri, err := resolveRuntimeAndArchetype(ctx, d, opts, pr)
+	if err != nil {
+		return nil, "", nil, nil, nil, nil, err
+	}
+	return agentDef, sandboxDir, ycfg, gcfg, pr, ri, nil
+}
+
 // resolvedCreateInputs carries the Phase-1 resolution outputs (profile, archetype,
 // devcontainer config, mounts, lifecycle state) threaded into the later config/meta/
 // state build phases, so those builders take one struct instead of long scalar lists.
@@ -295,18 +358,9 @@ type resolvedCreateInputs struct {
 	onCreateDone    bool
 }
 
-// resolveProfileAndArchetype resolves profile config, runtime base, archetype, mounts, and lifecycle state.
-func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options, agentDef *agent.Definition, ycfg *config.YoloaiConfig, gcfg *config.GlobalConfig) (*resolvedCreateInputs, error) {
-	pr, err := resolveProfileConfig(ctx, d, opts, &agentDef, ycfg, gcfg)
-	if err != nil {
-		return nil, err
-	}
-
+// resolveRuntimeAndArchetype resolves runtime base, archetype, mounts, and lifecycle state.
+func resolveRuntimeAndArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (*resolvedCreateInputs, error) {
 	if err := resolveRuntimeBase(ctx, d, opts, pr); err != nil {
-		return nil, err
-	}
-
-	if err := applyConfigDefaults(opts, ycfg, pr); err != nil {
 		return nil, err
 	}
 
@@ -376,7 +430,7 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 	lifecycleCfg := buildLifecycleConfig(ri.archetype, pr.archetypeDockerDRequired, ri.onCreateDone, ri.devcontainerCfg)
 
 	backend := d.Runtime.Descriptor().Type
-	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, launch.AgentLaunchPrefix(backend), tmuxConf, launch.WorkdirMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, headless)
+	configData, err := buildContainerConfig(d.Layout, agentDef, agentCommand, launch.AgentLaunchPrefix(backend), tmuxConf, launch.WorkdirMountPath(workdir), opts.Debug, networkMode == "isolated", networkAllow, opts.Passthrough, pr.setup, pr.autoCommitInterval, collectCopyDirs(workdir, auxDirs), opts.Name, runtime.TmuxSocketFor(d.Runtime, sandboxDir), pr.isolation, opts.VscodeTunnel, invocation.SanitizeTunnelName(opts.Name), lifecycleCfg, headless, opts.DNS)
 	if err != nil {
 		return nil, nil, "", "", "", "", nil, fmt.Errorf("build %s: %w", store.RuntimeConfigFile, err)
 	}
@@ -408,6 +462,7 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		HasPrompt:                 meta.HasPrompt,
 		NetworkMode:               networkMode,
 		NetworkAllow:              networkAllow,
+		DNS:                       slices.Clone(opts.DNS),
 		Ports:                     opts.Ports,
 		ConfigMounts:              ri.mergedMounts,
 		TmuxConf:                  tmuxConf,
@@ -751,6 +806,7 @@ func buildEnvironment(opts Options, pr *profileResult, workdir *DirSpec, baselin
 		HostFilesystem:     hostFilesystem,
 		VscodeTunnel:       opts.VscodeTunnel,
 		Archetype:          archetypeStr,
+		DNS:                slices.Clone(opts.DNS),
 	}
 }
 
@@ -810,7 +866,7 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 // agentLaunchPrefix is the backend's constant launch wrap (launch.AgentLaunchPrefix;
 // e.g. a 'PATH=...' prefix for Tart), computed once by the caller and stored here as the
 // single source of truth for the agent-command wrap (W1a of the architecture remediation plan).
-func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig, headless bool) ([]byte, error) {
+func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig, headless bool, dns []string) ([]byte, error) {
 	var stateDirName string
 	if agentDef.StateDir != "" {
 		stateDirName = filepath.Base(agentDef.StateDir)
@@ -831,6 +887,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		StateDirName:       stateDirName,
 		Debug:              debug,
 		NetworkIsolated:    networkIsolated,
+		DNS:                slices.Clone(dns),
 		AllowedDomains:     allowedDomains,
 		Passthrough:        passthrough,
 		SetupCommands:      setupCommands,

@@ -300,6 +300,42 @@ func TestBuildInstanceConfig_RejectsNetworkIsolatedWithGvisor(t *testing.T) {
 	assert.Contains(t, msg, "--isolation=container", "error points at the working alternatives")
 }
 
+func TestBuildInstanceConfig_RejectsAppleContainerNetworkNoneEvenWithSystemDNS(t *testing.T) {
+	st := &state.State{
+		Name:        "test",
+		Workdir:     &state.DirSpec{Path: "/project", Mode: store.DirMode("copy")},
+		Agent:       agent.GetAgent("test"),
+		NetworkMode: "none",
+		Layout:      config.Layout{Principal: config.CLIPrincipal},
+	}
+	_, err := buildInstanceConfig(runtime.BackendDescriptor{Type: runtime.BackendApple}, st, nil, nil, brokerOutcome{}, false, "")
+	assert.ErrorContains(t, err, "does not support --network-none")
+}
+
+func TestBuildInstanceConfig_MapsOrderedDNSAndRejectsUnsupportedCustomDNS(t *testing.T) {
+	st := &state.State{
+		Name:    "test",
+		Workdir: &state.DirSpec{Path: "/project", Mode: store.DirMode("copy")},
+		Agent:   agent.GetAgent("test"),
+		DNS:     []string{"1.1.1.1", "8.8.8.8"},
+		Layout:  config.Layout{Principal: config.CLIPrincipal},
+	}
+	apple := runtime.BackendDescriptor{Type: runtime.BackendApple, Capabilities: runtime.BackendCaps{CustomDNS: true}}
+	cfg, err := buildInstanceConfig(apple, st, nil, nil, brokerOutcome{}, false, "")
+	require.NoError(t, err)
+	assert.Equal(t, st.DNS, cfg.DNS)
+
+	_, err = buildInstanceConfig(runtime.BackendDescriptor{Type: runtime.BackendDocker}, st, nil, nil, brokerOutcome{}, false, "")
+	assert.ErrorContains(t, err, "custom DNS is not supported")
+	st.NetworkMode = "none"
+	_, err = buildInstanceConfig(apple, st, nil, nil, brokerOutcome{}, false, "")
+	assert.ErrorContains(t, err, "does not support --network-none")
+	_, err = buildInstanceConfig(runtime.BackendDescriptor{
+		Type: runtime.BackendDocker, Capabilities: runtime.BackendCaps{CustomDNS: true},
+	}, st, nil, nil, brokerOutcome{}, false, "")
+	assert.ErrorContains(t, err, "custom DNS is not supported")
+}
+
 // TestBuildInstanceConfig_BrokerOutcome verifies the broker outcome overrides the
 // container's network mode (rootless podman → slirp) and publishes the injector
 // endpoint as YOLOAI_BROKER_INJECTOR_ENDPOINT, while leaving both untouched when

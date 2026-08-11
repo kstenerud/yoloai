@@ -14,6 +14,8 @@ import importlib.util
 from pathlib import Path
 from types import ModuleType
 
+import pytest
+
 _RESOURCES_DIR = Path(__file__).resolve().parent.parent
 
 
@@ -73,3 +75,68 @@ def test_parse_nameservers_all_v6_returns_empty() -> None:
     # result trips read_nameservers' loud no-nameservers warning rather than
     # aborting the whole firewall install (the pre-fix behavior).
     assert firewall.parse_nameservers(["nameserver fd00::1\n"], _noop_log) == []
+
+
+def test_verified_nameservers_requires_exact_custom_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(firewall, "read_nameservers", lambda _: ["1.1.1.1", "8.8.8.8"])
+    assert firewall.verified_nameservers(["1.1.1.1", "8.8.8.8"], _noop_log) == ["1.1.1.1", "8.8.8.8"]
+
+
+def test_verified_nameservers_rejects_missing_extra_or_reordered(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setattr(firewall, "read_nameservers", lambda _: ["8.8.8.8", "1.1.1.1"])
+    try:
+        firewall.verified_nameservers(["1.1.1.1", "8.8.8.8"], _noop_log)
+    except firewall.NetworkIsolationError as err:
+        assert "does not match" in str(err)
+    else:
+        raise AssertionError("custom resolver mismatch must fail closed")
+
+
+def test_apply_firewall_custom_dns_rejects_general_dns_before_allowlist(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    def record(argv: list[str], *_args: object, **_kwargs: object) -> None:
+        commands.append(argv)
+
+    monkeypatch.setattr(firewall, "run_strict", record)
+    firewall.apply_firewall({("example.test", "203.0.113.9")}, ["1.1.1.1"], True, "", _noop_log, _noop_log)
+    udp_accept = ["iptables", "-A", "OUTPUT", "-d", "1.1.1.1", "-p", "udp", "--dport", "53", "-j", "ACCEPT"]
+    # Both DNS transports must be constrained before a broad domain allow can
+    # make an answering, unselected resolver reachable.
+    tcp_accept = ["iptables", "-A", "OUTPUT", "-d", "1.1.1.1", "-p", "tcp", "--dport", "53", "-j", "ACCEPT"]
+    udp_reject = ["iptables", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REJECT"]
+    tcp_reject = ["iptables", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REJECT"]
+    broad_accept = ["iptables", "-A", "OUTPUT", "-m", "set", "--match-set", "allowed-domains", "dst", "-j", "ACCEPT"]
+    assert commands.index(udp_accept) < commands.index(udp_reject) < commands.index(broad_accept)
+    assert commands.index(tcp_accept) < commands.index(tcp_reject) < commands.index(broad_accept)
+
+
+def test_apply_firewall_system_dns_keeps_existing_allowlist_behavior(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    def record(argv: list[str], *_args: object, **_kwargs: object) -> None:
+        commands.append(argv)
+
+    monkeypatch.setattr(firewall, "run_strict", record)
+    firewall.apply_firewall({("example.test", "203.0.113.9")}, ["1.1.1.1"], False, "", _noop_log, _noop_log)
+
+    assert ["iptables", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REJECT"] not in commands
+    assert ["iptables", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REJECT"] not in commands
+
+
+def test_apply_firewall_custom_dns_rejects_before_per_ip_fallback(monkeypatch: pytest.MonkeyPatch) -> None:
+    commands: list[list[str]] = []
+
+    def record_or_reject_ipset(argv: list[str], *_args: object, **_kwargs: object) -> None:
+        commands.append(argv)
+        if "--match-set" in argv:
+            raise firewall.NetworkIsolationError("xt_set unavailable")
+
+    monkeypatch.setattr(firewall, "run_strict", record_or_reject_ipset)
+    firewall.apply_firewall({("example.test", "203.0.113.9")}, ["1.1.1.1"], True, "", _noop_log, _noop_log)
+
+    udp_reject = ["iptables", "-A", "OUTPUT", "-p", "udp", "--dport", "53", "-j", "REJECT"]
+    tcp_reject = ["iptables", "-A", "OUTPUT", "-p", "tcp", "--dport", "53", "-j", "REJECT"]
+    per_ip_accept = ["iptables", "-A", "OUTPUT", "-d", "203.0.113.9", "-j", "ACCEPT"]
+    assert commands.index(udp_reject) < commands.index(per_ip_accept)
+    assert commands.index(tcp_reject) < commands.index(per_ip_accept)

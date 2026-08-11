@@ -37,6 +37,7 @@ func createCloneSource(t *testing.T, tmpDir, name string) {
 		Name:        name,
 		BackendType: "docker",
 		CreatedAt:   time.Now().Add(-time.Hour), // created an hour ago
+		DNS:         []string{"1.1.1.1", "8.8.8.8"},
 		Dirs: []store.DirEnvironment{{
 			HostPath:    "/tmp/project",
 			MountPath:   "/tmp/project",
@@ -72,6 +73,8 @@ func TestClone_Success(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, string(agent.AgentClaude), dstAgent.AgentType)
 	assert.Equal(t, "abc123", meta.Workdir().BaselineSHA)
+	assert.Equal(t, []string{"1.1.1.1", "8.8.8.8"}, meta.DNS,
+		"clone retains the captured DNS snapshot")
 	// CreatedAt should be refreshed (newer than source)
 	assert.True(t, meta.CreatedAt.After(time.Now().Add(-time.Minute)))
 }

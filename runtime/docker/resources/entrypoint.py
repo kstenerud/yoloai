@@ -182,6 +182,10 @@ def isolate_network(cfg: dict[str, Any]) -> None:
     not: without NET_ADMIN the iptables calls would fail. See
     docs/contributors/design/plans/tamper-resistant-network-isolation.md.
     """
+    custom_dns = cfg.get("dns", [])
+    if custom_dns:
+        import firewall
+        firewall.verified_nameservers(custom_dns, log_error)
     if not cfg.get("network_isolated", False):
         return
     if os.environ.get("YOLOAI_FIREWALL_EXTERNAL") == "1":
@@ -196,9 +200,9 @@ def isolate_network(cfg: dict[str, Any]) -> None:
     import firewall
 
     allowed_ips = firewall.resolve_domains(cfg.get("allowed_domains", []), log_error)
-    nameservers = firewall.read_nameservers(log_error)
+    nameservers = firewall.verified_nameservers(custom_dns, log_error)
     injector = os.environ.get("YOLOAI_BROKER_INJECTOR_ENDPOINT", "")
-    firewall.apply_firewall(allowed_ips, nameservers, injector, log_info, log_error)
+    firewall.apply_firewall(allowed_ips, nameservers, bool(custom_dns), injector, log_info, log_error)
 
 
 def run_setup_commands(cfg: dict[str, Any]) -> None:

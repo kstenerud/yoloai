@@ -99,19 +99,15 @@ func TestMigrateAgentConfigs_RelocatesAndStamps(t *testing.T) {
 	assert.Equal(t, "isolated", np.Mode)
 	assert.Equal(t, []string{"api.anthropic.com"}, np.Allow)
 
-	// environment.json is stamped v3 and no longer carries any of the relocated keys.
+	// Earlier rungs preserve v3; only the DNS snapshot migrator advances it.
 	keys := rawEnvKeys(t, sandboxDir)
 	assert.NotContains(t, keys, "agent")
 	assert.NotContains(t, keys, "model")
 	assert.NotContains(t, keys, "network_mode")
 	assert.NotContains(t, keys, "network_allow")
 	assert.JSONEq(t, "3", string(keys["version"]))
-
-	// The slimmed record now loads without balking — read from where it was
-	// written, which is still the flat path until the v6 tier move runs.
-	meta, err := store.LoadEnvironmentFrom(filepath.Join(sandboxDir, flatEnvFile))
-	require.NoError(t, err)
-	assert.Equal(t, "box", meta.Name)
+	_, err := store.LoadEnvironmentFrom(filepath.Join(sandboxDir, flatEnvFile))
+	require.ErrorIs(t, err, store.ErrNeedsMigration)
 
 	assertNoHostTier(t, sandboxDir)
 }
@@ -201,8 +197,8 @@ func TestMigrateAgentConfigs_MigratesV0Record(t *testing.T) {
 	readFlatRecord(t, sandboxDir, flatAgentCfgFile, &acfg)
 	assert.Equal(t, "claude", acfg.AgentType)
 
-	meta, err := store.LoadEnvironmentFrom(filepath.Join(sandboxDir, flatEnvFile))
-	require.NoError(t, err)
+	var meta store.Environment
+	readFlatRecord(t, sandboxDir, flatEnvFile, &meta)
 	assert.Equal(t, "yoloai-base", meta.ImageRef, "v0 image backfill")
 	require.Len(t, meta.Dirs, 1, "legacy workdir collapsed into Dirs[0]")
 	assert.Equal(t, "/proj", meta.Dirs[0].HostPath)

@@ -7,6 +7,7 @@ package orchestrator
 import (
 	"context"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/kstenerud/yoloai/internal/orchestrator/create"
@@ -88,7 +89,12 @@ func (e *Engine) Create(ctx context.Context, opts create.Options) (string, error
 	if err := e.ensure(ctx); err != nil {
 		return "", err
 	}
-	return create.Run(ctx, e.deps(), opts)
+	if err := e.ensureLayoutScaffold(); err != nil {
+		return "", err
+	}
+	return create.Run(ctx, e.deps(), opts, func(ctx context.Context, out io.Writer) error {
+		return e.runtime.Setup(ctx, e.layout, e.layout.ProfileDir("base"), out, e.logger, false)
+	})
 }
 
 // NeedsConfirmation reports whether destroying the sandbox would lose unapplied

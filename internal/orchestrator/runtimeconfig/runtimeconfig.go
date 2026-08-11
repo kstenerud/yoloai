@@ -59,6 +59,7 @@ type ContainerConfig struct {
 	StateDirName       string      `json:"state_dir_name"`
 	Debug              bool        `json:"debug,omitempty"`
 	NetworkIsolated    bool        `json:"network_isolated,omitempty"`
+	DNS                []string    `json:"dns,omitempty"`
 	AllowedDomains     []string    `json:"allowed_domains,omitempty"`
 	Passthrough        []string    `json:"passthrough,omitempty"`
 	SetupCommands      []string    `json:"setup_commands,omitempty"`

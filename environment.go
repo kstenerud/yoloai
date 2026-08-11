@@ -47,6 +47,7 @@ type Environment struct {
 	CapAdd             []string          `json:"cap_add,omitempty"`
 	Devices            []string          `json:"devices,omitempty"`
 	AutoCommitInterval int               `json:"auto_commit_interval,omitempty"`
+	DNS                DNSResolvers      `json:"dns,omitempty"`
 }
 
 // Workdir returns the primary directory — Dirs[0], the agent's cwd. Returns the
@@ -111,6 +112,7 @@ func environmentFromStore(m *store.Environment) *Environment {
 		CapAdd:             m.CapAdd,
 		Devices:            m.Devices,
 		AutoCommitInterval: m.AutoCommitInterval,
+		DNS:                DNSResolvers(m.DNS),
 	}
 	if len(m.Dirs) > 0 {
 		env.Dirs = make([]DirInfo, len(m.Dirs))

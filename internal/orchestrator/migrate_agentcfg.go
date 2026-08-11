@@ -85,7 +85,7 @@ func migrateAgentConfigRecord(sandboxDir string) error {
 	if err := json.Unmarshal(data, &legacy); err != nil {
 		return fmt.Errorf("parse %s: %w", store.EnvironmentFile, err)
 	}
-	if legacy.Version >= (&store.Environment{}).SchemaVersion() {
+	if legacy.Version >= 3 {
 		return nil // already migrated (sibling files were written by create or a prior run)
 	}
 
@@ -112,11 +112,12 @@ func migrateAgentConfigRecord(sandboxDir string) error {
 	if err := store.MigrateEnvironment(&meta); err != nil {
 		return err
 	}
+	meta.Version = 3
 	// Written back flat, at the same path it was read from. A migrator that read
 	// flat and wrote tiered would leave the record it re-reads unchanged, so the
 	// version check above would never advance and the sandbox would re-migrate
 	// forever (DF164).
-	if err := store.SaveEnvironmentTo(path, &meta); err != nil {
+	if err := store.SaveEnvironmentV3ForMigrationTo(path, &meta); err != nil {
 		return err
 	}
 	return nil

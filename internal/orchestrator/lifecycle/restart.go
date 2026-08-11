@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"maps"
 	"os"
+	"slices"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/agent"
@@ -27,6 +28,8 @@ import (
 	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 )
+
+var launchContainer = launch.LaunchContainer
 
 // initializeAgentFilesIfNeeded copies agent_files into the sandbox when they
 // have not yet been initialized (e.g., sandbox predates the feature or
@@ -145,12 +148,6 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		return err
 	}
 
-	// Read existing runtime-config.json
-	configData, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
-	if err != nil {
-		return fmt.Errorf("read runtime-config.json: %w", err)
-	}
-
 	// Build sandbox state for container launch.
 	// Workdir values are already resolved from meta (host-path and mode are stored
 	// verbatim at create time), so we construct DirSpec directly rather than
@@ -161,10 +158,9 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		Mode:      store.DirMode(meta.Workdir().Mode),
 	}
 
-	// Extract tmux_conf from runtime-config.json
-	var cfgJSON runtimeconfig.ContainerConfig
-	if err := json.Unmarshal(configData, &cfgJSON); err != nil {
-		return fmt.Errorf("parse runtime-config.json: %w", err)
+	configData, cfgJSON, err := patchAndLoadDNSConfig(sandboxDir, meta.DNS)
+	if err != nil {
+		return err
 	}
 
 	// Rebuild aux dir args from meta
@@ -201,6 +197,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		HasPrompt:    meta.HasPrompt,
 		NetworkMode:  np.Mode,
 		NetworkAllow: np.Allow,
+		DNS:          slices.Clone(meta.DNS),
 		Ports:        meta.Ports,
 		ConfigMounts: meta.Mounts,
 		TmuxConf:     cfgJSON.TmuxConf,
@@ -226,7 +223,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		sbState2.PromptSourcePath = store.ResumePromptFilePath(sandboxDir)
 	}
 
-	if err := launch.LaunchContainer(ctx, d, sbState2); err != nil {
+	if err := launchContainer(ctx, d, sbState2); err != nil {
 		return err
 	}
 
@@ -240,6 +237,23 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 	}
 
 	return nil
+}
+
+// patchAndLoadDNSConfig makes the environment snapshot authoritative before a
+// recreated instance receives its serialized runtime configuration.
+func patchAndLoadDNSConfig(sandboxDir string, resolvers []string) ([]byte, runtimeconfig.ContainerConfig, error) {
+	if err := patchConfigDNS(sandboxDir, resolvers); err != nil {
+		return nil, runtimeconfig.ContainerConfig{}, err
+	}
+	data, err := os.ReadFile(store.RuntimeConfigFilePath(sandboxDir))
+	if err != nil {
+		return nil, runtimeconfig.ContainerConfig{}, fmt.Errorf("read patched runtime-config.json: %w", err)
+	}
+	var cfg runtimeconfig.ContainerConfig
+	if err := json.Unmarshal(data, &cfg); err != nil {
+		return nil, runtimeconfig.ContainerConfig{}, fmt.Errorf("parse patched runtime-config.json: %w", err)
+	}
+	return data, cfg, nil
 }
 
 // tmuxCmd builds a tmux command slice, injecting -S <socket> when the sandbox

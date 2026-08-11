@@ -114,6 +114,9 @@ func printSandboxNetwork(w io.Writer, info *yoloai.SandboxInfo) {
 	if info.Environment != nil && len(info.Environment.Ports) > 0 {
 		fmt.Fprintf(w, "Ports:       %s\n", strings.Join(info.Environment.Ports, ", ")) //nolint:errcheck
 	}
+	if info.Environment != nil && len(info.Environment.DNS) > 0 {
+		fmt.Fprintf(w, "DNS:         %s\n", strings.Join(info.Environment.DNS, ", ")) //nolint:errcheck
+	}
 }
 
 // netHealthValue renders the value of the "Net health:" line. The wedged

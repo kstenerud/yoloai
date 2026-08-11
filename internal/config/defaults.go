@@ -55,6 +55,8 @@ network:
   isolated: false
   # Additional domains to allow when isolation is active (additive with agent defaults).
   allow: []
+  # Apple runtime IPv4 resolvers; [] keeps the vendor resolver.
+  # dns: []
 
 # --- Files and mounts ---
 

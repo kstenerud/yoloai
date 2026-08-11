@@ -37,6 +37,7 @@ const profileScaffold = `# agent: claude
 #   isolated: true           # enable network isolation
 #   allow:                   # domains allowed when isolated
 #     - example.com
+#   dns: []                  # Apple runtime IPv4 resolvers; [] is vendor DNS
 # workdir:
 #   path: ~/my-project
 #   mode: copy       # copy or rw

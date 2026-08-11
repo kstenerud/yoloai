@@ -15,6 +15,7 @@ import (
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -73,6 +74,55 @@ func TestSystem_ValidateSandboxName(t *testing.T) {
 	assert.Error(t, c.ValidateSandboxName("../escape"))
 }
 
+// TestSystem_ApplyMigration_RegistersDNSRung uses the public System migration
+// interface rather than constructing the DNS migrator directly. This proves the
+// v6->v7 rung is in the registered framework ladder: removing its registration
+// leaves the schema at v6 and this test red.
+func TestSystem_ApplyMigration_RegistersDNSRung(t *testing.T) {
+	s := newTestClient(t)
+	require.NoError(t, config.WriteSchemaVersion(s.layout.SchemaVersionPath(), config.SchemaTiered))
+	for _, name := range []string{"first", "second"} {
+		dir := s.layout.SandboxDir(name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(store.EnvironmentFilePath(dir)), 0o750))
+		testutil.WriteSandboxRecord(t, store.EnvironmentFilePath(dir), []byte(`{"version":3,"name":"`+name+`"}`))
+	}
+
+	report, err := s.ApplyMigration(context.Background(), MigrationDecision{})
+	require.NoError(t, err)
+	assert.ElementsMatch(t, []string{"first", "second"}, report.Migrated)
+	version, _, err := config.ReadSchemaVersion(s.layout.SchemaVersionPath())
+	require.NoError(t, err)
+	assert.Equal(t, config.SchemaDNSSnapshot, version)
+	for _, name := range []string{"first", "second"} {
+		meta, err := store.LoadEnvironment(s.layout.SandboxDir(name))
+		require.NoError(t, err)
+		assert.Equal(t, 4, meta.Version)
+		assert.Nil(t, meta.DNS, "v3 records migrate to an explicit v4 system-DNS snapshot")
+	}
+}
+
+// TestSystem_ApplyMigration_FullLadderToDNSSnapshot drives the public migration
+// entry point from the final flat-layout schema. Tiering must run before the DNS
+// rung, and the resulting record must load through the current ordinary reader.
+func TestSystem_ApplyMigration_FullLadderToDNSSnapshot(t *testing.T) {
+	s := newTestClient(t)
+	require.NoError(t, config.WriteSchemaVersion(s.layout.SchemaVersionPath(), config.SchemaPrincipalRenamed))
+	dir := s.layout.SandboxDir("flat-v3")
+	require.NoError(t, os.MkdirAll(dir, 0o750))
+	testutil.WriteSandboxRecord(t, filepath.Join(dir, store.EnvironmentFile), []byte(`{"version":3,"name":"flat-v3","backend":"seatbelt"}`))
+
+	_, err := s.ApplyMigration(context.Background(), MigrationDecision{})
+	require.NoError(t, err)
+	version, _, err := config.ReadSchemaVersion(s.layout.SchemaVersionPath())
+	require.NoError(t, err)
+	assert.Equal(t, config.SchemaDNSSnapshot, version)
+	assert.NoFileExists(t, filepath.Join(dir, store.EnvironmentFile))
+	meta, err := store.LoadEnvironment(s.layout.SandboxDir("flat-v3"))
+	require.NoError(t, err)
+	assert.Equal(t, 4, meta.Version)
+	assert.Nil(t, meta.DNS)
+}
+
 // TestSystem_ListAcrossBackends_Empty verifies a fresh install (no sandbox
 // dirs) lists nothing and probes no backends — no enumeration, no error.
 func TestSystem_ListAcrossBackends_Empty(t *testing.T) {
@@ -115,6 +165,13 @@ func writeEnv(t *testing.T, dir, content string) {
 	testutil.WriteSandboxRecord(t, filepath.Join(dir, "host", "environment.json"), []byte(content))
 }
 
+// writeCurrentEnv serializes a valid record through the store so tests that
+// exercise ordinary loading track the current environment metadata version.
+func writeCurrentEnv(t *testing.T, dir string) {
+	t.Helper()
+	require.NoError(t, store.SaveEnvironment(dir, &store.Environment{}))
+}
+
 // TestLiveInjectorPIDs_ProtectsOnlyLiveSandboxes guards the keep-set that scopes
 // the DF71 injector sweep: a sandbox with loadable metadata protects its recorded
 // injector PID; a broken sandbox's injector is fair game (an orphan).
@@ -122,7 +179,7 @@ func TestLiveInjectorPIDs_ProtectsOnlyLiveSandboxes(t *testing.T) {
 	c := newTestClient(t)
 
 	good := mkSandboxDir(t, c, "good")
-	writeEnv(t, good, `{"version":3}`)
+	writeCurrentEnv(t, good)
 	require.NoError(t, os.WriteFile(config.InjectorRecordPath(good), []byte(`{"pid":111,"addr":"127.0.0.1:1"}`), 0o600))
 
 	broken := mkSandboxDir(t, c, "broken")
@@ -168,10 +225,10 @@ func findTrashed(ts []TrashedSandbox, name string) bool {
 func TestPrune_ClassifiesSandboxDirs(t *testing.T) {
 	c := newTestClient(t)
 
-	// known: valid metadata at the current schema version (a pre-v3 record now
-	// balks on load and would classify as corrupt — see Q104).
+	// known: valid metadata at the current schema version. Older records balk on
+	// load and classify as corrupt until the framework migration upgrades them.
 	good := mkSandboxDir(t, c, "good")
-	writeEnv(t, good, `{"version":3}`)
+	writeCurrentEnv(t, good)
 
 	// never-init: no metadata, no work dir.
 	mkSandboxDir(t, c, "neverinit")

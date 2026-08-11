@@ -50,6 +50,7 @@ func TestMeta_SaveLoadRoundTrip(t *testing.T) {
 			CPUs:   "4",
 			Memory: "8g",
 		},
+		DNS: []string{"1.1.1.1", "8.8.8.8"},
 	}
 
 	err := SaveEnvironment(dir, original)
@@ -90,9 +91,17 @@ func TestMeta_OmitEmptyFields(t *testing.T) {
 	// writes them (they live in the sibling agent.json, Q104).
 	assert.NotContains(t, raw, "agent")
 	assert.NotContains(t, raw, "model")
+	assert.NotContains(t, raw, "dns")
 	// Default (no-principal) sandboxes omit the field, so existing
 	// environment.json files load as the default principal unchanged.
 	assert.NotContains(t, raw, "principal")
+}
+
+func TestMeta_MigrateV3ToV4DNS(t *testing.T) {
+	meta := &Environment{Version: 3, Name: "legacy"}
+	require.NoError(t, MigrateEnvironmentDNS(meta))
+	assert.Equal(t, 4, meta.Version)
+	assert.Nil(t, meta.DNS, "pre-DNS records retain system resolver semantics")
 }
 
 func TestMeta_VersionSetOnSave(t *testing.T) {

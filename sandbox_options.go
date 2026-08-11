@@ -78,6 +78,10 @@ type SandboxCreateOptions struct {
 	// NetworkAllow lists allowlisted domains when Network is NetworkModeIsolated.
 	NetworkAllow []string
 
+	// DNS is nil to inherit configuration, non-nil empty for the backend
+	// resolver, or an ordered custom IPv4 resolver list.
+	DNS DNSResolvers
+
 	// Ports forwards host→container ports. Protocol is tcp (the only mode the
 	// backend pipeline supports today).
 	Ports []PortMapping
@@ -164,6 +168,7 @@ func (o SandboxCreateOptions) toInternal() orchestrator.CreateOptions {
 		Headless:             o.Headless,
 		Network:              o.Network,
 		NetworkAllow:         o.NetworkAllow,
+		DNS:                  o.DNS,
 		Ports:                formatPorts(o.Ports),
 		Replace:              o.Replace,
 		AbandonUnappliedWork: o.AbandonUnappliedWork,
@@ -179,6 +184,10 @@ func (o SandboxCreateOptions) toInternal() orchestrator.CreateOptions {
 		Output:               o.Output,
 	}
 }
+
+// DNSResolvers is an ordered custom IPv4 resolver list. Nil inherits config;
+// a non-nil empty value explicitly selects the backend resolver.
+type DNSResolvers []string
 
 // SandboxCloneOptions configures Sandbox.Clone. Source (the receiver sandbox)
 // and Dest (the Clone argument) are not fields here — only the optional

@@ -210,6 +210,19 @@ func TestPrintNetworkDiff_AllowAdded(t *testing.T) {
 	assert.Contains(t, buf.String(), "+ b.com")
 }
 
+func TestPrintProfileInfoResources_RendersDNSWithoutIsolation(t *testing.T) {
+	var buf bytes.Buffer
+	printProfileInfoResources(&buf, &yoloai.ResolvedProfileConfig{Network: &yoloai.ProfileNetwork{DNS: []string{"1.1.1.1", "8.8.8.8"}}})
+	assert.Contains(t, buf.String(), "DNS:         1.1.1.1, 8.8.8.8")
+}
+
+func TestPrintNetworkDiff_RendersCustomToSystemDNSClear(t *testing.T) {
+	var buf bytes.Buffer
+	printed := printNetworkDiff(&buf, &yoloai.ProfileNetwork{DNS: []string{"1.1.1.1"}}, &yoloai.ProfileNetwork{DNS: []string{}})
+	assert.True(t, printed)
+	assert.Contains(t, buf.String(), "1.1.1.1 → system")
+}
+
 // --- printDirAdditions ---
 
 func TestPrintDirAdditions_NoAdditions(t *testing.T) {

@@ -73,6 +73,20 @@ func TestBuildNetworkConfig_Default(t *testing.T) {
 	assert.Nil(t, allow)
 }
 
+func TestResolveDNSPolicy(t *testing.T) {
+	apple := runtime.BackendDescriptor{Type: runtime.BackendApple, Capabilities: runtime.BackendCaps{CustomDNS: true}}
+	resolved, err := resolveDNSPolicy([]string{"1.1.1.1", "8.8.8.8"}, nil, NetworkModeIsolated, apple)
+	require.NoError(t, err)
+	assert.Equal(t, []string{"1.1.1.1", "8.8.8.8"}, resolved)
+
+	_, err = resolveDNSPolicy([]string{"1.1.1.1"}, nil, NetworkModeDefault, runtime.BackendDescriptor{Type: runtime.BackendDocker})
+	assert.ErrorContains(t, err, "does not support custom DNS")
+	_, err = resolveDNSPolicy(nil, nil, NetworkModeNone, apple)
+	assert.ErrorContains(t, err, "does not support --network-none")
+	_, err = resolveDNSPolicy([]string{"::1"}, nil, NetworkModeDefault, apple)
+	assert.ErrorContains(t, err, "must be an IPv4")
+}
+
 func TestBuildNetworkConfig_None(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	mode, allow := buildNetworkConfig(Options{Network: NetworkModeNone}, agentDef)
@@ -576,6 +590,110 @@ func TestCheckDirtyRepos_CleanRepoPasses(t *testing.T) {
 
 // prepareSandboxState validation tests (via state.Deps, not Engine)
 
+func prepareSandboxStateForTest(ctx context.Context, d state.Deps, opts Options) (*state.State, error) {
+	return prepareSandboxState(ctx, d, opts, func(context.Context, io.Writer) error { return nil })
+}
+
+func TestPrepareSandboxState_InvalidDNSDoesNotRunSetupOrCreateSandboxFiles(t *testing.T) {
+	tmpDir := t.TempDir()
+	layout := layoutForTmpDir(tmpDir)
+	d := state.Deps{Runtime: &fakeRuntime{}, Layout: layout, Input: strings.NewReader("")}
+	setupCalls := 0
+	_, err := prepareSandboxState(context.Background(), d, Options{
+		Name:    "invalid-dns",
+		Workdir: DirSpec{Path: tmpDir},
+		Agent:   "test",
+		DNS:     []string{"not-an-ip"},
+	}, func(context.Context, io.Writer) error {
+		setupCalls++
+		return nil
+	})
+	assert.ErrorContains(t, err, "must be an IPv4")
+	assert.Zero(t, setupCalls, "DNS policy must reject before runtime setup")
+	assert.NoDirExists(t, layout.SandboxDir("invalid-dns"), "DNS policy must reject before sandbox state creation")
+}
+
+type dnsPolicyRuntime struct {
+	fakeRuntime
+	descriptor        runtime.BackendDescriptor
+	profileImageCalls int
+	runtimeBaseCalls  int
+}
+
+func (r *dnsPolicyRuntime) Descriptor() runtime.BackendDescriptor { return r.descriptor }
+
+func (r *dnsPolicyRuntime) BuildProfileImage(_ context.Context, _ string, _ string, _ string, _ []string, _ config.Layout, _ io.Writer, _ *slog.Logger) error {
+	r.profileImageCalls++
+	return nil
+}
+
+func (r *dnsPolicyRuntime) ImageLabels(_ context.Context, _ string) (map[string]string, bool) {
+	return nil, false
+}
+
+func (r *dnsPolicyRuntime) PrepareRuntimeBase(_ context.Context, _ config.Layout, _ []string) (string, error) {
+	r.runtimeBaseCalls++
+	return "test-runtime-base", nil
+}
+
+// TestRun_DNSPolicyRejectsBeforeAllCreateEffects exercises the public create.Run
+// seam rather than resolveDNSPolicy directly. Each refusal happens before the
+// expensive setup closure, profile/runtime resolution, replacement, or sandbox
+// writes; the replace case additionally proves existing state is not destroyed.
+func TestRun_DNSPolicyRejectsBeforeAllCreateEffects(t *testing.T) {
+	for _, tt := range []struct {
+		name       string
+		defaults   string
+		dns        []string
+		network    NetworkMode
+		descriptor runtime.BackendDescriptor
+		want       string
+	}{
+		{
+			name: "inherited custom DNS on unsupported backend", defaults: "network:\n  dns: [1.1.1.1]\n",
+			descriptor: runtime.BackendDescriptor{Type: runtime.BackendDocker}, want: "does not support custom DNS",
+		},
+		{
+			name: "explicit custom DNS on unsupported backend", dns: []string{"1.1.1.1"},
+			descriptor: runtime.BackendDescriptor{Type: runtime.BackendDocker}, want: "does not support custom DNS",
+		},
+		{
+			name: "Apple Container network none", network: NetworkModeNone,
+			descriptor: runtime.BackendDescriptor{Type: runtime.BackendApple, Capabilities: runtime.BackendCaps{CustomDNS: true}}, want: "does not support --network-none",
+		},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			root := t.TempDir()
+			layout := layoutForTmpDir(root).WithPrincipal(config.CLIPrincipal)
+			if tt.defaults != "" {
+				require.NoError(t, os.MkdirAll(filepath.Dir(layout.DefaultsConfigPath()), 0o750))
+				require.NoError(t, os.WriteFile(layout.DefaultsConfigPath(), []byte(tt.defaults), 0o600))
+			}
+			name := "policy-reject"
+			profileDir := layout.ProfileDir("policy-profile")
+			require.NoError(t, os.MkdirAll(profileDir, 0o750))
+			require.NoError(t, os.WriteFile(filepath.Join(profileDir, "config.yaml"), []byte("agent: test\n"), 0o600))
+			require.NoError(t, os.WriteFile(filepath.Join(profileDir, "Dockerfile"), []byte("FROM scratch\n"), 0o600))
+			existing := layout.SandboxDir(name)
+			require.NoError(t, os.MkdirAll(existing, 0o750))
+			marker := filepath.Join(existing, "must-survive")
+			require.NoError(t, os.WriteFile(marker, []byte("keep"), 0o600))
+			calls := 0
+			rt := &dnsPolicyRuntime{descriptor: tt.descriptor}
+			_, err := Run(context.Background(), state.Deps{
+				Runtime: rt, Layout: layout, Input: strings.NewReader(""),
+			}, Options{Name: name, Agent: "test", Profile: "policy-profile", Runtimes: []string{"ios"}, Workdir: DirSpec{Path: root}, Replace: true, DNS: tt.dns, Network: tt.network},
+				func(context.Context, io.Writer) error { calls++; return nil })
+			assert.ErrorContains(t, err, tt.want)
+			assert.Zero(t, calls, "runtime setup must not run after DNS policy refusal")
+			assert.Zero(t, rt.profileImageCalls, "DNS policy must reject before profile image creation")
+			assert.Zero(t, rt.runtimeBaseCalls, "DNS policy must reject before runtime base preparation")
+			assert.FileExists(t, marker, "replacement/destruction must not run after DNS policy refusal")
+			assert.NoFileExists(t, store.EnvironmentFilePath(existing), "no sandbox state may be written")
+		})
+	}
+}
+
 func TestPrepareSandboxState_MissingName(t *testing.T) {
 	tmpDir := t.TempDir()
 	t.Setenv("ANTHROPIC_API_KEY", "sk-test")
@@ -586,7 +704,7 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "test",
@@ -604,7 +722,7 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "nonexistent-agent",
@@ -622,7 +740,7 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "test",
 		Workdir: DirSpec{Path: "/nonexistent/path"},
 		Agent:   "test",
@@ -645,7 +763,7 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "existing",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "test",
@@ -663,7 +781,7 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:       "test",
 		Workdir:    DirSpec{Path: tmpDir},
 		Agent:      "test",
@@ -685,7 +803,7 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "claude",
@@ -704,7 +822,7 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "test",
 		Workdir: DirSpec{Path: "/"},
 		Agent:   "claude",
@@ -725,7 +843,7 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 		Input:   strings.NewReader("y\n"),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir, Mode: DirModeRW, AllowDangerousPath: true},
 		Agent:   "claude",
@@ -759,7 +877,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "aider",
@@ -790,7 +908,7 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "test",
 		Workdir: DirSpec{Path: tmpDir},
 		Agent:   "claude",
@@ -816,7 +934,7 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 		Input:   strings.NewReader("y\n"),
 	}
 
-	st, err := prepareSandboxState(context.TODO(), d, Options{
+	st, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:    "test",
 		Workdir: DirSpec{Path: workDir},
 		Agent:   "claude",
@@ -868,7 +986,7 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 		Input:   strings.NewReader("y\n"),
 	}
 
-	st, err := prepareSandboxState(context.TODO(), d, Options{
+	st, err := prepareSandboxStateForTest(context.TODO(), d, Options{
 		Name:         "test",
 		Workdir:      DirSpec{Path: workDir},
 		Agent:        "claude",
@@ -903,7 +1021,7 @@ func TestPrepareSandboxState_UnreadableMetadataRefusesAndPreserves(t *testing.T)
 	require.NoError(t, os.WriteFile(workMarker, []byte("unapplied"), 0600))
 
 	d := state.Deps{Runtime: &fakeRuntime{}, Layout: layoutForTmpDir(tmpDir), Input: strings.NewReader("")}
-	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "old", Workdir: DirSpec{Path: tmpDir}, Agent: "test"})
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{Name: "old", Workdir: DirSpec{Path: tmpDir}, Agent: "test"})
 
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrSandboxExists, "this is the unreadable-metadata refusal, not the ordinary exists error")
@@ -922,7 +1040,7 @@ func TestPrepareSandboxState_AbsentMetadataIsNotRefused(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750)) // dir present, no environment.json
 
 	d := state.Deps{Runtime: &fakeRuntime{}, Layout: layoutForTmpDir(tmpDir), Input: strings.NewReader("")}
-	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "half", Workdir: DirSpec{Path: tmpDir}, Agent: "test"})
+	_, err := prepareSandboxStateForTest(context.TODO(), d, Options{Name: "half", Workdir: DirSpec{Path: tmpDir}, Agent: "test"})
 
 	// It may fail later on the fake runtime, but it must get PAST the metadata
 	// guard rather than refuse with the unreadable-metadata error.
