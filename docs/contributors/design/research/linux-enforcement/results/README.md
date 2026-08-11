@@ -205,6 +205,28 @@ so a rule still naming it matches a different sandbox with different policy. B k
 the DF190 variant — a running sandbox's identifier changing underneath it — does not occur here.
 Bounded by six *sequential* cycles; concurrent churn is untested and would be more adversarial.
 
+## Classifying a discarded run (D136)
+
+**From 2026-08-11, a run being invalidated carries two fields, written by whoever invalidates it at
+the moment they do it** — while the cause is in hand and the classification is a recollection rather
+than a reconstruction.
+
+- **`Class:`** — `free-negative` (a control satisfied by something other than the mechanism, the
+  [§11](../../../../principles/testing-principles.md) class and still the largest bucket here),
+  `frame-capture`, `instrument-in-region`, `predicate-bug`, `inference-overreach`,
+  `confounded-arms`, `no-verdict`. Definitions and specimens:
+  [`verification-method.md`](../../verification-method.md).
+- **`Direction:`** — `confirmed` or `contradicted`. Whether the bad run agreed with the hypothesis
+  in play. This one is not bookkeeping: the [D136](../../../../decisions/working-notes.md) count
+  found invalidated runs splitting **29 confirming to 8 contradicting**, and every contradicting one
+  was chased inside its round *because a contradicting result makes you look*. The confirming ones
+  are the ones that sit.
+
+**The rows below are deliberately not annotated.** Classifying twenty-nine of one's own bad runs
+after the fact is the same interpretive act that produced them, performed by the same reader. D136
+records one hand count, dated and labelled as soft; it is not repeated, and the aggregate is a
+`grep -c` computed on demand. Never store a total.
+
 ## Runs that were discarded, and why
 
 - **R1, R2 and R3's spoofing results were all free, and it took three runs to see it.** Every one

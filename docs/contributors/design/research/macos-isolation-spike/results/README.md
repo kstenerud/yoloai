@@ -71,6 +71,33 @@ the impression that the harness worked first time.
 | `pf-grant-matrix.txt` | **the matrix the brief asked for is moot; the one that replaced it found a conflict and its fix.** `pf-no-state.txt` removed the `-k` question entirely — revocation is a table delete — so there is no kill form to grant and no gateway peer to pin. What replaced it: D132's grant lets the unprivileged side change **table membership** and reload **one pinned file** root wrote, and never author rule text. The interface-keyed rewrite's rules say `on bridge101`, with indices assigned dynamically and reloaded on every detach and return. **G4 confirms the conflict** — no route installs an interface-keyed rule: not `-f <own file>`, not rewriting the pinned file (root-owned), not `-f -`. **G5 finds the fix and measures it**: invert the pool so there is one slot per **bridge index** rather than per sandbox. 164 rules covering bridge100–140 load fine (most naming interfaces that do not exist), and two real sandboxes then get **independent policy with nothing but table membership changed**. Interface keying fits D132 after all, provided the pool is inverted and the table regex covers the index range — a pattern change, not a model change. The cleaner idea, pf **interface groups**, is closed by measurement: macOS `ifconfig` answers `group: bad value` and its man page never mentions them. **And the method that `pf-liveness-detect.txt` V4 could not use now works**: the harness runs as root, removes its own blanket sudo grant for the duration, and refuses to report anything unless `sudo -n /usr/bin/true` is first shown to fail |
 | `dns-intercept.txt` | whether the host can see and take over a guest's DNS. It can, on apple: queries are observable on the bridge, `rdr` redirects UDP/53 to a host listener end to end, and `--dns` plus one rule makes it stick with 53 closed to everything else. **D4 is a bounded negative** — the same rule loaded on tart and nothing arrived, so tart's resolver path is not the same and is not characterised here |
 
+## Classifying a discarded run (D136)
+
+**From 2026-08-11, a run being invalidated carries two fields, written by whoever invalidates it at
+the moment they do it** — while the cause is in hand and the classification is a recollection rather
+than a reconstruction.
+
+- **`Class:`** — `free-negative` (a control satisfied by something other than the mechanism, the
+  [§11](../../../../principles/testing-principles.md) class and still the largest bucket),
+  `frame-capture`, `instrument-in-region`, `predicate-bug`, `inference-overreach`,
+  `confounded-arms`, `no-verdict`. Definitions and specimens:
+  [`verification-method.md`](../../verification-method.md) — most of which are drawn from this
+  directory.
+- **`Direction:`** — `confirmed` or `contradicted`. Whether the bad run agreed with the hypothesis
+  in play. `pf-spoof-run2-invalidated.txt` is the reason this field exists: 7 PASS / 0 FAIL for the
+  exact inverse of the truth, reading as a security result. The
+  [D136](../../../../decisions/working-notes.md) count found invalidated runs splitting **29
+  confirming to 8 contradicting**, and every contradicting one was chased inside its round.
+
+**The rows above are deliberately not annotated.** Classifying one's own bad runs after the fact is
+the same interpretive act that produced them. D136 records one hand count, dated and labelled as
+soft; it is not repeated, and the aggregate is a `grep -c` computed on demand. Never store a total.
+
+**This directory is also the case for the round rules.** It has 18 invalidation markers against the
+Linux half's 10, and the difference is structural rather than about care: the Linux pass ran against
+`archive/plans/enforcement-verification-queue.md` and synthesized once, and this one went item by
+item. See [`procedures/verification-rounds.md`](../../../../procedures/verification-rounds.md).
+
 ## What these files do NOT support
 
 Read this before quoting anything from them.
