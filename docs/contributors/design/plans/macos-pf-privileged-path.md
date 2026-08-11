@@ -439,6 +439,58 @@ cross-sandbox leaks and blamed the slot design, because its gate proved the gues
 and never that pf *would* block. It now fires one confirmed block before it trusts anything — which
 is option 3, arrived at by being burned.
 
+### Candidate: a fourth way out — read our own anchor's counters (2026-08-11)
+
+**The three options above are not exhaustive, and the one they miss avoids what each of them costs.**
+Raised while deciding where layer-3 enforcement failures should be detected; filed as
+[DF192](../findings-unresolved.md), which owns the defect this repairs.
+
+**Option 3 works and is forgeable.** The probe runs *inside the guest* via `container exec`, for the
+stated reason that from in there "pf blocked me" and "nothing routes" are indistinguishable. But the
+threat model is a hostile agent with sudo, and a root guest can shadow `curl` on `PATH` or intercept
+the exec'd command and return the exit status and HTTP code that read as HEALTHY. That is on top of
+the two properties audit already found — it mutates live policy so it races every acquisition, and
+its restore is unguarded. Three ways to be wrong, none of which its own output distinguishes.
+
+**Option 4: `pfctl -a com.apple/yoloai -vvs rules`, and read `Evaluations`.** This is not option 1.
+It reads *our own anchor* — the object the grant already permits reading non-verbosely — and
+discloses nothing about the host's filter policy. The shadowed fault is precisely a `pass quick all`
+that, in `man pf.conf`'s words, *"aborts the evaluation of the rules in other anchors"*. **An anchor
+that is never evaluated cannot count evaluations.** So a live sandbox whose anchor shows
+`Evaluations: 0` is the inert signature, read host-side, with the guest nowhere in the trust path.
+
+**pf can already do this; it is the grant that cannot ask.** `pf-no-state.txt` reads per-rule
+counters throughout (`out: 0 -> 17`, `in: 0 -> 1`) via `pfctl -a <anchor> -vvs rules` — see
+`pf_no_state.sh:105-120`, which selects rules by *text* rather than index for reasons worth copying.
+The grant permits `-s rules$`, anchored, so the verbose form is refused. macOS went behavioural
+because it could not ask for a number it produces perfectly well.
+
+**It also closes the platform asymmetry.** Linux answers this class host-side with nftables counters
+plus `NFNLGRP_NFTABLES`, no guest involved. Option 4 gives macOS the same shape, which means one
+verification model rather than two — and the layer-3 plan already found that reading one platform's
+result across to the other is how both of its rule-shape errors happened.
+
+**Three things must be measured before adopting it**, and none is an argument:
+
+1. **Does the grant widen safely?** Whether permitting the verbose read of our own anchor admits
+   anything else. That is a permit/refuse matrix run, not a judgement — `pf_grant_matrix.sh` exists,
+   and `pf-grant-matrix.txt` records V4's method for testing a refusal without a blanket grant
+   corrupting the result. **Bundle it with the table-regex widening the pool inversion already needs**
+   (§ *Post-rewrite verification*), so the boundary moves once and is measured once.
+2. **Does `Evaluations` actually stay 0 under the shadowed fault?** Predicted from `man pf.conf`, and
+   this document's own history is that predictions in this area have been wrong in both directions.
+   Induce the fault and read the counter.
+3. **Does it survive the pinned superset?** The inverted pool loads rules for ~41 bridge indices, most
+   of which do not exist. Whether a live sandbox's own slot counts evaluations distinguishably in that
+   shape is unmeasured.
+
+**And a fourth thing it needs regardless: a traffic baseline.** `Evaluations: 0` is ambiguous between
+"our anchor is not in the path" and "the sandbox sent nothing". Disambiguating needs a host-side
+signal that the sandbox is transmitting at all — bridge interface counters (`netstat -ib`) need no
+grant. Without that pairing this detector has its own free-negative, which is the failure the canary
+already shipped once (`pf-liveness-detect.txt` V3b: it returned HEALTHY for a dead container, a dead
+daemon, and a guest with no egress).
+
 ### The repair, since a detector implies one
 
 Measured, and the **order matters**: reload `/etc/pf.conf` to restore the anchor reference, *then*

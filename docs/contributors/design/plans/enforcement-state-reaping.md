@@ -247,6 +247,21 @@ notify keys with the watcher proven alive in the same run, and `/etc/pf.conf`'s 
 behavioural canary is the detector, at a **corrected 320–385 ms** with a 15.3 s worst case against a
 dropping path. It previously failed open, returning HEALTHY when the network was down.
 
+> **Do not adopt that canary for this design without reading [DF192](../findings-unresolved.md).**
+> It probes **from inside the guest** via `container exec`, so the hostile agent this workstream
+> exists to contain can shadow `curl` and answer for it. Moving enforcement host-side is only half
+> the win if the thing that decides whether enforcement is working still asks the sandbox. The
+> proposed replacement — read our own anchor's `Evaluations` counter host-side, paired with a bridge
+> traffic baseline — is in `macos-pf-privileged-path.md` § *Candidate: a fourth way out*, with the
+> three measurements it needs first.
+
+**The detector belongs on the host's side of the trust boundary, on both platforms.** Linux already
+is: nftables counters are kernel state a guest cannot write, and comparing a chain's counters against
+the veth's host-side `rx_packets` separates "our rules are in the path" from "our rules are inert"
+with no guest participation at all. Anything in-guest is diagnostics and UX — worth having to tell a
+cooperative user *why* a destination is refused, never load-bearing for whether yoloAI believes it is
+enforcing.
+
 **Do not fight forever.** Tailscale's trample handling is the pattern: detect, re-apply with backoff,
 **bound the retries**, then raise a persistent health warning and stop — at n=10 it logs that it is no
 longer attempting to replace the file. Collapse a batch of events into one fixup and rate-limit, or
