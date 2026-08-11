@@ -149,7 +149,6 @@ note "ignores it (pf-revocation-alt.txt T1), so exit status alone decides nothin
 printf 'block drop in quick on %s received-on %s proto tcp from any to %s\n' \
   bridge101 vmenet1 "$PROBE" > "$WD/ro.rules"
 RO_OUT=$(pfctl -a "$TANCHOR" -f "$WD/ro.rules" 2>&1 | quiet_pf | grep -viE 'Use of -f|present in the main|See /etc/pf.conf')
-RO_RC=$?
 RO_N=$(pfctl -a "$TANCHOR" -s rules 2>/dev/null | quiet_pf | grep -c . || true)
 note "received-on form: pfctl said: ${RO_OUT:-<nothing>}"
 note "                  rules in the anchor afterwards: $RO_N"
@@ -359,8 +358,10 @@ note "  per-VM interface, shared NAT : ${SHARED_VERDICT:-untested}"
 note "  per-VM interface, softnet    : ${SOFTNET_VERDICT:-untested}"
 note "  pf can key on it             : ${KEYABLE:-untested}"
 note ""
-note "The middle line is what run 1 answered and the bottom line is what the plan's row turns on."
-note "They are different claims and run 1 conflated them."
+note "  received-on available        : ${HAS_RECVON:-untested}"
+note ""
+note "The interface line is what run 1 answered and the keyability line is what the plan's row"
+note "turns on. They are different claims and run 1 conflated them."
 case "${KEYABLE:-untested}" in
   yes|yes-reversed)
     bad "T6: 'tart: none' is WRONG. Each VM gets its own host-side member interface AND pf can write a"

@@ -80,7 +80,6 @@ WD=$(mktemp -d /tmp/pfns.XXXXXX)
 SRVPID=""; CURLPID=""
 SERIES=""
 CLEAR_METHOD=""
-LAST_ARM=""
 VERDICT_SHAPE=""; VERDICT_RULES=""
 
 RESULTS="$HERE/results/pf-no-state.txt"
@@ -209,6 +208,7 @@ clear_flow() {
   stop_stream
   # /proc walk last, because pkill and killall are both absent from plenty of minimal images and
   # their absence is silent — the stream would simply run on and void the next census.
+  # shellcheck disable=SC2016  # runs in the GUEST; $c must not expand on the host
   asuser container exec "$G" sh -c '
     pkill -9 curl 2>/dev/null
     killall -9 curl 2>/dev/null
@@ -405,7 +405,7 @@ note "10s with counter 12. A rate of zero with a zero counter is a free negative
 
 RESULT_NOSTATE=untested
 revoke_arm() {   # $1 = label, $2 = ruleset. Sets ARM_VERDICT and ARM_SERIES.
-  ARM_VERDICT=untested; ARM_SERIES=""; LAST_ARM="$1"
+  ARM_VERDICT=untested
   load "$2" >/dev/null 2>&1
   [ "$(held)" -ge 2 ] || { note "$1: allowlist did not re-claim after the load; arm is void"; return; }
   clear_flow
@@ -430,7 +430,6 @@ revoke_arm() {   # $1 = label, $2 = ruleset. Sets ARM_VERDICT and ARM_SERIES.
   series "rev$1" 10 3
   local afi afo af; afi=$(rulestat "$BLOCKIN" Packets); afo=$(rulestat "$BLOCKOUT" Packets)
   af=$(( ${afi:-0} + ${afo:-0} ))
-  ARM_SERIES=$SERIES
   note "$1 KB/s over the 30s after revocation:$SERIES"
   note "$1 block counters — in: ${b4i:-0} -> ${afi:-0}   out: ${b4o:-0} -> ${afo:-0}   (out is '-' when"
   note "   the shape has no out-block rule);  gateway-flow states now: $(flow_states)"

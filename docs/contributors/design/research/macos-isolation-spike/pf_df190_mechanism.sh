@@ -111,14 +111,14 @@ done
 sleep 6
 note "every bridge and every address it carries:"
 bridges | sed 's/^/          /'
-COT_GWS=""
+COT_GWS=()
 for i in 1 2 3; do
   g=$(gwof "ycot_g$i"); b=$(brof "$g")
   note "  ycot_g$i: gw=${g:-<none>} -> ${b:-<none>}"
-  COT_GWS="$COT_GWS ${b:-none}"
+  COT_GWS+=("${b:-none}")
 done
-COT_UNIQ=$(printf '%s\n' $COT_GWS | sort -u | grep -c .)
-COT_N=$(printf '%s\n' $COT_GWS | grep -c .)
+COT_UNIQ=$(printf '%s\n' "${COT_GWS[@]}" | sort -u | grep -c .)
+COT_N=$(printf '%s\n' "${COT_GWS[@]}" | grep -c .)
 note "distinct bridges across $COT_N concurrent networks: $COT_UNIQ"
 if [ "$COT_UNIQ" = "$COT_N" ] && [ "$COT_N" = 3 ]; then
   ok "D0: three concurrent per-sandbox networks get three DISTINCT bridges, one gateway each. So"

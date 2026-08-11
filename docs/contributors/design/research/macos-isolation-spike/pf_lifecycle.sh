@@ -241,7 +241,7 @@ note "Without this arm, a stranger with correct policy in L3 could be correct be
 note "handed it a different index, because the timing happened to differ, or because the hazard does"
 note "not reproduce on this host today. I5 is reproducible, so the control is cheap and decisive."
 race L2
-L2_INHERIT=$RACE_INHERIT; L2_WBR=$RACE_W_BR
+L2_INHERIT=$RACE_INHERIT
 case "$L2_INHERIT" in
   yes) ok "L2: the stranger INHERITED A's policy — reached A's destination, refused its own. The"
        note "    hazard reproduces, so L3 has something to fix." ;;

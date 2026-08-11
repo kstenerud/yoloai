@@ -102,7 +102,7 @@ cleanup() {
   echo "== cleanup =="
   rm -f "$GRANT"
   restore_blanket
-  echo "   sudoers.d now: [$(ls /etc/sudoers.d/ 2>/dev/null | tr '\n' ' ')]"
+  echo "   sudoers.d now: [$(find /etc/sudoers.d -type f -exec basename {} \; 2>/dev/null | tr '\n' ' ')]"
   echo "   blanket restored: $([ -f "$BLANKET" ] && echo yes || echo NO -- restore it by hand)"
   pfctl -a "$ANCHOR" -F all >/dev/null 2>&1
   rm -rf "$WD"
@@ -161,7 +161,7 @@ if sudo -u "$U" -H sudo -n -k /usr/bin/true >/dev/null 2>&1; then
 else
   ok "G1: \`sudo -n /usr/bin/true\` is refused — refusals below mean what they say"
 fi
-note "sudoers.d during the matrix: [$(ls /etc/sudoers.d/ 2>/dev/null | tr '\n' ' ')]"
+note "sudoers.d during the matrix: [$(find /etc/sudoers.d -type f -exec basename {} \; 2>/dev/null | tr '\n' ' ')]"
 
 # ---------------------------------------------------------------------------
 say "G2 THE SHIPPED FORMS — all four must work"

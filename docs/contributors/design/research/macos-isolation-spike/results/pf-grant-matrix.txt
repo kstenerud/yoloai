@@ -1,5 +1,5 @@
 host: macOS 26.5.1 arm64
-date: 2026-08-11 08:38:02 CEST | anchor=com.apple/yoloai
+date: 2026-08-11 08:45:56 CEST | anchor=com.apple/yoloai
 sudo: Sudo version 1.9.17p2
 
 == G0 SETUP — install D132's grant, and take the harness's blanket grant away ==

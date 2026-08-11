@@ -1,5 +1,5 @@
 host: macOS 26.5.1 arm64
-date: 2026-08-11 08:31:25 CEST
+date: 2026-08-11 08:46:20 CEST
 tart: 2.32.1   softnet: error: unexpected argument '--version' found
 
 == T0 BASELINE — the host's interfaces before any VM exists ==
@@ -40,7 +40,7 @@ tart: 2.32.1   softnet: error: unexpected argument '--version' found
         
         Checked by loading it, not by reading about it: an anchor accepts `set timeout` and silently
         ignores it (pf-revocation-alt.txt T1), so exit status alone decides nothing without a control.
-        received-on form: pfctl said: /tmp/ttk.yDhkAY/ro.rules:1: syntax error
+        received-on form: pfctl said: /tmp/ttk.mbqEkl/ro.rules:1: syntax error
 pfctl: Syntax error in config file: pf rules not loaded
                           rules in the anchor afterwards: 0
         CONTROL, a plain rule in the same anchor: 1 rule(s) — proves the anchor loads at all
@@ -173,8 +173,10 @@ pfctl: Syntax error in config file: pf rules not loaded
           per-VM interface, softnet    : per-vm
           pf can key on it             : no
         
-        The middle line is what run 1 answered and the bottom line is what the plan's row turns on.
-        They are different claims and run 1 conflated them.
+          received-on available        : no
+        
+        The interface line is what run 1 answered and the keyability line is what the plan's row
+        turns on. They are different claims and run 1 conflated them.
    PASS    T6: 'tart: none' is right in EFFECT but wrong in its reason. It is not that tart has no
             per-sandbox networks -- it hands out a per-VM member interface in both modes -- it is
             that pf evaluates the traffic on the shared bridge and cannot key on the member at all --
