@@ -80,6 +80,7 @@ Pin versions when the package's behaviour can change in ways that break us. Don'
 - `golang-go` — *not* pinned in apt; Go is installed separately by tag (see "Go install" pattern below).
 - `nodejs` — pinned via NodeSource repository to Node 22 LTS (rationale: `../design/questions-resolved.md` #2, and DF158).
 - Downloaded binaries (gosu, ko, etc.) — pinned by version + checksum where possible.
+- `hadolint` — pinned by `ARG HADOLINT_VERSION` **and** a per-arch sha256 verified with `sha256sum -c`, since hadolint publishes `checksums.sha256` per release so "where possible" applies. It is a download rather than an apt package because Debian does not ship it; `shellcheck`, which Debian does ship, is an ordinary unpinned apt package. Both are in the image because `make check` requires them (D112) and its Docker fallback needs a daemon a sandbox only has under `container-privileged`. Gated by `TestDockerfile_ShipsTheLintersMakeCheckRequires`.
 - apt packages without a moving-target risk — left unpinned (hadolint DL3008 is suppressed for those `RUN` lines with `# hadolint ignore=DL3008` and a comment explaining the unpinned choice).
 
 ### Hadolint compliance

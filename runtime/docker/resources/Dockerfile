@@ -29,6 +29,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     jq \
     ripgrep \
     fd-find \
+    shellcheck \
     less \
     file \
     unzip \
@@ -180,6 +181,25 @@ RUN printf '#!/bin/sh\nexec aider --yes-always "$@"\n' > /usr/local/bin/yolo-aid
     && printf '#!/bin/sh\nexec gemini --yolo "$@"\n' > /usr/local/bin/yolo-gemini \
     && printf '#!/bin/sh\nexec opencode "$@"\n' > /usr/local/bin/yolo-opencode \
     && chmod +x /usr/local/bin/yolo-aider /usr/local/bin/yolo-claude /usr/local/bin/yolo-codex /usr/local/bin/yolo-gemini /usr/local/bin/yolo-opencode
+
+# hadolint: not in Debian, so it is a pinned download (shellcheck is apt, above).
+# Both are REQUIRED by `make check` (D112). The Makefile falls back to running
+# them via Docker, but that needs a daemon the sandbox only has under
+# container-privileged — so without these a sandbox cannot run the gate of the
+# project it was built to work on. Checksums per standards/dockerfile.md.
+ARG HADOLINT_VERSION=2.15.1
+RUN arch="$(dpkg --print-architecture)" \
+    && case "$arch" in \
+         amd64) ha=x86_64; sum=c7187db94eeeeca956519a6af171adc31453941a1e777961f6e680f697c8c507 ;; \
+         arm64) ha=arm64;  sum=f6198ef8090f404dbb771abfee086eb8c48ac177f30da7fd3510aca35b344b5d ;; \
+         *) echo "hadolint: unsupported arch $arch" >&2; exit 1 ;; \
+       esac \
+    && curl --retry 5 --retry-delay 2 --retry-all-errors -fsSL \
+       "https://github.com/hadolint/hadolint/releases/download/v${HADOLINT_VERSION}/hadolint-linux-${ha}" \
+       -o /usr/local/bin/hadolint \
+    && echo "${sum}  /usr/local/bin/hadolint" | sha256sum -c - \
+    && chmod +x /usr/local/bin/hadolint \
+    && hadolint --version
 
 # gosu for dropping privileges
 ARG GOSU_VERSION=1.17
