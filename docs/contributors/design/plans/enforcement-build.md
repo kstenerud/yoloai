@@ -1,0 +1,186 @@
+> **ABOUTME:** The "start here" build brief for host-side per-sandbox egress enforcement (layer 3).
+> The design is settled in `enforcement-state-reaping.md` and D132; this is the actionable plan and
+> deliberately not a place to re-litigate either.
+
+# Host-side enforcement — build brief
+
+- **Status:** PLANNED — no production code. The mechanism is measured on both platforms; what
+  remains is building it, plus the spikes named per part below.
+- **Depends on:** enforcement-state-reaping.md (the design), macos-pf-privileged-path.md (the macOS
+  privileged path), host-controlled-agent-launch.md (the pre-agent hook), tamper-resistant-network-isolation.md
+- **Rides:** **any.** It strengthens what `--network-isolated` already promises without changing its
+  spelling, and adds no user-visible name. **Two things would change that** and are called out where
+  they arise: refusing a sandbox that previously ran is newly-rejected input (breaking, rule 1), and
+  any persisted record that lands in the schema-versioned library is a migration (D131, and it opens
+  a release branch the moment it is known).
+
+## How this document works
+
+**It points; it does not track.** Every part below names the record that owns its status — a finding,
+a decision, or a plan. There is no status column here, on purpose: `post-merge-roadmap.md` has one,
+it is *known to lag* (DF103), and its own Status line tells readers to trust the plan rather than the
+table. Repeating that mistake in a second program document would be a choice, not an accident.
+
+**Work discovered mid-build goes in § Discovered**, as a line pointing at a record that owns it —
+never as a status, and never as a bullet that lives only here. This is the one convention the repo did
+not already have: rule 7 covers defects you decide not to fix, rule 8 covers ideas worth building, and
+neither covers *a necessary sub-part of the thing you are currently building, found while building it*.
+The rule is the same one `next-release.md` applies to itself, for the same reason.
+
+**When you jump, write it down first.** If a part is abandoned mid-flight for something more urgent,
+add the line to `next-release.md` § *In flight* before starting the new thing. The items are not what
+gets lost — the stack is.
+
+## What is already settled, so nobody re-derives it
+
+Three decisions, and the evidence behind each is in `enforcement-state-reaping.md`. **Do not rebuild
+from the older draft**: it keyed on the guest's IP address and two audits found it wrong.
+
+1. **Key on the host-side interface, never the guest's address.** On Linux the chosen form is a
+   **netdev ingress chain bound to the sandbox's own veth** — measured to key per-sandbox with
+   `br_netfilter` unloaded (r10), to hold a set-based allowlist with live revocation (r12), to revoke
+   a transfer already in flight (r14), and to work unprivileged inside rootless podman's netns (r13).
+   On macOS it is the bridge, via a **pinned superset with one slot per bridge index** (D132, G5).
+2. **No `ct state established,related accept` fast-path.** It is the direct cause of two bugs this
+   workstream found. A netdev chain sits before conntrack, so on Linux this is structural rather than
+   a rule to remember.
+3. **A rule's identity is the sandbox ID; the interface name is only its match.**
+
+**Two properties that follow and are easy to lose.** Deny with `reject`, not `drop` — measured at
+0.06 s against 5.09 s, and a black hole is what makes a severed agent fail confusingly. And a netdev
+chain **outlives its device as a stale-but-inert object**: it does not capture a successor (r11, r13),
+but it enforces nothing, and reading the ruleset cannot tell you.
+
+## Build order
+
+Each part names what it needs, and what would make it done. **A part is not done because its code
+merged; it is done when the thing under *exit* is true.**
+
+### Part 0 — the pre-agent hook
+
+`host-controlled-agent-launch.md` owns this, and it depends on nothing, which is why it is first. It
+is also the root of the macOS chain, so it pays three times.
+
+- **Needs:** code. No spike — the plan is researched against the code already.
+- **Why it gates everything:** enforcement must be installed *before the agent runs*, and reinstalled
+  when a sandbox's device is recreated. Both rootless podman (netns torn down with its last sandbox)
+  and the stale-but-inert netdev chain require it, independently.
+- **Exit:** a sandbox that stops and starts has enforcement in place before its agent's first packet,
+  asserted by a test that fails when the reinstall is removed.
+
+### Part 1 — Linux enforcement, docker first
+
+- **Needs:** code. The mechanism is measured; no spike outstanding for docker.
+- **Shape:** one netdev table per sandbox, chain bound to its veth, a named set as the allowlist, a
+  gateway accept, a DNS accept, and `reject` as the default for IPv4. ARP and IPv6 fall through the
+  chain policy deliberately — dropping ARP costs the sandbox its network and looks like containment.
+- **Exit:** two sandboxes on one bridge get independent policy in the same run; the denied
+  destination is refused with the deny counter incrementing; revoking a set element stops an
+  in-flight transfer. A rate of zero with a zero counter is a free negative and does not count.
+
+### Part 2 — detection, before any response policy
+
+- **Needs:** code, plus one spike (below).
+- **Why it is this early:** a `required` sandbox that cannot tell it has been trampled is just a
+  best-effort sandbox with a stronger label. Everything in part 5 rests on this.
+- **Shape:** host-side only. Compare the chain's counters against the veth's `rx_packets`
+  (`/sys/class/net/<veth>/statistics/`), plus `NFNLGRP_NFTABLES` for flush and delete events. **No
+  in-guest probe** — DF192 is the finding that says why, and the guest is what we do not trust.
+- **Spike:** the idle-sandbox case. `rule 0 + veth rx 0` is indistinguishable from a healthy sandbox
+  sending nothing, so the detector must report UNKNOWN there rather than healthy. That is the exact
+  free-negative the macOS canary already shipped once; it needs measuring, not reasoning.
+- **Exit:** an induced inert rule is reported as inert, and an idle sandbox is *not* reported as
+  broken, in the same run.
+
+### Part 3 — reaping and reconcile
+
+- **Needs:** code. The design is settled; the open question is where the record lives.
+- **Decision owed on day one:** the reconcile record is intended to stay **outside** the
+  schema-versioned library — host-side state rebuildable by reconciling against live sandboxes. If a
+  spike shows it must be schema-versioned, that is a migration, and D131 says cut `release-vX.Y.Z`
+  and move this work there **before** writing the persistence.
+- **Shape:** the record is removed *before* the rules it describes, never after (netavark's file-lock
+  race, which they hit). Startup diffs records against live sandboxes and tears down the difference.
+  Never delete on one identifier alone — Calico shipped an address-keyed reaper that deleted a live
+  workload's conntrack entries.
+- **Exit:** a sandbox destroyed without clean teardown leaves no rule a later sandbox can inherit,
+  asserted by reconciling and then checking a fresh sandbox gets only its own allowlist.
+
+### Part 4 — the other Linux backends
+
+- **Needs:** code. Both mechanisms are measured (r9 for CNI's veths, r13 for rootless podman).
+- **containerd:** one shared `yoloai0`, so the per-network bridge key does not apply; the netdev
+  chain does. **rootless podman:** the chain goes in the rootless netns via `podman unshare`, needs
+  no sudo, and dies with the last sandbox — so part 0's reinstall is mandatory here, not optional.
+- **Exit:** the part 1 exit criteria, on each backend, in `runtime/runtimetest` conformance form
+  rather than as a fake — rule 10's warning about capability-guarded tests applies directly.
+
+### Part 5 — intent, and what happens when we cannot enforce
+
+- **Needs:** a product decision from the owner, then code. **This is the part to not build first.**
+- **Why it exists:** `--network-isolated` today expresses one intent ("constrain it if you can"), and
+  the failure modes need three. The measured constraint is that refusal is only available for the
+  classes knowable *before* the sandbox starts; trampling, drift and inertness begin while the agent
+  is running, so a loud-unenforced path has to exist regardless.
+- **Shape, proposed:** a strength field on the `Netpolicy` record — the additive extension its own
+  type comment invites. Best-effort stays the default and breaks nothing. `required` refuses at
+  create for the knowable classes and **severs** at runtime for the rest.
+- **Sever means deny-all-but-the-gateway, with `reject`** — not kill. Measured (r7): host-destined
+  traffic never enters the forward hook, so a brokered agent keeps its API path and sees only that
+  some destinations now refuse. **On macOS this does not hold** — the rules sit on the bridge and
+  block both directions, so the gateway is inside the enforced surface and must be allowlisted
+  explicitly.
+- **Exit:** the owner has chosen; whichever is chosen has a test that fails when it is reverted.
+
+### Part 6 — macOS
+
+- **Needs:** `macos-pf-privileged-path.md` first, and it is blocked behind part 0.
+- **Two things this brief adds to that plan:** the pool must be inverted to one slot per bridge index
+  or interface keying does not fit D132's grant at all (G4/G5); and the grant should be measured for
+  a `-vvs rules` widening in the same matrix run, which would retire the guest-dependent canary
+  (DF192).
+- **Exit:** owned by that plan.
+
+## Riding along — small, independent, worth the same release
+
+None of these depends on the parts above, and each has a record that owns it. Each needs a `Rides:`
+field before it is staged.
+
+- **DF190's workaround** — delete the network when its last sandbox goes. An Apple-side defect with a
+  yoloAI-side remedy; unscoped, so size unknown.
+- **DF189** — move the CNI subnet off `10.89.0.0/16`, which is byte-identical to podman's default
+  allocator pool. `10.0.0.0`–`10.87.255.255` is outside every podman and docker local pool.
+- **DF188** — `resolve_domains` accepts sinkholed answers, installing a rule that matches nothing.
+- **DF193** — the guest can pre-create the on-create-done marker. Its own sweep (the other
+  read-write-tier files the host reads) is the larger half.
+
+## Discovered
+
+*Work found while building, each pointing at the record that owns it. Nothing else — no status.*
+
+*Nothing yet.*
+
+## Out of scope, deliberately
+
+- **tart.** Not a missing answer: each VM does get its own `vmenetN`, and macOS pf cannot key on a
+  bridge member — a rule on the member blocked nothing while the same rule on the bridge blocked both
+  VMs. Its own `--net-softnet-allow`/`-block` lists are the only surface it has, and nobody has
+  tested them.
+- **seatbelt.** Parked in `seatbelt-host-pf-enforcement.md`.
+- **The in-guest layer.** `tamper-resistant-network-isolation.md` owns it and this does not replace
+  it.
+- **Making a blocked agent recover gracefully.** A stalled or refused connection is the agent's
+  problem to handle; if "the agent just reconnects" needs to be true, that is separate work and it
+  applies to either shape.
+
+## Known-unmeasured, carried forward
+
+Named here because a build brief that reads as though everything is settled is the failure this
+workstream keeps producing. Fuller lists live in each results file's own bounding section.
+
+- **Cost.** Linux allowlist size 1/1000/10000 is *not separable* by the proxy used — that is not the
+  same as equal. macOS is unpriced at any size, and its pinned superset makes the question bigger.
+- **UDP**, on both platforms, throughout. DNS rides on it.
+- **IPv6.** Deliberately let past the chain policy on Linux; owned by `ipv6-network-isolation.md`.
+- **A hostile guest against any of this.** Every probe in the corpus is a cooperative `curl`.
+- **Concurrency.** One or two sandboxes, sequential, on an idle host, everywhere.

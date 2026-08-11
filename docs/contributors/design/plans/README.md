@@ -41,6 +41,12 @@ The part `ls` cannot give: what gates what, what must land first.
 
 - `egress-proxy-build.md`'s next step is `tamper-resistant-network-isolation.md` (containment
   step 1.5).
+- **Host-side enforcement (layer 3) is a program, and `enforcement-build.md` is its entry point.**
+  `enforcement-state-reaping.md` holds the design and the measurements; the brief holds the build
+  order and points at the record owning each part. Its root dependency is
+  `host-controlled-agent-launch.md`, which depends on nothing and also gates
+  `macos-pf-privileged-path.md` — so the macOS half of the stack cannot start until that one moves.
+  The brief carries no status column, deliberately: see DF103 and the note in its own header.
 - `retire-overlay-reflink-copy.md` is the active plan for the `:overlay` retirement (D109); the
   audit record (`overlay-sysadmin-escape.md`) is archived.
 - `public-layering.md` is the frame; `move-audit.md` and `session-carve.md` are its sub-tasks.
