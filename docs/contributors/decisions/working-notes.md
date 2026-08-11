@@ -1760,6 +1760,21 @@ A fourth observation is a *property worth keeping*: `report()` prints `-- WHAT W
 
 **An explicit escape exists, because the alternative is a trap.** Someone who uninstalls the grant, moves a library between machines, or changes backends must be able to proceed. The refusal names the remedy and a flag accepts the downgrade deliberately — loudly, and recorded on the sandbox so its history says the guarantee was lowered and when. What must not exist is a silent path.
 
-**Direction matters: an upgrade is not a downgrade.** A sandbox created with in-guest filtering and later started with host-side enforcement available should take it and say so. Only the lowering is refused.
+**Enforcement is never upgraded. It is fixed at creation and only ever moves down.** A sandbox started somewhere that could give it more does not take the extra; it runs exactly what it was created with. A user who wants stronger protection creates a new sandbox, which is a reasonable answer here and not a dodge — *disposable sandboxes* is the first line of this project's own description.
 
-**Not breaking under rule 1**, despite being a newly-rejected start: the tier concept does not exist yet, so no invocation that works today is refused. It ships with the feature that creates the guarantee in the first place.
+**Why not upgrade, since more protection sounds strictly better.** Because the axes are not alike, and auto-upgrading forces yoloAI to classify each one correctly, forever. Moving from in-guest to host-side placement is invisible to the user — same allowlist, same traffic permitted, merely harder for the agent to defeat. Gaining IPv6 coverage is a **behaviour change**: it blocks traffic that flowed yesterday. One of those is safe to apply silently and one is not, and every axis added later would need the same judgement. Never upgrading deletes the question instead of answering it repeatedly. It also keeps a sandbox's enforcement a property *of the sandbox* — like its agent, workdir and policy — rather than of whichever machine it last ran on.
+
+**So the record and reality never diverge**, in either direction. Applying more than the record says would make `ls` understate what is running and give "what does this sandbox enforce?" two answers.
+
+**What the user is actually asked** is therefore narrow, and it is the only question in this area they are asked at all: *the system can no longer deliver what this sandbox was created with — is it still acceptable to run it with less?* Their answer is the escape hatch, and it is theirs to give.
+
+**Mechanics, all of which follow from the above.**
+
+- The set of enforcement properties in force is recorded in `netpolicy.json` at creation.
+- Every start computes what this environment can deliver and asks one question: **is anything recorded now missing?** A one-directional subset test — no notion of "better" is needed, and none is defined.
+- Nothing missing → start, applying exactly the recorded set.
+- Something missing, no flag → **refuse**, listing *everything* missing. The check collects the full set before refusing and never fails fast: a truncated list makes the user fix one thing to discover the next, and makes any later acceptance cover items they were never shown.
+- Something missing, with the flag → start, **print the same list**, then rewrite the record downward. Printing on both paths is what makes the flag safe without tracking what the user has previously been shown — no state, no two-phase ceremony.
+- **Rewrite after the sandbox has actually started**, never before. Recording the weaker set and then failing to start would leave a sandbox claiming less than it has, and the next start would accept that weaker set without asking.
+
+**Not breaking under rule 1**, despite being a newly-rejected start: the enforcement record does not exist yet, so no invocation that works today is refused. It ships with the feature that creates the guarantee in the first place.

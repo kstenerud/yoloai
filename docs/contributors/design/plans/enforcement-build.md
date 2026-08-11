@@ -144,13 +144,26 @@ missing withdraws a working defense against the primary threat.
 - **Where it must appear:** at create, and in the sandbox's ongoing status — not only at create,
   because the tier can drop at runtime (trampling, drift) and a create-time line has scrolled away
   by then.
-- **A downgrade is refused** ([D135 amendment](../../decisions/working-notes.md)). Never-refuse
-  governs what a sandbox can be *given* at first create; it does not govern *withdrawing* what this
-  sandbox already had. A sandbox created with host-side enforcement and restarted where only
-  in-guest filtering is available is refused, with the remedy named and an explicit flag to accept
-  the downgrade deliberately. **Reboot is the ordinary path into this**, since elevation is not
-  sticky, so the check belongs on every start rather than on an explicit restart. An *upgrade* is
-  taken silently and announced.
+- **Enforcement is fixed at creation and only ever moves down** ([D135 amendment](../../decisions/working-notes.md)).
+  Never-refuse governs what a sandbox can be *given* at first create; it does not govern
+  *withdrawing* what this sandbox already had. Every start applies exactly the recorded set — a host
+  that could give more does not give more, because a placement upgrade is invisible while a coverage
+  upgrade (IPv6) blocks traffic that flowed yesterday, and never upgrading deletes that distinction
+  rather than requiring it be judged correctly for every axis ever added. Stronger protection means
+  **a new sandbox**, which is a fair answer in a tool whose first line of self-description is
+  *disposable sandboxes*.
+- **The one question the user is asked:** the system can no longer deliver what this sandbox was
+  created with — is it still acceptable to run it with less? **Reboot is the ordinary path into
+  this**, since elevation is not sticky, so the check belongs on every start rather than on an
+  explicit restart.
+- **The check is one-directional and collects everything.** *Is anything recorded now missing?* —
+  a subset test needing no notion of "better". It gathers the full set before refusing and never
+  fails fast, because a truncated list makes the user fix one thing to discover the next.
+- **`--allow-weaker-enforcement`** starts anyway, prints the same list, and rewrites the record
+  downward **after a successful start**, never before. Printing on both paths is what keeps the flag
+  safe with no state: nothing has to remember what the user was previously shown. Name chosen over
+  `--allow-downgrade` because `system migrate` already tells users to *downgrade*, meaning run an
+  older release.
 - **The recorded tier must live in the host tier.** `netpolicy.json` already does. A tier recorded
   anywhere guest-writable would let a hostile agent downgrade its own sandbox by editing the file —
   DF193's class, and the reason this is a placement requirement rather than a detail.
