@@ -1,0 +1,149 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-10 15:35:16 CEST
+tart: 2.32.1   softnet: error: unexpected argument '--version' found
+
+== T0 BASELINE — the host's interfaces before any VM exists ==
+        the apple backend is stopped first, so its bridges cannot be mistaken for tart's
+          IF lo0
+            127.0.0.1
+          IF gif0
+          IF stf0
+          IF anpi1
+          IF anpi0
+          IF en3
+          IF en4
+          IF en1
+          IF en2
+          IF bridge0
+          IF utun0
+          IF utun1
+          IF ap1
+          IF en0
+            192.168.0.157
+          IF utun2
+            100.107.208.103
+          IF awdl0
+          IF utun3
+          IF utun4
+          IF llw0
+          IF vmenet0
+          IF bridge100
+            192.168.139.3
+        interfaces at baseline: 21
+        cloned yoloai-base -> ytartkey_a, ytartkey_b
+
+== T1 SHARED NAT, ONE VM — what appears on the host? ==
+        This is the mode every earlier tart result in this directory used, without ever asking what
+        host interface it produces.
+        new interface(s): vmenet1 
+   PASS    T1: a tart VM in shared NAT does produce a host-side interface
+          IF vmenet1
+
+== T2 SHARED NAT, TWO VMs — one interface or two? ==
+        The per-sandbox key question, asked of tart in exactly the form it was asked of apple. If both
+        VMs land on one interface, no rule keyed on that interface can tell them apart and the plan's
+        'none' is right for this mode.
+        second VM's new interface(s): bridge101 vmenet2 
+   PASS    T2: each VM in shared NAT gets its OWN host interface. The plan's 'tart: none' is WRONG for
+            this mode and tart converges with the other bridge backends.
+        all interfaces with addresses now:
+          IF lo0
+            127.0.0.1
+          IF gif0
+          IF stf0
+          IF anpi1
+          IF anpi0
+          IF en3
+          IF en4
+          IF en1
+          IF en2
+          IF bridge0
+          IF utun0
+          IF utun1
+          IF ap1
+          IF en0
+            192.168.0.157
+          IF utun2
+            100.107.208.103
+          IF awdl0
+          IF utun3
+          IF utun4
+          IF llw0
+          IF vmenet0
+          IF bridge100
+            192.168.139.3
+          IF vmenet1
+          IF bridge101
+            192.168.64.1
+          IF vmenet2
+
+== T3/T4 SOFTNET — a mode nothing here has ever run ==
+        Softnet routes the VM through a subprocess over socketpair(2), and carries its own per-VM
+        destination allowlist (--net-softnet-allow / --net-softnet-block). Two things follow that the
+        plan does not currently say: there may be NO host interface to key on at all, and tart may
+        already have the enforcement this whole workstream is trying to add.
+        interfaces after both VMs stopped: 21
+        new interface(s) under softnet: bridge101 vmenet1 
+        second softnet VM's new interface(s): vmenet2
+        all interfaces with addresses under two softnet VMs:
+          IF lo0
+            127.0.0.1
+          IF gif0
+          IF stf0
+          IF anpi1
+          IF anpi0
+          IF en3
+          IF en4
+          IF en1
+          IF en2
+          IF bridge0
+          IF utun0
+          IF utun1
+          IF ap1
+          IF en0
+            192.168.0.157
+          IF utun2
+            100.107.208.103
+          IF awdl0
+          IF utun3
+          IF utun4
+          IF llw0
+          IF vmenet0
+          IF bridge100
+            192.168.139.3
+          IF vmenet1
+          IF bridge101
+            192.168.2.1
+          IF vmenet2
+   PASS    T3/T4: each Softnet VM gets its own host interface. tart has a per-VM key in this mode.
+
+== T5 VERDICT — what the plan's tart row should say ==
+          shared NAT, two VMs : two
+          softnet             : per-vm
+        
+   FAIL    T5: 'tart: none' is WRONG. At least one mode gives a per-VM host interface, so tart converges
+            with the bridge backends and the per-backend table needs changing before anything is
+            built on that row.
+
+== WHAT WAS NOT TRIED ==
+        - `--net-bridged`. It puts the VM on the physical LAN, which is a different threat model and
+          almost certainly not something yoloAI would adopt, so it is not exercised. That leaves one
+          of tart's three modes unmeasured.
+        - Whether Softnet's own --net-softnet-allow/--net-softnet-block actually enforce. Their
+          existence is read from `tart run --help`, not from a run: nothing here starts a VM with a
+          blocked CIDR and confirms it is unreachable from inside. If tart's own allowlist is the
+          answer for that backend, it needs the same treatment every pf rule in this directory got.
+        - Anything inside the guests. No VM here is logged into, so no egress is probed from a tart
+          VM at all. The arms are about what appears on the HOST, which is what interface keying
+          turns on.
+        - Whether the interfaces seen are stable across VM restart, which is the question that
+          produced the whole lifecycle rule on the apple backend. Not asked here.
+        - More than two VMs, and any allocator behaviour. If tart does hand out per-VM interfaces,
+          whether their names recycle is exactly the question I1-I5 had to answer for apple, and
+          none of it is answered here.
+
+== cleanup ==
+   VMs now: 0 of ours remain
+
+pass=3 fail=1 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/tart-net-key.txt

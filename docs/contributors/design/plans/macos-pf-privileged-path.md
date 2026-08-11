@@ -10,9 +10,11 @@
   that found three of its conclusions unsupported**. Nothing built. The pass added two required
   mechanisms — a bridge-scoped default-deny and connection-state teardown — and settled the
   verification, polling and pool-size questions with numbers. Two of those numbers then changed:
-  **connection-state teardown needs a `pfctl -k` grant after all**, and **the pool figures were 2×
-  too high**, which reopens the 8-slot decision. Read § *Audit remediation* before quoting anything
-  from § *What the verification pass settled*.
+  connection-state teardown appeared to need a `pfctl -k` grant, and **the pool figures were 2×
+  too high**, which reopens the 8-slot decision. **Then the enforcement plan was rewritten onto an
+  interface key (2026-08-10), and a further pass withdrew the `-k` requirement entirely** — see
+  § *Post-rewrite verification*, which supersedes the `-k` half of § *Audit remediation* and of
+  § *What the verification pass settled*. Read the post-rewrite section before quoting either.
 - **Depends on:** tamper-resistant-network-isolation.md, host-controlled-agent-launch.md
 - **Decision:** [D132](../../decisions/working-notes.md#d132--macos-pf-is-driven-through-a-generated-nopasswd-sudoers-grant-that-authorizes-pf-table-membership-and-nothing-else) — the mechanism and the five rejected alternatives. Cite that, not this file.
 - **Rides:** **any** — the user-visible surface only gains capability. `--network-isolated` becomes
@@ -30,7 +32,7 @@ statements; this table is the index.
 
 | Claim | Resolution |
 | --- | --- |
-| X2: "a return-direction rule stops it… prefer that to amending D132 for `pfctl -k`" | **CONFIRMED WRONG.** The missing arm was run (`pf-revocation.txt` R5a). Rule alone, kill removed: the transfer **survived**, 54→108 bytes, four states intact. Rule + kill: 45→45, stopped. The two are necessary *together*. The cheap fix does not exist. Both escapes were then measured and both are closed: an anchor accepts `set timeout` and **ignores it**, and a timeout cannot reach a busy state anyway (0s decay in 20s against an idle control's full 20s); `-K` kills **source tracking entries, not states**, so it was never a candidate. What does work is the two-host form `-k <guest> -k <gateway>`, which names both endpoints and so can be pinned in the grant. See § *What the verification pass settled*, and D132's 2026-08-09 remediation amendment. |
+| X2: "a return-direction rule stops it… prefer that to amending D132 for `pfctl -k`" | **SUPERSEDED 2026-08-11 — no `-k` grant is needed at all; see § *Post-rewrite verification*.** The row below is the 2026-08-09 finding and was correct against the stateful shape. **CONFIRMED WRONG.** The missing arm was run (`pf-revocation.txt` R5a). Rule alone, kill removed: the transfer **survived**, 54→108 bytes, four states intact. Rule + kill: 45→45, stopped. The two are necessary *together*. The cheap fix does not exist. Both escapes were then measured and both are closed: an anchor accepts `set timeout` and **ignores it**, and a timeout cannot reach a busy state anyway (0s decay in 20s against an idle control's full 20s); `-K` kills **source tracking entries, not states**, so it was never a candidate. What does work is the two-host form `-k <guest> -k <gateway>`, which names both endpoints and so can be pinned in the grant. See § *What the verification pass settled*, and D132's 2026-08-09 remediation amendment. |
 | M8's pool-cost figures, and the 8-slot decision drawn from them | **ARTIFACT, resolved.** The harness timed `sudo -u <user> -H sudo -n pfctl` — two nested sudo invocations per call, the drop *inside* the timed region. Both shapes run back to back: the difference is **7.95 ms/call** against 7.9 ms for one sudo. Corrected: **93 / 158 / 297 ms**, i.e. 14 / 25 / 46% of a container create. The audit's predicted "~47% not 99%" was right. **The 8-slot decision is open again.** |
 | M3 detector C, recommended and adopted | **CONFIRMED, fixed, and re-priced.** Both fault classes induced, with the old sentinel run beside the new one: guest cut off — old HEALTHY, new UNKNOWN; container gone — old HEALTHY, new UNKNOWN. The fix needs three probes, so the canary costs **320–385 ms, not 83–105**, with a 15.3 s worst case against a dropping path. Its policy mutation and acquisition race are now stated as adoption conditions. |
 
@@ -96,11 +98,72 @@ smaller gap than the claim that closed this investigation on macOS.
 > network because an unrelated sandbox restarted is a backend defect independent of every keying
 > question on this page, and it is reproducible — three consecutive runs.
 >
-> **It is not yet filed, and that is a gap, not a decision.** Rule 7 sends it to
-> `design/findings-unresolved.md`, which the parallel Linux pass is actively writing (it holds DF189
-> as of this run). Filing it from here races that. It needs a `DF` allocated with
-> `scripts/next-id.sh DF` after a `git fetch`, by whichever pass writes to that file next. Recorded
-> here so it is not lost in the meantime — see `pf-interface-key.txt` I2c for the run.
+> **Filed since as DF190 by the Linux pass**, and now diagnosed: it reproduces with zero rules
+> of ours loaded, so it is a defect in Apple's `container` and not ours, and its cause is a network
+> object outliving its last container and re-attaching onto an index handed out in the meantime.
+> Deleting the network when its last sandbox goes avoids it. A stop/start does **not** recover the
+> victim — it moves the defect to the other sandbox. See `df190-mechanism.txt`; the original
+> observation is `pf-interface-key.txt` I2c.
+
+## Post-rewrite verification — 2026-08-10/11
+
+The enforcement plan was rewritten onto a host-side interface key
+([`enforcement-state-reaping.md`](enforcement-state-reaping.md), 2026-08-10) and named five things
+for hardware. All five ran. Two of this file's standing conclusions do not survive them.
+
+| Question | Result |
+| --- | --- |
+| Does pf's `no state` give the Cilium shape, removing the state-teardown asymmetry? | **Yes, and the `-k` requirement is withdrawn.** But not for the reason the question assumed, and the shape costs more than a keyword — see below. |
+| Pin the `-k` peer to our gateway, under per-sandbox gateways? | **Moot.** Nothing needs `-k`. The tension between "pin the peer" and per-sandbox networks dissolves with it. |
+| DF190's mechanism, and who owns it | **Apple's.** It reproduces with zero rules of ours loaded, and a network object outliving its last container is the cause (`df190-mechanism.txt`). |
+| Is tart genuinely out of reach? | **Yes, and not for the stated reason.** tart *does* give each VM its own host-side `vmenetN` in both shared NAT and Softnet; what fails is pf, which evaluates on the shared bridge. A rule `on <member>` blocks nothing (counter 0) while the same rule on the bridge blocks both (counter 12), and OpenBSD's `received-on` is a syntax error here. So tart is unreachable because of **macOS pf**, not because of tart's networking — which leaves tart's own `--net-softnet-allow`/`-block` as its only enforcement surface, untested (`tart-net-key.txt`). |
+| The lifecycle rule, end to end | **Its withdraw half works and wins its race by 783 ms**; its re-read half could not be exercised (`pf-lifecycle.txt`). |
+
+**Revocation no longer needs a state kill, and this file's `-k` prescription is withdrawn**
+(`pf-no-state.txt`). `no state` on the ingress rule alone changes nothing: every rule here is `in` on
+the bridge, the host's reply travels `out`, matches no rule, meets pf's default pass — and a passed
+packet creates state, which is bidirectional and carries the guest's forward packets past rule
+evaluation. That mechanism was written into `pf_revocation.sh`'s own R5 notes and never followed up.
+Adding a return rule scoped to the allowlist reaches a genuine **zero-state census under a live
+transfer**, and revocation *still* fails, because every block here is also `in` — so the download
+direction is **never evaluated against a block at all**. Only the complete bidirectional shape
+revokes, and the 2×2 says both ingredients are necessary and neither sufficient:
+
+| | no egress block | with egress block |
+| --- | --- | --- |
+| **stateless** | survives | **stops** |
+| **stateful** | survives | survives |
+
+Measured on both destination classes with a control each, including the NAT'd path, where the
+translated state on `en0` — created outside our anchor by rules we do not own — survives the
+revocation and does not rescue the flow. **Revocation is then a `-T delete` and nothing else, which
+D132 already permits.** So the amendment this file called for is not needed, and the security
+boundary gets *narrower* rather than wider.
+
+**But the interface key does not fit D132's grant as written, and the fix is a pool inversion**
+(`pf-grant-matrix.txt`). The grant is defensible because the unprivileged side changes table
+membership and reloads one pinned file root wrote; it can never author rule text. Interface-keyed
+rules name a bridge, and indices are dynamic, per-sandbox, and change across a restart. All three
+routes to installing such a rule are closed, as they should be. The fix: **invert the pool so there
+is one slot per bridge index rather than per sandbox** — the pinned file enumerates every index the
+host could hand out, each with its own table, and claiming a sandbox means adding its allowlist to
+the table named after the index it landed on. Rules stay static, the key stays the interface, and the
+unprivileged side still only touches membership. Measured: 164 rules covering `bridge100`–`bridge140`
+load, and two real sandboxes get independent policy with no rule text written. **The grant needs its
+table regex widened to the index range** — a pattern change, not a model change. pf interface groups
+would have been cleaner and macOS does not have them (`ifconfig` answers `group: bad value`).
+
+**Two consequences this file must carry forward.** A sandbox landing on an index outside the
+superset's range meets no rule and is **silently unenforced — fail-open**, so the range needs a
+preflight assertion that does not exist. And `block drop out` on the bridge denies host-initiated
+traffic to the sandbox unless the source is allowlisted, so every sandbox's allowlist must contain
+its own gateway for credential injection to work at all.
+
+**§ *Verification is mandatory*'s V4 UNKNOWN is answerable after all.** It could not decide whether a
+grant was refused because it ran under a blanket harness grant. The method that works: run the check
+as root, remove the blanket for its duration — root keeps its authority because it already is root —
+and refuse to report anything until `sudo -n /usr/bin/true` is shown to fail. `pf-grant-matrix.txt`
+does this and returns a clean 7-permit / 9-refuse matrix.
 
 ## Why this exists
 
@@ -598,6 +661,13 @@ independently on Linux, where the same one-rule fix works. Two verdicts stay del
 borrowing B's *live* address failed on the return path (ARP delivers the reply to B), which says
 nothing about a stale address whose owner has exited; and the full-replace case left the guest
 holding no address, which is UNKNOWN rather than a refusal.
+
+> **SUPERSEDED, 2026-08-11.** Everything in this sub-section is true of the *stateful* ruleset it was
+> measured against, and the remedy it lands on — `pfctl -k <guest> -k <gateway>` plus a D132
+> amendment — is **withdrawn**. Under the stateless shape in § *Post-rewrite verification*, revocation
+> is a `-T delete` and nothing else. Kept because the mechanism it documents (why the surviving state
+> is sourced from the host, why order matters, why the two escapes are closed) is what led to the
+> replacement, and because a reader arriving from the audit table needs to find it.
 
 **Deleting an allowlist entry does not stop traffic already flowing (X2).** The transfer kept
 advancing after the delete while new connections were refused. `pfctl -k <guest>` alone does **not**

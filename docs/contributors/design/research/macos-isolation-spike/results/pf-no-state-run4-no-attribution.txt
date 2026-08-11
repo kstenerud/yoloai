@@ -1,0 +1,117 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-10 14:39:24 CEST | anchor=com.apple/yoloai_n | egress=en0
+
+== N0 SETUP — a per-sandbox network, which is the shape the rewritten design specifies ==
+        guest=192.168.65.2  gateway=192.168.65.1  bridge=bridge101  egress=en0
+        rate-controlled server up on 192.168.65.1:18651 — 32 KB per 125 ms = 256 KB/s, 150s
+
+== N1 DOES `no state` SURVIVE THE ROUND TRIP THROUGH pfctl? ==
+        pfctl exiting 0 is not the question. This anchor accepts `set timeout` and silently ignores
+        it (pf-revocation-alt.txt T1), so the only honest check is to read the rule back out.
+          pass in quick on bridge101 proto tcp from any to <yn_dst> no state
+          block drop in quick on bridge101 proto tcp all
+   PASS    N1: pf accepted `no state` AND reports it back — the keyword is really in the ruleset
+        allowlist holds 2 address(es) after the load — a flushed anchor loses table membership,
+        and an empty allowlist enforces nothing while the rules still read correctly.
+
+== N2 THE THREE SHAPES — correctness and state census for each ==
+        Gated on the CENSUS, not on correctness. Run 1 asked the wrong question here: a return rule is
+        not needed to make traffic work, it is needed to stop pf minting state on the reply. Correctness
+        passed, the arm was skipped, and the section announced a refutation of the very mechanism the
+        census on the next screen had just confirmed.
+        
+        S1  ingress `no state` only — the shape run 1 measured
+        correctness: gateway->200  external(NAT'd)->301  denied->000   (need non-000, non-000, 000)
+        slate cleared by: -k gateway -k guest
+        census: transfer at 1048576 bytes, states on the gateway flow = 1
+                (translated states on en0, which no bridge rule can prevent: 0)
+          ALL tcp 192.168.65.1:18651 -> 192.168.65.2:56234       ESTABLISHED:ESTABLISHED
+        
+        S2  + a return rule scoped to the allowlist, also `no state`
+        correctness: gateway->200  external(NAT'd)->301  denied->000   (need non-000, non-000, 000)
+        slate cleared by: -k gateway -k guest
+        census: transfer at 1048576 bytes, states on the gateway flow = 0
+                (translated states on en0, which no bridge rule can prevent: 0)
+        
+        S3  + `block drop out` — the complete bidirectional shape.
+            Every block rule in the interface-keyed design is `in` on the bridge, so the host's data
+            travelling OUT to the guest is never evaluated against a block at all. A download has a
+            permitted direction regardless of the allowlist. The retired address-keyed shape carried
+            `block return out quick to <src>` for this; the rewrite dropped it and nothing caught it.
+        correctness: gateway->200  external(NAT'd)->301  denied->000   (need non-000, non-000, 000)
+        slate cleared by: -k guest
+        census: transfer at 1048576 bytes, states on the gateway flow = 0
+                (translated states on en0, which no bridge rule can prevent: 0)
+        
+                       correctness   gateway-flow states during a live transfer
+          S1 in-only        yes              1
+          S2 +pass out      yes              0
+          S3 +block out     yes              0
+   PASS    N2: S2 is correct AND holds zero states during a live transfer — the stateless shape is
+            actually achieved, not merely requested. Revocation is measured on it below.
+
+== N3 REVOCATION OF AN IN-FLIGHT TRANSFER — the P1b shape ==
+        Sustained transfer, remove the allowlist entry with a table delete and NOTHING ELSE — no
+        `pfctl -k`, no reload — then sample the rate for 30s and read the block rule's counter.
+        Linux, for comparison: fast-path 300 KB/s for 30s with counter 0; no fast-path 0 KB/s inside
+        10s with counter 12. A rate of zero with a zero counter is a free negative, not a result.
+        S2 before revocation: 1277952 then 2064384 bytes; states on the gateway flow: 0
+        S2 revoked (1 address(es) left in the allowlist)
+        S2 KB/s over the 30s after revocation: 256 256 256 256 256 256 256 256 266 256
+        S2 block-in packet counter: 0 -> 0;  gateway-flow states now: 1
+   FAIL    N3/S2: the transfer SURVIVED revocation with a zero-state ruleset.
+        
+        S2 held no state and still could not revoke, so the survival is not about state at all.
+        Re-running on S3, which adds the missing `block drop out`:
+        S3 before revocation: 1310720 then 2097152 bytes; states on the gateway flow: 0
+        S3 revoked (1 address(es) left in the allowlist)
+        S3 KB/s over the 30s after revocation: 0 0 0 0 0 0 0 0 0 0
+        S3 block-in packet counter: 0 -> 0;  gateway-flow states now: 0
+   UNKNOWN N3/S3: inconclusive
+
+== N4 THE CONTROL — the winning shape with `no state` REMOVED, which must SURVIVE ==
+        Without this arm the experiment shows a transfer stopping, not `no state` stopping it. Same
+        protocol, same path, same destination, same rules — one keyword different.
+        the control anchor, read back (there must be NO `no state` here):
+          pass in quick on bridge101 proto tcp from any to <yn_dst> flags S/SA keep state
+          pass out quick on bridge101 proto tcp from <yn_dst> to any flags S/SA keep state
+          block drop in quick on bridge101 proto tcp all
+        CTL before revocation: 1277952 then 2064384 bytes; states on the gateway flow: 1
+        CTL revoked (1 address(es) left in the allowlist)
+        CTL KB/s over the 30s after revocation: 256 256 256 256 256 256 256 256 256 256
+        CTL block-in packet counter: 7 -> 9;  gateway-flow states now: 1
+   PASS    N4: the stateful control SURVIVED revocation, as R2/R3/R5a found. The two arms differ.
+
+== N5 VERDICT — derived from the arms above, not asserted ==
+          zero-state shape achieved:   S2
+          states under S1 / S2 / S3:   1 / 0 / 0
+          no-state arm:                stops-no-counter
+          stateful control arm:        survives
+   UNKNOWN N5: not decided by this run — read the arm verdicts above rather than this line.
+
+== WHAT WAS NOT TRIED ==
+        - UDP. Every rule and every probe here is TCP. pf's stateless handling of UDP is a separate
+          question and DNS rides on it.
+        - Throughput cost. Linux measured allowlist sizes 1/1000/10000 and found run-to-run variance
+          larger than any difference between configurations. Nothing here measures what per-packet
+          evaluation costs on pf at any allowlist size, so "it costs nothing" is a Linux result only.
+        - `set state-policy if-bound`. Run 1 found a NAT'd state on the egress interface
+          (guest -> host-lan -> 1.1.1.1) created outside this anchor entirely. If pf's default
+          floating state policy lets that state match the flow on the bridge, that is a second way
+          to defeat `no state` that no bridge-scoped rule can close. An anchor may well ignore
+          `set state-policy` the way it ignores `set timeout`.
+        - Revocation on the NAT'd path. Both revocation arms run against the gateway, which the host
+          TERMINATES. The external path is the product-relevant one and it is the one with the
+          weaker evidence here; it needs a rate-controlled destination this rig does not have.
+        - What `block drop out` costs. It blocks host-initiated traffic to the sandbox as well as
+          replies, and the credential broker's injector endpoint lives on the gateway address. If S3
+          is the shape that works, that interaction is a design question, not a detail.
+        - Concurrency. One sandbox, one flow. Whether these rules disturb a second sandbox was
+          measured for the stateful shape (pf-revocation-alt.txt T4) and not here.
+        - Long-lived idle connections, which is where state timeouts would have mattered.
+
+== cleanup ==
+   main-refs: before=2 after=2   anchor rules: 0
+
+pass=3 fail=1 unknown=2
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-no-state.txt

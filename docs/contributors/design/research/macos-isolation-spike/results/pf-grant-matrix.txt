@@ -1,0 +1,122 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-11 08:45:56 CEST | anchor=com.apple/yoloai
+sudo: Sudo version 1.9.17p2
+
+== G0 SETUP — install D132's grant, and take the harness's blanket grant away ==
+        harness blanket grant present: yes
+        pinned ruleset written to /etc/yoloai/pf-pool.conf (root:wheel 644), as D132 specifies
+   PASS    G0: D132's grant, written exactly as the plan states it, validates under visudo
+        blanket grant removed for the duration; this script keeps root because it already IS root
+
+== G1 THE GUARD — the matrix is void unless an unauthorized command is actually refused ==
+        pf-liveness-detect.txt V4 is UNKNOWN because it ran under a blanket grant and every refusal
+        check passed for a reason unrelated to D132. Proving the removal took, before trusting anything.
+   PASS    G1: `sudo -n /usr/bin/true` is refused — refusals below mean what they say
+        sudoers.d during the matrix: [yoloai-d132-matrix ]
+
+== G2 THE SHIPPED FORMS — all four must work ==
+   PERMIT  as expected table add
+   PERMIT  as expected table delete
+   PERMIT  as expected table show
+   PERMIT  as expected table flush
+   PERMIT  as expected reload the pinned file
+   PERMIT  as expected read the anchor's rules
+   PERMIT  as expected pf info
+
+== G3 WHAT MUST STAY REFUSED ==
+        `-k` is in this list as a SIMPLIFICATION now, not a cost. pf-no-state.txt showed revocation
+        needs only a table delete, so the grant never has to widen for it — and the gateway-pinning
+        tension the brief raised disappears with it.
+   REFUSE  as expected kill states by host (-k)
+   REFUSE  as expected kill states, both endpoints
+   REFUSE  as expected kill source tracking (-K)
+   REFUSE  as expected flush the anchor (-F all)
+   REFUSE  as expected read the MAIN ruleset
+   REFUSE  as expected read anchor rules verbosely
+   REFUSE  as expected disable pf
+   REFUSE  as expected a table outside the pool range
+   REFUSE  as expected a different anchor
+
+== G4 THE CONFLICT — can an unprivileged process install a rule naming a bridge? ==
+        This is the question the interface-keyed rewrite creates. Its rules say `on bridge101`, and
+        bridge indices are dynamic, per-sandbox, and change across a restart; pf-lifecycle.txt then
+        reloads the anchor on every detach and return with different interface names each time. D132's
+        model has the unprivileged side changing table MEMBERSHIP only, never rule TEXT.
+        
+        route 1: load an interface-keyed ruleset from a path of our choosing
+   REFUSE  as expected   -f <our own file>
+        route 2: rewrite the pinned file, then reload it with the permitted command
+   PASS    G4 route 2: the pinned file is not writable by the unprivileged user, so reloading it cannot
+                    smuggle in rule text. The pin holds.
+        route 3: an inline ruleset on stdin
+   PASS    G4 route 3: `-f -` is refused
+        
+        the rules actually in the anchor after all three attempts:
+          pass in quick from <yb_src_0> to <yb_dst_0> flags S/SA keep state
+          block return in quick from <yb_src_0> to any
+   PASS    G4: no interface-keyed rule could be installed by the unprivileged user through any route.
+            THAT IS THE PROBLEM, not the reassurance it looks like. The rewritten plan keys
+            enforcement on the host-side interface; those rules name a bridge whose index is assigned
+            dynamically and changes across a restart. Under D132 as written, the unprivileged side
+            cannot write them, and the pinned file cannot contain them because nobody knows the
+            indices at install time. So interface keying needs EITHER a privileged component that
+            authors rules at claim time, OR a pinned superset naming every index the host could ever
+            hand out, OR a wider grant. The plan picks none of these because it has not noticed.
+
+== G5 THE ESCAPE — a pinned SUPERSET with tables keyed by bridge INDEX ==
+        G4 says interface keying does not fit the grant. That is only worth reporting alongside what
+        would fit, and two candidates exist.
+        
+        The clean one is pf interface GROUPS: bind bridge101 into a group with ifconfig and let a static
+        rule say `on <group>`. macOS does not have them. Measured, not assumed:
+          ifconfig lo0 group ytest_probe -> ifconfig: group: bad value
+          man ifconfig mentions 'group': 0 time(s)
+          Closed, and it was the best idea.
+        
+        The surviving one inverts the pool. Instead of a slot per sandbox whose rule names that
+        sandbox's interface, have a slot per BRIDGE INDEX: the pinned file enumerates every index the
+        host could hand out, each with its own table, and claiming a sandbox means adding its allowlist
+        to the table named after the index it landed on. Rules stay static, the unprivileged side still
+        only ever changes table membership, and the key is still the interface. The grant's regex would
+        need to cover the index range — a pattern change, not a model change.
+        generated 206 lines covering bridge100-bridge140
+        pfctl said: <nothing>
+        rules loaded into the anchor: 164
+   PASS    G5: pf loaded 164 rules naming 41 bridge indices, most of which do not exist
+        
+        Loadable is not enforcing. Two real sandboxes, each claimed ONLY by adding an address to the
+        table named after its own bridge index — no rule text written at any point.
+        A on bridge101 (index 101), B on bridge102 (index 102)
+        claimed by table membership only: yb_dst_101 <- 1.1.1.1,  yb_dst_102 <- 1.0.0.1
+        A -> its own 1.1.1.1: 301    A -> B's 1.0.0.1: 000     (need non-000 then 000)
+        B -> its own 1.0.0.1: 301    B -> A's 1.1.1.1: 000    (need non-000 then 000)
+   PASS    G5: TWO SANDBOXES GET INDEPENDENT POLICY, keyed on the interface, with a static pinned
+            ruleset and nothing but table membership changed. The interface-keyed design DOES fit
+            D132's model — provided the pool is inverted to one slot per bridge INDEX and the
+            grant's table regex covers that range. That is the shape the plan should specify.
+
+== WHAT WAS NOT TRIED ==
+        - What the superset costs at evaluation time. G5 loads 41 indices; a host could hand out
+          more, and every packet is now evaluated against a first-match list dominated by rules for
+          interfaces that do not exist. pf-no-state.txt already declines to price per-packet
+          evaluation, and this makes that gap bigger rather than smaller.
+        - What happens when a sandbox lands on an index OUTSIDE the superset range. It would meet no
+          rule at all and be silently unenforced — fail-open, the worst direction. That needs a
+          preflight assertion nobody has written.
+        - Whether a privileged claim-time component is acceptable at all. That is a product decision
+          about what may run as root, not a measurement, and it is the likeliest real answer.
+        - sudo's regex matching itself. The grant is taken verbatim from the plan and validated, but
+          no attempt was made to defeat the regexes -- argument smuggling, alternate pfctl paths,
+          symlinks, or `--` handling. A permit/refuse matrix is not a review of the pattern.
+        - Any form of the grant other than the one the plan states. If the plan's text is wrong, this
+          measures the wrong boundary faithfully.
+        - The lifecycle rule's reload CADENCE against sudo. Every reload is a sudo invocation and
+          pf-pool-scaling.txt priced one at ~7.9 ms; nothing here multiplies that by a detach/return
+          rate, and pf-lifecycle.txt's daemon reloads on every transition.
+
+== cleanup ==
+   sudoers.d now: [yoloai-spike-session ]
+   blanket restored: yes
+
+pass=24 fail=0 unknown=0
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-grant-matrix.txt

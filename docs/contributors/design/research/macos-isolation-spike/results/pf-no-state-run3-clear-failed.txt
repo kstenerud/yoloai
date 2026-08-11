@@ -1,0 +1,94 @@
+host: macOS 26.5.1 arm64
+date: 2026-08-10 14:16:17 CEST | anchor=com.apple/yoloai_n | egress=en0
+
+== N0 SETUP — a per-sandbox network, which is the shape the rewritten design specifies ==
+        guest=192.168.65.2  gateway=192.168.65.1  bridge=bridge101  egress=en0
+        rate-controlled server up on 192.168.65.1:18651 — 32 KB per 125 ms = 256 KB/s, 150s
+
+== N1 DOES `no state` SURVIVE THE ROUND TRIP THROUGH pfctl? ==
+        pfctl exiting 0 is not the question. This anchor accepts `set timeout` and silently ignores
+        it (pf-revocation-alt.txt T1), so the only honest check is to read the rule back out.
+          pass in quick on bridge101 proto tcp from any to <yn_dst> no state
+          block drop in quick on bridge101 proto tcp all
+   PASS    N1: pf accepted `no state` AND reports it back — the keyword is really in the ruleset
+        allowlist holds 2 address(es) after the load — a flushed anchor loses table membership,
+        and an empty allowlist enforces nothing while the rules still read correctly.
+
+== N2 THE THREE SHAPES — correctness and state census for each ==
+        Gated on the CENSUS, not on correctness. Run 1 asked the wrong question here: a return rule is
+        not needed to make traffic work, it is needed to stop pf minting state on the reply. Correctness
+        passed, the arm was skipped, and the section announced a refutation of the very mechanism the
+        census on the next screen had just confirmed.
+        
+        S1  ingress `no state` only — the shape run 1 measured
+        correctness: gateway->200  external(NAT'd)->301  denied->000   (need non-000, non-000, 000)
+        census VOID: 1 state(s) on 192.168.65.1:18651 survived the clear, so anything counted below
+          would include them.
+        
+        S2  + a return rule scoped to the allowlist, also `no state`
+        correctness: gateway->200  external(NAT'd)->301  denied->000   (need non-000, non-000, 000)
+        census VOID: 1 state(s) on 192.168.65.1:18651 survived the clear, so anything counted below
+          would include them.
+        
+        S3  + `block drop out` — the complete bidirectional shape.
+            Every block rule in the interface-keyed design is `in` on the bridge, so the host's data
+            travelling OUT to the guest is never evaluated against a block at all. A download has a
+            permitted direction regardless of the allowlist. The retired address-keyed shape carried
+            `block return out quick to <src>` for this; the rewrite dropped it and nothing caught it.
+        correctness: gateway->200  external(NAT'd)->301  denied->000   (need non-000, non-000, 000)
+        census VOID: 1 state(s) on 192.168.65.1:18651 survived the clear, so anything counted below
+          would include them.
+        
+                       correctness   gateway-flow states during a live transfer
+          S1 in-only        no              -1
+          S2 +pass out      no              -1
+          S3 +block out     no              -1
+   FAIL    N2: no shape tried reaches a zero census with working traffic. pf is minting state for this
+             flow from somewhere none of these rules covers — the NAT'd state on en0 is the standing
+             candidate, and it is created outside this anchor entirely.
+
+== N3 REVOCATION OF AN IN-FLIGHT TRANSFER — the P1b shape ==
+        Sustained transfer, remove the allowlist entry with a table delete and NOTHING ELSE — no
+        `pfctl -k`, no reload — then sample the rate for 30s and read the block rule's counter.
+        Linux, for comparison: fast-path 300 KB/s for 30s with counter 0; no fast-path 0 KB/s inside
+        10s with counter 12. A rate of zero with a zero counter is a free negative, not a result.
+   UNKNOWN N3: no zero-state shape to revoke on; skipped rather than run on a shape N2 rejected.
+
+== N4 THE CONTROL — the winning shape with `no state` REMOVED, which must SURVIVE ==
+        Without this arm the experiment shows a transfer stopping, not `no state` stopping it. Same
+        protocol, same path, same destination, same rules — one keyword different.
+   UNKNOWN N4: no winning shape to build a control from.
+
+== N5 VERDICT — derived from the arms above, not asserted ==
+          zero-state shape achieved:   none
+          states under S1 / S2 / S3:   -1 / -1 / -1
+          no-state arm:                untested
+          stateful control arm:        untested
+   UNKNOWN N5: not decided by this run — read the arm verdicts above rather than this line.
+
+== WHAT WAS NOT TRIED ==
+        - UDP. Every rule and every probe here is TCP. pf's stateless handling of UDP is a separate
+          question and DNS rides on it.
+        - Throughput cost. Linux measured allowlist sizes 1/1000/10000 and found run-to-run variance
+          larger than any difference between configurations. Nothing here measures what per-packet
+          evaluation costs on pf at any allowlist size, so "it costs nothing" is a Linux result only.
+        - `set state-policy if-bound`. Run 1 found a NAT'd state on the egress interface
+          (guest -> host-lan -> 1.1.1.1) created outside this anchor entirely. If pf's default
+          floating state policy lets that state match the flow on the bridge, that is a second way
+          to defeat `no state` that no bridge-scoped rule can close. An anchor may well ignore
+          `set state-policy` the way it ignores `set timeout`.
+        - Revocation on the NAT'd path. Both revocation arms run against the gateway, which the host
+          TERMINATES. The external path is the product-relevant one and it is the one with the
+          weaker evidence here; it needs a rate-controlled destination this rig does not have.
+        - What `block drop out` costs. It blocks host-initiated traffic to the sandbox as well as
+          replies, and the credential broker's injector endpoint lives on the gateway address. If S3
+          is the shape that works, that interaction is a design question, not a detail.
+        - Concurrency. One sandbox, one flow. Whether these rules disturb a second sandbox was
+          measured for the stateful shape (pf-revocation-alt.txt T4) and not here.
+        - Long-lived idle connections, which is where state timeouts would have mattered.
+
+== cleanup ==
+   main-refs: before=2 after=2   anchor rules: 0
+
+pass=1 fail=1 unknown=3
+results: /Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/macos-isolation-spike/results/pf-no-state.txt
