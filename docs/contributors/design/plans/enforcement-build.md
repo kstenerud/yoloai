@@ -6,8 +6,12 @@
 
 - **Status:** PLANNED — no production code. The mechanism is measured on both platforms; what
   remains is building it, plus the spikes named per part below.
-- **Depends on:** enforcement-state-reaping.md (the design), macos-pf-privileged-path.md (the macOS
-  privileged path), host-controlled-agent-launch.md (the pre-agent hook), tamper-resistant-network-isolation.md
+- **Depends on:** enforcement-state-reaping.md, host-controlled-agent-launch.md, macos-pf-privileged-path.md, tamper-resistant-network-isolation.md
+
+  Which is which: `enforcement-state-reaping.md` holds the design and the measurements,
+  `host-controlled-agent-launch.md` is the pre-agent hook and the root of the whole chain,
+  `macos-pf-privileged-path.md` is the macOS privileged path, and
+  `tamper-resistant-network-isolation.md` is the in-guest layer this sits above rather than replaces.
 - **Rides:** **any.** It strengthens what `--network-isolated` already promises without changing its
   spelling, and adds no user-visible name. **Two things would change that** and are called out where
   they arise: refusing a sandbox that previously ran is newly-rejected input (breaking, rule 1), and
@@ -115,22 +119,42 @@ is also the root of the macOS chain, so it pays three times.
 - **Exit:** the part 1 exit criteria, on each backend, in `runtime/runtimetest` conformance form
   rather than as a fake — rule 10's warning about capability-guarded tests applies directly.
 
-### Part 5 — intent, and what happens when we cannot enforce
+### Part 5 — degrade and disclose
 
-- **Needs:** a product decision from the owner, then code. **This is the part to not build first.**
-- **Why it exists:** `--network-isolated` today expresses one intent ("constrain it if you can"), and
-  the failure modes need three. The measured constraint is that refusal is only available for the
-  classes knowable *before* the sandbox starts; trampling, drift and inertness begin while the agent
-  is running, so a loud-unenforced path has to exist regardless.
-- **Shape, proposed:** a strength field on the `Netpolicy` record — the additive extension its own
-  type comment invites. Best-effort stays the default and breaks nothing. `required` refuses at
-  create for the knowable classes and **severs** at runtime for the rest.
-- **Sever means deny-all-but-the-gateway, with `reject`** — not kill. Measured (r7): host-destined
-  traffic never enters the forward hook, so a brokered agent keeps its API path and sees only that
-  some destinations now refuse. **On macOS this does not hold** — the rules sit on the bridge and
-  block both directions, so the gateway is inside the enforced surface and must be allowlisted
-  explicitly.
-- **Exit:** the owner has chosen; whichever is chosen has a test that fails when it is reverted.
+**Decided 2026-08-11: [D135](../../decisions/working-notes.md). yoloAI never refuses a sandbox for
+lack of enforcement capability. It degrades to the strongest layer available and says which one that
+is.** The reasoning was already in the tree: `design/network-isolation.md` § *Threat Model* ranks the
+**errant** agent as primary and says that for it *"any filter that says 'no' to the right destinations
+is sufficient"* — which the in-guest layer meets. Refusing to start because the *secondary* defense is
+missing withdraws a working defense against the primary threat.
+
+- **Needs:** code, plus the message text. No spike.
+- **Disclosure is the mandatory half**, for the reason the same section gives: *"The rules must not
+  have silent partial-application modes. A rogue agent benefits from any case where the user believes
+  isolation is enforced but it isn't."*
+- **Three tiers, and the message must distinguish them** — they are different guarantees, not
+  different verbosity:
+
+  | Tier | What it is | What it stops |
+  | --- | --- | --- |
+  | in-guest only | `iptables`+`ipset` inside the sandbox | an errant agent; **an agent that gains root can flush it** |
+  | in-guest, tamper-resistant | installed from a privileged sidecar, agent holds no `CAP_NET_ADMIN` | the agent cannot flush its own rules |
+  | host-side | rules outside the sandbox, keyed on the host interface | measured not defeasible by a guest with `CAP_NET_ADMIN` |
+
+- **Where it must appear:** at create, and in the sandbox's ongoing status — not only at create,
+  because the tier can drop at runtime (trampling, drift) and a create-time line has scrolled away
+  by then.
+- **Runtime response stays sever, not kill.** Measured (r7): host-destined traffic never enters the
+  forward hook, so a brokered agent keeps its API path and sees only that some destinations now
+  refuse. Deny with `reject` (0.06 s vs 5.09 s). **On macOS this does not hold** — the rules sit on
+  the bridge and block both directions, so the gateway is inside the enforced surface and must be
+  allowlisted explicitly.
+- **Deferred, not rejected:** an opt-in strict mode that fails rather than degrades, for CI and
+  shared hosts. Nobody has asked; adding it later is additive; and whenever it arrives, refusing a
+  sandbox that previously ran is newly-rejected input and therefore breaking.
+- **Exit:** a sandbox that cannot get host-side enforcement still runs, still filters, and its status
+  names the tier — asserted by a test that fails when the disclosure is removed, not merely when the
+  enforcement is.
 
 ### Part 6 — macOS
 

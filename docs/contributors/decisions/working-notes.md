@@ -1718,3 +1718,29 @@ The migrations were run to test the library, and they did. Three defects, in sev
 3. **There is no arm-level precondition.** A run with two arms needs "this arm is void" separately from "the whole run is void"; v1's `require()` only does the latter. P1b works around it by making a per-arm precondition fatal, which is the safe direction but discards a valid arm when the other fails to start.
 
 A fourth observation is a *property worth keeping*: `report()` prints `-- WHAT WAS NOT TRIED --`, so any harness run saved to `results/` satisfies `scripts/check_research_bounds.py` automatically. The library and the gate interlock without either knowing about the other.
+
+## D135 — yoloAI never refuses a sandbox for lack of enforcement capability; it degrades to the strongest layer available and says which one that is
+
+**Date:** 2026-08-11. **Status:** Active. **Consumers:** `design/plans/enforcement-build.md` § *Part 5*, `design/network-isolation.md` § *Threat Model*, `internal/netpolicy/`, [SEC §1](../principles/security-principles.md), [SEC §9](../principles/security-principles.md).
+
+**The question.** Host-side enforcement (layer 3) is not available everywhere: on macOS `apple` it needs [D132](#d132--macos-pf-is-driven-through-a-generated-nopasswd-sudoers-grant-that-authorizes-pf-table-membership-and-nothing-else)'s sudoers grant to be installed, on `tart` macOS pf cannot key on a bridge member at all, and any backend can lose enforcement at runtime to a trampled ruleset or a reassigned interface. When a user asks for `--network-isolated` and yoloAI cannot deliver the strongest form, does it refuse the sandbox or run it?
+
+**Decision. It runs it, and it discloses what the user is getting.** Refusal is rejected as a default. Disclosure is mandatory, at create and in the sandbox's ongoing status.
+
+**Why this is not a weakening, and the reasoning is already in the tree.** `design/network-isolation.md` § *Threat Model* enumerates two classes and ranks them: the **errant agent** is primary — one that hallucinated a URL, or installed a package whose postinstall phones home — and for it *"**any** filter that says 'no' to the right destinations is sufficient. The agent reads the error, backs off, tries something else. The bar is correctness, not bypass resistance."* The in-guest iptables/ipset layer meets that bar. Refusing to start a sandbox because the *secondary* defense is unavailable would withdraw a working defense against the primary threat, which is a net loss of safety, not a gain.
+
+**Why disclosure is not optional.** The same section states the rogue-agent property that makes silence unacceptable: *"The rules must not have **silent partial-application** modes. A rogue agent benefits from any case where the user believes isolation is enforced but it isn't."* A user who believes they have host-side enforcement and has in-guest filtering has exactly that belief. So the residual risk is surfaced rather than buried (SEC §9), and the tier is named in words the user can act on rather than as a capability flag.
+
+**The tiers, which are what the message must distinguish** — they are three genuinely different guarantees, not three verbosity levels:
+
+1. **In-guest only.** `iptables` + `ipset` installed inside the sandbox by `entrypoint.py`. Stops an errant agent. **An agent that gains root in the sandbox can flush its own rules**, so it is not a rogue defense.
+2. **In-guest, tamper-resistant.** The agent container holds no `CAP_NET_ADMIN`; rules are installed from a privileged sidecar sharing its netns (`tamper-resistant-network-isolation.md`, shipped for docker). The agent cannot flush them.
+3. **Host-side.** Rules outside the sandbox entirely, keyed on the host-side interface. Measured not defeasible by a guest holding `CAP_NET_ADMIN`: it added a second address and stayed blocked, changed its MAC and stayed blocked, and cannot name the host-side interface at all.
+
+**What this decides and what it leaves open.** It settles the *default*: never refuse, always disclose. It does **not** decide whether an opt-in strict mode exists for callers who would rather fail than run degraded — CI, shared hosts. That is deferred rather than rejected: nobody has asked for it, YAGNI applies, and adding it later is additive. If it is ever added, refusing a sandbox that previously ran is **newly-rejected input and therefore breaking** (rule 1), which is an argument for it being opt-in whenever it arrives.
+
+**Rejected.**
+1. **Refuse when the strongest layer is unavailable.** Withdraws a working defense against the primary threat, breaks every macOS user who has not run a setup step, and is breaking under rule 1. It optimises for a threat the design already ranks second.
+2. **Degrade silently.** The status quo, and the thing the threat model explicitly names as benefiting a rogue agent. It is also how a user ends up trusting a sandbox they should not.
+3. **Prompt at create.** Teardown has no tty (`yoloai stop`, signal handlers, MCP calls, crash sweeps) — the same reason D132 rejected a runtime prompt — and a prompt on every create is friction that trains people to dismiss it.
+4. **A capability flag in `yoloai doctor` only.** Doctor is opt-in and consulted when something is already wrong. The user who needs this information is the one who never runs doctor.
