@@ -1,0 +1,78 @@
+=== W2b ===
+Does D132's grant still hold once it widens for the inverted pool and the host-side detector?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: kill states by host (-k): True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: kill source tracking (-K): True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: flush our own anchor (-F all): True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: read the MAIN ruleset: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: disable pf: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: a different anchor: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: load a ruleset from our own file: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: load a ruleset from stdin: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: a table below the widened range: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: a table above the widened range: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: verbose read of the MAIN ruleset: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: verbose read of the PARENT anchor: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: verbose read of a SIBLING anchor: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: verbose read of pf STATES: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: verbose read of TABLES: True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  baseline: recursive read of our anchor and its children (-A): True   (permitted under the blanket grant, which is what makes the refusal below attributable)
+  the widened grant validates under visudo: True   (/etc/sudoers.d/yoloai-w2b-matrix: parsed OK)
+  `sudo -n /usr/bin/true` is refused, so a refusal means what it says: True   (this is the check pf-liveness-detect.txt V4 could not make)
+  permitted, as it must be: table add in the widened range: True   (a permit the blanket also allows cannot be attributed to D132's grant, so this is a control and not a claim)
+  permitted, as it must be: table show at the top of the range: True   (a permit the blanket also allows cannot be attributed to D132's grant, so this is a control and not a claim)
+  permitted, as it must be: reload the pinned file: True   (a permit the blanket also allows cannot be attributed to D132's grant, so this is a control and not a claim)
+  permitted, as it must be: read our anchor's rules: True   (a permit the blanket also allows cannot be attributed to D132's grant, so this is a control and not a claim)
+  permitted, as it must be: read our anchor's rules VERBOSELY — the new one: True   (a permit the blanket also allows cannot be attributed to D132's grant, so this is a control and not a claim)
+  permitted, as it must be: pf info: True   (a permit the blanket also allows cannot be attributed to D132's grant, so this is a control and not a claim)
+  the verbose read actually returned rules, so 'nothing leaked' is not free: True   (4 rule lines came back through the grant)
+
+-- measurements --
+  sudoers.d during the matrix: 'yoloai-w2b-matrix'
+  under the widened grant: kill states by host (-k): False
+  under the widened grant: kill source tracking (-K): False
+  under the widened grant: flush our own anchor (-F all): False
+  under the widened grant: read the MAIN ruleset: False
+  under the widened grant: disable pf: False
+  under the widened grant: a different anchor: False
+  under the widened grant: load a ruleset from our own file: False
+  under the widened grant: load a ruleset from stdin: False
+  under the widened grant: a table below the widened range: False
+  under the widened grant: a table above the widened range: False
+  under the widened grant: verbose read of the MAIN ruleset: False
+  under the widened grant: verbose read of the PARENT anchor: False
+  under the widened grant: verbose read of a SIBLING anchor: False
+  under the widened grant: verbose read of pf STATES: False
+  under the widened grant: verbose read of TABLES: False
+  under the widened grant: recursive read of our anchor and its children (-A): False
+  lines the verbose read discloses that are also in the main ruleset: 'none'   (4 rules in the main ruleset, 4 rule lines readable through the widened grant)
+  does the verbose read mention any anchor but ours: 'no'
+  fields the verbose form exposes that `-s rules` does not: ['Evaluations', 'Inserted', 'Owner']   (`Inserted: uid N pid N` names the process that wrote the rules — host-side information the plain form withholds, disclosed to the grant holder as a side effect of asking for Evaluations)
+
+-- expectations, rendered from the values above --
+  [PASS] still refused: kill states by host (-k)  <- under the widened grant: kill states by host (-k)=False
+  [PASS] still refused: kill source tracking (-K)  <- under the widened grant: kill source tracking (-K)=False
+  [PASS] still refused: flush our own anchor (-F all)  <- under the widened grant: flush our own anchor (-F all)=False
+  [PASS] still refused: read the MAIN ruleset  <- under the widened grant: read the MAIN ruleset=False
+  [PASS] still refused: disable pf  <- under the widened grant: disable pf=False
+  [PASS] still refused: a different anchor  <- under the widened grant: a different anchor=False
+  [PASS] still refused: load a ruleset from our own file  <- under the widened grant: load a ruleset from our own file=False
+  [PASS] still refused: load a ruleset from stdin  <- under the widened grant: load a ruleset from stdin=False
+  [PASS] still refused: a table below the widened range  <- under the widened grant: a table below the widened range=False
+  [PASS] still refused: a table above the widened range  <- under the widened grant: a table above the widened range=False
+  [PASS] still refused: verbose read of the MAIN ruleset  <- under the widened grant: verbose read of the MAIN ruleset=False
+  [PASS] still refused: verbose read of the PARENT anchor  <- under the widened grant: verbose read of the PARENT anchor=False
+  [PASS] still refused: verbose read of a SIBLING anchor  <- under the widened grant: verbose read of a SIBLING anchor=False
+  [PASS] still refused: verbose read of pf STATES  <- under the widened grant: verbose read of pf STATES=False
+  [PASS] still refused: verbose read of TABLES  <- under the widened grant: verbose read of TABLES=False
+  [PASS] still refused: recursive read of our anchor and its children (-A)  <- under the widened grant: recursive read of our anchor and its children (-A)=False
+
+-- WHAT WAS NOT TRIED --
+  - defeating the regexes. This takes the widened patterns and checks that the intended commands pass and the obvious ones fail; argument smuggling, alternate `pfctl` paths, symlinks and `--` handling are a review of the pattern rather than a run, and `pf-grant-matrix.txt` already says so about the narrow form
+  - whether a sandbox can land on a bridge index outside 100-140 at all, which is W4 and is what decides whether this range is the right one
+  - the verbose read's output under a host whose main ruleset is NOT the stock one. The disclosure check compares against this host's `/etc/pf.conf`; a machine running a third-party firewall has a different main ruleset and the comparison would have to be redone there
+  - whether `Evaluations` can be made to lie by a party who can write another anchor. W2 shows a `quick` match zeroes it, which is the honest direction; whether anything can INFLATE it to mask an outage is unasked
+  - sudo's own behaviour under a policy sourced from LDAP/AD rather than a file, which the timing files already name as an unmeasured case
+
+-- all live expectations held --

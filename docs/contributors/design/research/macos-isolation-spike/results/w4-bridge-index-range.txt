@@ -1,0 +1,36 @@
+=== W4 ===
+Is the inverted pool's index range boundable, and is landing outside it really fail-open?
+
+-- controls and baselines (all held, or this would not render) --
+  the victim's bridge104 is gone after its guest is removed: True   (otherwise the next allocation is not being offered a hole at all)
+  baseline: the sandbox is contained: False   (no rules loaded anywhere)
+  the excluding superset really did load its rules: True   (20 rules loaded, none of them naming bridge104)
+
+-- measurements --
+  bridges already present before this run: ['bridge100']   (the index space is shared — tart and apple both allocate from it)
+  indices handed out, in creation order: [101, 102, 103, 104, 105, 106]
+  index range observed: '101..106'
+  are they contiguous from the lowest free index: True   (contiguous-from-lowest is what makes a fixed pinned range sound)
+  a new network takes the FREED index rather than advancing past the high-water mark: True   (freed bridge104, replacement landed on bridge104, high-water was bridge106)
+  superset covers bridge104: True
+  denied host under the covering superset: '000'
+  superset covers bridge114..118 only: False
+  denied host under the excluding superset: '301'
+
+-- expectations, rendered from the values above --
+  [PASS] bridge indices fill holes, so the highest index in use is a function of CONCURRENT networks and a fixed pinned range can be sound  <- a new network takes the FREED index rather than advancing past the high-water mark=True
+  [PASS] a sandbox inside the pinned range is enforced  <- superset covers bridge104=True
+  [FAIL] a sandbox on an index outside the pinned range is still enforced  <- superset covers bridge114..118 only=False
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  bridge indices fill holes, so the highest index in use is a function of CONCURRENT networks and a fixed pinned range can be sound: an allocator-policy observation, not a before/after on a mechanism. Its negative — an index advancing past the high-water mark — is what the same measurement would have shown, and net-ceiling.txt records the identical hole-filling behaviour for SUBNETS independently
+
+-- WHAT WAS NOT TRIED --
+  - the ceiling. `net-ceiling.txt` created 16 networks without finding a limit and this creates 6; neither establishes what the allocator's maximum index is, only that it fills holes below the high-water mark
+  - tart and apple allocating CONCURRENTLY from the same index space. Both were observed using bridge100+, and a mixed fleet is `pf-mixed-backend.txt`'s subject — but nothing here starts a tart VM while apple networks exist and watches the indices interleave
+  - a preflight assertion. This measures that the hazard is real and that the range is boundable in principle; it does not write the check, and where that check would run — before the agent, per the ordering dependency — is a design question this run does not open
+  - whether the index is knowable EARLY enough. The bridge appears when a container attaches, and `host-controlled-agent-launch.md` is the dependency that gives the host a turn between attach and agent start. Untouched here
+  - a host that has been up for weeks. Indices here are allocated on a machine whose bridge table this run largely created; long-running hosts with churned networks are the case where a monotonic counter would have shown itself
+  - IPv6, and whether a bridge outside the range leaks differently over v6 than v4
+
+-- SOME EXPECTATIONS FAILED --

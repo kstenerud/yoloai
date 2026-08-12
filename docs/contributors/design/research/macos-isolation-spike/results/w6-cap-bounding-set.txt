@@ -1,0 +1,33 @@
+=== W6 ===
+Does dropping CAP_NET_ADMIN from the bounding set stop a root agent on the apple backend from removing its own allowlist?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the agent removed its own allowlist and reached a denied host: True   (no bounding-set drop — DF179's mechanism, reproduced on this backend)
+  the guest is root: True   (uid=0)
+  CAP_NET_ADMIN is in the container's bounding set to begin with: True   (CapBnd=00000000a80435fb (bit 12 = CAP_NET_ADMIN))
+  the allowlist actually enforced before the agent touched it: True   (denied=000 allowed=301)
+  the allowlist enforced in the dropped arm too, before the agent ran: True   (denied=000 allowed=301)
+  the agent was STILL ROOT when it was refused: True   (otherwise this measures gosu, which is docker's answer and not the question)
+  the sandbox still had a network at the moment it was refused: True   (allowed=301 immediately after the failed flush — so the 000 on the denied host is the allowlist, not a dead box)
+  the agent's arm ran to the end: True   (a truncated arm would report fewer escapes as silently 'not reached')
+
+-- measurements --
+  with CAP_NET_ADMIN dropped from the bounding set: False
+  the agent's own bounding set in the dropped arm: '00000000a80425fb'   (against 00000000a80435fb at container start; bit 12 clear means CAP_NET_ADMIN is unreachable for it and every descendant)
+  escape: sudo, then the denied host: '000'   (000 = still contained. sudo cannot exceed a bounding set)
+  escape: a new user namespace mapped to root, then the denied host: '000'   (000 = still contained)
+  escape: a new user namespace AND its own netns: 'ok'   (expected to succeed and to be worthless — that netns is not the one the policy is in, and it has no route out)
+
+-- expectations, rendered from the values above --
+  [PASS] a root agent cannot remove its own allowlist once CAP_NET_ADMIN is out of the bounding set  <- with CAP_NET_ADMIN dropped from the bounding set=False
+
+-- WHAT WAS NOT TRIED --
+  - the shipped path. This installs the allowlist with a hand-written iptables sequence and drops with capsh; yoloAI's apple path runs entrypoint.py, which would have to do the drop itself. Whether that is reachable there is a code question this run does not answer
+  - `container exec` into a container whose entrypoint dropped the capability. The daemon parents that process, so it cannot be inside a bounding set the entrypoint narrowed — measured separately in W6b, and it decides whether the mechanism holds for processes yoloAI starts rather than for the agent
+  - ipset. The real allowlist is iptables+ipset and only iptables is exercised here; ipset needs the same capability and is assumed to follow, which is an assumption
+  - podman and containerd, which DF179 names in the same breath as apple
+  - whether the agent can prevent the drop happening — racing the entrypoint, or arranging to be the process that execs. That is the interesting attack and it is not run
+  - IPv6. The rules here are iptables, not ip6tables, which is DF179's gap and not this one's
+  - any host-side check. The whole point is that this needs none, so the run has nothing to say about pf
+
+-- all live expectations held --

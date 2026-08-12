@@ -1,0 +1,31 @@
+=== W10 ===
+Why can an apple guest sometimes not reach its own vmnet gateway, where the credential injector binds?
+
+-- controls and baselines (all held, or this would not render) --
+  the listener answers on the host's own loopback: True   (so an unreachable guest below is not an unbound listener)
+  every guest has external egress, so any 000 below is the gateway and not a dead sandbox: True   (bridge100->301, bridge101->301, bridge102->301)
+  the host itself reaches EVERY gateway on the same port: True   (bridge100->204, bridge101->204, bridge102->204 — so an unreachable guest is not an unbound listener, and the address is live on the host)
+  baseline: the guest CANNOT reach a host listener on its own gateway: False
+
+-- measurements --
+  per-guest state: [{'bridge': 'bridge100', 'gw': '192.168.65.1', 'guest_to_gw': '204', 'host_to_gw': '204', 'lo0_route': False, 'gw_dns': 'ok', 'external': '301', 'box': 'ybw10box0'}, {'bridge': 'bridge101', 'gw': '192.168.66.1', 'guest_to_gw': '000', 'host_to_gw': '204', 'lo0_route': False, 'gw_dns': 'FAILED', 'external': '301', 'box': 'ybw10box1'}, {'bridge': 'bridge102', 'gw': '192.168.67.1', 'guest_to_gw': '204', 'host_to_gw': '204', 'lo0_route': True, 'gw_dns': 'ok', 'external': '301', 'box': 'ybw10box2'}]
+  gateways the guest CAN reach: ['bridge100', 'bridge102']
+  gateways the guest CANNOT reach: ['bridge101']
+  the two mechanisms tested and refuted: {'lo0_host_route_present': {'bridge100': False, 'bridge101': False, 'bridge102': True}, 'gateway_dns_answers': {'bridge100': 'ok', 'bridge101': 'FAILED', 'bridge102': 'ok'}}   (if the lo0 route explained it, it would be absent exactly on the unreachable bridge; it is not)
+  baseline on bridge100 read [arm: reach]: '204'
+  bridge101: True
+  bridge101 read [arm: reach]: '000'
+
+-- expectations, rendered from the values above --
+  [PASS] a guest on the affected bridge cannot reach a host service on its own gateway — which is exactly where reach.go binds the credential injector  <- bridge101=True
+
+-- WHAT WAS NOT TRIED --
+  - **WHY.** Two candidate mechanisms were tested and refuted in the file above — a missing lo0 host route and a layer-2 fault — and nothing replaces them. No vmnet tracing, no daemon instrumentation, no packet capture on the bridge while a SYN is lost. The effect tracks the bridge INDEX, which is a symptom and not a cause
+  - whether it was ever different. reach.go cites a 2026-06-28 spike and this host runs `container` CLI 1.0.0; no other version was tried and the built-in network was not deleted and recreated
+  - a real broker. The listener stands in for the injector; nothing runs `yoloai new --broker` and watches a credential exchange fail. That is the run that would turn this into a filed defect rather than a measured asymmetry
+  - what `InjectorReach` does about it. `ipAssignedToHost(gw)` is TRUE in the broken case — the address IS on a bridge — so the reach check passes and the injector binds an address the agent cannot dial. It does not take reach.go's degradation path, which that file says is a silent security downgrade
+  - a packet capture on the affected bridge while the guest sends. That is the next step and it is cheap; it would say whether the SYN arrives at the host at all, which splits the remaining space in half
+  - the boundary of the direction split. Two things addressed to the gateway fail (a host listener and the gateway's own DNS) and one thing routed through it works (external egress); nothing here probes ICMP to the gateway, other gateway-hosted services, or traffic to a THIRD party on the same subnet, which would say whether it is the gateway address or the bridge's local delivery in general
+  - IPv6, tart, seatbelt, and any second host
+
+-- all live expectations held --

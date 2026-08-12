@@ -1,0 +1,35 @@
+=== W9 ===
+Does installing yoloAI's pf pool disturb iCloud Private Relay?
+
+-- controls and baselines (all held, or this would not render) --
+  the log predicate finds transitions it is known to contain: True   (20 policy changes in the last 8h — without this, a quiet window is indistinguishable from a query that matches nothing)
+  baseline: the privacy-proxy policy changed state during the window: False
+
+-- measurements --
+  the last ten policy changes before this run: ['05:38:28 ON', '05:39:05 off', '05:39:56 ON', '05:40:26 off', '05:41:16 ON', '05:42:06 off', '05:43:27 ON', '05:43:57 off', '05:45:18 ON', '05:54:19 off']
+  the state this run starts in: 'off'   ('ON' means a privacy-proxy policy is installed; 'off' means none is)
+  iCloud Private Relay is a service on this account: False   (the daemon runs regardless — it also serves Mail Privacy Protection and Safari's tracker-IP hiding — so its presence proves nothing)
+  quiet window (180s, nothing running): 'no changes'
+  while loading and flushing our anchor: False
+  pf-only window (180s, 12 load/flush cycles, no interface touched) [arm: pf-only]: 'no changes'
+  while creating and destroying vmnet networks: False
+  bridge-only window (180s, 17 create/destroy cycles, no pf rule loaded) [arm: bridge-only]: 'no changes'
+  the correlation that prompted this run, left UNATTRIBUTED: 'policy stable from 03:45 to 05:29, then 18 transitions in 25 minutes while W1/W2/W2b/W4 ran, then no policy from 05:54 onward'   (recorded because it is what made this an item. With Private Relay off on this account those transitions belong to some other privacy-proxy consumer, and nothing here identifies which — it is an observation, not a finding)
+
+-- VOIDED ARMS, whose expectations decide nothing --
+  pf-only: Private Relay is not answerable on this host: subscribed=False, policy state at start='off'. A pf change cannot be shown to disable a feature that is already off, and reporting 'no disturbance' from that is the free negative this directory exists to refuse.
+  bridge-only: Private Relay is not answerable on this host: subscribed=False, policy state at start='off'. A pf change cannot be shown to disable a feature that is already off, and reporting 'no disturbance' from that is the free negative this directory exists to refuse.
+
+-- expectations, rendered from the values above --
+  [VOID] loading pf rules alone disturbs the privacy-proxy policy  <- while loading and flushing our anchor=False
+  [VOID] creating and destroying vmnet networks alone disturbs it  <- while creating and destroying vmnet networks=False
+
+-- WHAT WAS NOT TRIED --
+  - **THE QUESTION ITSELF, on this host.** Private Relay is not a service on this iCloud account, so the arms are voided rather than reported. The prior-art hazard is therefore neither confirmed nor refuted here and remains live for users who do have it — it needs a host with iCloud+ and the feature on, and until then it is a documented risk rather than a measured one
+  - the user-visible symptom. Nothing here opens Safari, checks an egress address, or reads System Settings — the instrument is the daemon's own log, so a 'change' is a policy update and not a demonstrated loss of the feature
+  - recovery. Whether a disturbed policy comes back on its own, and how long it takes, is not measured — the run restores nothing and asserts nothing about the state it leaves behind
+  - which pf operation matters, if any. The pf arm loads AND flushes AND changes table membership every cycle; it does not separate them, so a positive result there names the group and not the member
+  - any other pf writer. The anchor census in `pf-midlife-wipe.txt` W0 covers who else writes here; this run does not re-take it
+  - a second host, a different network, or a Wi-Fi/Ethernet difference. The daemon's policy is per-network and this is one machine on one SSID
+
+-- all live expectations held --

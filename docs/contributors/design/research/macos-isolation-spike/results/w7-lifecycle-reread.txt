@@ -1,0 +1,32 @@
+=== W7 ===
+Is the lifecycle rule's re-read half reachable once DF190's workaround is applied, and do kill and stop release differently?
+
+-- controls and baselines (all held, or this would not render) --
+  [reclaim] a stranger took the freed index: True   (stranger landed on bridge100, freed index was bridge100 — without this the arm is not testing anything)
+  baseline: the returning sandbox reclaimed its original bridge index: True   (bridge100 -> stranger -> bridge100: the reclaim pf-lifecycle.txt could not get past)
+  [workaround] a stranger took the freed index: True   (stranger landed on bridge100, freed index was bridge100 — without this the arm is not testing anything)
+
+-- measurements --
+  [reclaim] sandbox started on [arm: reclaim]: 'bridge100'
+  [reclaim] backend latency: stop -> bridge released, seconds [arm: reclaim]: 0.01   (the backend's own teardown, measured separately because pf-lifecycle.txt L4 spent 5212 ms of it inside 'our' reaction time)
+  [reclaim] sandbox returned on [arm: reclaim]: 'bridge100'
+  [workaround] sandbox started on [arm: workaround]: 'bridge100'
+  [workaround] backend latency: stop -> bridge released, seconds [arm: workaround]: 0.0   (the backend's own teardown, measured separately because pf-lifecycle.txt L4 spent 5212 ms of it inside 'our' reaction time)
+  [workaround] sandbox returned on [arm: workaround]: 'bridge101'
+  with DF190's workaround applied: False
+  does the stranger keep its egress through the return? [arm: workaround]: '301'   (DF190's displacement is what the workaround exists to stop; a 000 here would mean it did not work)
+  seconds from the release event to the bridge disappearing: {'stop': 0.0, 'kill': 0.0, 'daemon restart': 5.38}   (-1 means it had not gone within the limit. This is the window a withdraw-on-detach mechanism has to beat, per release path)
+  do the release paths differ?: True   (pf-lifecycle.txt measured only the clean stop and its own bounds call the others the dangerous case)
+
+-- expectations, rendered from the values above --
+  [PASS] with the network deleted while empty, a returning sandbox CANNOT reclaim its old index — so the re-read half of the lifecycle rule is finally reachable  <- with DF190's workaround applied=False
+
+-- WHAT WAS NOT TRIED --
+  - the withdraw mechanism itself. `pf-lifecycle.txt` implements and races it; this run measures only WHICH INDEX a returning sandbox lands on and how fast each release path frees one. No pf rule is loaded here at all
+  - the re-read actually being performed. This establishes that the case is now reachable — the returning sandbox lands somewhere new — not that a re-read implementation handles it. That is the next run and it needs the mechanism
+  - a host crash or a hard power loss, which is the release path with no software involvement at all and the one no harness can schedule
+  - whether DF190's workaround is safe to adopt. Deleting a network when its last sandbox goes is measured here as preventing the reclaim; what it costs a sandbox that expects its subnet back is not examined
+  - n. Each arm runs once. `pf-lifecycle.txt`'s own margin is n=1 and this does not improve on that
+  - tart, which has no per-sandbox networks pf can key on anyway
+
+-- all live expectations held --

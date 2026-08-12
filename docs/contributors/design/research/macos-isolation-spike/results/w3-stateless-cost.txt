@@ -1,0 +1,48 @@
+=== W3 ===
+What do statelessness and the 41-index superset cost pf per packet?
+
+-- controls and baselines (all held, or this would not render) --
+  the stateless arms really were evaluated per packet: True   (stateless 86266 vs stateful 2036 evaluations — if these were close, `no state` did not take and every timing below would be measuring the same thing twice)
+
+-- measurements --
+  bring-up attempts before a usable bridge: 1   (W10: on some bridge indices the guest cannot reach its gateway at all, which makes a host-terminated transfer unrunnable there)
+  rig: 'ybw3 on bridge100, gateway 192.168.65.1, 256 MiB bulk and 400 short connections per sample, n=5'
+  none: bulk, seconds per 256 MiB: [0.046, 0.044, 0.045, 0.044, 0.046]   (median 0.045s = 5702 MiB/s)
+  none: 400 short connections, seconds: [0.073, 0.072, 0.069, 0.07, 0.077]   (median 0.072s = 5533 conn/s)
+  stateful: bulk, seconds per 256 MiB: [0.044, 0.05, 0.063, 0.049, 0.056]   (median 0.050s = 5161 MiB/s)
+  stateful: 400 short connections, seconds: [0.089, 0.071, 0.065, 0.073, 0.075]   (median 0.073s = 5495 conn/s)
+  stateless: bulk, seconds per 256 MiB: [0.044, 0.059, 0.059, 0.059, 0.047]   (median 0.059s = 4369 MiB/s)
+  stateless: 400 short connections, seconds: [0.083, 0.071, 0.072, 0.071, 0.072]   (median 0.072s = 5571 conn/s)
+  superset: bulk, seconds per 256 MiB: [0.045, 0.046, 0.045, 0.048, 0.048]   (median 0.046s = 5590 MiB/s)
+  superset: 400 short connections, seconds: [0.072, 0.085, 0.071, 0.072, 0.071]   (median 0.072s = 5540 conn/s)
+  rules loaded in the superset arm: 166
+  anchor evaluations during each arm's transfers: {'none': 0, 'stateful': 2036, 'stateless': 86266, 'superset': 92695}   (a ruleset that is not in the path would be free AND fast — this is what stops a cheap number being reported for a rule nobody evaluated)
+  ruleset load time, seconds: {'none': 0.0, 'stateful': 0.0105, 'stateless': 0.0093, 'superset': 0.0115}   (separate from the transfer's timed region; this is what lands on the acquisition path, and pf-pool-scaling.txt prices the sudo around it)
+  median seconds — short connections, by ruleset: {'none': 0.072, 'stateful': 0.073, 'stateless': 0.072, 'superset': 0.072}
+  median seconds — bulk, by ruleset: {'none': 0.045, 'stateful': 0.05, 'stateless': 0.059, 'superset': 0.046}
+  connection rate: cost of statelessness vs the same rules stateful: '0.99x'
+  connection rate: cost of the 41-index superset vs the same shape at 4 rules: '1.01x'
+  connection rate: whole adopted shape vs no rules at all: '1.00x'
+  bulk: whole adopted shape vs no rules at all: '1.02x'
+  within-ruleset spread (max-min over median), short connections: {'none': '10.0%', 'stateful': '33.2%', 'stateless': '16.2%', 'superset': '20.1%'}
+  within-ruleset spread, bulk: {'none': '6.0%', 'stateful': '37.7%', 'stateless': '25.9%', 'superset': '7.4%'}
+  effect vs noise, short connections: 'between-ruleset difference 0.1% against a within-ruleset spread of up to 33.2%'   (when the effect does not clear the noise the result is an upper bound)
+  the adopted shape costs less than 2x the unfiltered floor on both measures: True   (connections 0.072s vs 0.072s; bulk 0.046s vs 0.045s)
+
+-- expectations, rendered from the values above --
+  [PASS] per-packet evaluation with a 164-rule first-match list is affordable on this path  <- the adopted shape costs less than 2x the unfiltered floor on both measures=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  per-packet evaluation with a 164-rule first-match list is affordable on this path: a cost comparison between rulesets, not a before/after on one mechanism. Its discriminating half is the evaluation-counter control above, which shows the stateless arms were genuinely evaluated per packet rather than quietly matching a state
+
+-- WHAT WAS NOT TRIED --
+  - the NAT'd path. Every transfer here is host-terminated on the bridge, which is the only path whose throughput this rig controls. An external destination goes through vmnet's NAT and pf's translation rules as well, and that is where a real agent's traffic goes
+  - allowlist SIZE. `<yw3_dst>` holds one address throughout. Linux priced 1/1000/10000 elements and found it free; pf tables are radix tries and should behave, but nothing here varies it and 'should' is not a measurement
+  - concurrent sandboxes. One guest, one transfer at a time. N guests all being evaluated against the same 164-rule list is the shape the product has and it is unmeasured
+  - the SERVER's own ceiling. The bulk arm is served by a Python HTTP handler writing 1 MiB chunks, and if that is the bottleneck then the bulk numbers measure Python rather than pf. The short-connection arm exists because of that: run 1 of this file used a 24 MiB transfer that finished inside one timer tick, so every ruleset looked identical
+  - UDP, which W1 made the shape cover. All timing here is TCP
+  - **a measurement of the effect, as opposed to an upper bound on it.** The between-ruleset differences here do not clear the within-ruleset spread, so what this run establishes is that the adopted shape costs less than the noise floor of this rig on this path -- not what it costs. Separating them needs many more samples or a path where pf is the bottleneck, and neither is here
+  - a busy host. One idle M4 MacBook Air, n=5 per cell after a discarded warm-up, medians reported beside their samples because r14 established that variance here can exceed the effect being looked for -- which is what happened
+  - latency, as distinct from throughput. Nothing measures connection setup time under the superset, which is what an agent making many short requests would actually feel
+
+-- all live expectations held --

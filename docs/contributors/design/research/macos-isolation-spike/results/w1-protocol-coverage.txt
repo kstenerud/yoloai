@@ -1,0 +1,53 @@
+=== W1 ===
+Does the adopted pf shape contain UDP and ICMP, and does DNS survive its egress block?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: TCP to the denied host: True   (anchor empty — without this every block is free)
+  baseline: UDP/53 to the denied host: True   (the protocol the corpus never loaded a rule for)
+  baseline: ICMP echo to the denied host: True   (the protocol pf-main-run.txt tested circularly)
+  [as-written] membership was re-added after the flush: True   (2 addresses in <yw_dst>)
+  [as-written] `container exec` still answers, so the sampler is alive: True   (a dead sampler reads as perfect containment)
+  [as-written] the allowlisted host still answers over UDP: True   (dig @1.1.1.1: 104.20.23.154 172.66.147.243 rc=0 — an allowlist that blocks everything is not an allowlist)
+  [agnostic] membership was re-added after the flush: True   (2 addresses in <yw_dst>)
+  [agnostic] `container exec` still answers, so the sampler is alive: True   (a dead sampler reads as perfect containment)
+  [agnostic] the allowlisted host still answers over UDP: True   (dig @1.1.1.1: 104.20.23.154 172.66.147.243 rc=0 — an allowlist that blocks everything is not an allowlist)
+
+-- measurements --
+  guest: 'ybw1 192.168.65.2 via 192.168.65.1 on bridge101'
+  [as-written] TCP to the denied host: False
+  [as-written] UDP to the denied host: True
+  [as-written] ICMP to the denied host: True
+  [as-written] raw probe output — tcp / udp / icmp [arm: as-written]: "'000' / '104.20.23.154 172.66.147.243 rc=0' / 'OK'"
+  [as-written] DNS through the vmnet gateway still resolves [arm: as-written]: True   (dig @192.168.65.1: 172.66.147.243 104.20.23.154 rc=0)
+  [as-written] block rule packets, in / out [arm: as-written]: '0->5 / 0->0'
+  [agnostic] TCP to the denied host: False
+  [agnostic] UDP to the denied host: False
+  [agnostic] ICMP to the denied host: False
+  [agnostic] raw probe output — tcp / udp / icmp [arm: agnostic]: "'000' / ';; communications error to 1.0.0.1#53: timed out ;; no servers could be reached rc=9' / 'NOREPLY'"
+  [agnostic] DNS through the vmnet gateway still resolves [arm: agnostic]: True   (dig @192.168.65.1: 172.66.147.243 104.20.23.154 rc=0)
+  [agnostic] block rule packets, in / out [arm: agnostic]: '0->7 / 0->5'
+
+-- expectations, rendered from the values above --
+  [PASS] [as-written] the shape denies TCP to a non-allowlisted host  <- [as-written] TCP to the denied host=False
+  [FAIL] [as-written] the shape denies UDP to a non-allowlisted host  <- [as-written] UDP to the denied host=True
+  [FAIL] [as-written] the shape denies ICMP to a non-allowlisted host  <- [as-written] ICMP to the denied host=True
+  [PASS] [as-written] the egress block does not break the guest's own DNS  <- [as-written] DNS through the vmnet gateway still resolves=True
+  [PASS] [agnostic] the shape denies TCP to a non-allowlisted host  <- [agnostic] TCP to the denied host=False
+  [PASS] [agnostic] the shape denies UDP to a non-allowlisted host  <- [agnostic] UDP to the denied host=False
+  [PASS] [agnostic] the shape denies ICMP to a non-allowlisted host  <- [agnostic] ICMP to the denied host=False
+  [PASS] [agnostic] the egress block does not break the guest's own DNS  <- [agnostic] DNS through the vmnet gateway still resolves=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  [as-written] the egress block does not break the guest's own DNS: a functional-preservation check. When the design is right this reads the same with and without the mechanism, so it has no mechanism-absent state that comes out the other way. Recorded as a claim rather than a control so that a failure renders instead of voiding the arm that found it
+  [agnostic] the egress block does not break the guest's own DNS: a functional-preservation check. When the design is right this reads the same with and without the mechanism, so it has no mechanism-absent state that comes out the other way. Recorded as a claim rather than a control so that a failure renders instead of voiding the arm that found it
+
+-- WHAT WAS NOT TRIED --
+  - UDP that is not DNS. `dig` is the probe because its exit code is unambiguous; QUIC on 443, WireGuard, and plain datagram exfiltration are the same table match in principle and none is run
+  - fragmented UDP, and pf's `scrub`/reassembly interaction with `no state`. A stateless ruleset has no reassembly context, and nothing here sends a datagram larger than one MTU
+  - IPv6. `pf-v6-hole.txt` already measured the allowlist as v4-only on both backends and this run does not re-open it; the protocol-agnostic form here is still `inet`-implicit and would need its own v6 pair
+  - revocation. `pf-no-state.txt` measured that for TCP; whether removing a UDP peer from the table stops an in-flight UDP flow is a different question, and a connectionless one, so its answer may not follow
+  - tart and seatbelt. `tart-net-key.txt` established pf cannot key on tart's per-VM interfaces at all, so there is no shape to give this test
+  - what the protocol-agnostic form costs. Removing `proto tcp` widens what every rule must be evaluated against and W3 prices evaluation, not this
+  - the credential broker's injector endpoint, which is W5 and rides the same egress block this run only checks DNS against
+
+-- SOME EXPECTATIONS FAILED --
