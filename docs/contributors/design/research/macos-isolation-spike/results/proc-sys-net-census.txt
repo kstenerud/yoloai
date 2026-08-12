@@ -1,0 +1,40 @@
+=== SYSCTL ===
+How much of /proc/sys/net is writable by the agent, and does non-root close the class?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the agent can write a containment-relevant sysctl: True
+  CAP_NET_ADMIN really was gone from the root agent: True   (ipset goes through netlink and checks the capability, so a refusal proves the drop took — every sysctl write below is despite that, not because it silently failed)
+  the allowlist was enforcing throughout: True   (allowed=301 denied=000)
+  the non-root arm really did run as a different uid: True   (uid=1001 — the one variable between the arms)
+  the two arms examined effectively the same population: True   (779 files against the root arm's 780, with 5 root-only by mode and a small per-instance variation in the per-interface v6 entries. A population much smaller than that would make the writable count below free)
+
+-- measurements --
+  root agent: files examined / writable: '780 / 763'
+  root agent: containment-relevant knobs it can write: ['ipv6/conf/all/disable_ipv6', 'ipv6/conf/all/accept_ra', 'ipv6/conf/default/disable_ipv6', 'ipv4/conf/all/rp_filter', 'ipv4/conf/all/accept_local', 'ipv4/conf/all/route_localnet', 'ipv4/ping_group_range', 'ipv4/conf/all/send_redirects', 'ipv4/conf/all/arp_ignore', 'ipv4/conf/all/arp_announce']
+    ipv6/conf/all/disable_ipv6: 'turns IPv6 back on; the kernel then reconfigures address and default route from the RA by itself'
+    ipv6/conf/all/accept_ra: 're-accept Router Advertisements, restoring the v6 default route'
+    ipv6/conf/default/disable_ipv6: 'same, for interfaces appearing later'
+    ipv4/conf/all/rp_filter: 'relax reverse-path filtering, which is the check that makes source spoofing fail'
+    ipv4/conf/all/accept_local: 'accept packets claiming a local source address'
+    ipv4/conf/all/route_localnet: 'route 127/8 as if it were global'
+    ipv4/ping_group_range: 'open raw-ish ICMP sockets to unprivileged uids'
+    ipv4/conf/all/send_redirects: 'emit ICMP redirects at neighbours'
+    ipv4/conf/all/arp_ignore: 'change who this host answers ARP for'
+    ipv4/conf/all/arp_announce: 'change what source it announces'
+  root agent: a sample of the rest: ['bridge/bridge-nf-call-arptables', 'bridge/bridge-nf-call-ip6tables', 'bridge/bridge-nf-call-iptables', 'bridge/bridge-nf-filter-pppoe-tagged', 'bridge/bridge-nf-filter-vlan-tagged', 'bridge/bridge-nf-pass-vlan-input-dev', 'core/busy_poll', 'core/busy_read', 'core/dev_weight', 'core/dev_weight_rx_bias', 'core/dev_weight_tx_bias', 'core/devconf_inherit_init_net']   (753 others, truncated for reading)
+  non-root agent, same bounding-set drop: False
+  files under /proc/sys/net readable only by root (mode 0600): 5   (tcp_fastopen_key and the stable_secret set — legitimately outside the non-root arm's population)
+  non-root agent: files examined / writable: '779 / 0'
+  non-root agent: anything still writable: 'none'
+
+-- expectations, rendered from the values above --
+  [PASS] a non-root agent cannot write any containment-relevant sysctl, so the uid change closes the class rather than the one knob already measured  <- non-root agent, same bounding-set drop=False
+
+-- WHAT WAS NOT TRIED --
+  - **whether any writable knob actually defeats the allowlist.** The list is separated into containment-relevant and not by JUDGEMENT, from what each knob does — not by trying each one and probing a denied destination. `disable_ipv6` is the only one measured end to end (`ipv6-sidestep.txt`, `agent-uid-and-sysctls.txt`); the rest are named as plausible and are not demonstrated exploits
+  - sysctls outside `/proc/sys/net`. `kernel.*`, `fs.*` and `user.*` are a different surface with different owners, and a root agent's reach there is unexamined
+  - non-net paths to the same effect — netlink is covered by the capability, but `ioctl` on a socket, `/sys/class/net`, and eBPF are not enumerated here
+  - a Fedora or Arch base. Everything here is the Debian-derived blessed image; sysctl defaults, file modes and the presence of `gosu` are all properties of that image and do not transfer
+  - whether the apple launch path CAN run the agent non-root. `gosu` is in the image and the docker path uses it; the legacy path apple takes is a code question this run does not open
+
+-- all live expectations held --
