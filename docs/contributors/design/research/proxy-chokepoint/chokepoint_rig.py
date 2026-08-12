@@ -143,6 +143,20 @@ def assert_choked(h: Harness, box: str) -> bool:
     return "200" not in out.stdout and "301" not in out.stdout
 
 
+def proxy_lines() -> int:
+    """Request COUNT, not the set of names.
+
+    A set delta cannot see a repeat request to a host already in it, so a control that asks
+    "did anything new reach the proxy" reports False when the answer is yes-but-again. That
+    voided P8 run 1, whose positive control re-fetched a host the sandbox's own agent had
+    already contacted at startup.
+    """
+    if not PROXY_LOG.exists():
+        return 0
+    return sum(1 for ln in PROXY_LOG.read_text().splitlines()
+               if ln.split(" ", 1)[0] in {"CONNECT", "GET", "POST", "HEAD", "PUT"})
+
+
 def targets_seen() -> set[str]:
     if not PROXY_LOG.exists():
         return set()

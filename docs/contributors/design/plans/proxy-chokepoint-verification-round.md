@@ -4,7 +4,7 @@
 
 # Proxy chokepoint verification round — Linux
 
-- **Status:** IN-PROGRESS — opened 2026-08-12 under [D136](../../decisions/working-notes.md).
+- **Status:** IN-PROGRESS — opened 2026-08-12 under [D136](../../decisions/working-notes.md); every item has now run, synthesis pass pending.
 - **Depends on:** —
 
 **Why this round exists.** The workstream changed course. `agent-privilege-reality.txt` measured
@@ -158,5 +158,5 @@ unreliable. *Decides:* whether a chokepoint is agent-agnostic or silently Claude
 | P3 | **SSH works via CONNECT — but no tunnel tool ships, and allowing it costs closure** | [`p3p4-toolchain-under-chokepoint.txt`](../research/proxy-chokepoint/results/p3p4-toolchain-under-chokepoint.txt) |
 | P4 | **PASSES — npm/pip/apt/go/curl all work on standard proxy env alone** | [`p3p4-toolchain-under-chokepoint.txt`](../research/proxy-chokepoint/results/p3p4-toolchain-under-chokepoint.txt) |
 | P6 | **Answered in passing by P2** — DNS was not permitted and the session worked; the proxy resolves | [`p2-chokepoint-viability.txt`](../research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
-| P7 | — | — |
-| P8 | — | — |
+| P7 | **Refused at the CLI today — so (B)'s cost is one breaking change, not a second channel** | [`p7-port-publishing.txt`](../research/proxy-chokepoint/results/p7-port-publishing.txt) |
+| P8 | **3 of 4 took the proxy unmodified; gemini unmeasured. Prior art's two predictions both failed** | [`p8-agent-proxy-routing.txt`](../research/proxy-chokepoint/results/p8-agent-proxy-routing.txt) |

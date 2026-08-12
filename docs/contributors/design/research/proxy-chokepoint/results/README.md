@@ -20,6 +20,8 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
 | P1 — agent traffic census | **RECORD** (run 3) | [`p1-agent-traffic-census.txt`](p1-agent-traffic-census.txt) |
 | P2 — chokepoint viability | **RECORD** (run 3) | [`p2-chokepoint-viability.txt`](p2-chokepoint-viability.txt) |
 | P3+P4 — toolchain under a chokepoint | **RECORD** (run 2) | [`p3p4-toolchain-under-chokepoint.txt`](p3p4-toolchain-under-chokepoint.txt) |
+| P7 — port publishing | **RECORD** (run 2) | [`p7-port-publishing.txt`](p7-port-publishing.txt) |
+| P8 — agent proxy routing | **RECORD** (run 3) | [`p8-agent-proxy-routing.txt`](p8-agent-proxy-routing.txt) |
 
 ## Invalidated
 
@@ -93,6 +95,36 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
 - Fixed by exporting the proxy explicitly in each command, via a `sh_proxied` helper that says in
   its docstring why it exists. The environment-delivery fact it exposed is not a rig detail — it
   is a design constraint on whatever gets built, and it is recorded in the run's reading notes.
+
+### P7 run 1 — a TCP connect is not a round trip
+
+- **Class:** `free-negative` (inverted: a free *positive*) · **Direction:** `confirmed`
+- The probe called `connect()` on the published host port. docker binds that port at **create**
+  time, so the connection succeeds whether or not anything is listening inside — the proxy
+  accepts and then fails to forward. The baseline, taken with nothing serving, therefore read
+  `True` where it had to read `False`, and v2 refused the run.
+- Fixed by requiring an HTTP round trip. Kept because the same mistake would make any future
+  port-publishing test pass vacuously, on any backend.
+
+### P8 runs 1 and 2 — the control could not see a repeat, and then attribution leaked
+
+- **Run 1 — `Class:` `predicate-bug` · `Direction:` `contradicted`.** The positive control asked
+  whether anything *new* had reached the proxy, comparing **sets of destination names**. The host
+  it fetched had already been contacted by the sandbox's own resident agent, so the set delta was
+  empty and the control failed although the request had plainly happened. Fixed by counting
+  request *lines*.
+- **Run 2 — `Class:` `confounded-arms` · `Direction:` `confirmed`, and the sharpest specimen in
+  this round.** It reported **4 of 4 agents took the proxy** — the answer the round wanted. It was
+  wrong: gemini was scored on `api.openai.com` and `chatgpt.com`, which are codex's, arriving
+  asynchronously in gemini's window, while gemini's own output showed it had refused to run at
+  all. Every control held. Nothing in the harness was broken. The arms were simply not separable,
+  because a live Claude agent talks continuously in the same sandbox and the previous agent's
+  connections trail into the next window.
+- Fixed by requiring a new target to match **the agent's own provider**, excluding the resident
+  agent's hosts by name, and settling between agents. The corrected run reads **3 of 4**, with
+  gemini recorded as *unmeasured* rather than as either answer.
+- Worth keeping as the specimen it is: a bad run that agreed with the hypothesis, passed every
+  control, and was caught only by reading a row against the tool's own output.
 
 ## Abandoned rather than half-run
 
