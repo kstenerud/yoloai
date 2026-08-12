@@ -19,6 +19,7 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
 | --- | --- | --- |
 | P1 — agent traffic census | **RECORD** (run 3) | [`p1-agent-traffic-census.txt`](p1-agent-traffic-census.txt) |
 | P2 — chokepoint viability | **RECORD** (run 3) | [`p2-chokepoint-viability.txt`](p2-chokepoint-viability.txt) |
+| P3+P4 — toolchain under a chokepoint | **RECORD** (run 2) | [`p3p4-toolchain-under-chokepoint.txt`](p3p4-toolchain-under-chokepoint.txt) |
 
 ## Invalidated
 
@@ -74,6 +75,24 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
   path rather than from two functions that could quietly differ. Worth recording because the
   failure was a misreading of the harness, not of the subject, and the corrected shape is the one
   future harnesses should copy.
+
+### P3+P4 run 1 — every tool was tested without the mechanism under test
+
+- **Class:** `free-negative` · **Direction:** `contradicted`
+- The rig set the proxy with `--env` at launch and then ran each tool through `yoloai exec`,
+  assuming the variables would be there. They are not: `--env` reaches the **agent's process
+  tree only**. So npm, pip, go, git and even `curl` were run with no proxy and no resolver, and
+  every `NO` was free — they were not failing to honour a proxy, they had none.
+- The tell was `curl` returning `000` when P2 had already shown curl working through the same
+  proxy, and the diagnosis was checked against `/proc/<pid>/environ` rather than inferred: PID 62
+  and PID 77 carry the variables, PID 1 and every `exec` shell do not.
+- **This is the one invalidated run in this round whose direction is `contradicted`** — it
+  disagreed with the hypothesis, which is exactly why it got chased within minutes. The two
+  `confirmed` ones in P1 each survived until a control caught them. Same asymmetry D136 counted,
+  visible inside a single round.
+- Fixed by exporting the proxy explicitly in each command, via a `sh_proxied` helper that says in
+  its docstring why it exists. The environment-delivery fact it exposed is not a rig detail — it
+  is a design constraint on whatever gets built, and it is recorded in the run's reading notes.
 
 ## Abandoned rather than half-run
 

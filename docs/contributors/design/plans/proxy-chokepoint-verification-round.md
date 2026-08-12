@@ -155,8 +155,8 @@ unreliable. *Decides:* whether a chokepoint is agent-agnostic or silently Claude
 | --- | --- | --- |
 | P1 | **99.2% HTTP+DNS, zero QUIC; SSH to GitHub appeared unasked** | [`p1-agent-traffic-census.txt`](../research/proxy-chokepoint/results/p1-agent-traffic-census.txt) |
 | P2 | **PASSES — agent completed the task, exit 0, with one destination; 7 real hostnames recovered** | [`p2-chokepoint-viability.txt`](../research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
-| P3 | — | — |
-| P4 | — | — |
+| P3 | **SSH works via CONNECT — but no tunnel tool ships, and allowing it costs closure** | [`p3p4-toolchain-under-chokepoint.txt`](../research/proxy-chokepoint/results/p3p4-toolchain-under-chokepoint.txt) |
+| P4 | **PASSES — npm/pip/apt/go/curl all work on standard proxy env alone** | [`p3p4-toolchain-under-chokepoint.txt`](../research/proxy-chokepoint/results/p3p4-toolchain-under-chokepoint.txt) |
 | P6 | **Answered in passing by P2** — DNS was not permitted and the session worked; the proxy resolves | [`p2-chokepoint-viability.txt`](../research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
 | P7 | — | — |
 | P8 | — | — |
