@@ -1,0 +1,45 @@
+host: Linux 6.8.0-136-generic x86_64 | nft v1.0.9
+date: 2026-08-12 02:37:46 UTC
+harness: research_harness_v2 (D136)
+round:   enforcement-verification-round-2.md, item V7
+
+=== V7 ===
+What do N per-sandbox netdev chains cost, and how long does a 10000-element allowlist take to install?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the guest reaches the denied host: True   (no policy; the floor)
+  the fleet of 32 chains really is loaded: True   (32 tables)
+  the probe sandbox is still enforced with the fleet loaded: True   (a cost measured on a policy that stopped working is not a cost)
+
+-- measurements --
+  with a 1-element allowlist: False
+  install with a 1-element allowlist, no other chains: 8.5   (ms)
+  install with a 100-element allowlist, no other chains: 8.8   (ms)
+  install with a 1000-element allowlist, no other chains: 10.9   (ms)
+  install with a 10000-element allowlist, no other chains: 25.7   (ms)
+  install with a 1-element allowlist, 32 chains present: 13.1   (ms)
+  install with a 100-element allowlist, 32 chains present: 12.3   (ms)
+  install with a 1000-element allowlist, 32 chains present: 17.1   (ms)
+  install with a 10000-element allowlist, 32 chains present: 30.0   (ms)
+  a full install with a 10000-element allowlist stays under 200 ms: True   (worst case 30.0 ms, against the 816 ms sandbox start pf-lifecycle.txt measured on this class of host)
+  install cost at 10000 elements, fleet vs empty host: 1.17   (x — 32 other chains present vs none. Reported as a ratio and NOT claimed flat: this proxy has no repeat measurements and r14 established that run-to-run variance here exceeds the effects being looked for)
+  growth from 1 to 10000 elements, on an empty host: 3.03   (x)
+
+-- expectations, rendered from the values above --
+  [PASS] the policy under test actually enforces before it is priced  <- with a 1-element allowlist=False
+  [PASS] the allowlist install is absorbed by the start path rather than visible in it  <- a full install with a 10000-element allowlist stays under 200 ms=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  the allowlist install is absorbed by the start path rather than visible in it: a latency measurement against a budget taken from another run; there is no mechanism-absent state for 'how long does this take'
+
+-- WHAT WAS NOT TRIED --
+  - REPEATED measurements. Every number here is n=1 per cell on an idle host. R14 found run-to-run variance exceeding the differences it was looking for, so treat these as an order of magnitude and not as a comparison between cells
+  - concurrent installs. The fleet is built serially; N sandboxes STARTING at once is the case a cross-sandbox lock would serialise and nothing here measures it
+  - set UPDATE cost, which is what revocation costs and is the operation that happens repeatedly rather than once
+  - memory. N chains and a 10000-element set have a kernel footprint nobody has looked at, and it is the cost that does not show up in a timer
+  - teardown, which happens on every stop and is not timed here at all
+  - the interval set type. These are /32s in a plain hash set; the product's allowlist is resolved domains, which may want intervals and price differently
+  - containers. Hand-built veths, so this is nftables' cost and not docker's
+  - steady-state throughput, which is r14's question and is not re-asked
+
+-- all live expectations held --

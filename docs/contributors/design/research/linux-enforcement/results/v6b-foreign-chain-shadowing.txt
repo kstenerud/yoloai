@@ -1,0 +1,40 @@
+host: Linux 6.8.0-136-generic x86_64 | nft v1.0.9
+date: 2026-08-12 02:36:23 UTC
+harness: research_harness_v2 (D136)
+round:   enforcement-verification-round-2.md, item V6b (replaces dropped V6)
+
+=== V6b ===
+Can a foreign netdev chain on the same device shadow ours?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the guest reaches the denied host: True   (no chain at all; without this every block is free)
+  our deny fired: True   (2 packets)
+  the foreign chain really is evaluating traffic: True   (2 packets — without this the foreign chain is inert and its failure to shadow proves nothing)
+  still blocked with a foreign DROP in front: True
+  the foreign drop fired: True   (2 packets)
+
+-- measurements --
+  ours only: False
+  a SECOND netdev ingress chain attaches to the same device: True   (if the kernel refuses this, the whole shadowing class is closed at the door)
+  still blocked with a foreign higher-priority ACCEPT in front [arm: shadow]: True
+  and our deny still counted, so it was still reached [arm: shadow]: True   (2 -> 4)
+  a foreign terminal DROP stops our counter advancing [arm: shadow]: True   (ours 4 -> 4. If masked, a counter-based detector reads zero on a sandbox whose traffic is being dropped by someone else — enforcement intact, signature identical to inert)
+  so a counter-based detector would call that sandbox: 'INERT (wrongly)'   (the reason V1b's subscription design is worth having: it never infers enforcement from a counter at all)
+
+-- expectations, rendered from the values above --
+  [PASS] our chain blocks, alone on the device  <- ours only=False
+  [PASS] a foreign accept at higher priority does NOT shadow our deny  <- still blocked with a foreign higher-priority ACCEPT in front=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  a foreign accept at higher priority does NOT shadow our deny: the baseline is the no-chain state above; this arm adds a chain rather than removing the mechanism, so the discriminating before/after is 'ours only' vs 'ours plus foreign', both recorded
+
+-- WHAT WAS NOT TRIED --
+  - the EGRESS hook. Every chain here is ingress; whether egress base chains interact differently is unasked
+  - a foreign chain installed by something real — firewalld, a CNI plugin, another container runtime. This is a hand-built adversary and the shapes real software installs may differ
+  - priority collisions: two chains at the SAME priority on one device, where ordering is unspecified and a design cannot rely on it
+  - whether a foreign chain can be installed by anything less privileged than root, which decides whether this is an attack or only an accident
+  - the nftables `netdev` egress hook, `flowtable` offload, and XDP, all of which sit at or before ingress and none of which is examined
+  - containers. Hand-built veth, per R11's reasoning
+  - whether OUR chain could equally shadow someone else's, which is the same question pointed at the blast radius of shipping this
+
+-- all live expectations held --
