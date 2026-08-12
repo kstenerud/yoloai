@@ -1,0 +1,66 @@
+=== P9 === (run 2 — the record; run 1 invalidated, see README.md)
+Is `--network-none` usable for anything?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: a real agent completes a trivial task: True   (networking OPEN. If this fails the agent is broken for some unrelated reason and every failure below is free)
+
+-- measurements --
+  with --network-none: False
+  the `test` agent runs under --network-none [arm: counterexamples]: True   (rc=0)
+  local work still runs inside a --network-none sandbox [arm: counterexamples]: True   (interfaces present: ['lo'])
+  so the flag's status is [arm: counterexamples]: 'useless for every AI agent, usable for the no-op ones'
+
+-- expectations, rendered from the values above --
+  [PASS] a real agent CANNOT complete even a trivial local task under --network-none, because it cannot reach its own API server  <- with --network-none=False
+
+-- WHAT WAS NOT TRIED --
+  - a LOCAL model. An agent pointed at an LLM on the host would need egress to reach it, and nothing in the product exposes a host socket into the sandbox — but if that ever ships, --network-none stops being useless and this verdict expires
+  - brokering, which `launch.go:613` rejects outright under --network-none with an explicit error; that is read from the code, not measured here
+  - whether any USER actually runs it. This measures capability, not adoption
+  - the other backends. docker only
+  - --network-none on a RESTART of a sandbox created with networking, which is a different path
+
+-- all live expectations held --
+
+
+================================================================================
+READING NOTES — written at the run
+================================================================================
+
+THE HEADLINE IS CONFIRMED AND THE UNIVERSAL IS NOT.
+
+Confirmed: a real agent cannot complete even a trivial, entirely local task
+under --network-none. The task was "create a file containing the word hello" --
+no network needed to DO it -- and it still failed, because the agent cannot
+reach its API server to be told to. That holds for every shipped AI agent, since
+all five talk to a remote API.
+
+Not confirmed: "nobody could ever make use of it". Two counterexamples, both
+measured:
+
+  * The `test` agent runs and exits 0. Its HeadlessCmd is `sh -c "PROMPT"`, so
+    it executes the prompt as a shell command and never contacts anything.
+  * `--agent idle --network-none` gives a running container with `lo` only, and
+    `yoloai exec` into it works -- python, builds, offline tooling. The sandbox
+    as an offline box is a coherent thing to want and it functions today.
+
+So the deprecation is justified by "useless for its purpose" and NOT by "unused".
+The note has to say what becomes of the no-op agents, because removing the flag
+removes an offline mode that currently works.
+
+WHAT MAKES THIS WORTH MORE THAN ITS SIZE: the product currently RECOMMENDS this
+flag. `yoloai help security` says "Use --network-none for maximum isolation" and
+"Use --network-none where it matters"; GUIDE.md says "use --network-none when you
+need a guarantee". D137 establishes that the allowlist is not adversarially sound
+on any backend, so the product's own advice for a hostile agent today resolves to
+"use the mode that makes the agent unable to work". That is not a wrong statement
+about isolation -- it is a correct statement whose only available remedy is
+useless, which is precisely the gap a third mode would fill.
+
+RUN 1 WAS INVALIDATED FOR TWO RIG ERRORS THAT BOTH PRODUCED FALSE NEGATIVES, and
+they are worth naming because they nearly manufactured a cleaner answer than the
+truth. It passed "ignored" as the test agent's prompt -- not a shell command, so
+exit 1 -- and scored that as the flag breaking it. And it probed for local work
+against a container that a `--wait` run had already stopped. Both counterexamples
+read as absent. The headline would have been "no counterexamples found", which is
+the answer the deprecation proposal wanted, reached by measuring nothing.

@@ -22,6 +22,7 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
 | P3+P4 — toolchain under a chokepoint | **RECORD** (run 2) | [`p3p4-toolchain-under-chokepoint.txt`](p3p4-toolchain-under-chokepoint.txt) |
 | P7 — port publishing | **RECORD** (run 2) | [`p7-port-publishing.txt`](p7-port-publishing.txt) |
 | P8 — agent proxy routing | **RECORD** (run 3) | [`p8-agent-proxy-routing.txt`](p8-agent-proxy-routing.txt) |
+| P9 — is `--network-none` usable? (follow-up) | **RECORD** (run 2) | [`p9-network-none-utility.txt`](p9-network-none-utility.txt) |
 
 ## Invalidated
 
@@ -125,6 +126,20 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
   gemini recorded as *unmeasured* rather than as either answer.
 - Worth keeping as the specimen it is: a bad run that agreed with the hypothesis, passed every
   control, and was caught only by reading a row against the tool's own output.
+
+### P9 run 1 — two rig errors, both producing false negatives
+
+- **Class:** `free-negative` · **Direction:** `confirmed`
+- Asked whether any counterexample to "`--network-none` is useless" exists, and found none —
+  because it passed `"ignored"` as the `test` agent's prompt (that agent's `HeadlessCmd` is
+  `sh -c "PROMPT"`, so the prompt must *be* a shell command; `ignored` is not one, exit 1), and
+  because it probed for local work against a container a `--wait` run had already stopped.
+- **Both counterexamples are real** and the corrected run finds them: the `test` agent exits 0,
+  and `--agent idle --network-none` gives a working offline sandbox with `lo` only.
+- The invalidated run's answer — "no counterexamples" — is exactly what the deprecation proposal
+  it was checking would have wanted, arrived at by measuring nothing. Recorded because the
+  headline expectation *passed in both runs*: only the counterexample arm was wrong, which is the
+  half a reader skims.
 
 ## Abandoned rather than half-run
 
