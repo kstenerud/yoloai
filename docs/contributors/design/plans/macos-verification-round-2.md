@@ -138,7 +138,7 @@ Filled in as each item runs. Raw output in
 | W6b | `w6b-exec-vs-bounding-set.txt`. **The drop does not reach `container exec`.** The exec'd process carries the container's full configured set (`a80435fb`) against the holder's dropped `a80425fb`, and it removed the allowlist and reached the denied host (301). So W6 protects **descendants of the entrypoint** — which is the agent — and nothing the host starts afterwards. |
 | W7 | — |
 | W8 | — |
-| W9 | — |
+| W9 | `w9-private-relay.txt`. **Unanswerable on this host, and recorded as that rather than as an all-clear.** iCloud Private Relay is **not a service on this account**, and the daemon held no privacy-proxy policy when the run started — so a pf change cannot be shown to disable a feature that is already off, and both arms are **voided** rather than reported. The prior-art hazard is therefore neither confirmed nor refuted and stays live for users who do have it. What is measured: 12 pf load/flush cycles touching no interface, and 16 network create/destroy cycles loading no pf rule, both over 180 s against a quiet 180 s baseline, with the log predicate first shown finding the 20 transitions it is known to contain. The correlation that made this an item — a stable policy from 03:45 becoming 18 transitions in the 25 minutes W1/W2/W2b/W4 ran — is kept as an **unattributed observation**; with Private Relay off it belongs to some other privacy-proxy consumer and nothing here says which. |
 
 ## Explicitly out of this round
 
