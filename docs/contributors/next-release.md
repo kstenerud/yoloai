@@ -65,6 +65,7 @@ finding or decision first, and lands here only if it should block the release.
 - [DF189](design/findings-unresolved.md) — yoloAI's CNI subnet is byte-identical to podman's default allocator pool, so two sandboxes on one host can hold the same address
 - [DF190](design/findings-unresolved.md) — an apple sandbox silently loses all egress when an unrelated sandbox restarts and reclaims its vmnet bridge index
 - [DF193](design/findings-unresolved.md) — a guest can pre-create the on-create-done marker, and the host promotes it to permanent state on the next start, so setup commands never run
+- [DF194](design/findings-unresolved.md) — a guest holding `CAP_NET_ADMIN` can unbind its own host-side enforcement by destroying its own interface, and the sandbox returns unenforced unless something reinstalls
 
 ## Candidates — undecided
 

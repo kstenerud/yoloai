@@ -1,11 +1,36 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since. It is **not a specification** — its
+> conclusions have been applied to the live documents listed under *Where this landed*, and
+> those are the current answer. Good for archaeology: what was asked, what was run, and which
+> runs were thrown away. See [`../README.md`](../README.md).
+
 > **ABOUTME:** The fixed item set for the second Linux enforcement verification round — what is still
 > a claim rather than a measurement before the build starts, what each item decides, and what it
 > costs. Records what to run, not code.
 
 # Enforcement verification round 2 — Linux
 
-- **Status:** IN-PROGRESS — opened 2026-08-12 under [D136](../../decisions/working-notes.md).
-- **Depends on:** enforcement-build.md, enforcement-state-reaping.md
+- **Status:** IMPLEMENTED — opened and closed 2026-08-12 under [D136](../../decisions/working-notes.md). Every item ran or was dropped in writing; the single synthesis pass has been applied to `enforcement-build.md` and `enforcement-state-reaping.md`, and **those are what to cite**.
+- **Depends on:** —
+
+**Where this landed.** The outcomes below are recorded as they were found; the conclusions drawn from
+them are live elsewhere, and those are what to cite:
+
+- [`enforcement-build.md`](../../design/plans/enforcement-build.md) — **Part 2 rewritten** (the
+  counter poll retired, two subscriptions adopted, no spike outstanding), Part 0's forced ordering and
+  mandatory reinstall, Part 1's UDP and install cost, Part 3's broken-host and event-loss cases, Part
+  5's tier-3 row, and § *Known-unmeasured*.
+- [`enforcement-state-reaping.md`](../../design/plans/enforcement-state-reaping.md) § *Why the
+  immunity is structural* — V5's ifindex binding and what it closes.
+- [DF194](../../design/findings-unresolved.md) — filed: a guest can unbind its own enforcement by
+  destroying its own interface. [DF192](../../design/findings-unresolved.md) — **amended**: the Linux
+  counter-comparison it proposed is superseded and now wrong in both directions.
+- [`backend-idiosyncrasies.md`](../../backend-idiosyncrasies.md) — `nft flush ruleset` destroys
+  Docker's own chains.
+
+**The raw runs are not archived** and remain the citable evidence:
+`design/research/linux-enforcement/results/v*.txt`.
+
 
 **This file is the round's boundary** (D136 §3). The item set below was fixed before the first run.
 The round closes when every item has run or been explicitly dropped **in writing, here**. Until then
@@ -69,13 +94,15 @@ Filled in as each item runs. Raw output in
 
 | ID | Outcome |
 | --- | --- |
-| V1 | — |
-| V2 | — |
-| V3 | — |
-| V4 | — |
-| V5 | — |
-| V6 | — |
-| V7 | — |
+| V1 | `v1-netlink-event-coverage.txt`. The nftables group reports **every ruleset fault attributably** — our table deleted, `flush ruleset`, a reload beginning with a flush. **Silent for exactly one**: the device vanishing, where nothing in the ruleset changes and the table still lists as present. Collateral: a host-wide flush destroys **docker's own chains** too. |
+| V1b | `v1b-link-event-coverage.txt`. The **link group covers that one**, attributably, in both cases that matter — an ordinary stop and a guest destroying its own end. So the detector is two subscriptions over disjoint fault classes, with **no poll**. |
+| V2 | `v2-v5-netdev-device-binding.txt`. **A netdev chain naming an absent device does not load** (`No such file or directory`). Part 0 cannot install enforcement first; there is a window, and it is closeable only because yoloAI controls when the *agent* starts. |
+| V3 | `v3-netdev-udp.txt`. **UDP is denied by the same `ip daddr` rule**, allowlisted UDP still resolves, and `reject` answers in 0.05s against `drop`'s 3.06s — the same benefit R10 measured for TCP. The corpus's largest protocol gap is closed. |
+| V4 | `v4-hostile-guest-vs-netdev.txt`. A guest with `CAP_NET_ADMIN` adds an address, changes its MAC, flaps, renames its own end and fragments — **blocked through all five**. It **can** unbind enforcement by destroying its own interface, which costs it the network in the same instant. |
+| V5 | `v2-v5-netdev-device-binding.txt`. **Binding is by ifindex**, proved by renaming a live device: index unchanged, name changed, chain still enforcing, nft re-rendering under the new name. R11's `stale-but-inert` is therefore **structural**. |
+| ~~V6~~ | **Dropped in writing** — premise removed by V1b. See the item row. |
+| V6b | `v6b-foreign-chain-shadowing.txt`. A foreign higher-priority **accept does not shadow** our deny (ours still counted 2→4). A foreign terminal **drop freezes our counter** while enforcement is intact — so the retired poll had errors in *both* directions. |
+| V7 | `v7-scale-and-install-cost.txt`. A 10000-element allowlist installs in **25.7 ms** empty / **30.0 ms** with 32 other chains loaded, against an 816 ms sandbox start. Absorbed, not visible. All cells n=1. |
 
 ## Explicitly out of this round
 

@@ -66,9 +66,18 @@ from the older draft**: it keyed on the guest's IP address and two audits found 
 3. **A rule's identity is the sandbox ID; the interface name is only its match.**
 
 **Two properties that follow and are easy to lose.** Deny with `reject`, not `drop` — measured at
-0.06 s against 5.09 s, and a black hole is what makes a severed agent fail confusingly. And a netdev
-chain **outlives its device as a stale-but-inert object**: it does not capture a successor (r11, r13),
-but it enforces nothing, and reading the ruleset cannot tell you.
+0.06 s against 5.09 s for TCP and 0.05 s against 3.06 s for UDP (r10, V3), and a black hole is what
+makes a severed agent fail confusingly. And a netdev chain **outlives its device as a stale-but-inert
+object**: it enforces nothing, and reading the ruleset cannot tell you — the table still lists as
+present (V1).
+
+**That inertness is structural, which round 2 upgraded from an observation.** R11 and R13 measured
+that a recreated device does not inherit a departed chain; V5 measured *why*, by renaming a live
+device — the ifindex is unchanged, the name is not, and the chain kept enforcing while nft re-rendered
+its display under the new name. **The binding is to the device instance, not the name string.** So a
+returning device always carries a new ifindex and inheritance is impossible by construction, which
+closes the `k3b`/macOS-`I5` hazard class on Linux for this key. It also means the reverse: nothing
+will ever re-attach the chain for you, so part 0's reinstall is load-bearing rather than defensive.
 
 ## Build order
 
@@ -84,6 +93,16 @@ is also the root of the macOS chain, so it pays three times.
 - **Why it gates everything:** enforcement must be installed *before the agent runs*, and reinstalled
   when a sandbox's device is recreated. Both rootless podman (netns torn down with its last sandbox)
   and the stale-but-inert netdev chain require it, independently.
+- **Ordering is forced, and round 2 measured why (V2).** A netdev chain naming a device that does not
+  exist **does not load at all** — `nft` answers `No such file or directory`. So enforcement cannot be
+  installed ahead of the sandbox, and the order is fixed: **device → chain → agent.** The window
+  between the first two is real and is closeable only because yoloAI controls when the *agent*
+  starts, not because the window can be removed. Whatever runs in the container before the chain
+  loads is yoloAI's own `entrypoint.py`, and that is the argument the code has to be worth.
+- **And the reinstall is mandatory, not defensive.** V5 established the chain binds by **ifindex**, so
+  a returning sandbox's veth is a new device and the old chain will not follow it — the sandbox comes
+  back **unenforced** unless part 0 reinstalls. V4 reaches the same state by a hostile route: a guest
+  holding `CAP_NET_ADMIN` can destroy its own interface, which destroys the host-side veth with it.
 - **Exit:** a sandbox that stops and starts has enforcement in place before its agent's first packet,
   asserted by a test that fails when the reinstall is removed.
 
@@ -93,23 +112,62 @@ is also the root of the macOS chain, so it pays three times.
 - **Shape:** one netdev table per sandbox, chain bound to its veth, a named set as the allowlist, a
   gateway accept, a DNS accept, and `reject` as the default for IPv4. ARP and IPv6 fall through the
   chain policy deliberately — dropping ARP costs the sandbox its network and looks like containment.
+- **Round 2 settled two things the shape depended on.** **UDP is covered** by the same `ip daddr`
+  rule — allowlisted UDP still resolves, denied UDP is refused, and `reject` answers in 0.05s against
+  `drop`'s 3.06s, the same benefit R10 measured for TCP (V3). Every rule and probe behind this design
+  had been TCP, which made "the allowlist contains it" a claim about one protocol. And the **install
+  is cheap**: a 10000-element allowlist loads in 25.7 ms on an idle host, 30.0 ms with 32 other
+  sandboxes' chains present, against an 816 ms sandbox start (V7). It is absorbed by the start path
+  rather than visible in it — macOS's 14–46% of a `container run` has no Linux counterpart, which
+  follows from R15 since there is no `sudo` in this path to pay for.
 - **Exit:** two sandboxes on one bridge get independent policy in the same run; the denied
   destination is refused with the deny counter incrementing; revoking a set element stops an
   in-flight transfer. A rate of zero with a zero counter is a free negative and does not count.
 
 ### Part 2 — detection, before any response policy
 
-- **Needs:** code, plus one spike (below).
+**Rewritten 2026-08-12 by verification round 2. The counter-versus-`rx_packets` poll is retired and
+there is no spike outstanding.** What follows is measured, not sketched.
+
+- **Needs:** code. No spike.
 - **Why it is this early:** a `required` sandbox that cannot tell it has been trampled is just a
   best-effort sandbox with a stronger label. Everything in part 5 rests on this.
-- **Shape:** host-side only. Compare the chain's counters against the veth's `rx_packets`
-  (`/sys/class/net/<veth>/statistics/`), plus `NFNLGRP_NFTABLES` for flush and delete events. **No
-  in-guest probe** — DF192 is the finding that says why, and the guest is what we do not trust.
-- **Spike:** the idle-sandbox case. `rule 0 + veth rx 0` is indistinguishable from a healthy sandbox
-  sending nothing, so the detector must report UNKNOWN there rather than healthy. That is the exact
-  free-negative the macOS canary already shipped once; it needs measuring, not reasoning.
-- **Exit:** an induced inert rule is reported as inert, and an idle sandbox is *not* reported as
-  broken, in the same run.
+- **Shape: two netlink subscriptions over disjoint fault classes, and nothing else.** Host-side only
+  — **no in-guest probe**, per DF192, because the guest is what we do not trust.
+
+  | Subscription | Covers | Evidence |
+  | --- | --- | --- |
+  | `NFNLGRP_NFTABLES` | every **ruleset** fault, naming our table: our table deleted, host-wide `flush ruleset`, a reload beginning with a flush | V1 |
+  | `RTNLGRP_LINK` | every **device** fault, naming the veth: ordinary stop, and a guest destroying its own end | V1b |
+
+  V1 found the nftables group **silent** for exactly one fault — the device vanishing, where nothing
+  in the ruleset changes and the table still lists as present, so an inventory check misses it too.
+  V5 explains why: the chain binds by ifindex. V1b found that fault is a *link* event and is reported
+  attributably. Together they are complete for every fault this round could construct.
+
+- **Why the poll is retired rather than kept as a backstop.** It is not merely redundant, it is
+  wrong in **both** directions:
+  - **False healthy** — the idle sandbox. `rule 0 + veth rx 0` is indistinguishable from a healthy
+    sandbox sending nothing. This was the brief's own named spike and it is the free negative the
+    macOS canary shipped once.
+  - **False inert** — V6b. A *foreign* terminal `drop` at higher priority on the same device freezes
+    our counter while our enforcement is perfectly intact, so a counter-based detector reports a
+    healthy sandbox as broken.
+
+  A detector that infers enforcement from traffic has both failure modes by construction. One that
+  subscribes to state changes has neither.
+
+- **What neither subscription covers, stated so it is not assumed away:** a foreign chain shadowing
+  ours. V6b measured the dangerous direction closed on Linux — a foreign higher-priority `accept`
+  does **not** shadow our deny, because netfilter continues to the next base chain and only a
+  terminal `drop` stops traversal. That is a stronger position than macOS, where `pf-anchor-eval.txt`
+  found a loaded anchor pf never evaluates with all three health checks green. Do not read it across.
+- **Event loss is the residual risk and it is unmeasured.** Both groups can overrun and drop under
+  churn, which is exactly when a fleet is starting and stopping. A dropped delete is a silently
+  unenforced sandbox. Reconcile-on-resubscribe is the mitigation and it is Part 3's machinery, which
+  is the second reason these two parts share one model of what is live.
+- **Exit:** each of the four measured faults is reported, attributably, from a subscription — and an
+  **idle** sandbox produces no report at all, because nothing is inferred from its silence.
 
 ### Part 3 — reaping and reconcile
 
@@ -122,6 +180,16 @@ is also the root of the macOS chain, so it pays three times.
   race, which they hit). Startup diffs records against live sandboxes and tears down the difference.
   Never delete on one identifier alone — Calico shipped an address-keyed reaper that deleted a live
   workload's conntrack entries.
+- **Two facts from round 2 the reconcile has to survive.** A host-wide `flush ruleset` destroys
+  **docker's own chains**, not only ours — the next `docker network create` fails on a missing
+  `DOCKER-FORWARD` (V1, measured as collateral of inducing the fault). So the reconcile can find
+  itself running on a host where the runtime is broken, and "ask docker what is live" is not
+  guaranteed to answer. And **event loss** is the residual risk Part 2 hands over: both netlink
+  groups can overrun under churn, so reconcile-on-resubscribe is not optional polish.
+- **Inheritance is closed by construction here, which shrinks the job.** V5's ifindex binding means a
+  recreated device can never inherit a departed chain (R11's `stale-but-inert` is structural, not
+  incidental), and V6b showed a foreign chain cannot shadow ours. What remains for the reaper is
+  **accumulation** — stale tables that enforce nothing and cost memory — rather than misattribution.
 - **Exit:** a sandbox destroyed without clean teardown leaves no rule a later sandbox can inherit,
   asserted by reconciling and then checking a fresh sandbox gets only its own allowlist.
 
@@ -154,7 +222,7 @@ missing withdraws a working defense against the primary threat.
   | --- | --- | --- |
   | in-guest only | `iptables`+`ipset` inside the sandbox | an errant agent; **an agent that gains root can flush it** |
   | in-guest, tamper-resistant | installed from a privileged sidecar, agent holds no `CAP_NET_ADMIN` | the agent cannot flush its own rules |
-  | host-side | rules outside the sandbox, keyed on the host interface | measured not defeasible by a guest with `CAP_NET_ADMIN` |
+  | host-side | rules outside the sandbox, keyed on the host interface | measured not defeasible by a guest with `CAP_NET_ADMIN` — **against the netdev chain itself** (V4), not only K1's filter rule. It adds an address, changes its MAC, flaps, renames its own end and fragments its traffic, and stays blocked through all five. **One caveat:** it can destroy its own interface, which unbinds enforcement and costs it the network in the same instant — self-harm rather than an escape, and the reason part 0's reinstall is mandatory |
 
 - **Where it must appear:** at create, and in the sandbox's ongoing status — not only at create,
   because the tier can drop at runtime (trampling, drift) and a create-time line has scrolled away
@@ -246,9 +314,16 @@ field before it is staged.
 Named here because a build brief that reads as though everything is settled is the failure this
 workstream keeps producing. Fuller lists live in each results file's own bounding section.
 
-- **Cost.** Linux allowlist size 1/1000/10000 is *not separable* by the proxy used — that is not the
-  same as equal. macOS is unpriced at any size, and its pinned superset makes the question bigger.
-- **UDP**, on both platforms, throughout. DNS rides on it.
+- **Cost.** Linux *steady-state* at allowlist size 1/1000/10000 is *not separable* by the proxy used
+  — that is not the same as equal. The **acquisition** path is now measured (V7: 25.7–30.0 ms at
+  10000 elements, n=1 per cell) and is absorbed by an 816 ms start. Still unmeasured: concurrent
+  installs, set *update* cost (which is what revocation costs and happens repeatedly), teardown, and
+  memory. macOS is unpriced at any size, and its pinned superset makes the question bigger.
+- **UDP.** **Closed on Linux** (V3): denied by the same rule, allowlisted UDP unaffected, `reject`
+  fast. **Still open on macOS**, where every rule and probe in `pf-no-state.txt` is `proto tcp` and
+  pf's stateless handling of UDP is a separate question nothing has asked.
+- **Event loss** on both netlink groups, which is the residual risk under exactly the churn a fleet
+  produces, and the reason reconcile-on-resubscribe exists.
 - **IPv6.** Deliberately let past the chain policy on Linux; owned by `ipv6-network-isolation.md`.
 - **A hostile guest against any of this.** Every probe in the corpus is a cooperative `curl`.
 - **Concurrency.** One or two sandboxes, sequential, on an idle host, everywhere.

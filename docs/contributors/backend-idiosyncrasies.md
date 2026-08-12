@@ -45,6 +45,7 @@ inclusion test first, then add a row to the index.
 | Apple sandbox: TUI loses left gutter / leading chars orphan onto row above, only on tmux scroll; `^b r` heals it; Docker clean; both emulators affected | [Apple: exec -t forces ONLCR, corrupting column tracking](#apple-container-exec--t-forces-onlcr-on-the-host-local-bridge-pty-corrupting-the-apps-column-tracking-on-scroll) |
 | Brokered agent on podman-macOS hangs on first API call; one-shot curl to the injector works | [Podman Machine: gvproxy stalls streaming](#podman-machine-macos-gvproxy-host-forward-passes-a-one-shot-curl-but-stalls-the-agents-streaming-connection) |
 | A healthy apple/tart guest suddenly resolves nothing (`UNRESOLVED` for every name) with no change to the guest; the host resolves fine; someone just flushed DNS or ran `killall -HUP mDNSResponder` | [macOS: restarting mDNSResponder takes guest DNS down through the vmnet gateway](#macos-restarting-the-hosts-mdnsresponder-takes-guest-dns-down-through-the-vmnet-gateway) |
+| `docker network create` fails with `iptables: No chain/target/match by that name` for `DOCKER-FORWARD`; existing containers unaffected; something recently ran a host-wide nftables flush | [Docker: `nft flush ruleset` destroys Docker's own chains](#nft-flush-ruleset-destroys-dockers-own-chains-and-docker-does-not-notice-until-the-next-network-operation) |
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
 | Agent idle 9s+, route=ok but dns/tcp probe times out (DF8) | [Kata: netns warm-up race](#kata-netns-warm-up-race-tap0_kata-tc-mirred-filter-not-installed-when-taskstart-returns) |
@@ -753,6 +754,41 @@ To distinguish: run `curl --connect-timeout 5 https://api.anthropic.com/` inside
 the VM. `000` = TCP timeout/refused; `4xx` = TCP connected, HTTP response received.
 
 ## Docker
+
+### `nft flush ruleset` destroys Docker's own chains, and Docker does not notice until the next network operation
+
+**Symptom:** `docker network create` fails with
+
+```
+Failed to Setup IP tables: Unable to enable ACCEPT OUTGOING rule:
+(iptables failed: iptables --wait -t filter -A DOCKER-FORWARD -i br-<id> -j ACCEPT:
+iptables: No chain/target/match by that name.
+```
+
+Existing containers keep running and existing networks keep working, so nothing looks wrong until
+something tries to create a network — which makes the cause easy to attribute to whatever ran last
+rather than to the flush.
+
+**Cause.** On a host using the `nft` iptables backend, Docker's chains live in nftables tables like
+any other. `nft flush ruleset` is host-wide and takes them with it. Docker holds no watch on the
+ruleset and does not rebuild on demand, so its in-memory view and the kernel's disagree from that
+moment on.
+
+**This is the same shape as `l3d-shared-vs-own-table`, arriving from the other direction.** That run
+measured a firewall *manager* destroying a foreign table sharing its own; this is a foreign flush
+destroying the *manager's*. The lesson generalises: on a host with nftables, any tool issuing a
+host-wide flush is a tool that breaks every other tool's rules, and there is no ownership mechanism
+that prevents it.
+
+**Repair:** `sudo systemctl restart docker`, which rebuilds the chains from Docker's own state.
+
+**Why it matters to yoloAI beyond the annoyance.** A host-wide flush is one of the faults layer 3's
+detector exists to notice ([`enforcement-build.md`](design/plans/enforcement-build.md) Part 2), so
+the reconcile in Part 3 can find itself running on a host where **the container runtime itself is
+broken** — "ask Docker what is live" is not guaranteed to answer. Measured 2026-08-12 as collateral
+of deliberately inducing the fault; see `design/research/linux-enforcement/results/v1-netlink-event-coverage.txt`.
+
+---
 
 ### AppArmor blocks `mount(2)` even with `CAP_SYS_ADMIN`
 

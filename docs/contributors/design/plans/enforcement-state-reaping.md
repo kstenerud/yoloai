@@ -93,12 +93,35 @@ therefore cannot produce the collision at all:
 **So netdev trades one hazard for the other.** It is immune to the `k3b`/macOS-I5 inheritance
 hazard — a returning `veth0` does *not* pick up a departed sandbox's allowlist, which is exactly what
 rootless podman's name reuse makes dangerous for every other key. What it gets instead is a
-**stale-but-inert** chain: still listed, still reading correctly, enforcing nothing. That is class 8,
-and it is why `r8`'s counter detector is a prerequisite rather than a nicety.
+**stale-but-inert** chain: still listed, still reading correctly, enforcing nothing.
+
+### Why the immunity is structural, not incidental (V5, 2026-08-12)
+
+R11 recorded the *outcome* and named the gap in its own bounds: *"nothing here records whether nft
+binds by name or by index — which is the mechanism behind whatever was observed."* Round 2 settled it
+with a **rename**, which neither R11 nor K3b tried: take a live device with a chain attached and give
+it a different name. The ifindex is unchanged, the name is not.
+
+The chain **kept enforcing** (counter 2 → 4), and `nft` re-rendered its own display under the new
+name. **The binding is to the device instance, not the name string.** A prior-art gate first
+confirmed the field has published no clean answer here — `man nft` says netdev base chains "exist per
+interface only" (an instance) *and* take a device "name as a string" (a name), and mailing-list
+traffic exists around same-name re-registration.
+
+Two consequences, in opposite directions:
+
+- **Inheritance is impossible by construction.** A recreated device always carries a new ifindex, so
+  the `k3b`/I5 hazard class is closed on Linux for this key — not "was not observed", *cannot occur*.
+- **Nothing will ever re-attach the chain for you.** Which makes part 0's reinstall load-bearing
+  rather than defensive, and gives it a second hostile route: a guest holding `CAP_NET_ADMIN` can
+  destroy its own interface (V4), taking the host-side veth with it.
 
 **Consequence for the build:** enforcement must be **reinstalled when a sandbox's device is
-recreated**, and its absence is invisible to rule inspection. That is a second, independent reason for
-the pre-agent hook the rootless-podman row already required.
+recreated**, and its absence is invisible to rule inspection — the table still lists as present, and
+V1 measured that no netlink event is emitted either. **Detection of that one fault moved** from
+`r8`'s counter comparison to an `RTNLGRP_LINK` subscription (V1b), because a device disappearing is a
+link event and is reported attributably; see the build brief's Part 2, where the counter poll is
+retired outright.
 
 **It expresses the real policy, not just a one-line deny** (`r12-netdev-allowlist.txt`). R10 and R11
 recommended netdev on the strength of a single-address `drop`, which implies nothing about an
@@ -114,8 +137,18 @@ throughout:
 | `reject` | available **and effective**: 0.06 s vs 5.09 s for `drop`, with the counter to prove it fired |
 
 So the netdev key is not a downgrade on any axis the design cares about. **Its cost is the
-stale-but-inert chain above, which makes `r8`'s host-side counter detector a prerequisite rather
-than a nicety.**
+stale-but-inert chain above** — which round 2 then made cheap to detect: the fault is announced on the
+link group (V1b), so it costs a subscription rather than the counter poll `r8` prototyped. The poll is
+retired, and V6b is why it is retired rather than kept as a backstop: a *foreign* terminal `drop` in
+front of ours freezes our counter while our enforcement is intact, so a counter-based detector reports
+a healthy sandbox as broken. With the idle-sandbox case it was wrong in both directions.
+
+**Round 2 also closed the protocol gap and the shadowing question.** UDP is denied by the same
+`ip daddr` rule, allowlisted UDP still resolves, and `reject` answers a denied UDP query in 0.05 s
+against `drop`'s 3.06 s (V3) — every rule and probe behind this design had been TCP. And a foreign
+netdev chain at higher priority containing an `accept` does **not** shadow our deny (V6b): netfilter
+continues to the next base chain and only a terminal `drop` stops traversal, so the Linux analogue of
+`pf-anchor-eval.txt` — a loaded rule that is never evaluated — cannot be produced that way.
 
 > **A free negative, caught by its control.** Run 1 reported *"`reject` is not available in a netdev
 > chain"*. It was not: the probe was a one-line table definition `nft` cannot parse, so it failed on
