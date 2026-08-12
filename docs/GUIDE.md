@@ -389,7 +389,8 @@ yoloai new task ./project --abandon-unapplied
 yoloai new task ./project -- --allowedTools "Edit,Write,Bash"
 
 # Network isolation (allow only agent API traffic; IPv4 only — IPv6 is not filtered)
-# Tamper-resistant on docker only; elsewhere the sandbox can remove its own rules ('yoloai help security')
+# A guardrail, not containment: the agent has sudo, so root can re-enable IPv6 and
+# leave through it even on docker, where it cannot remove the rules ('yoloai help security')
 yoloai new task ./project --network-isolated
 
 # Allow extra domains in network-isolated mode
