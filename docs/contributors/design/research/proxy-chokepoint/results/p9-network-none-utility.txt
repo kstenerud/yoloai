@@ -64,3 +64,50 @@ exit 1 -- and scored that as the flag breaking it. And it probed for local work
 against a container that a `--wait` run had already stopped. Both counterexamples
 read as absent. The headline would have been "no counterexamples found", which is
 the answer the deprecation proposal wanted, reached by measuring nothing.
+
+
+================================================================================
+ADDENDUM 2026-08-12 — the owner refuted the counterexamples, and the refutation
+turned up the real difference
+================================================================================
+
+The owner's objection to the two counterexamples above is correct and sharper
+than they were: `test` and `idle` are not agents, so they pose no threat if
+networking is allowed -- and with no agent, --network-isolated has no agent API
+to allowlist, so it should collapse to the same posture as --network-none. That
+reasoning is right, and it retires "the no-op agents still work" as an argument
+for keeping the flag.
+
+Measured rather than conceded, because the collapse is testable. Two `idle`
+sandboxes, identical but for the mode, docker, n=1:
+
+                          --network-isolated    --network-none
+  interfaces              lo + eth0             lo
+  DNS to a nameserver     REACHED               blocked
+  getent hosts example    RESOLVED              blocked
+  arbitrary TCP (443)     blocked               blocked
+
+TCP collapses exactly as the owner predicted. **DNS does not.** An isolated
+sandbox with no agent still resolves names and still reaches a nameserver, which
+is a working exfiltration channel: data goes out in query labels to any domain
+the exfiltrator controls, and the configured recursive resolver forwards it to
+their authoritative server without the guest needing to reach an arbitrary
+nameserver itself. This is the DNS-exfil hole `netpolicy.md` already names as an
+`ip-filter` property; what is new here is that it survives the case where there
+is nothing legitimate to resolve.
+
+So `--network-none` is not equivalent to `--network-isolated` even with no agent,
+and the difference is the one that matters for an adversary rather than for a
+confused one.
+
+THE USE THAT FOLLOWS, stated as the thing to accept or reject rather than as a
+recommendation: --network-none is the only mode with NO egress channel of any
+kind. Under the proposed scheme that stays true -- `restricted` always permits
+the proxy, so a channel always exists and the policy sits at the far end of it.
+The case is running untrusted CODE rather than an untrusted agent: a suspicious
+repository, a dependency's test suite, a build script nobody has read, with
+`--agent idle` and `exec`, where the copy/diff/apply workflow is the point and no
+egress is wanted at all.
+
+Whether that is worth a mode is the owner's call. What is now measured is that it
+is not the same thing as `isolated`, and that the gap is DNS.
