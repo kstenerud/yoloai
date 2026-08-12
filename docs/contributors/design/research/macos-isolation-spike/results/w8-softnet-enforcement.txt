@@ -1,0 +1,28 @@
+=== W8 ===
+Does tart's Softnet actually deny a destination, and is `--net-softnet-allow` an allowlist?
+
+-- controls and baselines (all held, or this would not render) --
+  the guest has a network at all under Softnet: True   (1.1.1.1 -> 301)
+  baseline: the guest reaches a destination outside its Softnet policy: True   (--net-softnet-allow=0.0.0.0/0, which `--help` says disables destination-based restrictions)
+  the permitted address still answers, so this is an allowlist and not an outage: True   (1.1.1.1 -> 301)
+  `tart exec` still answers, so the sampler is not riding the filtered path: True   (the Guest Agent is a vsock channel, not the network under test)
+
+-- measurements --
+  `--net-softnet-allow=1.1.1.1/32` alone: allowed / other: '301 / 301'   (read as an allowlist this should refuse the second address; `--help` says --allow WIDENS the default private-address restriction rather than narrowing it, and the measurement agrees)
+  baseline read: '301'
+  --net-softnet-block=0.0.0.0/0 --net-softnet-allow=1.1.1.1/32: False
+  under default-deny: permitted / denied: '301 / 000'
+
+-- expectations, rendered from the values above --
+  [PASS] Softnet's default-deny form actually denies a destination on tart  <- --net-softnet-block=0.0.0.0/0 --net-softnet-allow=1.1.1.1/32=False
+
+-- WHAT WAS NOT TRIED --
+  - **the dynamic policy channel, which is the interesting half.** Softnet's README describes newline-delimited JSON-RPC over a Unix socket with flow-table clearing on change — which is live revocation, the thing `pf-no-state.txt` needed five runs to reach on pf. `tart run` exposes only the boot-time flags, and nothing here finds or drives that socket. Whether yoloAI could is the question that decides if tart gets revocation at all
+  - source pinning. Softnet also enforces the VM's own MAC and DHCP-assigned address, which would structurally close `pf-spoof.txt`'s S4 escape. Not exercised: no attempt was made to spoof from inside the guest
+  - the `@host` identifier the README names for gateway traffic, which is W5's problem on the tart side and is not probed
+  - UDP and DNS. Both probes are TCP/80. The guest resolves through the Softnet gateway and whether a default-deny policy costs it its resolver is exactly W1's question, unasked here
+  - more than one destination per class, and any address inside the private ranges Softnet restricts by default
+  - n. One boot per arm, one host, one tart and softnet version (tart 2.32.1, softnet 0.19.0)
+  - whether this composes with yoloAI at all. `runtime/tart` does not pass these flags today, and what it would cost to thread an allowlist through is a code question this run does not open
+
+-- all live expectations held --
