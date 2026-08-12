@@ -111,6 +111,57 @@ smaller gap than the claim that closed this investigation on macOS.
 > victim — it moves the defect to the other sandbox. See `df190-mechanism.txt`; the original
 > observation is `pf-interface-key.txt` I2c.
 
+## The premise this plan rests on has changed — 2026-08-12
+
+**Read this before the sections below.** They are all correct about pf and all written on an
+assumption that a post-round measurement voids.
+
+**In-guest enforcement cannot be made tamper-resistant on any backend whose sandbox grants
+the agent root — and every backend does, deliberately.** `Dockerfile:229` writes
+`yoloai ALL=(ALL) NOPASSWD:ALL`, because a sandbox where the agent cannot install a package
+is a different product. `entrypoint.py:324` already execs `gosu yoloai …` on every backend,
+so the agent is non-root *and* root on demand.
+
+Measured as the product launches it (`agent-privilege-reality.txt`), with the sudo grant as
+the only variable:
+
+| vector | grant removed | as shipped |
+| --- | --- | --- |
+| a `/proc/sys/net` sysctl (`disable_ipv6`) | refused | **ok** |
+| rewriting `/yoloai/bin/firewall.py` | refused | **ok** |
+| netlink (`ipset add`) with `CAP_NET_ADMIN` dropped | refused | refused |
+
+Netlink alone holds, because a bounding-set drop is inherited across `sudo`. The other two
+are ordinary root operations, and `sudo` simply grants them.
+
+**Three consequences, and they reach further than this plan.**
+
+1. **The `--network-isolated` guarantee is narrower than [DF179](../findings-unresolved.md)
+   states.** That entry reasons about *where enforcement sits* and concludes apple needs host
+   `pf` for want of a shareable netns. The operative fact is that the agent has root wherever
+   enforcement sits, so on every backend granting sudo the in-guest allowlist constrains a
+   **confused** agent and nothing more. DF179 is not this agent's write surface; its remedy
+   analysis should be revisited by whoever owns it.
+2. **Two candidate fixes are withdrawn.** *Run the agent non-root* is already done and buys
+   nothing. *Drop `CAP_NET_ADMIN` from the bounding set* (§ *Round 2*, W6) closes one vector
+   of three and leaves the sysctl class and file tampering open — a partial fix that invites
+   over-claiming, at the cost of more just-so start-path machinery.
+3. **The residue is unbounded by construction**, which is why hardening kept not converging.
+   `proc-sys-net-census.txt` puts 763 writable knobs behind one of those vectors, and
+   `tamper-persistence.txt` shows that overwriting our own files does not help because the
+   *toolchain* they invoke is equally writable. The set is a function of everything installed
+   in the image.
+
+**What this does NOT decide.** Host `pf` remains the only mechanism measured here that a
+guest with root cannot subvert, so if isolated sandboxes keep a network, this plan is still
+the answer for `apple` — tart has Softnet and seatbelt has no address. What has changed is
+that the in-guest layer can no longer be presented as an alternative to it, only as a
+convenience for the confused-agent case. **The live alternative is architectural rather than
+mechanical**: remove the route and mediate egress through a host-side proxy, which is where
+[`egress-proxy-build.md`](egress-proxy-build.md) and
+[`tamper-resistant-network-isolation.md`](tamper-resistant-network-isolation.md) already
+point. That decision is the owner's and is not taken here.
+
 ## Round 2 verification — 2026-08-12
 
 **This section is the single synthesis pass for verification round 2** ([D136](../../decisions/working-notes.md) §4),

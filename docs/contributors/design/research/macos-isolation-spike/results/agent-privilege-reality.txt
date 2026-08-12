@@ -1,0 +1,30 @@
+=== PRIV ===
+What privilege does the agent really have, and what does the image's sudo grant decide?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the agent can defeat at least one containment vector: False
+  the grant really was removed before the agent ran: True   (present at start=yes, after strip=no — the image ships it, so this is a removal and not an absence)
+  the agent ran as the product runs it, not as root: True   (uid=1001 via `gosu yoloai`, which is what entrypoint.py:324 execs on every backend)
+  the allowlist was enforcing in the baseline arm: True   (denied=000 allowed=301)
+  the grant was present in this arm: True
+  same uid, same launch shape — the sudo grant is the ONLY variable: True   (otherwise this compares two different things)
+
+-- measurements --
+  without sudo: sysctl / file tamper / netlink: 'refused / refused / refused'
+  the image as shipped, with NOPASSWD:ALL: True
+  as shipped: sysctl / file tamper / netlink: 'ok / ok / refused'
+  which vectors the shipped agent reaches: 'SYSCTL, TAMPER'
+  the agent's bounding set: '00000000a80425fb'   (CAP_NET_ADMIN is out of it, and the bounding set is inherited across `sudo` — which is why netlink alone stays closed)
+  disable_ipv6 after the shipped agent ran: '0'   (1 = still off, 0 = the agent turned IPv6 back on)
+
+-- expectations, rendered from the values above --
+  [PASS] the agent as the product launches it CAN defeat containment vectors, and the NOPASSWD sudo grant is what unlocks them  <- the image as shipped, with NOPASSWD:ALL=True
+
+-- WHAT WAS NOT TRIED --
+  - **whether removing the sudo grant is acceptable.** The baseline arm shows it closes every vector, and it is not a proposal: a sandbox whose agent cannot install a package is a different product. This measures the trade, it does not make it
+  - the other 762 sysctls. One stands in for the class `proc-sys-net-census.txt` enumerated; nothing here re-walks it under sudo
+  - whether the agent can regain CAP_NET_ADMIN some other way — a setuid binary with file capabilities, a kernel bug, or a path that does not go through `sudo`. `cap-drop-coverage.txt` lists the setuid binaries present and none carries fcaps
+  - docker, podman and containerd. The launch shape here is shared (`entrypoint.py` is one file) but only apple was run
+  - what the agent does with any of it. These are capabilities, not exploits; `ipv6-sidestep.txt` and `tamper-persistence.txt` are where two of them are carried through to a defeated allowlist
+
+-- all live expectations held --

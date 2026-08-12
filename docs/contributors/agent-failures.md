@@ -1457,3 +1457,34 @@ as scarce as the failures and twice as useful.
   and only one has been opened, the claim is unsupported no matter how well the code reads — and if
   the artifact is committed specifically so it can be audited later, then not opening it is the whole
   failure.
+
+### A37 — measured a rig I built, and reported the property of the product (2026-08-12)
+
+- **What happened:** across a session of macOS containment work I measured a root agent's reach
+  inside apple containers — 763 writable `/proc/sys/net` knobs, a rewritable `firewall.py`, a
+  shadowable `iptables` — and concluded that **running the agent non-root** would close the sysctl
+  class and the root-owned binaries. I carried that to the owner as the highest-value single change
+  available, they approved it, and I opened the launch path to implement it. `entrypoint.py:324`
+  already execs `gosu yoloai python3 sandbox-setup.py`, branching on `running_as_root` rather than on
+  backend. **The agent has been uid 1001 on every backend all along. There was nothing to implement.**
+  And the fact I had not checked, `Dockerfile:229`, is `yoloai ALL=(ALL) NOPASSWD:ALL` — so the
+  recommendation would not have helped even if it had been outstanding.
+- **Source of the false belief:** every container I measured was one I launched, with
+  `--entrypoint /bin/sh`, because that is what a harness needs in order to control the setup. That
+  container runs as root. I then described *the agent* as running as root, having never launched one
+  the way the product does. The rig was faithful to what it was built for and was never the subject.
+- **What caught it:** going to write the code. Not a control — none of the harnesses were wrong, and
+  each remains valid for the process it actually measured. The claim that failed was the one
+  connecting them to the product, and no probe in any of them was pointed at that.
+- **How far it travelled:** to a recommendation the owner accepted, and one step from a commit. It did
+  not reach a durable artifact only because implementing it required reading the file that refutes it.
+- **Why this is not A34 or A36 repeating.** A34 asserted a mechanism that fit an observation; A36
+  asserted a defect with no observation. This one has an observation, a sound harness, and a correct
+  measurement — and applies it to a subject it never sampled. The defect is not in the evidence or its
+  absence but in the **population**: `inference-overreach` (D136 §6) where the overreach is about
+  *whose process it was* rather than *how many*.
+- **The rule:** **when a harness constructs its own subject, the claim is about the construction until
+  something checks the product builds it the same way.** A rig that must control setup will diverge
+  from the product's setup — that is what makes it a rig — so "how does the product launch this?" is
+  not a detail to confirm later, it is the step that decides whether the measurement transfers at all.
+  One `grep` for `gosu`, at any point in the session, closes it.
