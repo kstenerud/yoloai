@@ -1,0 +1,35 @@
+=== TAMPER ===
+Does a tampered guest come back unenforced, and would overwriting our own scripts fix it?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the agent can replace the start script: True   (a root agent obviously can — this is what makes the non-root answer meaningful)
+  the start script was restored before the restart arms: True   (so those arms measure tampering and not this one's leftovers)
+  baseline: the sandbox comes back UNENFORCED after a restart: False
+  the start script is byte-identical to the clean one for arm B: True   (so arm B measures the toolchain and not a leftover from arm A — this is the overwrite policy, applied)
+
+-- measurements --
+  is the toolchain writable by the guest at all?: 'yes'   (the premise of arm B — if this were 'no', that arm could not exist)
+  ownership of what the start path depends on: 'drwxr-xr-x yoloai:yoloai\nlrwxrwxrwx root:root'
+  as the non-root agent user: True
+  how the non-root user managed it: 'append=no, unlink+create=yes'   (append vs unlink+create — the second is the one the directory permits)
+  baseline: denied / allowed: '000 / 301'   (the start script runs from the rootfs and enforces, so a later failure is the tampering and not the rig)
+  start script neutered: True
+  [script] denied / allowed [arm: script]: '301 / 301'
+  start script pristine, iptables shadowed: True
+  [toolchain] denied / allowed [arm: toolchain]: '301 / 301'
+
+-- expectations, rendered from the values above --
+  [FAIL] running the agent as a non-root user protects our own start path from being replaced  <- as the non-root agent user=True
+  [PASS] a tampered start script leaves the sandbox UNENFORCED at the next start — the hazard an overwrite-on-every-start policy exists to fix  <- start script neutered=True
+  [PASS] with our script pristine, a tampered TOOLCHAIN still leaves it UNENFORCED — i.e. overwriting our own files is NOT sufficient  <- start script pristine, iptables shadowed=True
+
+-- WHAT WAS NOT TRIED --
+  - the product's real start path. This is a reduced start script standing in for `entrypoint.py` plus `install-firewall.py`; whether those fail loudly on a broken `firewall.py` — which would make arm A less severe than it looks — is not measured here and should be, because it changes how urgent the overwrite is
+  - the interpreter. Arm B shadows `iptables`; `python3`, `ipset`, libc and the dynamic linker are the same class and are not exercised. The arm is an existence proof for the class, not a survey of it
+  - whether the OVERWRITE itself can be trusted to run. It has to happen before anything guest-authored executes, and on apple `container cp` requires the container to be RUNNING — which means something already started. Whether that something can be a host-chosen binary rather than a guest-writable one is the next question and this run does not open it
+  - detection. Nothing here computes or compares a hash; the manifest proposal is what this run supplies evidence FOR, not something it tests
+  - a read-only mount of /yoloai/bin, which would remove arm A entirely without any overwrite or hash. `m.ReadOnly` exists in the apple runtime and nothing here tries it
+  - whether making /yoloai/bin root-owned would hold. The ownership arm shows the agent-owned DIRECTORY is what defeats non-root; it does not verify that a root-owned directory with a root-owned parent actually closes it, and that is the fix that ought to be tested before it is adopted
+  - podman and containerd, and any non-Debian base
+
+-- SOME EXPECTATIONS FAILED --
