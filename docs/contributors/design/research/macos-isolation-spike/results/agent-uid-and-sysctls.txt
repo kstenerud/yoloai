@@ -1,0 +1,31 @@
+=== UID ===
+Does the bounding-set drop protect /proc/sys, and what does?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the agent turned IPv6 back on: True
+  IPv6 really was off before the agent ran: True   (disable_ipv6=1 addrs=0 — otherwise the arm measures nothing)
+  CAP_NET_ADMIN really was gone from the root agent: True   (ipset goes through netlink, which checks the capability — so a refusal here proves the drop took, and makes the sysctl success below a statement about /proc/sys rather than about the drop failing)
+  the non-root arm really did run as a different uid: True   (uid=1001 — the one variable between the arms)
+  IPv6 was off before that arm's agent ran too: True
+  the sandbox still had a network when it was refused: True   (allowlisted host -> 301)
+
+-- measurements --
+  the sysctl's owner and mode: '-rw-r--r-- root root'   (root-owned and writable by its owner; the agent is uid 0)
+  root agent: sysctl write / disable_ipv6 / v6 addrs: 'ok / 0 / 1'   (the address comes back on its own — the kernel reconfigures from the RA once the knob flips, needing no capability)
+  root agent, CAP_DAC_OVERRIDE also dropped: True
+  dropping CAP_DAC_OVERRIDE as well: 'bounding 00000000a80425f9, write ok, v6 addrs 1'   (REFUTED as the mechanism. The first guess was that DAC_OVERRIDE bypassed a permission check; it does not, because uid 0 is the file's OWNER and needs no override to write a mode-644 file it owns)
+  does dropping DAC_OVERRIDE close it?: False
+  non-root agent, same bounding-set drop: False
+  non-root agent: sysctl write / disable_ipv6 / v6 addrs: 'refused / 1 / 0'
+
+-- expectations, rendered from the values above --
+  [PASS] an agent that is not root cannot turn IPv6 back on, so disabling it in the guest is a remedy that holds  <- non-root agent, same bounding-set drop=False
+
+-- WHAT WAS NOT TRIED --
+  - the rest of `/proc/sys/net`. This measures ONE knob. Every root-owned 0644 sysctl under there is reachable by a root agent by the same route, and no census was taken of which ones matter — `route_localnet`, `accept_local`, `rp_filter` and the forwarding toggles are the obvious places to look
+  - `/proc/sys` mounted read-only, which would close the class rather than one knob. It needs CAP_SYS_ADMIN to remount and the container's bounding set does not contain it (the base set here is docker's default, `a80435fb`), so the entrypoint cannot do it from inside — it would have to be a mount the host sets up at create time. Untried
+  - whether the apple path can run the agent non-root at all. `gosu` is present in the image and the docker path uses it; whether the legacy launch path apple takes can adopt it is a code question this run does not open
+  - a guest that regains root after the drop — via a setuid binary, or a kernel bug. The two mechanisms compose deliberately: non-root closes the sysctl path, and the bounding-set drop still holds if root is somehow recovered
+  - IPv6 disabled by any route other than the sysctl. A v6-less network would be cleaner and apple's `container network create` does not offer one — a network created with only `--subnet` still gets a ULA `/64` assigned
+
+-- all live expectations held --
