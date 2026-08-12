@@ -18,6 +18,7 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
 | Run | Verdict | File |
 | --- | --- | --- |
 | P1 — agent traffic census | **RECORD** (run 3) | [`p1-agent-traffic-census.txt`](p1-agent-traffic-census.txt) |
+| P2 — chokepoint viability | **RECORD** (run 3) | [`p2-chokepoint-viability.txt`](p2-chokepoint-viability.txt) |
 
 ## Invalidated
 
@@ -56,6 +57,23 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
 - Run 2 also produced the first sighting of SSH to GitHub (140.82.121.3:22), which run 3
   reproduced. That observation survives its run's invalidation because it is a raw destination
   in the capture, not a product of the broken predicate.
+
+### P2 runs 1 and 2 — both harness, neither the world
+
+- **Run 1 — `Class:` `predicate-bug` · `Direction:` `confirmed`.** The harness passed
+  `--env NO_PROXY=localhost,127.0.0.1`, and `--env` on `new`/`run` comma-splits its value, so the
+  launch failed with an error naming a fragment nobody wrote. Every downstream control failed
+  honestly and the harness refused a verdict. Filed as [DF195](../../findings-unresolved.md) rather
+  than fixed mid-round — the same flag is `StringArray` on `start`/`restart`/`reset`, so three
+  sibling paths already do it the other way.
+- **Run 2 — `Class:` `instrument-in-region` · `Direction:` `contradicted`.** A second `probe()` was
+  given `baseline(want=False)` on the belief that it would *reuse* the first probe's
+  mechanism-absent state. `baseline()` executes the callable, so it ran the with-proxy check and
+  got `True`, and v2 refused the run. The fix is the shape the harness is designed for: **one
+  probe, one callable, a state flag** — so the baseline and the sample come from the same code
+  path rather than from two functions that could quietly differ. Worth recording because the
+  failure was a misreading of the harness, not of the subject, and the corrected shape is the one
+  future harnesses should copy.
 
 ## Abandoned rather than half-run
 

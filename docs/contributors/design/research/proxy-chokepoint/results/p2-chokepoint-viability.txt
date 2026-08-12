@@ -1,0 +1,86 @@
+=== P2 ===
+With one destination and a host-side proxy, does the work still complete?
+
+-- controls and baselines (all held, or this would not render) --
+  the proxy stand-in is listening: True   (172.17.0.1:8899 — if it died, every failure below is free)
+  the sandbox launched via the product's own launch path: True   (rc=0)
+  the sandbox's host-side veth was found: True   (dev='veth52ee4ee')
+  the chokepoint rule loaded: True   (one destination permitted; DNS is NOT, so a guest that resolves for itself fails — which is P6's question answered in passing)
+  baseline: the sandbox reaches an ordinary HTTPS destination: False   (chokepoint installed, no proxy configured. If this SUCCEEDS the chokepoint is not a chokepoint and every result below is free)
+  the chokepoint's deny rule actually fired: True   (18 packets — a baseline that failed for some other reason would look identical)
+  traffic to the proxy was permitted by the accept rule: True   (458 packets)
+  the proxy log is non-empty, so the destination list is evidence: True   (31 lines)
+  the agent's OWN LLM traffic went through the proxy: True   (this is what makes the work arm a statement about a chokepoint rather than about a sandbox that finished before the rule landed)
+  the package manager's traffic went through the proxy too: True   (the task's network-dependent step; without it the session could have completed from cache and proved nothing about coverage)
+
+-- measurements --
+  with the proxy configured: True
+  the agent completed the task under the chokepoint [arm: work]: True   (agent exit=0; diff mentions package.json=yes, index.js=yes)
+  distinct destinations the session asked for: 8
+  the destinations, in the clear: 'api.anthropic.com:443; downloads.claude.ai:443; example.com:443; github.com:443; http-intake.logs.us5.datadoghq.com:443; mcp-proxy.anthropic.com:443; raw.githubusercontent.com:443; registry.npmjs.org:443'
+  proxy errors: 0   (none)
+
+-- expectations, rendered from the values above --
+  [PASS] configuring the proxy restores reachability through the chokepoint  <- with the proxy configured=True
+  [PASS] a real agent session completes its work with one destination and a proxy, which is what D137's whole direction assumes  <- the agent completed the task under the chokepoint=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  a real agent session completes its work with one destination and a proxy: the mechanism-absent state is arm `reach`'s baseline, where the same chokepoint refused the same guest; re-running a full agent session with no proxy to watch it fail costs an LLM run to observe what the cheap arm already showed
+
+-- WHAT WAS NOT TRIED --
+  - shape (B). The chokepoint here is an nftables rule over a normal guest stack; a guest with NO stack reaching a socket would present the same traffic to the proxy, which is why coverage is measured on whichever is cheap — but that is an argument, not a measurement
+  - an ALLOWLIST. The proxy stand-in allows everything and validates no hostname, deliberately, so that nothing here can be read as having tested a policy
+  - UDP of any kind. An HTTP proxy carries TCP streams; P1 measured zero QUIC in this session
+  - git over SSH, which P1 saw attempted unasked and which no HTTP proxy carries without a CONNECT tunnel — that is P3
+  - other agents. Claude honours proxy env by documentation; prior art says Codex disables it inside its own sandbox and Aider needs a flag, which is P8
+  - failure MODES. This measures that the work completes, not what a user sees when it does not
+  - repeat runs, and one task. n=1 on both arms
+
+-- all live expectations held --
+
+
+================================================================================
+READING NOTES — written at the run
+================================================================================
+
+1. THE DIRECTION SURVIVES ITS FALSIFICATION TEST. A real agent session, launched
+   by the product, completed a network-dependent task with exactly one permitted
+   destination and exited 0. The chokepoint was demonstrably real while it did so
+   -- 18 packets hit the deny rule, and the same guest with the proxy unset could
+   not reach an ordinary HTTPS host.
+
+2. THE GUEST NEVER RESOLVED, AND NOTHING NOTICED. DNS was deliberately NOT
+   permitted through the chokepoint. The session still worked, because `CONNECT
+   registry.npmjs.org:443` carries a name and the proxy resolves it host-side.
+   That is P6's question answered in passing and it is the Cilium inversion from
+   prior-art section 1, arrived at from the other direction: under a chokepoint the
+   DNS-exfil hole does not need closing because the channel does not exist.
+
+3. THE DESTINATION LIST IS THE CLOSURE QUESTION'S EVIDENCE, and it is the first
+   time this workstream has had one. Seven real destinations (example.com is this
+   harness's own probe):
+
+     api.anthropic.com                    the LLM
+     mcp-proxy.anthropic.com              MCP
+     downloads.claude.ai                  the agent updating ITSELF
+     http-intake.logs.us5.datadoghq.com   telemetry, to a THIRD PARTY
+     registry.npmjs.org                   the task's package manager
+     github.com, raw.githubusercontent.com
+
+   Two readings, and they pull in opposite directions. The set is small and
+   enumerable, which is what a closed policy needs. And two of its members were
+   chosen by neither the user nor the task: an update endpoint and a telemetry
+   endpoint belonging to a company that is not Anthropic. A closed policy has to
+   decide about those explicitly rather than inheriting them, and today nothing
+   in the product would show a user they exist. That visibility is an argument
+   for this direction independent of containment, and it is not one the plan
+   currently makes.
+
+4. WHAT DID NOT APPEAR: port 22. P1 saw an unasked SSH attempt to GitHub; here
+   the chokepoint refused it and the task completed anyway (github.com went over
+   443 instead). One session is not proof that SSH is never needed, but it is
+   direct evidence that its absence is survivable, which is what P3 has to weigh.
+
+5. ZERO PROXY ERRORS across 31 requests. The honest path needed no per-tool
+   coaxing beyond the standard proxy environment variables -- for THIS agent.
+   Prior art says Codex and Aider will not be so cooperative, which is P8.

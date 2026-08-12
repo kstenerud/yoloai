@@ -154,9 +154,9 @@ unreliable. *Decides:* whether a chokepoint is agent-agnostic or silently Claude
 | Item | Verdict | Raw run |
 | --- | --- | --- |
 | P1 | **99.2% HTTP+DNS, zero QUIC; SSH to GitHub appeared unasked** | [`p1-agent-traffic-census.txt`](../research/proxy-chokepoint/results/p1-agent-traffic-census.txt) |
-| P2 | — | — |
+| P2 | **PASSES — agent completed the task, exit 0, with one destination; 7 real hostnames recovered** | [`p2-chokepoint-viability.txt`](../research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
 | P3 | — | — |
 | P4 | — | — |
-| P6 | — | — |
+| P6 | **Answered in passing by P2** — DNS was not permitted and the session worked; the proxy resolves | [`p2-chokepoint-viability.txt`](../research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
 | P7 | — | — |
 | P8 | — | — |
