@@ -1,0 +1,43 @@
+host: Linux 6.8.0-136-generic x86_64 | nft v1.0.9 | docker 29.6.1
+date: 2026-08-12 02:23:08 UTC
+harness: research_harness_v2 (D136)
+round:   enforcement-verification-round-2.md, item V3
+
+=== V3 ===
+Does a netdev allowlist cover UDP, and what does it cost DNS?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: UDP/53 to the denied resolver: True   (no policy loaded; without this every block is free)
+  baseline: TCP/53 to the denied resolver: True   (the same query over TCP, for the comparison)
+  the allowlisted resolver answers before any policy: True   (the positive half, so a denial below means something)
+  the allowlisted resolver STILL answers with the policy loaded: True   (an allowlist that blocks everything is not an allowlist)
+  the deny rule fired: True   (0 -> 3 packets)
+  the allow rule matched, so the set is doing work: True   (1 packets)
+  the drop rule fired: True   (2 packets)
+
+-- measurements --
+  under a reject-shaped netdev allowlist: False
+  under the same policy, over TCP: False
+  drop blocks UDP too, so the timing comparison is like-for-like: True
+  reject answers a denied UDP query faster than drop: True   (reject 0.05s vs drop 3.06s)
+  drop_blocked was: True
+
+-- expectations, rendered from the values above --
+  [PASS] a netdev allowlist denies UDP, not only TCP  <- under a reject-shaped netdev allowlist=False
+  [PASS] TCP is denied by the same rule on the same rig  <- under the same policy, over TCP=False
+  [PASS] reject spares the sandbox a timeout on denied UDP as it does on TCP  <- reject answers a denied UDP query faster than drop=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  reject spares the sandbox a timeout on denied UDP as it does on TCP: a latency comparison between two rule shapes, not a before/after on one mechanism
+
+-- WHAT WAS NOT TRIED --
+  - UDP that is not DNS. `dig` is the probe because its exit code is unambiguous; QUIC, WireGuard, and plain datagram exfiltration are the same `ip daddr` match in principle and are not run here
+  - docker's EMBEDDED resolver at 127.0.0.11. It lives in the sandbox's own netns and never crosses the veth, so host-side enforcement cannot see it at all — which also means a sandbox using it is unaffected by this policy, and nothing here measures what that resolver will forward to
+  - the reply direction. Every rule is `ip daddr` on ingress; a UDP response arriving for an allowlisted flow is not separately checked
+  - IPv6, which this policy deliberately lets past the chain policy
+  - fragmented UDP, and datagrams larger than one MTU
+  - rootless podman and containerd/CNI. docker only
+  - a hostile guest, which is V4
+  - whether ICMP port-unreachable from `reject` leaks anything about the host
+
+-- all live expectations held --

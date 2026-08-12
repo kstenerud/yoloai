@@ -1,0 +1,52 @@
+host: Linux 6.8.0-136-generic x86_64 | nft v1.0.9 | docker 29.6.1
+date: 2026-08-12 02:26:45 UTC
+harness: research_harness_v2 (D136)
+round:   enforcement-verification-round-2.md, item V4
+
+=== V4 ===
+Can a guest with CAP_NET_ADMIN defeat a netdev chain on its host veth?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: guest reaches the denied host: True   (no chain loaded)
+  the allowlisted host answers before any chain: True   (HTTP to 104.20.23.154)
+  oversized ICMP to the gateway works before any chain: True   (the fragmentation arm's positive path, on-link so the internet is not in it)
+  oversized ICMP to the on-link denied address works before any chain: True   (and its negative path, before the rule that should stop it)
+  the deny rule fired: True   (1 packets)
+  the allowlisted host still answers with the chain loaded: True   (the positive control that makes every block below meaningful)
+  the guest's MAC actually changed: True   (now 02:aa:bb:cc:dd:ee)
+  the guest still has a working path after the flap: True   (down/up must not cost it the network, or the next probe is free)
+  the guest still reaches the allowlisted host after renaming: True
+  oversized ICMP to the GATEWAY still works under the chain: True   (the gateway is allowlisted, so a fragmented denial below is the rule rather than fragmentation being broken on this path)
+
+-- measurements --
+  chain loaded, guest quiescent: False
+  after the guest added a second address: False
+  after the guest changed its MAC: False
+  after the guest flapped its interface: False
+  the chain is still attached to: 'veth768b893'
+  the guest can rename its own interface: True
+  after the guest renamed its own interface: False
+  fragmented ICMP to the denied on-link address is refused: True   (every fragment carries the IP header, so `ip daddr` should still match — an allowlist matching only first fragments would be a real evasion)
+  the guest can destroy its own interface: True
+  the host-side veth survives the guest deleting its end: False   (a veth pair dies together, so this is expected to be False — the question is what happens to the chain)
+  the chain still exists after the device is destroyed: True   (R11's stale-but-inert, reached by a hostile route rather than a lifecycle one)
+  and nft now reports it attached to: ''
+  SO: a guest can make itself unenforced by destroying its own interface: True   (it costs the guest its network at the same instant, so it is a denial of service against itself rather than an exfiltration path -- unless something restores the interface WITHOUT restoring the chain, which is Part 0's job)
+
+-- expectations, rendered from the values above --
+  [PASS] the netdev chain blocks before any tampering  <- chain loaded, guest quiescent=False
+  [PASS] adding an address does not defeat it  <- after the guest added a second address=False
+  [PASS] changing the MAC does not defeat it  <- after the guest changed its MAC=False
+  [PASS] a down/up flap does not unbind the chain  <- after the guest flapped its interface=False
+  [PASS] renaming its own end does not defeat it  <- after the guest renamed its own interface=False
+
+-- WHAT WAS NOT TRIED --
+  - whether anything RESTORES the interface after the guest destroys it. That is the case that turns this from self-harm into an escape, and it depends on the backend's restart behaviour — untested here and squarely Part 0's question
+  - CAP_SYS_ADMIN. R2 measured that the agent holds NET_ADMIN but not SYS_ADMIN, so it cannot enter another namespace; this run does not re-test that and inherits it
+  - a guest attempting to reach the nft socket, the docker socket, or the netlink group the host detector subscribes to
+  - IPv6 and UDP under tampering. The attacks are re-probed over TCP (curl) and ICMP (fragmentation) only
+  - traffic shaping to evade a counter-based detector — deliberately out of this round, and named in the round file as rogue-agent work
+  - rootless podman, where the chain lives in a namespace the guest cannot reach at all, and containerd
+  - concurrency: one guest, attacking alone, on an idle host
+
+-- all live expectations held --

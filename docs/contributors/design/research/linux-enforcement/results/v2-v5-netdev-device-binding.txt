@@ -1,0 +1,50 @@
+host: Linux 6.8.0-136-generic x86_64 | nft v1.0.9
+date: 2026-08-12 02:20:50 UTC
+harness: research_harness_v2 (D136)
+round:   enforcement-verification-round-2.md, items V2 and V5
+
+=== V2+V5 ===
+Can a netdev chain be installed before its device exists, and does nft bind it by name or by ifindex?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: ICMP to the denied host address: True   (no chain loaded; without this every block below is free)
+  ICMP to the second host address works too, before any chain: True   (this is the control that stays live while the deny rule is loaded)
+  the deny rule fired: True   (2 packets)
+  the second address is STILL reachable with the chain loaded: True   (so 'blocked' below is the rule, not a dead path)
+  the rename preserved the ifindex: True   (ifindex 1327 -> 1327; this is what makes the arm a name-vs-index discriminator at all)
+  the path still works after the rename: True   (renaming a host-side veth must not break routing, or the next probe is free)
+
+-- measurements --
+  under the chain, device named as loaded: False
+  the device can be renamed while a netdev chain is attached to it: True   (if this fails the arm cannot run and V5 is undecided by this route)
+  the chain still enforces on the RENAMED device [arm: v5]: True   (blocked=True, counter 2 -> 4. Both required: a blocked probe with a frozen counter means something else stopped it)
+  nft reports the chain attached to: 'yb_v25_r'   (the name nft prints after the rename — its own view of the binding)
+  so the netdev chain binds by: 'ifindex'   (ifindex means R11's stale-but-inert is STRUCTURAL — a recreated device has a new index and can never inherit. name means it was incidental)
+  a netdev chain naming a device that does not exist loads: False   (rc=1; nft said: /dev/stdin:4:34-50: Error: No such file or directory; did you mean chain ‘c_ingress’ in table netdev ‘yb_v25_nd’?
+        type filter hook ingress device "yb_v25_g" priority 0; policy accept;
+                                 ^^^^^^^^^^^^^^^^^
+/dev/stdin:3:11-19: Error: Could not process rule: No such file or directory
+    chain c_ingress {
+          ^^^^^^^^^)
+  Part 0 consequence: 'there IS a window: the device must exist first'   (the pre-agent hook must order device-then-chain-then-agent, and the gap between the first two is unenforced)
+
+-- VOIDED ARMS, whose expectations decide nothing --
+  v2-bind: the chain could not be loaded for an absent device, so whether it would bind on appearance is unreachable by this route
+
+-- expectations, rendered from the values above --
+  [PASS] a netdev chain bound to a device enforces  <- under the chain, device named as loaded=False
+  [FAIL] enforcement can be installed before its device appears (Part 0's ordering)  <- a netdev chain naming a device that does not exist loads=False
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  enforcement can be installed before its device appears (Part 0's ordering): a capability probe — 'does this ruleset load' has no mechanism-absent state to baseline against
+
+-- WHAT WAS NOT TRIED --
+  - containers. This is a hand-built veth pair, for R11's reason: docker does not recycle veth names and so cannot produce the collision. Whether a container runtime's own device churn hits the same kernel path is a separate arm
+  - TCP and UDP. Every probe here is ICMP, consistently and with a baseline, but a netdev chain may treat protocols differently and V3 is where that is asked
+  - the ghost-device arm's actual FILTERING. It measures that the chain loads and that the device appears under it; whether traffic is then dropped needs the netns wiring this arm does not build
+  - a device that appears and disappears repeatedly, and concurrent churn
+  - kernel-version sensitivity. One kernel, one nft. The prior-art gate found no published contract for this binding, so it must not be read as one
+  - rootless podman's netns, where the chain lives in a different namespace
+  - whether the rename path is something a hostile guest could reach — it cannot name the host-side device (k1), but that is V4's question, not this one
+
+-- SOME EXPECTATIONS FAILED --
