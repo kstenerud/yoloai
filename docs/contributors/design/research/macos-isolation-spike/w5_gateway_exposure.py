@@ -146,28 +146,46 @@ def main() -> int:
                       "the remedy expose?")
     servers: list[socketserver.TCPServer] = []
     try:
-        cleanup()
-        _q(["container", "network", "create", NET])
-        _q(["container", "run", "-d", "--name", BOX, "--network", NET, IMAGE, "sleep", "1800"])
-        for _ in range(60):
-            if guest("echo ok") == "ok":
-                break
-            time.sleep(1)
-        h.require("the guest is up", guest("echo ok") == "ok")
-
-        net = json.loads(_q(["container", "inspect", BOX]).stdout)[0]["status"]["networks"][0]
-        gw = net["ipv4Gateway"].split("/")[0]
-        bridge = ""
-        for line in _q(["ifconfig", "-a"]).stdout.splitlines():
-            if not line.startswith((" ", "\t")):
-                cur = line.split(":")[0]
-            elif line.strip().startswith("inet ") and line.split()[1] == gw:
-                bridge = cur
-                break
-        h.require("the guest's gateway is on a host bridge", bool(bridge), f"gateway {gw}")
-
         servers.append(serve(BROKER_PORT))
         servers.append(serve(BYSTANDER_PORT))
+
+        # A PER-SANDBOX network, which is what the rewritten design specifies — and W10 is
+        # why that is stated rather than assumed: on the built-in `default` network the
+        # gateway is not reachable from its own guests at all, so this whole experiment is
+        # unrunnable there.
+        #
+        # The bring-up retries because DF190 displaces a network's bridge at random and a
+        # guest with no egress would fail the baseline for a reason that has nothing to do
+        # with pf — W10 lost a trial to exactly that. The attempt count is REPORTED: a run
+        # that silently retries until it gets the state it wants is selecting its data.
+        gw = bridge = ""
+        attempts = 0
+        for attempts in range(1, 4):
+            cleanup()
+            _q(["container", "network", "create", NET])
+            _q(["container", "run", "-d", "--name", BOX, "--network", NET, IMAGE,
+                "sleep", "1800"])
+            for _ in range(60):
+                if guest("echo ok") == "ok":
+                    break
+                time.sleep(1)
+            if guest("echo ok") != "ok":
+                continue
+            net = json.loads(_q(["container", "inspect", BOX]).stdout)[0]["status"]["networks"][0]
+            gw = net["ipv4Gateway"].split("/")[0]
+            bridge = ""
+            for line in _q(["ifconfig", "-a"]).stdout.splitlines():
+                if not line.startswith((" ", "\t")):
+                    cur = line.split(":")[0]
+                elif line.strip().startswith("inet ") and line.split()[1] == gw:
+                    bridge = cur
+                    break
+            if bridge and reach(gw, BROKER_PORT) not in ("", "000"):
+                break
+        h.measure("bring-up attempts before the rig was usable", attempts,
+                  "more than one means DF190 displaced a network on the way")
+        h.require("the guest is up", guest("echo ok") == "ok")
+        h.require("the guest's gateway is on a host bridge", bool(bridge), f"gateway {gw}")
         h.measure("rig", f"{BOX} on {bridge}, gateway {gw}, broker stand-in :{BROKER_PORT}, "
                          f"bystander :{BYSTANDER_PORT}")
 
