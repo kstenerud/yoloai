@@ -1,0 +1,41 @@
+host: Linux 6.8.0-136-generic x86_64 | docker 29.6.1
+date: 2026-08-12 02:34:15 UTC
+harness: research_harness_v2 (D136)
+round:   enforcement-verification-round-2.md, item V1b (added mid-round)
+
+=== V1b ===
+Does the link netlink group report the device faults the nftables group cannot?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the monitor reports a device event in this window: False   (nothing has touched a device yet; the floor)
+  the sandbox has a host-side veth: True   (vethd8e4fb2)
+  the hostile sandbox has a host-side veth too: True   (vethb769b2e)
+  the guest really did destroy its interface: True
+  the host-side veth really is gone: True   (ground truth — the event must correspond to reality)
+  the OTHER sandbox's veth is untouched: True   (the discrimination control)
+  that veth is gone too: True
+
+-- measurements --
+  after starting a sandbox: True
+  FAULT 'guest destroys its own end': an event arrived: True
+    ... and it names the host-side veth: True   (attribution is the whole question: an event that does not say WHICH device forces a re-check of every sandbox)
+  FAULT 'sandbox stopped normally': an event arrived: True
+    ... and it names the host-side veth: True
+
+-- expectations, rendered from the values above --
+  [PASS] a sandbox starting is announced on the link group, so the watcher is alive  <- after starting a sandbox=True
+  [PASS] a guest unbinding its own enforcement is announced, attributably  <-   ... and it names the host-side veth=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  a guest unbinding its own enforcement is announced, attributably: the baseline for this probe is the empty window above; this is a different measurement (name attribution) over the same event
+
+-- WHAT WAS NOT TRIED --
+  - a Go rtnetlink subscriber. `ip monitor link` is the userspace face of the same group; what a raw RTNLGRP_LINK socket delivers may differ in detail and the implementation must re-check. Same bound as V1
+  - event loss under pressure. rtnetlink sockets can overrun and drop, which is precisely when a fleet of sandboxes is churning — and a dropped delete is a silently unenforced sandbox. Nothing here measures the buffer
+  - ORDERING against the nftables group. Two subscriptions mean two streams, and whether a device-delete can be observed before or after a related ruleset event is not established
+  - the device REAPPEARING and whether the reinstall is racing it — that is Part 0's window, which V2 established exists
+  - rootless podman and containerd/CNI, where device churn happens in another namespace and the host-side monitor may not see it at all
+  - a guest that renames rather than destroys, which V4 measured is inert for enforcement but would also emit a link event and could be used as noise
+  - how many events a busy host emits, i.e. the noise floor a real subscriber filters against
+
+-- all live expectations held --

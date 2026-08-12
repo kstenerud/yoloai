@@ -99,6 +99,7 @@ class Measurement:
     value: object
     detail: str = ""
     is_control: bool = False
+    is_baseline: bool = False
     probe: str = ""
     arm: str = ""
 
@@ -153,6 +154,7 @@ class Probe:
             value=value,
             detail=detail,
             is_control=True,
+            is_baseline=True,
             probe=self.name,
         )
         self.harness.measurements.append(m)
@@ -424,7 +426,14 @@ class Harness:
                 "no control or baseline was declared. A negative result with no "
                 "control is indistinguishable from a broken rig."
             )
-        broken = [c for c in controls if not c.value and c.arm not in self._void_arms]
+        # Baselines are excluded: they are validated against `want` at record time, and a
+        # baseline whose correct value is False -- "nothing has happened yet, so silence is
+        # the floor" -- would otherwise void every run that took one. That defect made half
+        # this API unusable until V1 hit it.
+        broken = [
+            c for c in controls
+            if not c.value and not c.is_baseline and c.arm not in self._void_arms
+        ]
         if broken:
             names = ", ".join(c.label for c in broken)
             self._void(f"control(s) did not hold: {names}. Their results would be free.")

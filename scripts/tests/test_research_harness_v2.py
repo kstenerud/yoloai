@@ -271,3 +271,31 @@ def test_counter_moved() -> None:
 def test_version_is_pinned() -> None:
     """Research pins its contract at the import line; this is the other half of that."""
     assert HARNESS_VERSION == 2
+
+
+def test_a_false_baseline_does_not_void_the_run() -> None:
+    """V1's shape: 'nothing has touched our table yet, so silence is the floor'.
+
+    A baseline is checked against `want` when it is recorded. Re-checking it for truthiness
+    at report time is redundant for want=True and wrong for want=False, and it made every
+    run that needed a False baseline void.
+    """
+    h = Harness("false-baseline")
+    h.control("rig is live", True)
+    h.not_tried("x")
+    answers = [False, True]
+    probe = h.probe("an event arrived", lambda: answers.pop(0))
+    probe.baseline(want=False, detail="nothing has happened yet")
+    h.expect("the fault produces an event", probe.sample(), want=True)
+    out = io.StringIO()
+    assert h.report(out) is True
+    assert "[PASS] the fault produces an event" in out.getvalue()
+
+
+def test_a_false_baseline_still_refuses_a_claim_matching_it() -> None:
+    """The discrimination rule is unchanged by the fix above."""
+    h = _armed("false-baseline-claim")
+    probe = h.probe("an event arrived", lambda: False)
+    probe.baseline(want=False)
+    with pytest.raises(HarnessError, match="never shown producing the opposite"):
+        h.expect("no event arrives", probe.sample(), want=False)
