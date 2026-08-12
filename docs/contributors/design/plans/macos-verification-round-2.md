@@ -127,7 +127,7 @@ Filled in as each item runs. Raw output in
 
 | ID | Outcome |
 | --- | --- |
-| W1 | — |
+| W1 | `w1-protocol-coverage.txt`. **The shape as written contains TCP and nothing else.** Loaded exactly as `pf-no-state.txt` and the reaping plan state it, a denied host is refused over TCP (`000`) and **answers over UDP** — `dig @1.0.0.1` returned real records — and **answers ICMP echo**. The egress block counter never moved. Dropping the `proto tcp` qualifier and changing nothing else closes both: UDP times out, ICMP gets no reply, TCP is unaffected, and the block counters move in *both* directions (`in 0→7`, `out 0→5`). **DNS through the vmnet gateway survives the egress block in both arms**, so the protocol-agnostic form does not cost the guest its resolver. |
 | W2 | — |
 | W3 | — |
 | W4 | — |
