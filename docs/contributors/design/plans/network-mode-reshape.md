@@ -8,10 +8,12 @@
   built by [egress-proxy-build.md](egress-proxy-build.md); this plan is the user-facing surface
   and can land ahead of it with `restricted` absent.
 - **Depends on:** egress-proxy-build.md
-- **Rides:** **breaking.** Three separate breaks, each independently rule-1: `--network-none` and
+- **Rides:** **breaking.** Five separate breaks, each independently rule-1: `--network-none` and
   `--network-isolated` become deprecated aliases; an allowlist under `none` starts being refused
-  ([DF196](../findings-unresolved.md)); and `--port` starts being refused under `restricted`.
-  Escalate the version in `next-release.md` when the first lands.
+  ([DF196](../findings-unresolved.md)); `--port` starts being refused under `restricted`; a named
+  mode a backend cannot deliver starts being refused ([D138](../../decisions/working-notes.md));
+  and DNS starts being denied under `isolated` with an empty allowlist. Escalate the version in
+  `next-release.md` when the first lands.
 
 ## Why the current shape cannot express what is true
 
@@ -57,13 +59,14 @@ plan, because `restricted` always permits the proxy.
 
 Its use is **running untrusted code rather than an untrusted agent**: a suspicious repository, a
 dependency's test suite, a build script nobody has read, with `--agent idle` and `exec`, where
-copy/diff/apply is the point. A narrower audience than the other three, and one enum value.
+copy/diff/apply is the point.
 
-**The cheaper alternative, stated so it is chosen rather than defaulted past:** deny port 53 under
-`isolated` when the allowlist is empty. That makes the collapse the owner predicted actually true
-and makes `none` redundant. It is arguably worth doing regardless — an empty allowlist with open DNS
-is a hole with no compensating benefit — and it is a smaller change than a mode. **Decide this
-before building `none`'s documentation, not after.**
+**And it is kept for a reason the table cannot show: it is the only mode a human can hold in their
+head as an absolute.** *"No network, ever"* needs no reader to know what the allowlist contains,
+what the proxy policy is, or which backend they are on. Every other mode's guarantee is conditional
+on something. That is worth a mode on its own, independently of the DNS argument below — which
+remains worth doing anyway, because an empty allowlist with open DNS is a hole with no compensating
+benefit.
 
 ## Why one flag with a value, not a third boolean
 
@@ -78,6 +81,27 @@ before building `none`'s documentation, not after.**
 4. **Booleans need pairwise exclusion forever.** `new.go:74` already carries
    `MarkFlagsMutuallyExclusive("network-none", "network-isolated")`; a third adds two more pairs,
    and DF196 exists because a *fourth* flag (`--network-allow`) sits outside that mechanism.
+
+## Closing DNS under `isolated`
+
+**Rule: port 53 is denied while the effective allowlist is empty, and permitted the moment it is
+not.** Today an isolated sandbox with nothing legitimate to resolve still reaches a nameserver,
+which is a working exfiltration channel and buys nothing.
+
+**It bites only where it should.** The effective allowlist includes the agent's own floor, so any
+real agent keeps DNS — the rule only closes the case where nothing has any business resolving
+anything, which is `--agent idle`, `--agent test`, or an agent with no floor.
+
+**It must be reversible on a running sandbox**, and that has an ordering trap in it. Adding a domain
+later re-opens 53 — but [D133](../../decisions/working-notes.md) resolves allowlisted domains **in
+the guest's resolver context**, so the live patch cannot resolve the domain it is being asked to add
+until DNS is already open. So `LivePatchNetwork` must **lift the DNS denial first, then resolve,
+then add the address** — not resolve-then-open, which deadlocks on the first domain added to an
+empty list and would look like "the allowlist is broken" rather than like an ordering bug.
+
+The inverse holds for symmetry: removing the last domain re-closes 53, because the invariant is *no
+allowlist ⇒ no DNS*, not *DNS was once open*. Worth a test in both directions — the second is the
+one nobody writes.
 
 ## Failing loudly
 
@@ -97,11 +121,13 @@ and is the model: `Network.Allow` → `requireIsolated` refuses with *"sandbox %
 --network-none; cannot modify network access"*. Creation is the one entry point that does not hold
 the position the product already holds.
 
-One sub-decision, called out because it is easy to get wrong in passing: an **agent floor** under
-`none` is the same shape as a user list. `--agent claude --network=none` supplies domains the mode
-cannot honour. Refusing it makes `none` unusable with any real agent — which P9 shows is already
-true in practice, but is currently not *said*. Refuse it, and the error becomes the product finally
-telling the truth it has been implying.
+**An agent floor under `none` is refused too — decided, not deferred.** It is the same shape as a
+user list: `--agent claude --network=none` supplies domains the mode cannot honour, and `Compose`
+discards them just as silently. Refusing makes `none` unusable with any real agent, which
+[P9](../research/proxy-chokepoint/results/p9-network-none-utility.txt) shows is *already* true —
+no shipped agent can work under it — but which the product has never said. The error is it finally
+saying so, at the moment the user asks, instead of leaving them to discover that their agent sits
+there unable to reach anything.
 
 **2. `--port` under `restricted` and `none` is an error.** A guest reduced to one destination cannot
 answer inbound connections, and the owner's call is that this is an acceptable casualty: `--port` is
@@ -110,11 +136,15 @@ exist — [P7](../research/proxy-chokepoint/results/p7-port-publishing.txt) conf
 `--port is incompatible with --network-none` fires at the CLI before anything is created. Extend it
 to `restricted`; do not invent a second shape.
 
-**3. `restricted` on a backend that cannot enforce it.** [D135](../../decisions/working-notes.md)
-governs and is not overridden here: **degrade and disclose, never refuse.** A backend without the
-mechanism drops to the strongest layer it has and says which one that is. This is the one place the
-plan does *not* fail loudly, and the difference is deliberate — the other two are user errors, this
-is a capability gap, and refusing a sandbox for the host's limitations is what D135 exists to stop.
+**3. A named mode the backend cannot deliver is refused — [D138](../../decisions/working-notes.md),
+which refines D135 rather than overriding it.** An earlier draft of this plan had this degrading and
+disclosing, on D135's authority. That was wrong, and the reason is this plan's own doing: D135's
+posture rests on the guarantee being *implicit*, so that refusing a user left them with nothing.
+With four named modes, refusing `restricted` leaves `isolated` still available and now sayable —
+**the enum is what makes refusal safe.** And degradation is no longer invisible: `--port` works
+under `isolated` and cannot under `restricted`, so a silent degrade would restore a capability the
+chosen mode excludes. The error must name the mode, the backend, and the strongest mode that backend
+*can* deliver, so the remedy is in the message rather than in a second command.
 
 ## What this does not decide
 
@@ -128,13 +158,16 @@ is a capability gap, and refusing a sandbox for the host's limitations is what D
 
 ## Order of work
 
-1. **`Compose` refuses an allowlist under `none`** (DF196). Independently useful, fixes a live
-   defect, and needs none of the rest.
+1. **`Compose` refuses an allowlist under `none`** (DF196), user list and agent floor alike.
+   Independently useful, fixes a live defect, and needs none of the rest.
 2. **`--network=` enum**, with `--network-isolated` and `--network-none` as deprecated aliases that
    still work. Register both in `docs/contributors/deprecations.md` with the date incurred — a
    compatibility alias is a deprecation on the day it lands (rule 9).
-3. **Decide the port-53 question**, which decides whether `none` is documented or retired.
-4. **`restricted` becomes selectable** when `egress-proxy-build.md` has something behind it. Until
+3. **Deny port 53 under `isolated` with an empty allowlist**, with the live re-open and its
+   ordering. Independent of the enum, and `none` is kept regardless — see § *The four modes*.
+4. **Refuse a named mode the backend cannot deliver** (D138). Needs the enum first, because the
+   error message has to name the strongest mode that backend *can* deliver.
+5. **`restricted` becomes selectable** when `egress-proxy-build.md` has something behind it. Until
    then the value does not exist rather than existing and degrading to `isolated`, which would be a
    promise the product cannot keep.
 

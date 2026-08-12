@@ -1923,3 +1923,31 @@ Two shapes satisfy §1 — a guest with a normal stack and exactly one permitted
 - **The failure a user sees names the wrong thing.** A non-proxy-aware tool fails with `Could not resolve hostname … Temporary failure in name resolution`, because DNS is the first thing it tries. That reads as a broken network rather than a policy decision.
 
 **And one question this decision cannot settle, now stated precisely.** git-over-SSH works through a `CONNECT` tunnel — the stream reached GitHub's sshd. But the image ships no tool that can build one, so supporting it is a product decision about the image; and allowing it costs the closure §2 requires, because `CONNECT host:22` is an opaque byte stream the proxy cannot inspect. An SSH allowance looks like a narrow exception and is not one. P1 saw a session reach for SSH unasked, and P2 saw a session complete with port 22 refused — so it is a real trade with evidence on both sides, and it is the owner's to make. The same applies to the destination list P2 recovered: seven hosts, two of which — the agent updating itself, and telemetry to a third party — were chosen by neither the user nor the task, and which a closed policy has to decide about explicitly.
+
+## D138 — an explicitly named network mode is refused when it cannot be delivered; degradation is for defaults, not for requests
+
+**Date:** 2026-08-12. **Status:** Active. **Refines [D135](#d135--yoloai-never-refuses-a-sandbox-for-lack-of-enforcement-capability-it-degrades-to-the-strongest-layer-available-and-says-which-one-that-is).** **Consumers:** [network-mode-reshape.md](../design/plans/network-mode-reshape.md), `internal/netpolicy/`, [SEC §1](../principles/security-principles.md).
+
+**What changed under D135, which is why this is a refinement and not a reversal.** D135 decided that yoloAI never refuses a sandbox for lack of enforcement capability. Its reasoning rests on a fact that [network-mode-reshape.md](../design/plans/network-mode-reshape.md) removes: **the guarantee was implicit.** `--network-isolated` was one word covering three genuinely different tiers, so a user asking for it had not asked for any particular one, and refusing them left them with *nothing* — D135's rejected option 1 says exactly this, that refusal "withdraws a working defense against the primary threat".
+
+With four named modes the user picks the tier by name. `restricted` *means* adversarial-grade. And the objection dissolves, because refusing it no longer leaves the user with nothing: `isolated` is still there, still enforced, and now sayable. **The enum is what makes refusal safe.**
+
+**Decision. When the user names a mode the backend cannot deliver, the sandbox is refused, with a message naming the mode, the backend, and the strongest mode that backend can deliver.** This governs the network mode axis at create. It does not touch D135's other half — enforcement lost at *runtime* to a trampled ruleset is not a request, and its handling is unchanged.
+
+**Two reasons, and the second is new since D135 was written.**
+
+1. **An explicit request that cannot be honoured is an error, and the product already agrees.** `Network.Allow` on a `none` sandbox refuses rather than silently doing nothing; [DF196](../design/findings-unresolved.md) is filed precisely because *creation* does not hold that line. Adding a third spelling of "silently give the user something other than what they asked for" while fixing the second would be incoherent.
+2. **Functionality now degrades with the mode, not just strength.** D135 assumed degradation was invisible — a weaker filter, same capabilities. Under `restricted` that is false: `--port` cannot work, because a guest reduced to one destination cannot answer inbound connections. So a silent degrade from `restricted` to `isolated` would silently *restore* a capability the user's chosen mode excludes, and a degrade in the other direction would remove one. Degradation across modes changes what the sandbox can do, which is not something to discover later.
+
+**D135 predicted this and deferred it.** Its closing paragraph leaves open "whether an opt-in strict mode exists for callers who would rather fail than run degraded — CI, shared hosts", as "deferred rather than rejected: nobody has asked for it, YAGNI applies". Someone has now asked, and the answer is better than the flag D135 imagined: **the mode name is the opt-in.** No new surface, and the strictness is a property of what was requested rather than of a separate switch that can disagree with it.
+
+**Rejected.**
+1. **Keep degrading, and disclose harder.** Disclosure does not help here, because the difference is no longer only in strength. A user told "you asked for `restricted`, you got `isolated`" still has a sandbox whose `--port` behaves differently from the one they asked for, and they find out when something works that should not have.
+2. **A separate `--strict` flag** (D135's own sketch). It can contradict the mode, it needs a default, and that default recreates this question one layer up.
+3. **Refuse for `restricted` only, keep degrading elsewhere.** Simpler to describe and wrong in the same way — `isolated` on a backend that cannot filter at all is the identical failure of an explicit promise.
+
+**Consequences.**
+- **Breaking (rule 1):** a sandbox that runs today on a backend without the capability stops running when it names a mode that backend lacks. `BREAKING-CHANGES.md` entry, and it escalates the release. D135 itself flagged that this is what refusal costs.
+- **`yoloai doctor` becomes load-bearing rather than optional**, since a refused create is the first time most users would learn their backend's ceiling. The message must name the strongest available mode so the fix is in the error, not in a second command.
+- **D135's amendment stands unchanged**: a *downgrade* on restart — a sandbox that had a guarantee and would lose it — is still refused, for the reason it already gives.
+- The default stays `open`, which is not a guarantee and cannot fail to be delivered.
