@@ -1,0 +1,40 @@
+=== W10 ===
+Can an apple guest on the DEFAULT vmnet network reach a host injector bound to its gateway?
+
+-- controls and baselines (all held, or this would not render) --
+  [t0] the host itself reaches the listener on the default gateway: True   (so an unreachable guest is not an unbound listener (192.168.64.1:18761))
+  baseline: the guest CANNOT reach a host listener on its own gateway: False
+  [t0] the per-sandbox network's gateway still answers: True   (192.168.65.1:18761 -> 204 -- this is what makes the default network's silence attributable to the network kind)
+  [t2] the host itself reaches the listener on the default gateway: True   (so an unreachable guest is not an unbound listener (192.168.64.1:18761))
+  [t2] the per-sandbox network's gateway still answers: True   (192.168.65.1:18761 -> 204 -- this is what makes the default network's silence attributable to the network kind)
+
+-- measurements --
+  [t0] external egress, default / own [arm: t0]: '301 / 301'
+  [t0] DEFAULT network: True
+  trial 0 (default created first) [arm: t0]: {'trial': 0, 'first_up': 'default', 'default_gw': '192.168.64.1', 'own_gw': '192.168.65.1', 'default_listener': '000', 'own_listener': '204', 'default_ext': '301', 'own_ext': '301', 'default_dns': 'FAILED', 'own_dns': 'ok'}
+  [t1] external egress, default / own [arm: t1]: '301 / 000'
+  [t2] external egress, default / own [arm: t2]: '301 / 301'
+  [t2] per-sandbox network: False
+  [t2] DEFAULT network: True
+  trial 2 (default created first) [arm: t2]: {'trial': 2, 'first_up': 'default', 'default_gw': '192.168.64.1', 'own_gw': '192.168.65.1', 'default_listener': '000', 'own_listener': '204', 'default_ext': '301', 'own_ext': '301', 'default_dns': 'FAILED', 'own_dns': 'ok'}
+  summary — default listener / own listener, per trial: [(0, '000', '204'), (2, '000', '204')]
+  summary — default DNS / own DNS, per trial: [(0, 'FAILED', 'ok'), (2, 'FAILED', 'ok')]
+  trials dropped because a guest lost its network (DF190): [1]   (reported rather than silently excluded — a run that drops trials without saying so is reporting a filtered population)
+
+-- VOIDED ARMS, whose expectations decide nothing --
+  t1: a guest had no external egress at all (default 301, own 000) -- DF190's displacement, not a gateway result. Voided rather than scored.
+
+-- expectations, rendered from the values above --
+  [PASS] [t0] a guest on the DEFAULT network CANNOT reach a host injector bound to its gateway -- contradicting reach.go  <- [t0] DEFAULT network=True
+  [PASS] [t2] a guest on the DEFAULT network CANNOT reach a host injector bound to its gateway -- contradicting reach.go  <- [t2] DEFAULT network=True
+
+-- WHAT WAS NOT TRIED --
+  - **WHY.** `container network inspect` reports both networks as `mode: nat`, same plugin, no options, so nothing in the configuration explains the difference. vmnet's NAT gateway lives inside the framework rather than in the host's IP stack, and no privileged tracing was done — this run establishes the fact and not the mechanism
+  - whether it was ever true. `reach.go` cites a 2026-06-28 spike; this host runs `container` CLI 1.0.0 and nothing here establishes which version changed, or whether the built-in network's age (created 2026-06-10) matters. Deleting and recreating the default network was NOT attempted, and it is the obvious next step
+  - a real broker. The listener is a plain HTTP server standing in for the injector; nothing here runs `yoloai new --broker` and watches a credential exchange fail, which is the run that would turn this into a filed defect rather than a measured asymmetry
+  - what `InjectorReach` does about it. `ipAssignedToHost(gw)` is TRUE here — the address is on bridge101 — so the reach check passes and the injector binds successfully. Whether the failure then surfaces as an error or as a hang is not measured, and reach.go's own comment says the degradation path is a silent security downgrade
+  - IPv6. Guests hold a v6 address on both network kinds and the gateway may answer there; only v4 is probed
+  - tart and seatbelt, which have their own reach implementations
+  - more than one host. Every result here is one Mac, one `container` version.
+
+-- all live expectations held --
