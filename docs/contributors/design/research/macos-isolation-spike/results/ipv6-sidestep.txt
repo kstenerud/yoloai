@@ -1,0 +1,28 @@
+=== IPV6 ===
+Does the in-guest IPv4 allowlist constrain IPv6 at all?
+
+-- controls and baselines (all held, or this would not render) --
+  with no allowlist, the peer answers over IPv4 too: True   (so the listener and the path both work before anything is installed)
+  baseline: the guest reaches its peer over IPv6: True
+  the allowlist DOES work — the same peer is refused over IPv4: True   (v4 -> 000. Without this a v6 success proves nothing, because an allowlist that blocks nothing would look identical)
+
+-- measurements --
+  target guest: 'yb6b v4=192.168.64.10 v6=fd96:9d70:8059:3047:fc27:3ff:fe7b:daa8'
+  the guest's own v6 default route: 'default via fe80::2cca:16ff:fe33:7b64 dev eth0 proto ra metric 1024 expires 8999sec hoplimit 64 pref medium'   (learned by RA from the vmnet gateway. The guest is v6-routed by default; only the host's lack of v6 upstream stops it leaving, which is a property of this host and not of the design)
+  baseline v6 read: '200'
+  with an IPv4 default-deny allowlist installed: True
+  v6 read under the allowlist: '200'
+  ip6tables OUTPUT policy inside the guest: 'Chain OUTPUT (policy ACCEPT)'   (the tool is present and its policy is ACCEPT — nothing installs a v6 rule)
+
+-- expectations, rendered from the values above --
+  [FAIL] the in-guest allowlist constrains IPv6 as well as IPv4  <- with an IPv4 default-deny allowlist installed=True
+
+-- WHAT WAS NOT TRIED --
+  - an EXTERNAL v6 destination. The GUEST is v6-routed — it installs a default via the vmnet gateway from an RA — but this HOST has no working v6 route to the internet, its only v6 defaults being Tailscale `utun` interfaces. So an internet v6 probe is unreachable here whatever the policy, and reporting that as containment would be a free negative. **On a host with real IPv6 the same unfiltered path reaches the internet with no guest-side configuration at all**, and that is the case this run cannot exercise
+  - host pf. This measures the IN-GUEST layer only. `pf-v6-hole.txt` already measured the same omission host-side and established that pf CAN enforce v6, so neither layer currently closes it and neither rescues the other
+  - whether `--network-isolated` behaves differently from this hand-installed shape. The rules here are the same `iptables` form `firewall.py` installs, but the product path also sets up ipset and DNS handling and was not run
+  - the guest's v6 route to the GATEWAY. Host services on the vmnet gateway may be reachable over v6 as well as v4, which is W5's exposure question in the other family and is unprobed
+  - per-sandbox networks. Both guests share the built-in network, which is what the product does today; whether the rewritten per-sandbox design puts guests in separate v6 subnets — and whether they can still route between them — is a different question
+  - IPv6 DNS. `getent ahosts` returned only A records here, so ordinary hostname traffic stayed on v4; a resolver handing back AAAA records would send normal agent traffic down the unfiltered path without the agent doing anything deliberate. That is the more dangerous version of this and it is not measured
+
+-- SOME EXPECTATIONS FAILED --
