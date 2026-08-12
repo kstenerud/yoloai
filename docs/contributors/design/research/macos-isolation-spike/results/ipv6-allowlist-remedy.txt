@@ -1,0 +1,29 @@
+=== IPV6FIX ===
+Does mirroring the allowlist into ip6tables close the v6 hole?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the guest reaches its peer over IPv6: True
+  an inet6 ipset exists and ip6tables can match it: True   (SET=ok MATCH=ok POLICY=ok — xt_set for the v6 family, which firewall.py's own fallback shows is not guaranteed)
+  the v4 half still permits its own allowlisted peer: True   (so the v6 policy did not take v4 down with it — DF134's failure mode)
+  adding the peer to the v6 set makes it reachable again: True   (v6 -> 200. A default-deny that blocks everything is not an allowlist, so this is what distinguishes the two)
+  that failure did not damage the v4 chain: True   (3 rules before, 3 after — the command fails cleanly, so the hazard is in the CALLER aborting an install part-way, not in iptables corrupting itself)
+
+-- measurements --
+  peer: 'yb6rb v4=192.168.64.32 v6=fd96:9d70:8059:3047:f87f:39ff:fe5c:ed6f'
+  baseline v6 read: '200'   (no v6 policy — this is ipv6-sidestep.txt's finding, re-taken here so the denial below is measured against it rather than cited)
+  v6 default-deny, peer not in allowed6: False
+  v6 read under the mirrored allowlist: '000'
+  feeding a v6 address to the v4 tool: "iptables v1.8.11 (nf_tables): host/network `fd96:9d70:8059:3047:f87f:39ff:fe5c:ed6f' not found"   (DF134's mechanism, confirmed still live — the families must be populated independently and a v6 address must never reach `iptables`)
+
+-- expectations, rendered from the values above --
+  [PASS] mirroring the allowlist into ip6tables closes the IPv6 hole  <- v6 default-deny, peer not in allowed6=False
+
+-- WHAT WAS NOT TRIED --
+  - AAAA resolution, which is the real cost of this option. The addresses here are link-scope peers typed in by the harness; the product would have to resolve each allowlisted domain in BOTH families, doubling the host/guest divergence and one-shot-decay surface `dns-gaps.txt` and `dns-split-horizon-sim.txt` already measured for v4
+  - a domain that resolves to different sets per family, which is the v6 form of split horizon and is not a hypothetical for CDN-fronted hosts
+  - the DNS rules themselves. `firewall.py` also allows the resolver; nothing here installs a v6 nameserver rule, and DF134 exists precisely because v6 nameservers were what broke the v4 install
+  - link-local traffic. `fe80::/10` is not covered by a `hash:net` set of global addresses and every guest has a link-local address permanently; whether the default-deny catches it is unmeasured
+  - ICMPv6. A v6 default-deny that drops Neighbour Discovery breaks the network in ways a v4 default-deny does not, because NDP is not optional the way ARP handling is — this run's policy blocks it and nothing checked what that costs over a longer life than the probe's
+  - the fallback path for hosts whose iptables lacks `xt_set`. `firewall.py` has one for v4; the v6 half would need its own and this run does not exercise it
+
+-- all live expectations held --
