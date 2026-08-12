@@ -153,7 +153,7 @@ unreliable. *Decides:* whether a chokepoint is agent-agnostic or silently Claude
 
 | Item | Verdict | Raw run |
 | --- | --- | --- |
-| P1 | — | — |
+| P1 | **99.2% HTTP+DNS, zero QUIC; SSH to GitHub appeared unasked** | [`p1-agent-traffic-census.txt`](../research/proxy-chokepoint/results/p1-agent-traffic-census.txt) |
 | P2 | — | — |
 | P3 | — | — |
 | P4 | — | — |

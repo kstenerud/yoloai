@@ -1,0 +1,88 @@
+=== P1 === (run 3 — the record; runs 1 and 2 invalidated, see README.md)
+What does a real agent session actually send, by protocol and port?
+
+-- controls and baselines (all held, or this would not render) --
+  the capture process is running: True   (a capture that never started reports silence, and silence reads as coverage)
+  baseline: the canary destination appears in the capture: False   (capture running, no sandbox yet — nothing on this host contacts TEST-NET-1)
+  the sandbox launched via the product's own `yoloai run`: True   (rc=0)
+  the sandbox has an address on the bridge: True   (ip='172.17.0.2')
+  the canary command itself ran inside the sandbox: True   (rc=28 — 0/7/28 all emit packets. The `--` matters: without it the CLI eats curl's own short flags and the probe never runs)
+  the agent actually did the task, so this is a session and not a crash: True   (run 1's agent died at startup in 2 s and its census was a docker build)
+  frames attributable to the sandbox were captured: True   (3878 frames)
+  every attributable frame lands in exactly one bucket: True   (3824+24+26+4 vs 3878 — a gap means a protocol no filter names, an overlap means one counted twice)
+  no other container's traffic is on this bridge: True   (attribution by address is only sound if nothing else is speaking)
+
+-- measurements --
+  after a canary from inside the sandbox: True
+  the agent's own exit outcome: 0   (recorded, not asserted — but see the next control)
+  frames discarded as pre-dating the sandbox: 0   (an earlier container can hold the same bridge address; run 1 censused a docker image build this way and read 100% HTTP from it)
+  frames classified proxyable-http: 3824   (98.6% of attributed frames)
+  frames classified dns-served-by-proxy: 24   (0.6% of attributed frames)
+  frames classified remainder: 26   (0.7% of attributed frames)
+  QUIC (UDP/443) frames: 0   (counted separately because it LOOKS like HTTPS and is not served by an HTTP CONNECT proxy — the finding that would falsify the direction, and the one run 2's text-parsing predicate could not have expressed)
+  destination ports seen, most frequent first: '443=3824, 53=24, 22=19, 9=4'   (the raw distribution, because a bucket is an interpretation and this is not)
+  the non-HTTP, non-DNS remainder, as tcpdump decodes it: 'ARP, Request who-has 172.17.0.1; ARP, Reply 172.17.0.1; [and 19 frames to port 22 — see below]'   (named rather than counted, because what it IS decides the work)
+  HTTP plus DNS accounts for at least 95% of what the agent emitted: True   (99.2% — the threshold is stated in advance so the number is not read as whatever it turns out to be)
+
+-- expectations, rendered from the values above --
+  [PASS] the capture sees traffic the sandbox emits, so a quiet census is a fact rather than a broken instrument  <- after a canary from inside the sandbox=True
+  [PASS] a host-side proxy can serve substantially all of a real agent session, which is what D137's trade assumes and no run in this corpus had checked  <- HTTP plus DNS accounts for at least 95% of what the agent emitted=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  a host-side proxy can serve substantially all of a real agent session, which is what D137's trade assumes and no run in this corpus had checked: a census has no mechanism-absent state; the instrument is baselined instead, via the canary above, which is the discriminating control this claim actually rests on
+
+-- WHAT WAS NOT TRIED --
+  - HOSTNAMES. Ports and protocols only — extracting SNI needs a TLS parser this host has no tooling for. The closure question D137 §2 poses needs them and is NOT answered here
+  - other agents. One Claude session; P8 asks whether Codex and Aider work at all under a chokepoint, and prior art says their proxy handling is unreliable
+  - other tasks. One npm-flavoured task; a Go build, a docker-in-docker workload or a task with MCP servers would emit different things
+  - the setup phase. Profile setup commands run before the agent and are deliberately outside isolation today; frames from that window are inside this region and are not separated out
+  - IPv6 egress. This network gives the guest no routable v6, so absence is a property of the network and not a finding
+  - WHY each flow happened. The capture says a destination was contacted, not which tool contacted it or whether the session would have failed without it
+  - repeat runs. n=1 session; an agent's traffic is not deterministic and proportions should be read as an order of magnitude
+
+-- all live expectations held --
+
+
+================================================================================
+READING NOTES — what the numbers above mean, written at the run and not later
+================================================================================
+
+1. THE DIRECTION IS VIABLE AND THE MARGIN IS LARGE. 99.2% of what the agent
+   emitted is HTTP(S) or DNS. A host-side proxy serves both. The threshold was
+   fixed at 95% before the run so that the figure could not be read as whatever
+   it turned out to be.
+
+2. ZERO QUIC, AND THAT IS THE LOAD-BEARING NEGATIVE. UDP/443 is the one shape
+   that looks like HTTPS in every summary and is not served by an HTTP CONNECT
+   proxy. It is counted by its own kernel filter rather than inferred, because
+   run 2's text-parsing predicate would have labelled it `tcp/443` and folded it
+   into the proxyable bucket -- the single finding that could falsify the
+   direction was the one that predicate could not express. Absence here is one
+   agent on one network; Chrome-style clients and gRPC endpoints would answer
+   differently, and nothing here says otherwise.
+
+3. THE REMAINDER IS 26 FRAMES AND IT IS NOT ALL ALIKE. Seven are ARP, which
+   never leaves the bridge and is irrelevant to a proxy -- so the honest
+   proxy-relevant remainder is smaller than 0.7%. The other 19 are the finding:
+
+4. SSH TO GITHUB, UNASKED. 19 frames to 140.82.121.4:22 (github.com), and to
+   .3 in the voided run 2 -- so it reproduces across sessions and is not a
+   fluke. The task asked for `npm init`, an npm install, and a LOCAL git commit.
+   The repository has no remote and the host's ~/.gitconfig (which yoloAI mounts)
+   contains no url.insteadOf rewrite, so neither obvious explanation holds. 19
+   frames is a handshake and a teardown, not a transfer: something attempted
+   GitHub over SSH, got no further than the version exchange, and the session
+   still succeeded with exit 0.
+
+   Two things follow. The session did not NEED it -- so a chokepoint that cannot
+   carry SSH would not have broken this task. And an ordinary session reaches for
+   SSH anyway, which means P3 is not a hypothetical about power users. What
+   attempted it, and whether any task would fail without it, is NOT established
+   here; a scouting run meant to separate task-driven from setup-driven SSH was
+   abandoned rather than half-run, and the question moves to P3 where it can be
+   asked with controls.
+
+5. DNS IS 24 FRAMES TO 8.8.8.8, not to docker's embedded resolver. So the guest
+   resolves externally today, and under a chokepoint that path disappears
+   entirely -- which is P6's question, and prior-art section 1 (Cilium) already
+   says the answer is to let the proxy resolve.
