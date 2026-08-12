@@ -1,16 +1,41 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since. It is **not a specification** — its
+> conclusions have been applied to the live documents listed under *Where this landed*, and
+> those are the current answer. Good for archaeology: what was asked, what was run, and which
+> runs were thrown away. See [`../README.md`](../README.md).
+
 > **ABOUTME:** The fixed item set for the second macOS enforcement verification round — what
 > is still a claim rather than a measurement, what each item decides, and what it costs.
 > Records what to run, not code.
 
 # macOS verification round 2
 
-- **Status:** IN-PROGRESS — opened 2026-08-12 under [D136](../../decisions/working-notes.md).
+- **Status:** IMPLEMENTED — opened and closed 2026-08-12 under [D136](../../decisions/working-notes.md). Every item ran or was dropped in writing; the single synthesis pass is [`macos-pf-privileged-path.md`](../../design/plans/macos-pf-privileged-path.md) § *Round 2 verification*, and **that is what to cite**.
 - **Depends on:** —
+
+**Where this landed.** The outcomes below are recorded as they were found; the conclusions drawn
+from them are live elsewhere:
+
+- [`macos-pf-privileged-path.md`](../../design/plans/macos-pf-privileged-path.md) § *Round 2 verification* — the
+  protocol-agnostic rule shape, the host-side detector, the costs, the forced gateway decision,
+  the corrected tart row, and an invariants-versus-mechanisms split per D136 §5.
+- [D132](../../decisions/working-notes.md) — **amended**: the grant's two widenings measured
+  together, the verbose read replacing the behavioural canary, `<dst>` holding addresses as a
+  forced decision, and whether the record is needed for apple at all.
+- **Two things needing an owner's decision rather than another run**, both named in the
+  synthesis: whether the credential injector gets a fixed port, and whether host `pf` on apple
+  is built as defence in depth now that the bounding-set drop exists.
+- **Two things that should be filed as findings** and are not this agent's write surface:
+  W10's unreachable gateway (a shipped path, `runtime/apple/reach.go`) and W9's unmeasured
+  Private Relay risk.
+
+**The raw runs are not archived** and remain the citable evidence:
+`design/research/macos-isolation-spike/results/w*.txt`.
 
 **This file is the round's boundary** ([D136](../../decisions/working-notes.md) §3,
 [`procedures/verification-rounds.md`](../../procedures/verification-rounds.md)). The item set below
 was fixed before the first run. The round closes when every item has run or been **explicitly
-dropped, in writing, here**. Until then [`macos-pf-privileged-path.md`](macos-pf-privileged-path.md)
+dropped, in writing, here**. Until then [`macos-pf-privileged-path.md`](../../design/plans/macos-pf-privileged-path.md)
 and D132 are **not edited** — intermediate optima are working state, and one synthesis pass applies
 the whole fact set at close.
 
@@ -18,7 +43,7 @@ Adding an item mid-round is normal; a run that opens a question is doing its job
 file* is what keeps the boundary real.
 
 **Why this round is macOS-only.** The Linux half ran its round 2 separately
-([`archive/plans/enforcement-verification-round-2.md`](../../archive/plans/enforcement-verification-round-2.md))
+([`archive/plans/enforcement-verification-round-2.md`](enforcement-verification-round-2.md))
 and named "macOS anything" as explicitly out of it. This is the other half.
 
 **Why this directory is the case for the round rules.** It carries 18 invalidation markers against
@@ -72,7 +97,7 @@ searches beyond it turned up mechanisms that document does not carry.
   (`runtime/apple/apple.go:206`) so the in-guest allowlist can be installed. The Docker path already
   ends with *"the entrypoint configures rules while running as root, then drops privileges — the
   agent never has `CAP_NET_ADMIN`"*, and `network-isolation.md:233` has a test asserting the
-  capability is out of the **bounding set**. [DF179](../findings-unresolved.md) reasons entirely
+  capability is out of the **bounding set**. [DF179](../../design/findings-unresolved.md) reasons entirely
   about *where enforcement sits* and concludes apple needs host `pf` because it has no shareable
   netns — it never asks whether the capability can be dropped from the bounding set after the rules
   are installed, which no root agent could then regain. **Consequence:** W6 exists, and if it holds
@@ -104,11 +129,11 @@ privilege drop.
 | ID | Question | Decides | Cost |
 | --- | --- | --- | --- |
 | W1 | Does the adopted bidirectional stateless shape cover **UDP and ICMP**, and does DNS survive `block drop out`? | Whether the shape has a containment hole or a functional one. Every rule and probe behind this design is `proto tcp`, so "the allowlist contains it" is a claim about one protocol; the corpus's one ICMP result is circular by its own admission. Linux closed the same gap in V3. | med |
-| W2 | Does `pfctl -a com.apple/yoloai -vvs rules` read `Evaluations: 0` under the shadowed fault, discriminate inside the 41-index superset, and can the grant widen to it safely? | [DF192](../findings-unresolved.md) — whether the forgeable in-guest canary is replaced by a host-side counter read. The plan names exactly these three plus a traffic baseline, and calls none of them arguments. | high |
+| W2 | Does `pfctl -a com.apple/yoloai -vvs rules` read `Evaluations: 0` under the shadowed fault, discriminate inside the 41-index superset, and can the grant widen to it safely? | [DF192](../../design/findings-unresolved.md) — whether the forgeable in-guest canary is replaced by a host-side counter read. The plan names exactly these three plus a traffic baseline, and calls none of them arguments. | high |
 | W3 | What does the stateless bidirectional shape cost per packet, and what does the 41-index superset cost at evaluation time? | Whether Linux's "the fast-path is free" transfers. `pf-no-state.txt` declines to price statelessness and `pf-grant-matrix.txt` widens the gap; this is the corpus's largest unpriced claim and the counterpart of Linux V7. | med |
 | W4 | What bridge indices does this host actually hand out, and what happens to a sandbox landing outside the pinned superset? | Whether the pool inversion's **fail-open** is boundable by a preflight assertion, or whether it is unbounded and the inversion needs a different shape. | low |
 | W5 | Does host→guest credential injection survive `block drop out`, and what does putting the gateway in every `dst` table expose? | Whether the adopted shape breaks the broker, and whether its remedy re-opens the host — the hazard `apple/container`'s own maintainer names. | low |
-| W6 | Can a root agent on the **apple** backend be denied `CAP_NET_ADMIN` after the in-guest allowlist is installed, by dropping it from the bounding set? | Whether [DF179](../findings-unresolved.md) closes on apple with no host component at all. If it does, this plan is defence in depth for apple rather than the only route, and its priority changes. | med |
+| W6 | Can a root agent on the **apple** backend be denied `CAP_NET_ADMIN` after the in-guest allowlist is installed, by dropping it from the bounding set? | Whether [DF179](../../design/findings-unresolved.md) closes on apple with no host component at all. If it does, this plan is defence in depth for apple rather than the only route, and its priority changes. | med |
 | W7 | Is the lifecycle rule's **re-read** half reachable once DF190's workaround is applied, and does a **killed** guest or a daemon restart release an index differently from a clean stop? | Whether the re-read half is unnecessary or merely untested, and whether the 783 ms margin holds on the release paths the product actually has. `pf-lifecycle.txt` stops sandboxes cleanly and says so. | med |
 | W8 | Does **Softnet** actually enforce a per-VM destination allowlist on tart, and does its policy channel revoke a live flow? | tart's only enforcement surface, currently asserted from `--help` text. Prior art says it is the shape this platform converged on, including the live-revocation problem `pf-no-state.txt` needed five runs for. | med |
 | W9 | Does loading our anchor **disable iCloud Private Relay** on this host, and what else writes pf here? | Whether installing yoloAI has an unstated user-visible side effect on the host's own networking — the reason `apple/container` refuses `pfctl` solutions. | low |
@@ -122,10 +147,17 @@ quote it either way without a third run. B was never the adopted detector, and W
 whole behavioural-detector family is replaced. **If W2 lands, B is moot and gets dropped in writing;
 if W2 fails, B comes back as an item.** It is not being run on spec.
 
+> **DROPPED 2026-08-12, explicitly, after W2.** W2 and W2b together retire the behavioural-detector
+> family: enforcement liveness is now read host-side from our own anchor's `Evaluations`, with the
+> guest nowhere in the trust path and the grant widening measured. Detector B was a candidate within
+> the family that is being replaced, so its premise is gone and a third run would settle a question
+> nothing now asks. Recorded rather than deleted, because an item that vanishes quietly is how a
+> round pretends to have closed.
+
 ## Outcomes
 
 Filled in as each item runs. Raw output in
-[`../research/macos-isolation-spike/results/`](../research/macos-isolation-spike/results/).
+[`../research/macos-isolation-spike/results/`](../../design/research/macos-isolation-spike/results/).
 
 | ID | Outcome |
 | --- | --- |

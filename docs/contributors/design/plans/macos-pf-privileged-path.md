@@ -15,6 +15,12 @@
   interface key (2026-08-10), and a further pass withdrew the `-k` requirement entirely** — see
   § *Post-rewrite verification*, which supersedes the `-k` half of § *Audit remediation* and of
   § *What the verification pass settled*. Read the post-rewrite section before quoting either.
+  **Then verification round 2 ran 2026-08-12 under [D136](../../decisions/working-notes.md)
+  against a fixed item set, and § *Round 2 verification* is its single synthesis pass — it
+  supersedes everything below it that it contradicts and is the section to read first.** Two
+  of its results bear on whether this should be built at all: the adopted rule shape filters
+  **TCP only**, and on apple the in-guest allowlist can be made tamper-resistant with **no
+  host component**, which makes host `pf` defence in depth there rather than the only route.
 - **Depends on:** tamper-resistant-network-isolation.md, host-controlled-agent-launch.md
 - **Decision:** [D132](../../decisions/working-notes.md#d132--macos-pf-is-driven-through-a-generated-nopasswd-sudoers-grant-that-authorizes-pf-table-membership-and-nothing-else) — the mechanism and the five rejected alternatives. Cite that, not this file.
 - **Rides:** **any** — the user-visible surface only gains capability. `--network-isolated` becomes
@@ -104,6 +110,138 @@ smaller gap than the claim that closed this investigation on macOS.
 > Deleting the network when its last sandbox goes avoids it. A stop/start does **not** recover the
 > victim — it moves the defect to the other sandbox. See `df190-mechanism.txt`; the original
 > observation is `pf-interface-key.txt` I2c.
+
+## Round 2 verification — 2026-08-12
+
+**This section is the single synthesis pass for verification round 2** ([D136](../../decisions/working-notes.md) §4),
+run against [`archive/plans/macos-verification-round-2.md`](../../archive/plans/macos-verification-round-2.md)'s fixed item
+set. Nothing below was written while the round was open. Where it contradicts a section
+further down, **this section wins**.
+
+### The two things that change what this plan is
+
+**1. The rule shape as written contains TCP and nothing else** (`w1-protocol-coverage.txt`).
+Every rule in § *Post-rewrite verification* and in `enforcement-state-reaping.md` says
+`proto tcp`. Loaded exactly that way, a denied host is refused over TCP and **answers over
+UDP and ICMP**, with the egress block's counter never moving — so nothing in the shape is
+*evaluated* against a datagram at all, and an errant agent walks around the allowlist with a
+UDP client. Dropping the qualifier and changing nothing else closes both directions and
+leaves TCP unaffected. **DNS through the vmnet gateway survives the egress block**, so the
+fix costs the guest nothing. The rule shape below must be read protocol-agnostic; this also
+re-runs the circular ICMP result `pf-main-run.txt` shipped.
+
+**2. This plan may not be the only route for the apple backend** (`w6-cap-bounding-set.txt`).
+[DF179](../findings-unresolved.md) concludes apple needs host `pf` because it has no
+shareable netns — reasoning entirely about *where* enforcement sits. It never asks whether
+the capability can be taken away once the rules are written. Measured: with `CAP_NET_ADMIN`
+dropped from the **bounding set**, a **still-root** agent cannot remove its own allowlist —
+`sudo` cannot exceed a bounding set, nor can a new user namespace, and a private netns
+succeeds and is worthless. That is a different move from docker's `gosu` privilege drop and
+it needs no host component whatsoever. **`w6b` bounds it**: the property covers descendants
+of the entrypoint — which is the agent — and *not* anything the host starts afterwards,
+because `container exec` is parented by the daemon and carries the container's full
+configured set. **Consequence: for apple, host `pf` becomes defence in depth rather than the
+only mechanism, and this plan's priority is a decision the owner should now take
+deliberately.** It does not change tart or seatbelt, which have no in-guest allowlist at all.
+
+### The verification question is settled, and the grant moves once
+
+**Option 4 works** (`w2-evaluations-detector.txt`). Under the shadowing fault our anchor's
+`Evaluations` is exactly flat while the sandbox is genuinely fail-open, and healthy the same
+traffic on the same path moves it. It **still discriminates inside the 164-rule superset**,
+which was the sub-question with no prediction behind it. So the forgeable in-guest canary
+([DF192](../findings-unresolved.md)) is replaceable by a host-side read with the guest
+nowhere in the trust path — the same shape Linux has.
+
+**Its disambiguator is not the one the plan proposed.** `Evaluations: 0` was expected to be
+ambiguous between *not in the path* and *the sandbox sent nothing*. In practice an idle
+sandbox's evaluations range **27–944 per 30 s** and are **host-side** traffic — `Ipkts` stays
+at 0 while `Opkts` moves — so a non-zero count says nothing about the sandbox at all. What
+tracks the guest is the bridge's own **`Ipkts`** (0 idle, 9 under load), which needs no
+grant. A detector must pair the counter with that, not with "the anchor counted something".
+
+**And the grant widens safely, once, for both needs** (`w2b-grant-widening.txt`). With the
+table regex extended to the bridge-index range *and* a line added for
+`pfctl -a com.apple/yoloai -vvs rules`, all **16** refusals hold — including six that exist
+only because of the widening — and the verbose read discloses no line of the main ruleset and
+names no anchor but ours. It does hand over `Inserted: uid N pid N`. Each refusal is
+baselined **permitted under a blanket grant**, so the thing that made
+`pf-liveness-detect.txt` V4 unanswerable is what makes these answerable.
+
+**Detector B is dropped, in writing.** `pf-liveness-detect.txt`'s detector B is unsettled
+(BROKEN in the committed run, HEALTHY in the re-run, same fault) and this section retires the
+whole behavioural-detector family. Its premise is gone, so it is not being run on spec.
+
+### The costs, and the one that cannot be paid
+
+- **Per-packet evaluation is below this rig's noise floor** (`w3-stateless-cost.txt`), and
+  that is an **upper bound, not a measurement**: ratios of 0.99–1.02× against a
+  within-ruleset spread of 6–38%. `no state` demonstrably took (55 k evaluations against
+  1.2 k). Linux's "the fast-path is free" is not confirmed here so much as *not contradicted*.
+- **The inverted pool's fail-open is real, and boundable** (`w4-bridge-index-range.txt`). A
+  sandbox outside the pinned range is silently unenforced — 20 rules loaded, denied host
+  answers 301. But indices are handed out contiguously from the lowest free one and **fill
+  holes**, so the highest in use tracks *concurrent* networks and a fixed range is sound while
+  the concurrent count stays inside it. **The preflight assertion is now mandatory and still
+  unwritten.**
+- **The egress block breaks credential injection, and the fix that works cannot be written**
+  (`w5-gateway-exposure.txt`). Under the adopted shape the guest cannot reach the injector on
+  its gateway. Putting the gateway in `<dst>` restores it *and* opens every other port the
+  host has bound there, because `<dst>` holds addresses — the hazard `apple/container` #719's
+  maintainer names. A **port-scoped** `pass` fixes it exactly, and is **unavailable**: the
+  injector binds an *ephemeral* port (`internal/broker/host.go:237`) while D132's pinned file
+  is static text root wrote at install time. **Either the injector gets a fixed port, or every
+  sandbox is granted its whole host gateway.** That is a decision, and it is now forced.
+
+### Corrections to the rows above
+
+- **tart is not without an enforcement surface** (`w8-softnet-enforcement.txt`). Softnet's
+  default-deny form — `--net-softnet-block=0.0.0.0/0` relaxed by `--net-softnet-allow` —
+  **enforces**: permitted `301`, denied `000`. And this plan had the flag backwards:
+  `--net-softnet-allow` alone *widens* the default private-address restriction rather than
+  naming an allowlist. So *"tart: none"* is wrong in a third way — pf cannot reach it, and it
+  does not need pf. **Not run: Softnet's dynamic policy channel**, which is JSON-RPC over a
+  Unix socket with flow-table clearing on change — live revocation, already built, and the
+  thing `pf-no-state.txt` needed five runs to reach. `tart run` exposes only boot-time flags.
+- **The lifecycle rule's re-read half is reachable at last** (`w7-lifecycle-reread.txt`).
+  DF190's workaround — delete the network when its last sandbox goes — stops the reclaim, so a
+  returning sandbox lands on a new index and the case that half exists for finally arises.
+  **The release paths differ**: `stop` and `kill` free the index immediately, a daemon restart
+  holds it 5.61 s. The re-read itself is still not implemented or run.
+
+### Two hazards this plan must now carry
+
+- **Private Relay is an unmeasured, live risk** (`w9-private-relay.txt`). `apple/container`'s
+  maintainers refuse `pfctl`-based solutions partly over it, and the field reports Private
+  Relay disabling itself when any rule is added to pf. **This host cannot answer it** — the
+  feature is not on this account — so both arms were voided rather than reported. It is a
+  documented risk, not a measured one, and it needs a host with iCloud+.
+- **A guest on some vmnet bridges cannot reach its own gateway at all**
+  (`w10-gateway-host-route.txt`), which is exactly where `runtime/apple/reach.go` binds the
+  credential injector. External egress is unaffected, the host reaches the same address, ARP
+  is healthy, and no pf rule is involved — so this sits *beneath* everything on this page and
+  is invisible to every existing check. `ipAssignedToHost(gw)` is true in the broken case, so
+  `InjectorReach` does not degrade; it succeeds and binds an address the agent cannot dial.
+  **Mechanism unknown**; two candidates were tested and refuted. This is a separate defect and
+  should be filed as one.
+
+### Invariants and mechanisms, kept apart (D136 §5)
+
+The thrash on this page lived entirely in the second list. Nothing in the first has moved
+across three rounds.
+
+| Invariant — what the mechanism must achieve | Status |
+| --- | --- |
+| Revocation must stop an in-flight transfer | holds |
+| Policy must not be inheritable by a recycled identity | holds |
+| Enforcement liveness must be detectable from outside the guest | holds, and round 2 makes it host-side |
+| Membership without rules, and rules without membership, must both fail closed | **open** — W4 shows the second fails *open* |
+| The unprivileged side must never author rule text | holds |
+
+**Mechanisms — every one of these has changed at least once and may change again:**
+`pfctl -k` versus a return rule versus a stateless bidirectional shape; address key versus
+interface key versus ingress tag; slot-per-sandbox versus slot-per-bridge-index; a
+behavioural canary versus an `Evaluations` read; host `pf` versus a bounding-set drop.
 
 ## Post-rewrite verification — 2026-08-10/11
 
