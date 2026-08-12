@@ -1419,3 +1419,41 @@ as scarce as the failures and twice as useful.
   The generalisation worth carrying past this instance: **a document with no standing is not evidence
   the loop can act on.** Filing something correct in a place nothing consults is indistinguishable
   from not having found it — and it feels *better*, because the finding is on the record.
+
+### A36 — audited harnesses for a defect class by reading the code and never opened the results (2026-08-12)
+
+- **What happened:** asked whether any runs should be migrated to harness v2 and redone, I checked every
+  Python harness in `linux-enforcement/` against v2's new invariant and reported two defective:
+  `r11_netdev_lifecycle.py` and `r13_rootless_netdev.py`. Both compute
+  `inherited = (not reach) and counter_moved`, and I showed that a broken rig yields
+  `inherited = False`, which **passes** the claim "the stale chain does not capture its successor".
+  I called it a free negative in a load-bearing result, proposed a queue, a port and a re-run, and the
+  owner said yes. **Both results files record `reachable=True`.** The probe reached the denied host in
+  each run, so the path was demonstrably live and the negative is self-controlling. Nothing needed
+  redoing.
+- **Source of the false belief:** the code. The hazard I described is real *in the construction* —
+  that branch would produce a free negative — and I promoted "this could fail" to "this did fail"
+  without opening the artifact that says which branch was taken. Two files, one `grep`, thirty
+  seconds.
+- **Why this one is not A34 repeating:** A34 asserted a mechanism that fit an observation. This
+  asserted a defect with **no** observation, in an area where the observation is a committed file
+  whose entire purpose is to be read. The corpus already names the class — `verification-method.md`
+  calls it *evidence without a verdict*; this is its inverse, a verdict without evidence — and both
+  come from the same place, which is that reading source feels like measuring.
+- **The aggravating detail:** this happened three commits after landing [D136](decisions/working-notes.md),
+  whose §1 is *a probe must demonstrate it can report failure rather than declare that it could*. I
+  applied that standard to eleven harnesses and not to my own claim about them. **A rule aimed at an
+  artifact does not attach to the reasoning that audits the artifact** — which is A31's shape again,
+  the check not derived from the reading that produced the claim.
+- **Caught by:** myself, one step before the rig — but only because the port required knowing which
+  branch the run took, so the data became load-bearing for the *fix*. Had the remedy been "add a
+  control" rather than "restructure around the recorded value", I would have re-run two sound
+  experiments and reported the unchanged answer as a confirmation. The owner's question is what
+  started it, consistent with every other entry here.
+- **Cost:** none durable. The proposed DF would have asserted a defect that does not exist, and it was
+  one step away. No commit, no hardware time.
+- **The rule:** **an audit of a recorded run reads the recording, not the recorder.** Source says what
+  a harness *can* produce; only the results file says what it *did*. When the two are both available
+  and only one has been opened, the claim is unsupported no matter how well the code reads — and if
+  the artifact is committed specifically so it can be audited later, then not opening it is the whole
+  failure.
