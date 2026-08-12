@@ -1,0 +1,39 @@
+=== W5 ===
+Does credential injection survive the egress block, and what does the remedy expose?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the guest reaches the injector endpoint on its gateway: True   (no rules loaded — both host services answer)
+  baseline: the guest reaches an unrelated host service on the same gateway: True   (the bystander answers too, so a later 000 is the rule)
+  the guest still has a network — an allowlisted external host answers: True   (1.1.1.1:80 -> 301)
+  the remedy does restore the injector: True   (broker 204 with the gateway in <dst>)
+  and still admits the injector: True   (broker 204 under the port-scoped rule)
+
+-- measurements --
+  bring-up attempts before the rig was usable: 1   (more than one means DF190 displaced a network on the way)
+  rig: 'ybw5 on bridge100, gateway 192.168.65.1, broker stand-in :18751, bystander :18752'
+  gateway absent from <dst>: False
+  injector endpoint, gateway not allowlisted: '000'   (000 means credential injection is broken by the adopted shape)
+  gateway in <dst>: True
+  gateway in <dst> — the bystander service: True
+  injector endpoint, gateway allowlisted: '204'
+  unrelated host service, gateway allowlisted: '204'   (this is the whole cost of the remedy: <dst> holds ADDRESSES, so permitting the injector permits every port on the host's bridge address)
+  port-scoped pass, gateway NOT in <dst>: True
+  port-scoped pass — the bystander service: False
+  injector endpoint under a port-scoped rule: '204'
+  unrelated host service under a port-scoped rule: '000'
+  can that rule actually be written under D132?: False   (the injector binds an EPHEMERAL port (internal/broker/host.go:237; respawnBindPort returns '0' with no prior record), so its number is unknown until the sandbox starts — and the pinned file is static text root wrote at install time, which the unprivileged side can never author. The narrow rule works and is unavailable)
+
+-- expectations, rendered from the values above --
+  [PASS] the adopted shape cuts the guest off from the injector endpoint unless the gateway is explicitly allowlisted  <- gateway absent from <dst>=False
+  [FAIL] allowlisting the gateway does not also expose unrelated host services on it  <- gateway in <dst> — the bystander service=True
+  [PASS] a port-scoped rule closes the bystander  <- port-scoped pass — the bystander service=False
+
+-- WHAT WAS NOT TRIED --
+  - **a real injector.** A plain HTTP listener stands in for it on the same address. What is under test is pf's treatment of guest-to-gateway traffic, not the broker's behaviour — but nothing here starts `yoloai new` with a broker configured and watches a real credential exchange survive the shape, and that is the run an implementer would want
+  - pinning the injector to a FIXED port, which would make the narrow rule writable. That is a code change with its own consequences (collisions between concurrent sandboxes, most obviously) and this run only shows why someone might want it
+  - what else is bound to 0.0.0.0 on a real user's Mac. The bystander here is a listener this harness started; the hazard is about services the user already runs, and no census of those was taken
+  - the same question on tart, where the gateway is shared between VMs rather than per-sandbox — the exposure there is potentially wider and pf cannot key on tart's interfaces anyway (`tart-net-key.txt`)
+  - UDP to the gateway, other than DNS. W1 covers the resolver on :53; the injector is TCP and nothing here probes other datagram services on the gateway address
+  - IPv6. The guest holds a v6 address and the gateway may answer on it, which would be a second path to the same host services
+
+-- SOME EXPECTATIONS FAILED --

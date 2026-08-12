@@ -217,9 +217,13 @@ def main() -> int:
         h.control("the guest still has a network — an allowlisted external host answers",
                   reach(ALLOW, 80) not in ("", "000"),
                   f"{ALLOW}:80 -> {reach(ALLOW, 80)}")
+        # Phrased as the break, not as its absence. The baseline is "reachable with no rules
+        # loaded", so a claim has to want the opposite — and the opposite IS the finding:
+        # the adopted shape takes the injector away unless something is done about it.
         h.expect(
-            "the adopted shape leaves the injector reachable without any special provision",
-            b1, want=True,
+            "the adopted shape cuts the guest off from the injector endpoint unless the "
+            "gateway is explicitly allowlisted",
+            b1, want=False,
         )
 
         # -- ARM 2: the remedy the plan assumes, and its cost -------------------------
