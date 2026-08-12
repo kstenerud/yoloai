@@ -3,7 +3,7 @@
 
 # Proxy chokepoint — raw runs
 
-Every run lands here as it happens, **including the ones thrown away** ([D136](../../../decisions/working-notes.md) §4).
+Every run lands here as it happens, **including the ones thrown away** ([D136](../../../../decisions/working-notes.md) §4).
 What a bad control looked like is worth as much as the result that replaced it, and this
 directory is the fact store the round's synthesis pass reads.
 
@@ -66,7 +66,7 @@ Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
 - **Run 1 — `Class:` `predicate-bug` · `Direction:` `confirmed`.** The harness passed
   `--env NO_PROXY=localhost,127.0.0.1`, and `--env` on `new`/`run` comma-splits its value, so the
   launch failed with an error naming a fragment nobody wrote. Every downstream control failed
-  honestly and the harness refused a verdict. Filed as [DF195](../../findings-unresolved.md) rather
+  honestly and the harness refused a verdict. Filed as [DF195](../../../findings-unresolved.md) rather
   than fixed mid-round — the same flag is `StringArray` on `start`/`restart`/`reset`, so three
   sibling paths already do it the other way.
 - **Run 2 — `Class:` `instrument-in-region` · `Direction:` `contradicted`.** A second `probe()` was

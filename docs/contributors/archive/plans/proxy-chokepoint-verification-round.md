@@ -1,10 +1,16 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since. It is **not a specification** — its
+> conclusions have been applied to the live documents listed under *Where this landed*, and
+> those are the current answer. Good for archaeology: what was asked, what was run, and which
+> runs were thrown away. See [`../README.md`](../README.md).
+
 > **ABOUTME:** The fixed item set for the round that decides whether a no-route sandbox plus a
 > host-side proxy carries the work a developer expects, and which of two chokepoint shapes to
 > build. Records what to run, not code.
 
 # Proxy chokepoint verification round — Linux
 
-- **Status:** IN-PROGRESS — opened 2026-08-12 under [D136](../../decisions/working-notes.md); every item has now run, synthesis pass pending.
+- **Status:** IMPLEMENTED — opened and closed 2026-08-12 under [D136](../../decisions/working-notes.md). Every item ran; the single synthesis pass has been applied to the documents listed below, and **those are what to cite**.
 - **Depends on:** —
 
 **Why this round exists.** The workstream changed course. `agent-privilege-reality.txt` measured
@@ -17,6 +23,19 @@ destination** and move all policy to a host-side proxy the agent has no privileg
 That reframing is cheap to state and expensive to get wrong, because it trades an open-ended
 *policy* problem for a closed *coverage* problem — and nobody has measured the coverage. This round
 measures it.
+
+**Where this landed.** The outcomes below are recorded as they were found; the conclusions drawn
+from them are live elsewhere, and those are what to cite:
+
+- [D137](../../decisions/working-notes.md) § *What the round settled* — the fork's price, the
+  environment-delivery constraint, and the SSH/closure tension that is now the owner's call.
+- [`netpolicy.md`](../../design/netpolicy.md) § *Hostile containment* — its written commitment to one of the
+  two mechanisms, corrected to state the invariant and hold the mechanism open.
+- [`egress-proxy-build.md`](../../design/plans/egress-proxy-build.md) § *What the chokepoint round settled* — the
+  build constraints the round produced, none of which were in the plan before it ran.
+
+**The raw runs are not archived** and remain the citable evidence:
+`design/research/proxy-chokepoint/results/*.txt`.
 
 **This file is the round's boundary** (D136 §2). The item set below was fixed before the first run.
 The round closes when every item has run or been explicitly dropped **in writing, here**. Until then
@@ -57,7 +76,7 @@ Read before the item set was fixed. It removed two items, split one, and found t
 answer was already on disk — which is the second time that has happened in this workstream ([A35](../../agent-failures.md)),
 and the reason the gate exists.
 
-- **[`agent-proxy-support.md`](../research/agent-proxy-support.md) already settles the containment
+- **[`agent-proxy-support.md`](../../design/research/agent-proxy-support.md) already settles the containment
   half of the proxy-env question, with a verified per-agent table.** `HTTP_PROXY` is *never* a
   containment boundary for an untrusted agent — it lives inside the agent's environment, so the agent
   can unset it or open raw sockets. That document reached the identical conclusion this round was
@@ -73,13 +92,13 @@ and the reason the gate exists.
   proxy quirks above bite only on *non-LLM* traffic — WebFetch, MCP servers, tool calls, package
   managers. That splits the census (P1) from the agent-cooperation question (P8) and is why they are
   separate items.
-- **[`prior-art-egress-enforcement.md`](../research/prior-art-egress-enforcement.md) §5 records the
+- **[`prior-art-egress-enforcement.md`](../../design/research/prior-art-egress-enforcement.md) §5 records the
   peer group converging on shape (B)**: "agent VMs with no external interface at all, talking over a
   virtual socket to a host-side proxy that enforces an allowlist by hostname and injects
   credentials". Per D136 §1 a convergence away from our design is a *constraint*, not a note — and
   here it converges **toward** the provisional choice while diverging from this repo's own written
   primitive (below). Recorded so the synthesis pass does not treat (B) as novel.
-- **[`netpolicy.md`](../netpolicy.md) §Hostile already commits to shape (A)** in writing: "a
+- **[`netpolicy.md`](../../design/netpolicy.md) §Hostile already commits to shape (A)** in writing: "a
   default-deny egress firewall in the sandbox netns whose only outbound path is forced to a
   filtering proxy on a different principal/namespace than the agent." That is the repo's committed
   primitive and the fork above departs from it. **Consequence:** the synthesis pass owes `netpolicy.md`
@@ -153,10 +172,10 @@ unreliable. *Decides:* whether a chokepoint is agent-agnostic or silently Claude
 
 | Item | Verdict | Raw run |
 | --- | --- | --- |
-| P1 | **99.2% HTTP+DNS, zero QUIC; SSH to GitHub appeared unasked** | [`p1-agent-traffic-census.txt`](../research/proxy-chokepoint/results/p1-agent-traffic-census.txt) |
-| P2 | **PASSES — agent completed the task, exit 0, with one destination; 7 real hostnames recovered** | [`p2-chokepoint-viability.txt`](../research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
-| P3 | **SSH works via CONNECT — but no tunnel tool ships, and allowing it costs closure** | [`p3p4-toolchain-under-chokepoint.txt`](../research/proxy-chokepoint/results/p3p4-toolchain-under-chokepoint.txt) |
-| P4 | **PASSES — npm/pip/apt/go/curl all work on standard proxy env alone** | [`p3p4-toolchain-under-chokepoint.txt`](../research/proxy-chokepoint/results/p3p4-toolchain-under-chokepoint.txt) |
-| P6 | **Answered in passing by P2** — DNS was not permitted and the session worked; the proxy resolves | [`p2-chokepoint-viability.txt`](../research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
-| P7 | **Refused at the CLI today — so (B)'s cost is one breaking change, not a second channel** | [`p7-port-publishing.txt`](../research/proxy-chokepoint/results/p7-port-publishing.txt) |
-| P8 | **3 of 4 took the proxy unmodified; gemini unmeasured. Prior art's two predictions both failed** | [`p8-agent-proxy-routing.txt`](../research/proxy-chokepoint/results/p8-agent-proxy-routing.txt) |
+| P1 | **99.2% HTTP+DNS, zero QUIC; SSH to GitHub appeared unasked** | [`p1-agent-traffic-census.txt`](../../design/research/proxy-chokepoint/results/p1-agent-traffic-census.txt) |
+| P2 | **PASSES — agent completed the task, exit 0, with one destination; 7 real hostnames recovered** | [`p2-chokepoint-viability.txt`](../../design/research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
+| P3 | **SSH works via CONNECT — but no tunnel tool ships, and allowing it costs closure** | [`p3p4-toolchain-under-chokepoint.txt`](../../design/research/proxy-chokepoint/results/p3p4-toolchain-under-chokepoint.txt) |
+| P4 | **PASSES — npm/pip/apt/go/curl all work on standard proxy env alone** | [`p3p4-toolchain-under-chokepoint.txt`](../../design/research/proxy-chokepoint/results/p3p4-toolchain-under-chokepoint.txt) |
+| P6 | **Answered in passing by P2** — DNS was not permitted and the session worked; the proxy resolves | [`p2-chokepoint-viability.txt`](../../design/research/proxy-chokepoint/results/p2-chokepoint-viability.txt) |
+| P7 | **Refused at the CLI today — so (B)'s cost is one breaking change, not a second channel** | [`p7-port-publishing.txt`](../../design/research/proxy-chokepoint/results/p7-port-publishing.txt) |
+| P8 | **3 of 4 took the proxy unmodified; gemini unmeasured. Prior art's two predictions both failed** | [`p8-agent-proxy-routing.txt`](../../design/research/proxy-chokepoint/results/p8-agent-proxy-routing.txt) |

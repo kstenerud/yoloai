@@ -198,6 +198,56 @@ Key files: `internal/credential/`, `internal/broker/`, `runtime/docker/reach.go`
     > Note CVE-2025-66479 covers the *earlier* empty-allowlist bypass, not this null-byte one (no CVE
     > assigned for the null-byte bug as of disclosure).
 
+## What the chokepoint round settled — 2026-08-12
+
+[`proxy-chokepoint-verification-round.md`](../../archive/plans/proxy-chokepoint-verification-round.md) measured step 2's
+premise on real hardware for the first time. Raw runs:
+`../research/proxy-chokepoint/results/*.txt`. **Step 2 is no longer "the hostile-grade future" — it
+is the main line** ([D137](../../decisions/working-notes.md)), because in-guest enforcement was
+measured to be structurally defeatable on every backend that grants the agent `sudo`, which is all
+of them.
+
+**What is now measured rather than assumed.** A real agent session emits **99.2% HTTP or DNS and
+zero QUIC**, and completed its task with exactly one permitted destination. npm, pip, apt, go, curl
+and git-over-HTTPS all worked on the standard proxy environment alone. Three of four non-Claude
+agents routed through the proxy unmodified, including the two this repo's own survey predicted
+would fail.
+
+**Four build requirements the round produced, none of which was in this brief before it ran.**
+
+1. **The proxy configuration must be part of the container's environment, not the agent's.**
+   `--env` is delivered to the *agent's process tree only* — measured against `/proc`: the
+   `agent-run.sh` and `claude` processes carry the variables, PID 1 does not, and neither does a
+   shell from `yoloai exec`. Under a chokepoint that is a cliff, not a quirk: `yoloai exec` is a
+   shipped command and how a user debugs their own sandbox, and it would have no network at all.
+   Setup commands and any process not descended from the agent are in the same position.
+2. **A refusal must not present as a DNS failure.** A non-proxy-aware tool under a chokepoint fails
+   with `Could not resolve hostname … Temporary failure in name resolution`, because DNS is the
+   first thing it tries. That names the wrong thing — it reads as a broken network rather than a
+   policy decision — and every such tool will fail identically. Whatever ships needs an answer to
+   this; nothing in the current design has one.
+3. **The DNS-exfil hole this step was designed to kill does not need killing.** Under a chokepoint
+   there is no route for DNS to travel; `CONNECT` carries a name and the proxy resolves host-side.
+   Measured: DNS was not permitted and the session worked. Remove it from the step's scope rather
+   than building a mechanism for it.
+4. **`--port` is the fork's whole price.** A guest with no IP stack cannot publish a port. The CLI
+   already refuses `--port` with `--network-none`, so the shape is decided; but `--port` *does*
+   compose with `--network-isolated` today, so moving isolation to a stack-less guest makes a
+   working documented combination start being refused — rule 1, a `BREAKING-CHANGES.md` entry, and
+   a version escalation. Price it before choosing, not after.
+
+**And one thing this brief must not decide by itself.** git-over-SSH works through a `CONNECT`
+tunnel — the stream reached GitHub's sshd. But no `nc`/`socat`/`corkscrew` ships in the image, so
+supporting it is a decision about the image; and allowing it hands the proxy an opaque byte stream
+it cannot inspect, which reopens the closure the whole direction is for. `CONNECT host:22` looks
+like a narrow exception and is not one. A session reached for SSH unasked (P1) and another
+completed with port 22 refused (P2), so there is evidence on both sides and the call is the
+owner's.
+
+**The SNI-hardening requirements below are unaffected and unmeasured.** The round's proxy stand-in
+validates no hostname, deliberately, so that nothing it produced could be read as having tested a
+policy. Every requirement in that block still stands in full.
+
 Per-agent base_url/dummy/force-API-key/telemetry-suppression quirks for Codex/Gemini/Aider/
 OpenCode (the table below) live in **launch config** (agent definitions), not the proxy — add a
 `BrokerConfig` per agent + its launch knobs when extending beyond Claude.
