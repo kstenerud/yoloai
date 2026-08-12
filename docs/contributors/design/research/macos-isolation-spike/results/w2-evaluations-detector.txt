@@ -1,0 +1,47 @@
+=== W2 ===
+Can enforcement liveness be read from our own anchor's Evaluations counter?
+
+-- controls and baselines (all held, or this would not render) --
+  the shadowed host is genuinely fail-OPEN, so the fault is real: True   (denied host answers 301 while our rules are loaded and correct — this is pf-anchor-eval's three-green-checks state, reproduced)
+  baseline: our anchor counted evaluations for the guest's traffic: False
+  with the shadow gone the sandbox is contained again: True   (denied host answers 000)
+  [superset] the sandbox is contained by its own slot: True   (denied host answers 000 — keyed only by table membership, no rule text written)
+  [superset] the shadow re-opens it: True   (denied host answers 301)
+
+-- measurements --
+  guest: 'ybw2 via 192.168.65.1 on bridge101'
+  evaluations across the shadowed baseline: '3 -> 3'   (an anchor pf never reaches cannot count)
+  healthy host, same traffic, same path: True
+  evaluations across the healthy sample: '149 -> 186'
+  superset rules loaded [arm: superset]: 164   (bridge100-bridge140, live slot yw2_dst_101)
+  superset, shadowed: False
+  [superset] evaluations while shadowed [arm: superset]: '311 -> 311'
+  superset, healthy: True
+  [superset] evaluations while healthy [arm: superset]: '311 -> 567'
+  [superset] shadowed sample read [arm: superset]: False   (False is the inert signature)
+  idle window with NO capture attached (30s): evaluations, Ipkts, Opkts: '39, 0, 44'   (the uncontaminated floor)
+  what the idle bridge traffic is (tcpdump over the same 30s): 'ICMP6=1, other=1'   (2 packets — the floor a zero reading has to be compared against)
+  idle window WITH the capture attached (30s): evaluations, Ipkts, Opkts: '31, 0, 0'   (compare against the quiet window above — a large gap means the capture is inside the region it measures, and every idle figure here is the instrument's)
+  does attaching a capture change the floor?: 'quiet 39 vs captured 31 evaluations over the same interval on the same host'   (promiscuous mode changes what the interface receives, so this is checked rather than assumed)
+  busy window: evaluations, Ipkts, Opkts: '26, 9, 8'
+  the pairing distinguishes idle from inert: True   (a healthy but silent sandbox shows both flat; a shadowed but talking one shows bridge packets moving while evaluations do not)
+
+-- expectations, rendered from the values above --
+  [PASS] the counter advances exactly when our anchor is in the path  <- healthy host, same traffic, same path=True
+  [PASS] the counter still discriminates with 41 indices loaded, most of them naming interfaces that do not exist  <- superset, healthy=True
+  [PASS] an unprivileged host-side traffic signal moves with the anchor's counter, so a quiet sandbox need not be read as an inert one  <- the pairing distinguishes idle from inert=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  an unprivileged host-side traffic signal moves with the anchor's counter, so a quiet sandbox need not be read as an inert one: a pairing check across two counters, not a before/after on one mechanism. The half that matters — bridge packets moving while evaluations stay flat — is the shadowed baseline above, taken from the same anchor on the same host
+
+-- WHAT WAS NOT TRIED --
+  - the OTHER shadowing fault. This induces the one `man pf.conf` describes — a `quick` match in an anchor evaluated earlier. `pf-anchor-eval.txt`'s host had lost the main ruleset's `anchor "com.apple/*"` line instead, which is a different cause with the same signature and was not reproduced here because inducing it means writing the main ruleset (hazard 1) and repairing with a backend restart
+  - whether the grant can widen to `-vvs rules` safely. That is a permit/refuse matrix and needs the blanket sudo grant removed for its duration — W2b
+  - what supplies the idle floor, beyond its DIRECTION. `Ipkts` stayed at 0 through both idle windows while `Opkts` moved, so the evaluations counted there are host-to-guest traffic and not the sandbox's — but the capture's composition varied run to run (mDNS and ICMPv6 in some, almost nothing in others) and the count itself ranged 27-944 across five 30s windows. So the floor is real, host-side, and NOT a rate. A detector treating a non-zero count as 'this sandbox is alive' is reading someone else's traffic; the signal that actually tracks the guest is `Ipkts`, which is 0 idle and moved to 9 under load
+  - a hostile guest against this detector. It has no guest component at all, which is the point, but nothing here tries to influence the counter from inside the sandbox by shaping traffic
+  - what the detector costs. Every read is a `sudo pfctl` at ~7.9 ms (`pf-pool-scaling.txt`) and nothing multiplies that by a polling cadence
+  - an idle sandbox over a REALISTIC interval. The idle windows here are 30 seconds each on a machine doing nothing; a sandbox idle for an hour is the case the ambiguity actually arises in, and the floor is run-to-run noisy enough that one 30s sample is not a rate
+  - the counter's behaviour across a pf reload, a reboot, or `pfctl -F all`. Evaluations reset with the ruleset, so a detector comparing against a stored previous value has a wraparound case nobody has looked at
+  - multiple sandboxes. One guest, one slot; whether one sandbox's traffic can make another's slot look alive is unasked and is the obvious next question
+
+-- all live expectations held --
