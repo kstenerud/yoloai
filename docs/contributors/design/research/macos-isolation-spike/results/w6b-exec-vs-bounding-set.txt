@@ -1,0 +1,25 @@
+=== W6b ===
+Does `container exec` restore CAP_NET_ADMIN that the entrypoint dropped?
+
+-- controls and baselines (all held, or this would not render) --
+  the allowlist enforced before exec touched it (undropped arm): True
+  baseline: a `container exec` process removed the allowlist and reached a denied host: True   (nothing dropped — exec holds the capability)
+  the container's long-lived process really did lose it: True   (holder CapBnd=00000000a80425fb — bit 12 clear, so the drop took)
+  the allowlist enforced before exec touched it (dropped arm): True
+
+-- measurements --
+  with the entrypoint's subtree dropped: True
+  the exec'd process's bounding set: '00000000a80435fb'   (against the holder's 00000000a80425fb; equal means exec is outside the drop)
+  the denied host as seen from exec, after its flush: '301'
+
+-- expectations, rendered from the values above --
+  [FAIL] the entrypoint's drop also covers processes the daemon starts with `container exec`  <- with the entrypoint's subtree dropped=True
+
+-- WHAT WAS NOT TRIED --
+  - whether a guest process can REACH `container exec`. It cannot — it is a host-side command — so nothing here is an escape for the errant-agent threat model. This measures a property of yoloAI's own tooling
+  - `--cap-drop NET_ADMIN` on the container itself, which would fix the exec path and break the install path, since the allowlist needs the capability to be written. Whether apple's container can express 'drop after start' is unasked
+  - tart and seatbelt. tart has no capability model of this shape and seatbelt has no container at all
+  - whether yoloAI's `exec` uses `container exec` on apple, which is a code question this run does not open
+  - the canary. `pf-liveness-detect.txt`'s probe reaches the guest this way, so the result bears on it, but no canary was run here
+
+-- SOME EXPECTATIONS FAILED --

@@ -1,6 +1,6 @@
-> **ABOUTME:** The fixed item set for the second macOS enforcement verification round — what is still
-> a claim rather than a measurement, what each item decides, and what it costs. Records what to run,
-> not code.
+> **ABOUTME:** The fixed item set for the second macOS enforcement verification round — what
+> is still a claim rather than a measurement, what each item decides, and what it costs.
+> Records what to run, not code.
 
 # macOS verification round 2
 
@@ -112,6 +112,7 @@ privilege drop.
 | W7 | Is the lifecycle rule's **re-read** half reachable once DF190's workaround is applied, and does a **killed** guest or a daemon restart release an index differently from a clean stop? | Whether the re-read half is unnecessary or merely untested, and whether the 783 ms margin holds on the release paths the product actually has. `pf-lifecycle.txt` stops sandboxes cleanly and says so. | med |
 | W8 | Does **Softnet** actually enforce a per-VM destination allowlist on tart, and does its policy channel revoke a live flow? | tart's only enforcement surface, currently asserted from `--help` text. Prior art says it is the shape this platform converged on, including the live-revocation problem `pf-no-state.txt` needed five runs for. | med |
 | W9 | Does loading our anchor **disable iCloud Private Relay** on this host, and what else writes pf here? | Whether installing yoloAI has an unstated user-visible side effect on the host's own networking — the reason `apple/container` refuses `pfctl` solutions. | low |
+| W6b | **Added mid-round 2026-08-12, from W6's result.** Does `container exec` restore the capability the entrypoint dropped? | How far W6's property reaches. The bounding set belongs to a process *tree* and the daemon parents an exec, so W6 may protect the agent and nothing else. Not an escape — a guest cannot reach `container exec` — but it decides whether a design can rely on the property for everything yoloAI runs in the sandbox, including the canary. | low |
 
 **Deliberately not an item, recorded so it is not lost.** `pf-liveness-detect.txt`'s detector B is
 unsettled (BROKEN in the committed run, HEALTHY in the re-run, same fault) and this README says not to
@@ -131,7 +132,8 @@ Filled in as each item runs. Raw output in
 | W3 | — |
 | W4 | — |
 | W5 | — |
-| W6 | — |
+| W6 | `w6-cap-bounding-set.txt`. **Yes.** Baseline reproduces DF179 on this backend — a root agent flushed its own allowlist and reached a denied host. With `CAP_NET_ADMIN` out of the bounding set the same root agent could not: the denied host stayed at `000` while an allowlisted one answered `301` in the same second, so the refusal is the allowlist and not a dead box. `sudo` does not help (a bounding set is not something sudo can exceed) and neither does a new user namespace; a *private netns* succeeds and is worthless, having no route out. |
+| W6b | `w6b-exec-vs-bounding-set.txt`. **The drop does not reach `container exec`.** The exec'd process carries the container's full configured set (`a80435fb`) against the holder's dropped `a80425fb`, and it removed the allowlist and reached the denied host (301). So W6 protects **descendants of the entrypoint** — which is the agent — and nothing the host starts afterwards. |
 | W7 | — |
 | W8 | — |
 | W9 | — |
