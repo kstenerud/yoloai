@@ -2011,7 +2011,7 @@ So the axis is no longer "how strong is the filter" but **where the machinery si
 3. **Implement `requires:` for real instead of removing it.** Out of scope of this decision and not free — version verification is its own feature with its own design questions. Nothing forces bundling that build with a config file that duplicates `--archetype` and under-filters mounts.
 
 **Consequences.**
-- **Breaking (rule 1):** `docs/BREAKING-CHANGES.md` entry under `## Unreleased`; escalates the release. A repo whose only mounts came from `.yoloai.yaml` `mounts:` loses them — the CLI `--mount` flag and devcontainer.json's `mounts:` are the replacements.
+- **Breaking (rule 1):** `docs/BREAKING-CHANGES.md` entry under `## Unreleased`; escalates the release. A repo whose only mounts came from `.yoloai.yaml` `mounts:` loses them. There is deliberately no repo-side replacement; the remaining mount sources are all host-side — a profile's `mounts:`, the base config's `mounts:`, or devcontainer.json's `mounts:` (filtered). **yoloAI has no `--mount` flag**, which is itself worth noting: the most privilege-bearing key in the config has no CLI surface at all.
 - **The existence-check warning is itself a deprecation** (D127) and is registered in [deprecations.md](../deprecations.md), `Incurred: 2026-08-13`.
 - `internal/orchestrator/archetype/yoloaiyaml.go` and its test are deleted outright — no compatibility reader, because there is nothing left to be compatible with once the keys do nothing.
 - `docs/contributors/architecture/code-map.md` and `docs/contributors/design/environments.md` drop `.yoloai.yaml` from their file lists and Project Spec sections (the architecture tier is D124-gated on this; a stale name there fails `make check`).

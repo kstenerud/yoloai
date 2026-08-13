@@ -46,8 +46,10 @@ longer overrides auto-detection — use `--archetype` instead. `requires:` is go
 enforced anything. **`mounts:` is gone, and a repo relying on it loses those host mounts** — its
 entries passed only tilde expansion, unlike devcontainer.json's `mounts:`, which is filtered
 (`FilterMounts` strips the docker socket, credential dirs, and workdir collisions) before being
-applied. There is no replacement for arbitrary `.yoloai.yaml` mounts; use devcontainer.json's
-`mounts:` (filtered) or `--mount` on the command line.
+applied. There is no replacement for arbitrary `.yoloai.yaml` mounts declared by the repo itself.
+The remaining ways to add a mount are all host-side, where the person running yoloAI chooses them:
+a profile's `mounts:`, the base config's `mounts:` (`~/.yoloai/defaults/config.yaml`), or
+devcontainer.json's `mounts:` (filtered). There is no `--mount` command-line flag.
 
 **Why it changed:** D140. The file was never documented for users (absent from README.md,
 `docs/GUIDE.md`, and shipped help text), two of its three keys were dead weight or a
