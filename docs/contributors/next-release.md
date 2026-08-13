@@ -4,7 +4,7 @@
 
 # Next release
 
-**Next release version: `v0.11.1`**
+**Next release version: `v0.12.0`**
 
 ## How this works
 
@@ -66,6 +66,11 @@ finding or decision first, and lands here only if it should block the release.
 - [DF190](design/findings-unresolved.md) — an apple sandbox silently loses all egress when an unrelated sandbox restarts and reclaims its vmnet bridge index
 - [DF193](design/findings-unresolved.md) — a guest can pre-create the on-create-done marker, and the host promotes it to permanent state on the next start, so setup commands never run
 - [DF194](design/findings-unresolved.md) — a guest holding `CAP_NET_ADMIN` can unbind its own host-side enforcement by destroying its own interface, and the sandbox returns unenforced unless something reinstalls
+- [network-mode-reshape.md](design/plans/network-mode-reshape.md) — Network mode reshape — one flag, four trust boundaries
+- [DF196](design/findings-unresolved.md) — `--network-none` silently swallows an allowlist: `--network-allow` is accepted, discarded, and never recorded
+- [DF197](design/findings-unresolved.md) — `--port` is refused with `--network-none` at the CLI only, so a profile's or archetype's ports are accepted and silently dropped
+- [DF198](design/findings-unresolved.md) — `--network-none` is silently unenforced on containerd, apple and tart, while shipped help says it holds on every backend
+- [DF195](design/findings-unresolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox
 
 ## Candidates — undecided
 
