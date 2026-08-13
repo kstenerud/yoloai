@@ -2015,3 +2015,47 @@ So the axis is no longer "how strong is the filter" but **where the machinery si
 - **The existence-check warning is itself a deprecation** (D127) and is registered in [deprecations.md](../deprecations.md), `Incurred: 2026-08-13`.
 - `internal/orchestrator/archetype/yoloaiyaml.go` and its test are deleted outright — no compatibility reader, because there is nothing left to be compatible with once the keys do nothing.
 - `docs/contributors/architecture/code-map.md` and `docs/contributors/design/environments.md` drop `.yoloai.yaml` from their file lists and Project Spec sections (the architecture tier is D124-gated on this; a stale name there fails `make check`).
+
+---
+
+## D141 — A repo may not widen the sandbox boundary; requests that would are refused and listed
+
+**Date:** 2026-08-13. **Status:** Active. **Extends [D140](#d140--yoloaiyaml-project-config-is-removed-entirely)'s principle to the file that stays.** Supersedes no decision — the behaviour it replaces (`FilterMounts`, `dangerousRunArgCaps`) was never decided, it accreted, which is itself the finding. **Consumers:** `internal/orchestrator/archetype/`, `internal/orchestrator/create/`, `internal/cli/lifecycle/`.
+
+**Decision. `devcontainer.json` stays supported, and every request in it that would widen the sandbox boundary is refused at create — all of them at once, in one message that lists each one. A single per-invocation flag grants the whole list.** Nothing is silently stripped and nothing is silently granted.
+
+**The line is the sandbox boundary, not the source of the request.** A repo-supplied request is refused when it changes what the sandbox can reach *outside itself*, and allowed when it happens *inside* a boundary that already exists:
+
+| Refused — widens the boundary | Allowed — happens inside it |
+| --- | --- |
+| `mounts` — host paths enter the sandbox | `postCreateCommand` and siblings |
+| `runArgs --cap-add` — kernel capabilities | `containerEnv` / `remoteEnv` |
+| `runArgs --privileged` | `runArgs --cpus` / `--memory` |
+| `forwardPorts` / `appPort` — binds a host port | |
+
+**Why lifecycle commands are on the allowed side, which is the load-bearing call.** They run as the unprivileged `yoloai` user (`entrypoint.py:324` execs `sandbox-setup.py` via `gosu yoloai`), inside the sandbox, *after* the egress policy is applied. Running a repo's own code in a disposable sandbox is what yoloAI is for — the agent will run it one prompt later regardless, and refusing it buys nothing. It is also the pragmatic half: nearly every real devcontainer has a `postCreateCommand`, so refusing it would make "safe by default" mean **devcontainer support is off by default**, which contradicts the reason D18 chose to support the format at all.
+
+**What this replaces is filter-and-proceed, in three flavours, none of them decided.**
+- **Capabilities:** a 17-entry denylist (`dangerousRunArgCaps`) stripped the known-dangerous ones with a warning and granted everything else silently. **The denylist disappears** — any capability request is refused. A denylist of escape-enabling capabilities cannot be complete by construction, and its own comment admits the shape was chosen "so that benign, non-escalating caps in a devcontainer still work" — an availability argument standing in for a safety one.
+- **Mounts:** `FilterMounts` stripped the docker socket, credential dirs and workdir collisions, then granted the rest. Now the presence of any mount is refused.
+- **`forwardPorts`:** granted silently. Now refused.
+
+All three are the silent degradation [D138](#d138--an-undeliverable-mode-is-refused-not-degraded) retired, surviving in a corner that decision did not sweep.
+
+**One flag, not per-category, and the reason is that the refusal message *is* the granularity.** The user sees every unsafe request enumerated before deciding, so an all-or-nothing accept is already an informed one. Per-category flags would be real CLI surface bought for a distinction the list already draws. Named for its consequence rather than as a generic override (the `AbandonUnappliedWork` convention): the flag says the repo may widen the sandbox boundary.
+
+**The flag is per-invocation and is never a persisted config key.** This is the one constraint that must land with the feature rather than after it. In a daemon the person who set the flag is not the person whose host paths get mounted, and the repo arrives with no human in the loop — but that failure does not wait for a daemon. A persisted `trust_repo: true` in `defaults/config.yaml` reproduces it immediately on the CLI: set once, silently applied to every sandbox afterwards, including the repo the agent edited last week. Making it unpersistable now is free; retrofitting it once someone's config depends on it is a breaking change.
+
+**Accepted risk, explicitly.** With the flag set, an agent that edits `devcontainer.json` and a user who re-creates with the flag will get whatever the agent asked for. That is the user's call to make and the flag exists to let them make it. The protection that matters is that the default refuses, and that the refusal names every request — so the edit is visible at the moment it would take effect.
+
+**Rejected.**
+1. **Keep filtering, improve the filters.** Rejected because a filter answers "which of these do we happen to know are dangerous", which is a question that cannot be answered completely, and because stripping a request the repo made is exactly the degradation D138 retired.
+2. **Per-request prompting.** Rejected as the fiddliness a single balk avoids: one refusal listing everything is one decision, and it works unattended and in scripts where a prompt cannot.
+3. **Per-category flags.** Rejected above — the enumerated list already gives the user the per-category view, without four flags to document and combine.
+4. **Refuse lifecycle commands too.** Rejected: they execute inside the containment boundary as an unprivileged user, and refusing them turns devcontainer support off for the overwhelming majority of real repos.
+
+**Consequences.**
+- **Breaking (rule 1):** a repo whose `devcontainer.json` carries mounts, capabilities or `forwardPorts` now fails to create until the flag is passed. `docs/BREAKING-CHANGES.md` entry under `## Unreleased`.
+- `dangerousRunArgCaps` and `FilterMounts` are deleted rather than rewired — the refusal needs to know only *that* a request exists, never whether it is on a list.
+- The refusal must land before any destructive or expensive step in `prepareSandboxState`, for the same reason the mode-capability validation does: `--replace` tears down an existing sandbox, and Phase 2 copies the whole workdir.
+- Plan: [`repo-request-trust.md`](../design/plans/repo-request-trust.md).
