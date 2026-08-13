@@ -1124,7 +1124,7 @@ earlier signal and records nothing else.
 
 - **Discovered:** 2026-08-13, auditing [network-mode-reshape.md](plans/network-mode-reshape.md) · **Workstream:** CLI / isolation
 - **Severity:** LOW–MEDIUM (same shape as DF196, one flag over: a request is accepted, discarded, and left unrecorded)
-- **Disposition:** UNRESOLVED — the reshape plan carries the fix as step 2, alongside DF196
+- **Disposition:** UNRESOLVED — the reshape plan carries the fix as step 1, alongside DF196
 - **Rides:** **breaking.** Refusing a profile+mode combination that is accepted today is newly-rejected input.
 - **Description:** `internal/cli/lifecycle/new.go:207` refuses `--port` with `--network-none` by reading `cmd.Flags().GetStringSlice("port")` — **the flag only**. Ports also arrive from a profile (`internal/orchestrator/create/prepare_profile.go:141`, `:199`, which *prepend* to `opts.Ports`) and from devcontainer archetypes (`prepare_archetype.go:272`). Neither path passes the check, and the library API validates nothing (`sandbox_options.go:81`). So a profile carrying `ports:` plus `--network-none` creates a sandbox whose ports can never work, with no error and nothing recorded.
 - **This is the second instance of one defect class, which is the part worth acting on** ([GEN §18](../principles/general-principles.md)). DF196 is the same failure for the allowlist: a CLI-level guard over a value that three doors can set. Two of a kind on adjacent flags says the architecture invites it — the guards are written where the *flag* is parsed rather than where the *value* is resolved. The fix for both is one layer down, at the point the mode and the request are finally composed, and doing them separately would be two mechanisms for one job.

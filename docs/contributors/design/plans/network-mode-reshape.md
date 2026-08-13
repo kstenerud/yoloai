@@ -25,12 +25,21 @@ the only thing that decides what a mode is worth against an agent that turns on 
 | `restricted` | **outside** the sandbox | restricts egress, hardened against a compromised agent. |
 | `none` | — | no network at all. Nothing in or out. |
 
-**Each value names a trust boundary, not a mechanism**, and that is what keeps this compatible with
-[netpolicy.md](../netpolicy.md) § *Hostile containment*, which says mode is the **intent** and
-strategy is the **realization**, and warns against adding a mode where a strategy would do.
-*In-sandbox* versus *out-of-sandbox* is intent — it is the question *"can the thing I am containing
-switch it off?"* — and it is answered before any mechanism is chosen. `ip-filter` and `egress-proxy`
-remain strategies underneath. **That carve stands; this plan does not overturn it.**
+**Each value names a trust boundary, not a mechanism.** `ip-filter` and `egress-proxy` remain
+strategies underneath, so [netpolicy.md](../netpolicy.md)'s mode-is-intent / strategy-is-realization
+split survives — but **one sentence of it does not, and this plan supersedes that sentence rather
+than continuing it.** netpolicy.md §3 decided this exact question: *"'Hostile' = `isolated` + the
+`egress-proxy` strategy — a new **strategy**, not a new **mode**."* `restricted` is that
+combination, promoted to a mode.
+
+The reason to overturn it is that its premise changed. It was written when the proxy was expected to
+be *"a strictly-better interpretation of the same allowlist… with no policy-model change and no
+contract change"*. [D137](../../decisions/working-notes.md) and the chokepoint round make it
+neither: `--port` stops working, live `allow`/`deny` stops working, brokering becomes mandatory, and
+the policy set must be fixed at creation. **A strategy that changes the contract is a mode.** An
+earlier draft of this plan claimed the carve was untouched and cited a neighbouring section as
+endorsement — the supersession-as-continuity failure [A38](../../agent-failures.md) records,
+recurring inside the plan that records it.
 
 The ordering falls out of the axis rather than out of the adjectives, which is why the values can be
 read cold: machinery nowhere, inside, outside, no network.
