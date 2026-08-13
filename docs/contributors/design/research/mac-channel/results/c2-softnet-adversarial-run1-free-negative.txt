@@ -1,0 +1,39 @@
+=== C2 — VOID ===
+baseline for probe 'the guest reaches 8.8.8.8, which the deny policy will forbid' read False, wanted True. With the mechanism absent this probe must report the opposite of what the run will claim; it does not, so it is not measuring what it is believed to measure.
+
+-- controls and baselines --
+  baseline: the guest reaches 8.8.8.8, which the deny policy will forbid: False   (--net-softnet-allow=0.0.0.0/0, which `--help` says disables destination restrictions — so the address is reachable when policy allows it)
+
+-- no verdict is rendered from a void run --
+Traceback (most recent call last):
+  File "/Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/mac-channel/c2_softnet_adversarial.py", line 172, in <module>
+    sys.exit(main())
+             ^^^^^^
+  File "/Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/mac-channel/c2_softnet_adversarial.py", line 99, in main
+    denied.baseline(want=True,
+  File "/Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/mac-channel/../../../../../scripts/research_harness_v2.py", line 162, in baseline
+    self.harness._void(
+  File "/Users/karlstenerud/Projects/yoloai/docs/contributors/design/research/mac-channel/../../../../../scripts/research_harness_v2.py", line 407, in _void
+    raise HarnessError(f"[{self.name}] {reason}")
+research_harness_v2.HarnessError: [C2] baseline for probe 'the guest reaches 8.8.8.8, which the deny policy will forbid' read False, wanted True. With the mechanism absent this probe must report the opposite of what the run will claim; it does not, so it is not measuring what it is believed to measure.
+
+-- INVALIDATED --
+Class: free-negative
+Direction: confirmed
+The denied destination was 8.8.8.8, which does not answer HTTP on port 80 from this host
+under ANY policy — measured from the host directly: 8.8.8.8, 9.9.9.9 and 93.184.216.34 all
+return 000 while 1.1.1.1 returns 301. So every "denied host unreachable" this run could have
+produced was free, and would have read as containment.
+
+The run never reached that conclusion: the baseline is taken with the policy wide open and
+must read True, it read False, and the harness voided before a single expectation rendered.
+This is the specimen v2 exists for, reproduced by the round that cites it.
+
+**But the same reading had already escaped, by hand.** Before this harness ran, an
+exploratory `tart run --net-softnet-block=0.0.0.0/0 --net-softnet-allow=1.1.1.1/32` was read
+as "Softnet default-deny reproduced: permitted 301, denied 000" and reported as such. That
+observation is withdrawn. It is the identical defect, and what separated the two was not
+scepticism but the fact that one of them had to declare a baseline.
+
+Re-run as run 2 with DENIED=208.67.222.222 (404 from this host, so it demonstrably answers)
+and a different operator from the permitted address, so the arms are not both Cloudflare.

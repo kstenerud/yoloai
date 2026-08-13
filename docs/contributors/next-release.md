@@ -70,6 +70,8 @@ finding or decision first, and lands here only if it should block the release.
 - [DF196](design/findings-unresolved.md) — `--network-none` silently swallows an allowlist: `--network-allow` is accepted, discarded, and never recorded
 - [DF197](design/findings-unresolved.md) — `--port` is refused with `--network-none` at the CLI only, so a profile's or archetype's ports are accepted and silently dropped
 - [DF198](design/findings-unresolved.md) — `--network-none` is silently unenforced on containerd, apple and tart, while shipped help says it holds on every backend
+- [DF199](design/findings-unresolved.md) — `--network-none` makes a seatbelt sandbox fail to start, because SBPL's `network*` class also covers unix sockets
+- [DF200](design/findings-unresolved.md) — the `NetworkNone` conformance case cannot fail, and does not run on any backend that has the defect
 - [DF195](design/findings-unresolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox
 
 ## Candidates — undecided

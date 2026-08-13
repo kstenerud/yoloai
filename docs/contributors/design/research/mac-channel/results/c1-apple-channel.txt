@@ -1,0 +1,35 @@
+=== C1 ===
+does the apple backend expose a host<->guest data channel, and does it survive a guest with no IP stack?
+[harness v2] every expectation rests on a probe baselined with the mechanism absent and answering the other way; see procedures/verification-rounds.md
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the host completes a round trip with the guest over a published socket: False   (same guest, same listener, but the container was started without --publish-socket, so there is no host end to connect to)
+  the stackless guest really has only lo: 'lo'   (if this shows an ethernet device the arm is not measuring a stackless guest)
+  baseline: a guest reaches an external address: True   (default network, no flags — the positive control A22 requires)
+
+-- measurements --
+  guest AF_VSOCK/CID probe: 'AF_VSOCK=ok | AF_UNIX=ok | AF_INET=ok | dev_vsock= True | local_cid= 3'   (the raw guest-side capability read, before any channel is asked for)
+  with --publish-socket, default network: True   (host end /tmp/yc1/net.sock)
+  with --publish-socket, --network none: True   (host end /tmp/yc1/none.sock)
+  under --network none: False   (same probe, same image, same host, --network none added)
+  host end pre-existing: '[0/6] [0s]\n[1/6] Fetching image [0s]\n[2/6] Unpacking image [0s]\n[3/6] Fetching kernel [0s]\n[4/6] Fetching init image [0s]\n[5/6] Unpacking init image [0s]\n[5/6] '   (container creates the host end; it refuses to reuse one, which is what establishes the direction as guest-listens / host-connects)
+  sequential round trips over one published socket (of 5): 5
+  concurrent round trips over one published socket (of 5): 5   (a chokepoint proxy needs many in flight; one accept-loop served them)
+  guest-initiated vsock to host CID 2: 'port1024=ConnectionResetError port2000=ConnectionResetError port8080=ConnectionResetError port50000=ConnectionResetError'   (whether the guest can open its own channel out, rather than being connected to)
+  AF_UNIX sun_path budget for the host end: 22   (108-byte limit; a host end under ~/.yoloai/sandboxes/<name>/ can exceed it, which bit this run before it was noticed)
+
+-- expectations, rendered from the values above --
+  [PASS] apple exposes a host<->guest channel that carries arbitrary bidirectional data  <- with --publish-socket, default network=True
+  [PASS] that channel survives a guest with no IP stack, which is shape (B)  <- with --publish-socket, --network none=True
+  [PASS] --network none actually removes the guest's egress  <- under --network none=False
+
+-- WHAT WAS NOT TRIED --
+  - **the guest-initiated direction, beyond the vsock probe above.** `--publish-socket` is guest-listens/host-connects. An egress proxy wants the opposite, so a build on this needs either a guest-side shim that multiplexes local connections over the channel, or a host proxy that connects in and speaks a reverse protocol. Which of those is cheaper is a design question this run does not open
+  - whether yoloAI can pass these flags at all. `runtime/apple` passes neither --network nor --publish-socket today; what it costs to thread them through is a code question (and the --network half is C3's defect)
+  - the channel under the real image. This runs alpine+python3, not yoloai-base, whose entrypoint.py takes over PID 1 — so nothing here says the shim can be started before the agent, only that the host end exists from container start
+  - throughput and latency. Every payload here is a few bytes; whether this channel carries a real HTTP session at usable speed is unmeasured and is P2's question one layer down
+  - restart and lifecycle. Whether the host end survives a container stop/start, a daemon restart, or a reboot — the whole subject of enforcement-state-reaping.md — is untouched
+  - SOCK_DGRAM, and anything other than a stream socket
+  - n. One host, one macOS (26.5.1), container CLI 1.0.0, one boot per arm
+
+-- all live expectations held --

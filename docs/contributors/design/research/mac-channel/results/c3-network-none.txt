@@ -1,0 +1,33 @@
+=== C3 ===
+is --network-none enforced on apple, tart and seatbelt, through yoloAI's own launch path?
+[harness v2] every expectation rests on a probe baselined with the mechanism absent and answering the other way; see procedures/verification-rounds.md
+
+-- controls and baselines (all held, or this would not render) --
+  apple: a no-flag sandbox starts: True
+  baseline: the sandbox reaches an external address: True   (apple, no --network-none — the positive control the claim below inverts)
+  tart: a no-flag sandbox starts: True
+  tart: the no-flag sandbox reaches out: True   (per-backend positive control; the probe's baseline is taken once, on the first backend)
+  seatbelt: a no-flag sandbox starts: True
+  seatbelt: the no-flag sandbox reaches out: True   (per-backend positive control; the probe's baseline is taken once, on the first backend)
+
+-- measurements --
+  apple: --network-none sandbox starts: True
+  apple: under --network-none: True   (same probe, same backend, same destination)
+  tart: --network-none sandbox starts: True
+  tart: under --network-none: True   (same probe, same backend, same destination)
+  seatbelt: --network-none sandbox starts: False   (Run 'yoloai new -h' for help)
+  seatbelt: --network-none outcome: 'REFUSED-TO-START'   (not a silent pass and not enforcement either — see the finding)
+
+-- expectations, rendered from the values above --
+  [FAIL] --network-none removes egress on apple  <- apple: under --network-none=True
+  [FAIL] --network-none removes egress on tart  <- tart: under --network-none=True
+
+-- WHAT WAS NOT TRIED --
+  - containerd, docker and podman. `runtime/containerd/lifecycle.go:527` admits the same gap in its own comment and is unmeasured here; docker and podman pass the mode to the engine and are read, not run
+  - IPv6 specifically. The apple arm's guest holds a global v6 address as well as a v4 one, and the probe only dials a v4 literal — so the v6 half is confirmed present and never exercised
+  - whether the sandbox can be reached FROM outside, which is the other half of what a user reading 'no network at all' would assume
+  - the seatbelt failure's mechanism. This run records only that the sandbox does not start; which SBPL operation class breaks it is C4's subject
+  - a fresh base image. Both VM backends reuse an image predating this tree — see the instrument's boundary in the module docstring
+  - n. One host, one run per arm
+
+-- SOME EXPECTATIONS FAILED --

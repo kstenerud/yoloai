@@ -1,0 +1,33 @@
+=== C2 ===
+can a root guest defeat tart's Softnet default-deny policy?
+[harness v2] every expectation rests on a probe baselined with the mechanism absent and answering the other way; see procedures/verification-rounds.md
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the guest reaches 208.67.222.222, which the deny policy will forbid: True   (--net-softnet-allow=0.0.0.0/0, which `--help` says disables destination restrictions — so the address is reachable when policy allows it)
+  the guest is root-capable: True   (every attack below runs under sudo; without this the run measures an unprivileged user and answers a different question)
+  the permitted address still answers under the deny policy: True   (so the block above is an allowlist and not an outage (A22))
+
+-- measurements --
+  under --net-softnet-block=0.0.0.0/0 with one /32 allowed: False
+  guest en0 before the attacks: '192.168.2.2 ea:fa:07:bb:28:d8'
+  after: MAC spoof: False   (attack exit=0; permitted host still reachable=True)
+  after: static IP reassign: False   (attack exit=0; permitted host still reachable=False)
+  static IP reassign: INCONCLUSIVE: True   (the attack cost the guest its own working destination too, so an unreachable denied host here is self-inflicted, not containment)
+  after: gateway override: False   (attack exit=0; permitted host still reachable=True)
+  attacks whose liveness control held, so their result counts: 2   (of 3 attempted)
+
+-- expectations, rendered from the values above --
+  [PASS] Softnet's default-deny actually blocks the denied destination  <- under --net-softnet-block=0.0.0.0/0 with one /32 allowed=False
+  [PASS] a root guest does not get out from under Softnet via MAC spoof  <- after: MAC spoof=False
+  [PASS] a root guest does not get out from under Softnet via gateway override  <- after: gateway override=False
+
+-- WHAT WAS NOT TRIED --
+  - **Softnet's dynamic policy channel** — newline-delimited JSON-RPC over a unix socket with flow-table clearing on change, which is live revocation already built upstream. `tart run` exposes only boot-time flags and nothing here drives that socket. Whether yoloAI could is the question that decides if tart gets revocation at all (W8 named this too; still unrun)
+  - attacking the softnet *process* from the guest — it is a host process, and the guest has no handle on it by construction, so there was nothing to attack. That is the claim, and it is argued rather than measured
+  - the `@host` alias for gateway traffic, which is W5's credential-injection problem on the tart side
+  - UDP, ICMP and DNS. Every probe is TCP/80, which is W1's protocol-coverage question unasked on this backend — and W1 found the pf shape filtered TCP only
+  - IPv6. Softnet's flags are CIDRs and this run never checks whether a v6 destination is covered at all
+  - whether this composes with yoloAI. `runtime/tart` passes no Softnet flag today
+  - n. One host, one boot per arm, tart 2.32.1 / softnet 0.19.0
+
+-- all live expectations held --
