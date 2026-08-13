@@ -1,176 +1,206 @@
-> **ABOUTME:** Replace the two network booleans with one four-valued `--network` flag, so the
-> product can say which adversary each mode defends against — and so the mode that defends against
-> a compromised agent has somewhere to live.
+> **ABOUTME:** Replace the two network booleans with one four-valued `--network` flag whose values
+> name *where the enforcement machinery sits relative to the agent* — and make every mode balk
+> loudly at the features it cannot honour, instead of degrading.
 
-# Network mode reshape — one flag, four modes
+# Network mode reshape — one flag, four trust boundaries
 
-- **Status:** PLANNED — designed, no code. The mode it exists to make room for (`restricted`) is
-  built by [egress-proxy-build.md](egress-proxy-build.md); this plan is the user-facing surface
-  and can land ahead of it with `restricted` absent.
+- **Status:** PLANNED — designed, no code.
 - **Depends on:** egress-proxy-build.md
-- **Rides:** **breaking.** Five separate breaks, each independently rule-1: `--network-none` and
-  `--network-isolated` become deprecated aliases; an allowlist under `none` starts being refused
-  ([DF196](../findings-unresolved.md)); `--port` starts being refused under `restricted`; a named
-  mode a backend cannot deliver starts being refused ([D138](../../decisions/working-notes.md));
-  and DNS starts being denied under `isolated` with an empty allowlist. Escalate the version in
-  `next-release.md` when the first lands.
 
-## Why the current shape cannot express what is true
+  Only step 5 needs it — steps 1–4 depend on nothing.
+- **Rides:** **a migration.** See § *Why this is migration-bearing* — a released binary reading a
+  `restricted` record does not error, it silently produces an unisolated sandbox. Per rule 12 /
+  [D131](../../decisions/working-notes.md) the work goes to `release-v0.12.0` and **not to `main`**.
 
-Two booleans, `--network-isolated` and `--network-none`, and between them no way to say the thing
-[D137](../../decisions/working-notes.md) established: **the allowlist is a guardrail against a
-confused agent and is not adversarially sound on any backend.** The agent has `sudo` by design, and
-the residue behind that is unbounded.
+## The axis
 
-So the product's advice for a hostile agent currently resolves to `--network-none` — `yoloai help
-security` says *"Use --network-none for maximum isolation"*, `GUIDE.md` says *"use --network-none
-when you need a guarantee"* — and [P9](../research/proxy-chokepoint/results/p9-network-none-utility.txt)
-measured what that costs: **no shipped AI agent can work under it**, because none can reach its own
-API. A real agent failed a task that needed no network to perform, since it could not be told to do
-it. The advice is not wrong; its only remedy is useless. That is the gap.
+Two booleans could not say the thing this workstream spent a month establishing. One flag, four
+values, and **the axis is where the enforcement machinery sits relative to the agent** — which is
+the only thing that decides what a mode is worth against an agent that turns on you.
 
-## The four modes
+| Mode | Machinery sits | Guarantee |
+| --- | --- | --- |
+| `open` | nowhere | none. Anything in the sandbox reaches anything. |
+| `isolated` | **inside** the sandbox | restricts egress. **No guarantee against an agent subverting the machinery itself.** |
+| `restricted` | **outside** the sandbox | restricts egress, hardened against a compromised agent. |
+| `none` | — | no network at all. Nothing in or out. |
 
-| Mode | Defends against | Mechanism | Egress channels |
-| --- | --- | --- | --- |
-| `open` | nothing | none | all |
-| `isolated` | a **confused** agent | in-guest IPv4 allowlist | allowlisted TCP, **plus DNS** |
-| `restricted` | a **compromised** agent | one destination; policy at a host-side proxy | the proxy only |
-| `none` | — (quarantine) | no interface | **none** |
+**Each value names a trust boundary, not a mechanism**, and that is what keeps this compatible with
+[netpolicy.md](../netpolicy.md) § *Hostile containment*, which says mode is the **intent** and
+strategy is the **realization**, and warns against adding a mode where a strategy would do.
+*In-sandbox* versus *out-of-sandbox* is intent — it is the question *"can the thing I am containing
+switch it off?"* — and it is answered before any mechanism is chosen. `ip-filter` and `egress-proxy`
+remain strategies underneath. **That carve stands; this plan does not overturn it.**
 
-**`isolated` keeps its name and its meaning, and gains an honest description.** It is not being
-weakened — it is being described. Nothing about its mechanism changes here.
+The ordering falls out of the axis rather than out of the adjectives, which is why the values can be
+read cold: machinery nowhere, inside, outside, no network.
 
-**`restricted` is the new one** and is where D137's invariant lands: the sandbox's only egress is a
-host-side proxy under a principal the agent has no privilege over. Measured viable end to end in the
-[chokepoint round](../../archive/plans/proxy-chokepoint-verification-round.md): 99.2% of a real
-session is HTTP or DNS with zero QUIC, a real session completed its task with one destination, every
-package manager worked on standard proxy environment alone, and the guest never resolved because the
-proxy does.
+### Two rungs deliberately collapsed
 
-**`none` survives on one measured property**, not on the counterexamples first offered for it. The
-owner's objection to those was correct — `test` and `idle` are not agents and pose no threat if
-networking is allowed, so "they still work under `none`" argues nothing. What survives is a
-differential: two `idle` sandboxes differing only in mode, **TCP blocked under both, and DNS
-resolving under `isolated`**. An isolated sandbox with nothing legitimate to resolve still reaches a
-nameserver, which is a working exfiltration channel — data leaves in query labels to a domain the
-exfiltrator controls. So `none` is the only mode with no channel at all, and stays so under this
-plan, because `restricted` always permits the proxy.
+`isolated` covers what [D135](../../decisions/working-notes.md) called two tiers — in-guest
+filtering, and in-guest filtering the agent cannot flush (the sidecar firewall). They are one mode
+now. The distinction was an artifact of believing a sandbox's inner machinery could be hardened
+against a compromised agent; [D137](../../decisions/working-notes.md) measured that it cannot,
+because the agent has `sudo` by design and the residue behind that is unbounded. **A better tier 1
+is not a different guarantee, so it does not get its own name.** Ideas from the sidecar work may
+still make `isolated` more robust and are worth taking where cheap — **not worth new privilege
+requirements**, and never worth being described as containment.
 
-Its use is **running untrusted code rather than an untrusted agent**: a suspicious repository, a
-dependency's test suite, a build script nobody has read, with `--agent idle` and `exec`, where
-copy/diff/apply is the point.
+## What each mode balks at
 
-**And it is kept for a reason the table cannot show: it is the only mode a human can hold in their
-head as an absolute.** *"No network, ever"* needs no reader to know what the allowlist contains,
-what the proxy policy is, or which backend they are on. Every other mode's guarantee is conditional
-on something. That is worth a mode on its own, independently of the DNS argument below — which
-remains worth doing anyway, because an empty allowlist with open DNS is a hole with no compensating
-benefit.
+**Degrading is retired** ([D138](../../decisions/working-notes.md)). A mode that cannot be delivered
+is refused; a feature the mode cannot honour is refused. The point of the axis is that a user can
+hold the guarantee in their head, and a guarantee that quietly varies by host — or that silently
+drops a feature they asked for — is not one.
 
-## Why one flag with a value, not a third boolean
+### `none` — the sandbox is air-gapped
 
-1. **The names do not order themselves.** "Isolated" connotes more separation than "restricted"; a
-   user reaching for the strongest option could reasonably pick the weaker one. An enum makes the
-   reader see the ordered list at the point of choosing, which dissolves the problem instead of
-   solving it by finding better adjectives.
-2. **It is already an enum underneath.** `NetworkMode` is `"none"` / `"isolated"` / `""` in the
-   store and in `netpolicy.Compose`. The booleans are a CLI-only shape over a value.
-3. **It is the established idiom here.** `--isolation container|container-enhanced|vm|vm-enhanced`
-   is the same problem solved the same way, one flag away.
-4. **Booleans need pairwise exclusion forever.** `new.go:74` already carries
-   `MarkFlagsMutuallyExclusive("network-none", "network-isolated")`; a third adds two more pairs,
-   and DF196 exists because a *fourth* flag (`--network-allow`) sits outside that mechanism.
+No agent can run here: every shipped agent needs its API server, so **no API access means no use for
+a key and no purpose for a broker.** The mode is for running untrusted *code* — a suspicious
+repository, a dependency's test suite, a build script nobody has read — with `--agent idle` and
+`exec`, where copy/diff/apply is the point.
 
-## Closing DNS under `isolated`
+| Requested | Behaviour | State today |
+| --- | --- | --- |
+| a real agent (`agent.RealAgents()`) | **refuse** | accepted; the agent then sits unable to work |
+| `--network-allow` or a profile allowlist | **refuse** | silently discarded ([DF196](../findings-unresolved.md)) |
+| `--port` | **refuse** | refused at the CLI only; a profile's `ports:` slips past ([DF197](../findings-unresolved.md)) |
+| `--broker` | **refuse** | already refused |
+| credential delivery | **deliver nothing** | falls back to *direct* delivery — the real key enters an air-gapped box for no reason |
+| MCP servers needing egress | **refuse** | undefined |
 
-**Rule: port 53 is denied while the effective allowlist is empty, and permitted the moment it is
-not.** Today an isolated sandbox with nothing legitimate to resolve still reaches a nameserver,
-which is a working exfiltration channel and buys nothing.
+The predicate for the first row is `agent.RealAgents()`, which already excludes `test`, `shell` and
+`idle`. **It is not "the agent's allowlist floor is non-empty"** — `aider` ships with five
+`APIKeyEnvVars` and *no* `NetworkAllowlist`, as does any file-defined agent that omits the optional
+field, so a floor-based rule would wave through the agent most likely to fail silently.
 
-**It bites only where it should.** The effective allowlist includes the agent's own floor, so any
-real agent keeps DNS — the rule only closes the case where nothing has any business resolving
-anything, which is `--agent idle`, `--agent test`, or an agent with no floor.
+The credential row reads as a surprise and is not: refusing the broker currently *causes* direct
+delivery, so `none` has **worse** credential hygiene than `isolated` today. Under this plan it has
+none, because there is nothing for a credential to reach.
 
-**It must be reversible on a running sandbox**, and that has an ordering trap in it. Adding a domain
-later re-opens 53 — but [D133](../../decisions/working-notes.md) resolves allowlisted domains **in
-the guest's resolver context**, so the live patch cannot resolve the domain it is being asked to add
-until DNS is already open. So `LivePatchNetwork` must **lift the DNS denial first, then resolve,
-then add the address** — not resolve-then-open, which deadlocks on the first domain added to an
-empty list and would look like "the allowlist is broken" rather than like an ordering bug.
+### `restricted` — one route out, and it is the proxy
 
-The inverse holds for symmetry: removing the last domain re-closes 53, because the invariant is *no
-allowlist ⇒ no DNS*, not *DNS was once open*. Worth a test in both directions — the second is the
-one nobody writes.
+All routes are removed and a single host-side proxy is the only destination
+([D139](../../decisions/working-notes.md)). Several network features cannot survive that. Each is a
+deliberate compromise for the guarantee, not an oversight:
+
+| Requested | Behaviour | Why |
+| --- | --- | --- |
+| `--port` | **refuse** | a guest with no route cannot answer inbound. A **contract property of the mode**, not of the mechanism — a backend falling back to shape (A) could technically publish and must not, or the mode means different things per backend |
+| live `allow` / `deny` | **refuse** | D137 §2 requires the policy set fixed at creation; a runtime-mutable allowlist is the open-ended set moving rather than closing |
+| brokering | **mandatory** | the single destination *is* the broker's injector. A credential must not enter a sandbox whose whole premise is that it cannot be trusted with one |
+| MCP servers needing arbitrary egress | **refuse** | they would need a second route |
+
+### `isolated` and `open` — unchanged behaviour
+
+`open` promises nothing. `isolated` works as it does today; what changes is that it is *described*
+honestly, and that it is refused rather than silently unenforced where a backend cannot do it.
+
+## Why this is migration-bearing
+
+`internal/netpolicycfg` stamps `schemaVersion = 1` on save and **never compares it on load** —
+`Load` unmarshals `Version` and returns. The constant is unexported, so nothing outside the package
+could check it either. Compare `store/environment.go:333`, which guards both directions.
+
+So a **released v0.11.0 binary reading `"network_mode": "restricted"` does not fail.** It falls
+through every `== "isolated"` test and produces a sandbox with no isolation at all: no sidecar
+firewall (`launch.go:301`), no `NET_ADMIN` (`:1040`), `CanEnforce` never consulted (`:990`), and the
+guest firewall off, because `entrypoint.py` keys on a bool rather than on the mode string. On
+seatbelt and apple the guest simply gets full network. Only docker errors, and only by luck — it
+passes the mode through as a *network name* and the daemon rejects it.
+
+Patching `Load` does not fix this: it would protect binaries from that release forward, and the
+stranded population is everything already shipped. The clean refusal has to come from the realm
+stamp (`LibrarySchemaVersion`), which means a registered migrator, a `schema_releases.go` entry, a
+rule 9 deprecation entry — and rule 12: **`release-v0.12.0`, not `main`.**
 
 ## Failing loudly
 
-Three refusals. Each is newly-rejected input, so each needs a `BREAKING-CHANGES.md` entry, and each
-needs a test that goes red on revert (rule 10).
+Each refusal is newly-rejected input: a `BREAKING-CHANGES.md` entry and a test that goes red on
+revert (rule 10).
 
-**1. An allowlist under `none` is an error — [DF196](../findings-unresolved.md), and it is a live
-defect today.** `--network-none --network-allow example.com` currently **exits 0**, creates a
-running sandbox, stores `{"version": 1, "network_mode": "none"}` with no `allow` key, and gives the
-guest only `lo`. The user asked for a destination and was neither refused nor warned, and the
-request left no trace for a later reader.
+**Where the checks belong: below the CLI.** Every refusal has at least three doors — the flag, a
+profile, and the library API — and `netpolicy.Compose` (single call site, `prepare_dirs.go:342`) is
+downstream of all of them. The existing `--port`-under-`none` check is the counter-example to copy
+*away* from: `new.go:207` reads the flag only, so profile- and archetype-supplied ports slip past
+([DF197](../findings-unresolved.md)). The runtime path already gets this right — `Network.Allow`
+refuses on a `none` sandbox — and creation is the one entry point that does not.
 
-The fix belongs in **`netpolicy.Compose`**, not the CLI. Three doors reach it — the flag pair, a
-profile setting `network.mode` and `network.allow` independently, and an integrator calling the
-public API — and only `Compose` is downstream of all three. The runtime path is **already correct**
-and is the model: `Network.Allow` → `requireIsolated` refuses with *"sandbox %q uses
---network-none; cannot modify network access"*. Creation is the one entry point that does not hold
-the position the product already holds.
+**One correction to an earlier draft, because it changes what the argument rests on:** a profile has
+no mode key at all. `config.NetworkConfig` is `Isolated bool` + `Allow []string`, so a profile can
+supply the allowlist half but never `none`. The conclusion survives — all doors still converge on
+`Compose` — but four modes mean a **new config key**, which is a rule-1 rename carrying a 12-month
+user-facing deprecation, a real parser (`handleYoloaiNetwork` validates nothing today), and edits to
+the shipped default config and the profile scaffold.
 
-**An agent floor under `none` is refused too — decided, not deferred.** It is the same shape as a
-user list: `--agent claude --network=none` supplies domains the mode cannot honour, and `Compose`
-discards them just as silently. Refusing makes `none` unusable with any real agent, which
-[P9](../research/proxy-chokepoint/results/p9-network-none-utility.txt) shows is *already* true —
-no shipped agent can work under it — but which the product has never said. The error is it finally
-saying so, at the moment the user asks, instead of leaving them to discover that their agent sits
-there unable to reach anything.
+## What must be verified before this ships
 
-**2. `--port` under `restricted` and `none` is an error.** A guest reduced to one destination cannot
-answer inbound connections, and the owner's call is that this is an acceptable casualty: `--port` is
-special-purpose, and failing loudly is correct. The precedent, the message and the code path already
-exist — [P7](../research/proxy-chokepoint/results/p7-port-publishing.txt) confirms
-`--port is incompatible with --network-none` fires at the CLI before anything is created. Extend it
-to `restricted`; do not invent a second shape.
+**`--network-none` is not honoured on containerd, apple or tart.** containerd says so in its own
+comment (*"the `runtime.NetworkMode == "none"` CLI flag is not currently honored… setupCNI is
+unconditional"*); apple reads the mode only for `"isolated"`; tart has no `NetworkMode` handling at
+all. docker and podman honour it natively, and seatbelt omits `(allow network*)`.
 
-**3. A named mode the backend cannot deliver is refused — [D138](../../decisions/working-notes.md),
-which refines D135 rather than overriding it.** An earlier draft of this plan had this degrading and
-disclosing, on D135's authority. That was wrong, and the reason is this plan's own doing: D135's
-posture rests on the guarantee being *implicit*, so that refusing a user left them with nothing.
-With four named modes, refusing `restricted` leaves `isolated` still available and now sayable —
-**the enum is what makes refusal safe.** And degradation is no longer invisible: `--port` works
-under `isolated` and cannot under `restricted`, so a silent degrade would restore a capability the
-chosen mode excludes. The error must name the mode, the backend, and the strongest mode that backend
-*can* deliver, so the remedy is in the message rather than in a second command.
+Shipped help says *"it holds on every backend"* and `netpolicy.md` says *"`none` is a hard boundary
+on every backend"*. Both are wrong on half the backends, both are security claims in user-facing
+text, and this is a **live defect independent of this plan** — filed as
+[DF198](../findings-unresolved.md). Static reading only: the containerd half is verifiable on the
+Linux host, apple and tart need the Mac. **Correct the text first, then the backends** — and note
+that under D138 an unenforceable `none` must be *refused*, which needs a `BackendCaps` field that
+does not exist (`runtime.go:284` carries only `NetworkIsolation bool`).
 
 ## What this does not decide
 
-- **The mechanism behind `restricted`** — a normal guest stack with a one-address filter, or no IP
-  stack at all with a socket to the proxy. Priced in D137 § *What the round settled*; both satisfy
-  the invariant and the choice is per backend.
-- **git over SSH.** It works through a `CONNECT` tunnel, no tunnel tool ships in the image, and
-  allowing it hands the proxy an opaque stream that reopens the closure `restricted` exists for.
-  Owner's call, recorded in D137.
-- **Whether `none` survives at all**, per the port-53 alternative above.
+- **git over SSH under `restricted`** — it works through a `CONNECT` tunnel, no tunnel tool ships in
+  the image, and allowing it hands the proxy an opaque stream. Owner's call, recorded in D137.
+- **The proxy's policy language.** D137 §2 requires it closed at creation; the spelling belongs to
+  `egress-proxy-build.md`.
+- **Where host-side *allowlist* enforcement lands** (`enforcement-build.md`, D135's old tier 3). It
+  is out-of-sandbox machinery, so it belongs on `restricted`'s strategy axis rather than being a
+  fifth mode — but whether it survives D137 at all is not settled here.
+- **`restricted` and D133.** D133 decided allowlisted domains resolve in the guest's resolver
+  context, never on the host; under `restricted` the proxy resolves host-side. Whether D133 narrows
+  to `isolated` or is contradicted needs stating — and D133 already carries its own audit note
+  calling itself provisional.
 
 ## Order of work
 
-1. **`Compose` refuses an allowlist under `none`** (DF196), user list and agent floor alike.
-   Independently useful, fixes a live defect, and needs none of the rest.
-2. **`--network=` enum**, with `--network-isolated` and `--network-none` as deprecated aliases that
-   still work. Register both in `docs/contributors/deprecations.md` with the date incurred — a
-   compatibility alias is a deprecation on the day it lands (rule 9).
-3. **Deny port 53 under `isolated` with an empty allowlist**, with the live re-open and its
-   ordering. Independent of the enum, and `none` is kept regardless — see § *The four modes*.
-4. **Refuse a named mode the backend cannot deliver** (D138). Needs the enum first, because the
-   error message has to name the strongest mode that backend *can* deliver.
-5. **`restricted` becomes selectable** when `egress-proxy-build.md` has something behind it. Until
-   then the value does not exist rather than existing and degrading to `isolated`, which would be a
-   promise the product cannot keep.
+1. **`Compose` refuses what a mode cannot honour** — allowlist under `none`, real agent under
+   `none`. Fixes a live defect ([DF196](../findings-unresolved.md)); needs nothing else.
+2. **Move `--port`'s refusal below the CLI** ([DF197](../findings-unresolved.md)) — same shape, same
+   layer, second instance of the class, so fix them together (GEN §18).
+3. **Correct the `none` claims in shipped help and `netpolicy.md`** ([DF198](../findings-unresolved.md)),
+   then fix or refuse `none` per backend.
+4. **`--network=` enum**, booleans as deprecated aliases, both registered in `deprecations.md` with
+   the date incurred (rule 9). Carries the schema bump and the migrator.
+5. **`restricted` becomes selectable** once `egress-proxy-build.md` has something behind it. Until
+   then the value does not exist, rather than existing and degrading — which D138 retires.
 
-## Surfaces to sweep when the names change (rule 2)
+## Surfaces to sweep (rule 2)
 
-`internal/cli/lifecycle/new.go` (flags, exclusions, `printCreateSummary`), `internal/cli/helpcmd/help/{security,flags}.md` (embedded, shipped, typechecked by nothing), `docs/GUIDE.md`, `docs/contributors/design/network-isolation.md`, `netpolicy.md`, `profile_config.go` (`ProfileNetwork`), `network.go` (`Mode`, `requireIsolated`), and `internal/netpolicy/compose.go`. The three places recommending `--network-none` as a guarantee are the ones that most need rewriting, and they are in shipped help rather than in docs.
+The flags and mode strings reach roughly forty live files. **`architecture/code-map.md` is gated**
+(D124) and is already stale here — it names `loadIsolatedMeta` / `saveNetworkAllowlist` /
+`tryLivePatchNetwork`, none of which exist under those names.
+
+- **Shipped text:** `README.md`, `docs/GUIDE.md` (six sites including `:909`), `docs/ROADMAP.md`,
+  `internal/cli/helpcmd/help/{security,flags,topics}.md`, `internal/config/defaults.go` (the
+  commented default config), `profile.go` (the profile scaffold).
+- **CLI:** `lifecycle/{new,run}.go`, `sandboxcmd/{allowed,allow,deny,info,sandbox}.go`,
+  `cli/profile/profile.go` (the `network.isolated` JSON key, human output, diff).
+- **Library / orchestrator:** `create/create.go` (the `NetworkMode` typedef and constants),
+  `aliases.go`, `types.go`, `sandbox.go`, `sandbox_options.go`, `environment.go`,
+  `profile_config.go`, `launch/launch.go` (six mode literals), `status/status.go`,
+  `envsetup/context.go`, `netpolicy/{compose,strategy}.go`, `netpolicycfg/`,
+  `runtimeconfig/runtimeconfig.go` and its patch path, `config/{config,profile,defaults}.go`,
+  `agent/agent.go` (`RealAgents`), `mcpsrv/` — network-blind today: no tool accepts a mode and
+  `sandbox_status` drops `network_mode`.
+- **Runtime / guest:** `runtime/runtime.go` (`BackendCaps`, the mode doc comment),
+  `docker/docker.go`, `seatbelt/profile.go`, `apple/apple.go`, `containerd/lifecycle.go`,
+  `isolation.go`, `docker/resources/{entrypoint,firewall,install-firewall}.py`,
+  `runtimetest/conformance.go`.
+- **Contributor docs:** `architecture/code-map.md` (gated), `design/{commands,config,security,
+  environments,overview}.md`, `netpolicy.md`, `network-isolation.md`,
+  `principles/{security,general}-principles.md`, `backend-idiosyncrasies.md`, and the live plans
+  `enforcement-build.md`, `egress-proxy-build.md`, `ipv6-network-isolation.md`,
+  `guest-network-families.md`, `seatbelt-host-pf-enforcement.md`, `macos-pf-privileged-path.md`.
+- **Tests / scripts:** `scripts/smoke_test.py`, `test/e2e/json_test.go`, `cli/integration_test.go`,
+  and the ~13 test files asserting on the current flags.
