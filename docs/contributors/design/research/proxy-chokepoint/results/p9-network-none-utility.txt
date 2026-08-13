@@ -1,0 +1,113 @@
+=== P9 === (run 2 — the record; run 1 invalidated, see README.md)
+Is `--network-none` usable for anything?
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: a real agent completes a trivial task: True   (networking OPEN. If this fails the agent is broken for some unrelated reason and every failure below is free)
+
+-- measurements --
+  with --network-none: False
+  the `test` agent runs under --network-none [arm: counterexamples]: True   (rc=0)
+  local work still runs inside a --network-none sandbox [arm: counterexamples]: True   (interfaces present: ['lo'])
+  so the flag's status is [arm: counterexamples]: 'useless for every AI agent, usable for the no-op ones'
+
+-- expectations, rendered from the values above --
+  [PASS] a real agent CANNOT complete even a trivial local task under --network-none, because it cannot reach its own API server  <- with --network-none=False
+
+-- WHAT WAS NOT TRIED --
+  - a LOCAL model. An agent pointed at an LLM on the host would need egress to reach it, and nothing in the product exposes a host socket into the sandbox — but if that ever ships, --network-none stops being useless and this verdict expires
+  - brokering, which `launch.go:613` rejects outright under --network-none with an explicit error; that is read from the code, not measured here
+  - whether any USER actually runs it. This measures capability, not adoption
+  - the other backends. docker only
+  - --network-none on a RESTART of a sandbox created with networking, which is a different path
+
+-- all live expectations held --
+
+
+================================================================================
+READING NOTES — written at the run
+================================================================================
+
+THE HEADLINE IS CONFIRMED AND THE UNIVERSAL IS NOT.
+
+Confirmed: a real agent cannot complete even a trivial, entirely local task
+under --network-none. The task was "create a file containing the word hello" --
+no network needed to DO it -- and it still failed, because the agent cannot
+reach its API server to be told to. That holds for every shipped AI agent, since
+all five talk to a remote API.
+
+Not confirmed: "nobody could ever make use of it". Two counterexamples, both
+measured:
+
+  * The `test` agent runs and exits 0. Its HeadlessCmd is `sh -c "PROMPT"`, so
+    it executes the prompt as a shell command and never contacts anything.
+  * `--agent idle --network-none` gives a running container with `lo` only, and
+    `yoloai exec` into it works -- python, builds, offline tooling. The sandbox
+    as an offline box is a coherent thing to want and it functions today.
+
+So the deprecation is justified by "useless for its purpose" and NOT by "unused".
+The note has to say what becomes of the no-op agents, because removing the flag
+removes an offline mode that currently works.
+
+WHAT MAKES THIS WORTH MORE THAN ITS SIZE: the product currently RECOMMENDS this
+flag. `yoloai help security` says "Use --network-none for maximum isolation" and
+"Use --network-none where it matters"; GUIDE.md says "use --network-none when you
+need a guarantee". D137 establishes that the allowlist is not adversarially sound
+on any backend, so the product's own advice for a hostile agent today resolves to
+"use the mode that makes the agent unable to work". That is not a wrong statement
+about isolation -- it is a correct statement whose only available remedy is
+useless, which is precisely the gap a third mode would fill.
+
+RUN 1 WAS INVALIDATED FOR TWO RIG ERRORS THAT BOTH PRODUCED FALSE NEGATIVES, and
+they are worth naming because they nearly manufactured a cleaner answer than the
+truth. It passed "ignored" as the test agent's prompt -- not a shell command, so
+exit 1 -- and scored that as the flag breaking it. And it probed for local work
+against a container that a `--wait` run had already stopped. Both counterexamples
+read as absent. The headline would have been "no counterexamples found", which is
+the answer the deprecation proposal wanted, reached by measuring nothing.
+
+
+================================================================================
+ADDENDUM 2026-08-12 — the owner refuted the counterexamples, and the refutation
+turned up the real difference
+================================================================================
+
+The owner's objection to the two counterexamples above is correct and sharper
+than they were: `test` and `idle` are not agents, so they pose no threat if
+networking is allowed -- and with no agent, --network-isolated has no agent API
+to allowlist, so it should collapse to the same posture as --network-none. That
+reasoning is right, and it retires "the no-op agents still work" as an argument
+for keeping the flag.
+
+Measured rather than conceded, because the collapse is testable. Two `idle`
+sandboxes, identical but for the mode, docker, n=1:
+
+                          --network-isolated    --network-none
+  interfaces              lo + eth0             lo
+  DNS to a nameserver     REACHED               blocked
+  getent hosts example    RESOLVED              blocked
+  arbitrary TCP (443)     blocked               blocked
+
+TCP collapses exactly as the owner predicted. **DNS does not.** An isolated
+sandbox with no agent still resolves names and still reaches a nameserver, which
+is a working exfiltration channel: data goes out in query labels to any domain
+the exfiltrator controls, and the configured recursive resolver forwards it to
+their authoritative server without the guest needing to reach an arbitrary
+nameserver itself. This is the DNS-exfil hole `netpolicy.md` already names as an
+`ip-filter` property; what is new here is that it survives the case where there
+is nothing legitimate to resolve.
+
+So `--network-none` is not equivalent to `--network-isolated` even with no agent,
+and the difference is the one that matters for an adversary rather than for a
+confused one.
+
+THE USE THAT FOLLOWS, stated as the thing to accept or reject rather than as a
+recommendation: --network-none is the only mode with NO egress channel of any
+kind. Under the proposed scheme that stays true -- `restricted` always permits
+the proxy, so a channel always exists and the policy sits at the far end of it.
+The case is running untrusted CODE rather than an untrusted agent: a suspicious
+repository, a dependency's test suite, a build script nobody has read, with
+`--agent idle` and `exec`, where the copy/diff/apply workflow is the point and no
+egress is wanted at all.
+
+Whether that is worth a mode is the owner's call. What is now measured is that it
+is not the same thing as `isolated`, and that the gap is DNS.

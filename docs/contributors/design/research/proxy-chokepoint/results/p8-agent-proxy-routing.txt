@@ -1,0 +1,66 @@
+=== P8 === (run 3 — the record; runs 1 and 2 invalidated, see README.md)
+With the proxy as the only path out, do the other agents take it?
+
+-- controls and baselines (all held, or this would not render) --
+  the proxy stand-in is listening: True   (172.17.0.1:8899)
+  the sandbox launched via the product's own launch path: True   (rc=0)
+  the sandbox's host-side veth was found: True   (dev='veth2330945')
+  the chokepoint rule loaded: True   (one destination permitted, DNS deliberately not)
+  baseline: the chokepoint refuses an ordinary HTTPS destination: True   (proxy unset. If False, there is no chokepoint and every 'took the proxy' below is free)
+  a known-cooperative client reaches the proxy in this rig: True   (curl is the stand-in for the agent P2 already proved; without this a row of NOs below would be the rig's fault and would read as a finding)
+
+-- measurements --
+  codex [arm: agents]: 'took the proxy'   (attributable: ['ab.chatgpt.com:443', 'api.openai.com:443', 'chatgpt.com:443']; other new traffic in the window: ['http-intake.logs.us5.datadoghq.com:443']; deny +3)
+  gemini [arm: agents]: 'never got as far as the network'   (attributable: none; other new traffic: none; deny +0; tail='...trust this directory in interactive mode. For more details, see https://geminicli.com/docs/cli/trusted-folders/#headless-and-automated-environments')
+  aider [arm: agents]: 'took the proxy'   (attributable: ['pypi.org:443']; other new traffic: none; deny +0; tail='https://platform.openai.com/account/api-keys')
+  opencode [arm: agents]: 'took the proxy'   (attributable: ['models.opencode.ai:443']; other new traffic in the window: ['registry.npmjs.org:443']; deny +0)
+  agents that routed through the proxy: '3 of 4'   (['aider', 'codex', 'opencode'])
+  agents that made no network attempt at all: "['gemini']"   (these say NOTHING about proxying)
+  so, on the agents that actually reached the network, a chokepoint is [arm: agents]: 'agent-agnostic'
+
+-- WHAT WAS NOT TRIED --
+  - whether any of them would COMPLETE a task. Dummy credentials, so every request fails at the far end; this measures the ROUTE and nothing else
+  - the per-agent remedies prior art names — DISABLE_AIOHTTP_TRANSPORT for Aider, the CA variables for Codex
+  - Codex's OWN sandbox, which is where prior art says it disables proxy env. Whether this invocation entered that path is not established
+  - base_url brokering, which is how the product actually points an agent at an endpoint and which bypasses the proxy-env question entirely for the LLM call — the agents here were run bare, not as yoloAI launches them
+  - version pinning. Every agent is whatever the image ships today, and prior art warns this is a fast-moving snapshot
+  - repeat runs. n=1 per agent
+
+-- all live expectations held --
+
+
+================================================================================
+READING NOTES — written at the run
+================================================================================
+
+1. PRIOR ART'S TWO PREDICTIONS BOTH FAILED, IN THE GOOD DIRECTION.
+   `agent-proxy-support.md` named Codex (`.no_proxy()` inside its own sandbox,
+   inconsistent call-site coverage) and Aider (aiohttp ignores env proxies without
+   `DISABLE_AIOHTTP_TRANSPORT=True`) as the agents a forced proxy would break.
+   Both took the proxy here, unmodified, with nothing but the standard variables.
+
+   That does NOT retire the warning. The survey is version-dependent and says so;
+   Codex's own-sandbox path may simply not have been entered by `codex exec`; and
+   this measures the ROUTE, not a completed task. What it does mean is that the
+   pessimistic assumption the round carried in is not supported by measurement,
+   and a design should not be shaped around a breakage nobody has reproduced.
+
+2. GEMINI IS UNMEASURED, NOT COMPLIANT AND NOT BROKEN. It refused to run against
+   an untrusted folder in a headless environment and never opened a socket --
+   `--yolo` did not change that. Scoring it either way would be inference from an
+   absence. It is recorded as unmeasured, which is the only honest cell.
+
+3. THE ONE STRUCTURAL RESULT: the sandbox's OWN Claude agent is a permanent
+   background talker (`mcp-proxy.anthropic.com`, `downloads.claude.ai`, Datadog),
+   so any per-agent attribution inside one sandbox is contaminated by default.
+   This run excludes those hosts by name and requires a new target matching the
+   agent's own provider. A cleaner design would give each agent its own sandbox,
+   at four times the cost.
+
+4. RESIDUAL LIMITATION, STATED BECAUSE IT AFFECTS ONE CELL. Attribution compares
+   SETS of destination names, so a repeat request to a host some earlier window
+   already saw is invisible. Aider's own LLM call to api.openai.com is exactly
+   that case -- its error output proves it reached OpenAI, but the name had already
+   been recorded during codex's window, so the cell is carried by aider's pypi.org
+   update check instead. The verdict is unaffected; the evidence for it is weaker
+   than the row makes it look, and that is worth saying rather than tidying away.

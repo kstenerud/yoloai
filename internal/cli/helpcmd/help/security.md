@@ -59,7 +59,9 @@ NETWORK ISOLATION
 
   On docker, the rules are installed from a separate helper container and
   the sandbox is denied NET_ADMIN, so an agent inside it cannot remove
-  them. This is the case the allowlist actually contains a hostile agent.
+  them. This is the strongest case, and it is still not containment for a
+  hostile agent: the sandbox grants sudo by design, and root can turn on
+  IPv6 (below) and leave through a family these rules never covered.
 
   On apple, podman and containerd the sandbox installs the rules itself
   and therefore holds NET_ADMIN, so an agent that tries can flush them.
@@ -77,8 +79,14 @@ NETWORK ISOLATION
   networks yoloAI creates today the guest gets no globally-routable
   IPv6 address, so there is no v6 egress to restrict — but that is a
   property of those networks, not a guarantee this flag makes. If your
-  guest has routable IPv6, the allowlist does not apply to it. Use
-  --network-none where that matters.
+  guest has routable IPv6, the allowlist does not apply to it.
+
+  This is not only a property of your network. The agent has sudo, and
+  root can re-enable IPv6 from inside the sandbox, so a hostile agent
+  can create the condition rather than having to find it. Denying
+  NET_ADMIN stops the rules being flushed; it does not stop this. Use
+  --network-none where it matters — it removes the interface rather
+  than filtering it, which is why it holds where the allowlist does not.
 
 ISOLATION MODES
 

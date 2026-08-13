@@ -1,0 +1,56 @@
+=== P7 ===
+Does `--port` survive a guest with no IP stack?
+
+-- controls and baselines (all held, or this would not render) --
+  a sandbox with --port launched: True   (rc=0)
+  baseline: the host reaches a listener inside the sandbox: False   (published, but nothing is listening inside yet. A TCP connect SUCCEEDS here because docker binds the host port at create time, so the probe must complete an HTTP round trip or it reports reachability for an empty sandbox)
+  something really is listening inside the sandbox: True   (otherwise an unreachable host port says nothing about publishing)
+
+-- measurements --
+  with a listener running inside: True
+  the CLI accepts --port together with --network-none [arm: none]: False   (rc=2; stderr="yoloai: --port is incompatible with --network-none\nRun 'yoloai run -h' for help")
+  so `--port` under a stack-less guest is [arm: none]: 'REFUSED AT THE CLI'   (the better of the two failure modes: the user is told, at the moment they ask, rather than discovering it when nothing connects)
+
+-- expectations, rendered from the values above --
+  [PASS] `--port` publishes a guest listener to the host, which is the shipped behaviour shape (B) would have to preserve  <- with a listener running inside=True
+
+-- WHAT WAS NOT TRIED --
+  - shape (B) itself. `--network-none` removes the interface, which is the same structural position a socket-only guest is in, but it is an ANALOGUE and not the thing — nothing here measures a real socket channel because none exists yet
+  - a reverse forwarder. Whether ingress could be restored over the same socket that carries egress is the obvious next question and is a design question about something unbuilt; answering it by argument here would be inference-overreach
+  - the other backends. docker only. apple, tart and containerd each publish ports their own way and none is examined
+  - whether anyone USES --port with isolation. The feature composes today and is documented; how often that combination is reached is not knowable from here
+  - UDP ports, port ranges, and binding to a specific host interface, all of which `parsePortBindings` may or may not accept
+
+-- all live expectations held --
+
+
+================================================================================
+READING NOTES — written at the run
+================================================================================
+
+1. THE COST OF SHAPE (B) IS SMALLER AND BETTER-SHAPED THAN THE FORK ASSUMED.
+   The round opened saying (B) "needs a reverse forwarder" for `--port`, implying
+   new machinery on every backend. What is actually there is a product decision
+   the codebase has ALREADY MADE: `--port` with `--network-none` is refused at the
+   CLI, with a clear message, before anything is created. A stack-less guest is
+   the same structural position, so (B) inherits an existing, deliberate,
+   already-shipped incompatibility rather than introducing a new one.
+
+2. BUT THE BREAKING HALF IS NOW PRECISE, AND IT WAS NOT BEFORE. Today `--port`
+   composes with `--network-isolated` and works. If isolation moves to shape (B),
+   that combination has to start being refused -- which is newly-rejected input on
+   a shipped, documented, working combination. That is AGENTS.md rule 1's
+   definition of a break, it needs a BREAKING-CHANGES entry, and it escalates the
+   release. Shape (A) does not have this cost at all, because a normal stack keeps
+   publishing working.
+
+   So P7 does not falsify the fork; it prices it. The price is one breaking change
+   to one flag combination, not a second channel per backend.
+
+3. THE PROBE HAD TO BE AN HTTP ROUND TRIP, AND THE FIRST ATTEMPT WAS VOIDED FOR
+   NOT BEING ONE. docker binds a published host port at CREATE time, so
+   `connect()` to it succeeds whether or not anything is listening inside -- the
+   proxy accepts and then fails to forward. A TCP-level probe therefore reported
+   the port reachable with an empty sandbox behind it, and its baseline read True
+   when it had to read False. The harness refused the run. Worth keeping because
+   the same mistake would make any future port-publishing test pass vacuously.

@@ -1488,3 +1488,39 @@ as scarce as the failures and twice as useful.
   from the product's setup — that is what makes it a rig — so "how does the product launch this?" is
   not a detail to confirm later, it is the step that decides whether the measurement transfers at all.
   One `grep` for `gosu`, at any point in the session, closes it.
+
+
+### A38 — framed a reversal as a refinement, and could not see it because I wrote both records the same day (2026-08-13)
+
+- **What I claimed:** that D138 *refined* [D135](decisions/working-notes.md) rather than reversing it.
+  D135 says yoloAI never refuses a sandbox for lack of enforcement capability. D138 says an
+  explicitly-named mode that cannot be delivered is refused. My argument was that naming the modes
+  made refusal safe, because a refused `restricted` still leaves `isolated` available — so the
+  situation had changed rather than the position.
+- **What was true:** it was a reversal. An independent audit took the argument apart in three moves,
+  each checkable: the safety argument **does not reach the bottom rung** (refusing `isolated` leaves
+  only `open`, which defends nothing, or `none`, which no agent can run under — precisely D135's
+  rejected option 1); the premise that the tiers had stopped being implicit was **false**, because the
+  enum gave D135's *two* in-sandbox tiers a single name; and the half of D138 that was safe **was
+  already shipped** (`internal/netpolicy/strategy.go:42` already refuses `isolated` where the backend
+  lacks the capability), so the delta was exactly the reversal.
+- **Caught by:** an independent audit the owner asked for, on a plan I had told them I was the wrong
+  person to judge. The owner then settled it in the other direction — retiring degradation outright,
+  on comprehensibility rather than on safety, which is an honest reversal and a better decision than
+  the one I was defending.
+- **How far it travelled:** into `working-notes.md` as D138, and into a plan built on it. Both were on
+  an unpushed branch, so nothing shipped.
+- **The tell I had and did not use.** D137 and D138 were written **the same day, by me**. D137's
+  rejected alternative 4 reads *"Refuse `--network-isolated` where it cannot be enforced adversarially.
+  **Rejected on D135**"* — and D138 does that, without citing D137 and without marking the rejection
+  superseded. A contradiction that plain, four hours apart, in one file.
+- **Why it survived.** Not for want of scepticism: I flagged the exact question as the one I could not
+  judge, and asked for an audit of it. But I had already written the record, and a record you wrote is
+  read as an argument you are checking rather than as text that might be wrong — the same reading
+  problem A35 names for prior art, pointed inward. Writing the decision *and* its justification
+  in one sitting removes the only reader who would have noticed.
+- **The rule:** **a decision that supersedes another must state which one it is — refinement or
+  reversal — and name the superseded text explicitly.** If the two records were written by the same
+  author within a day, that claim is unreviewed by construction and needs an outside reader before it
+  lands. The cheap check is mechanical: grep the older decision's *rejected options* for the thing the
+  new one is deciding. It costs one search and it would have caught this.

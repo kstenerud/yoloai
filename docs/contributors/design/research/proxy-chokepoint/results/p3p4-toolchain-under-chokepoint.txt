@@ -1,0 +1,112 @@
+=== P3+P4 ===
+Does the ordinary developer toolchain work behind a forced proxy?
+
+-- controls and baselines (all held, or this would not render) --
+  the proxy stand-in is listening: True   (172.17.0.1:8899)
+  the sandbox launched via the product's own launch path: True   (rc=0)
+  the sandbox's host-side veth was found: True   (dev='vetha3cffc2')
+  the chokepoint rule loaded: True   (one destination permitted, DNS deliberately not)
+  baseline: the chokepoint refuses an ordinary HTTPS destination: True   (proxy unset. If this reports False the chokepoint is not installed and every success below is free)
+  the deny rule actually fired: True   (32 packets)
+
+-- measurements --
+  npm through the proxy [arm: p4]: 'YES'
+  pip through the proxy [arm: p4]: 'YES'
+  apt through the proxy [arm: p4]: 'YES'
+  go through the proxy [arm: p4]: 'YES'
+  curl through the proxy [arm: p4]: '200'
+  every package manager tried worked through the proxy [arm: p4]: True   (worked: ['apt', 'curl', 'go', 'npm', 'pip'])
+  git over HTTPS through the proxy [arm: p3]: 'YES'
+  a CONNECT-capable tool ships in the image [arm: p3]: 'NO'
+  plain ssh to github, no ProxyCommand [arm: p3]: 'ssh: Could not resolve hostname github.com: Temporary failure in name resolution'
+  ssh reaches github through a CONNECT tunnel [arm: p3]: True   ("Warning: Permanently added 'github.com' (ED25519) to the list of known hosts.\ngit@github.com: Permission denied (publickey)." — 'permission denied' still proves the TCP stream reached github's sshd)
+  what that costs, if it worked [arm: p3]: 'the proxy is tunnelling an opaque stream'
+  distinct destinations the toolchain asked the proxy for: 12
+  the destinations, in the clear: 'api.anthropic.com:443; downloads.claude.ai:443; example.com:443; files.pythonhosted.org:443; github.com:22; github.com:443; http-intake.logs.us5.datadoghq.com:443; mcp-proxy.anthropic.com:443; proxy.golang.org:443; pypi.org:443; raw.githubusercontent.com:443; registry.npmjs.org:443'
+
+-- expectations, rendered from the values above --
+  [PASS] the honest path's package managers need no coaxing beyond the standard proxy environment, which is what a chokepoint depends on  <- every package manager tried worked through the proxy=True
+
+-- UNBASELINED CLAIMS, resting on a probe never shown to report failure --
+  the honest path's package managers need no coaxing beyond the standard proxy environment: the mechanism-absent state is the chokepoint baseline above, where the same guest could not reach anything
+
+-- WHAT WAS NOT TRIED --
+  - an allowlist. The proxy allows everything and validates no hostname; nothing here tests a policy, only a path
+  - authentication for SSH. No key is present, so 'permission denied' is the best outcome available and it is a statement about REACHABILITY, not about whether a user's clone would succeed
+  - git push, submodules, LFS, and credential helpers
+  - private registries, .npmrc auth, pip index URLs, GOPRIVATE — every package manager fetched a public artefact anonymously
+  - what a FAILURE looks like to a user beyond the one ssh case captured above
+  - proxy authentication, TLS interception, and custom CAs, which every corporate deployment of this shape has and this rig has none of
+  - repeat runs. n=1 per cell
+
+-- all live expectations held --
+
+
+================================================================================
+READING NOTES — written at the run
+================================================================================
+
+P4 — THE PACKAGE MANAGERS ARE A NON-EVENT, WHICH IS THE RESULT
+--------------------------------------------------------------
+npm, pip, apt, go and curl all worked through the proxy with nothing but the
+standard environment variables. No per-tool coaxing, no config files, no image
+changes. This is the boring answer and it is the one the direction needed: the
+cost of a chokepoint does not land on the package managers.
+
+Read it against what it does NOT say. Every fetch here was a public artefact
+pulled anonymously. Private registries, .npmrc credentials, GOPRIVATE and index
+URLs are all untouched, and they are where a real developer's setup lives.
+
+P3 — SSH WORKS, AND THAT IS THE UNCOMFORTABLE ANSWER
+-----------------------------------------------------
+Three findings, and they point in different directions.
+
+1. A CONNECT tunnel carries SSH. The stream reached github.com's sshd and got
+   "Permission denied (publickey)" -- an authentication failure, which is proof
+   of reachability, since a refused connection cannot be refused BY the peer.
+
+2. The image ships nothing that can build that tunnel. No nc, socat, ncat or
+   corkscrew. The tunnel above was built with a hand-written Python
+   ProxyCommand, which is a research rig and not something a user has. So
+   supporting SSH under a chokepoint is a product decision -- add a package,
+   ship a ProxyCommand in the image's ssh_config -- and not merely a proxy
+   capability.
+
+3. Allowing it costs the closure the whole direction is for. `CONNECT
+   github.com:22` is indistinguishable from `CONNECT github.com:22` used to
+   carry anything else; the proxy cannot see inside, so an SSH allowance is an
+   allowance for an arbitrary byte stream to that host. D137 section 2 warns
+   that the coverage problem reopens if policy becomes an open-ended hostname
+   allowlist -- an opaque tunnel is the same reopening by another route, and a
+   worse one, because it looks like a single narrow exception.
+
+   The honest framing for the plan: SSH support and containment closure are in
+   tension, the tension is not resolvable by better engineering, and someone has
+   to choose. P2 is the reason it is a real choice rather than a formality --
+   that session's task completed with port 22 refused.
+
+4. THE FAILURE A USER SEES IS THE WRONG ONE. Plain ssh under a chokepoint fails
+   with "Could not resolve hostname github.com: Temporary failure in name
+   resolution". That reads as a broken network, not as a policy decision, and it
+   names DNS rather than the thing that actually refused. Under a chokepoint
+   every non-proxy-aware tool will fail this way, because DNS is the first thing
+   any of them tries. Whatever gets built needs to answer this, and nothing in
+   the current plan does.
+
+AN ENVIRONMENT-DELIVERY CONSTRAINT THE PLAN DOES NOT STATE
+-----------------------------------------------------------
+Measured while fixing this harness, and it is a design constraint rather than a
+defect in today's product. `--env` is delivered to the AGENT'S process tree only:
+PID 62 (agent-run.sh) and PID 77 (claude) carry the variables; PID 1 does not,
+and neither does a shell from `yoloai exec`.
+
+Today that is invisible, because `exec` has full network anyway. Under a
+chokepoint it is a cliff: the proxy configuration would reach the agent and
+nothing else, so `yoloai exec` -- a shipped command, and how a user debugs their
+own sandbox -- would have no network at all, failing with the same misleading
+DNS error as above. Anything not descended from the agent process is in the same
+position: setup commands, a daemon, an interactive shell via attach.
+
+So the proxy configuration has to live in the CONTAINER's environment or the
+image, not be handed to the agent process. That is cheap to do and expensive to
+discover later, which is why it is recorded here rather than left for the build.

@@ -1729,7 +1729,9 @@ A fourth observation is a *property worth keeping*: `report()` prints `-- WHAT W
 
 ## D135 — yoloAI never refuses a sandbox for lack of enforcement capability; it degrades to the strongest layer available and says which one that is
 
-**Date:** 2026-08-11. **Status:** Active. **Consumers:** `design/plans/enforcement-build.md` § *Part 5*, `design/network-isolation.md` § *Threat Model*, `internal/netpolicy/`, [SEC §1](../principles/security-principles.md), [SEC §9](../principles/security-principles.md).
+> **RETIRED 2026-08-13 by [D138](#d138--automatic-degradation-is-retired-a-network-mode-the-backend-cannot-deliver-is-refused).** Automatic degradation is gone; an undeliverable mode is refused. The reasoning below is **not wrong** and is kept because it states the cost of refusing better than anything else in the tree — it was outweighed, on comprehensibility rather than on safety. Its three-tier ladder no longer exists: tiers 1 and 2 collapsed into `isolated` when [D137](#d137--in-guest-enforcement-is-abandoned-as-a-containment-boundary-the-guest-gets-one-destination-and-all-policy-moves-to-a-host-side-proxy) measured that in-sandbox machinery cannot be hardened against a compromised agent, and tier 3 became `restricted`. **Do not build from this.**
+
+**Date:** 2026-08-11. **Status:** RETIRED (see banner). **Consumers:** `design/plans/enforcement-build.md` § *Part 5*, `design/network-isolation.md` § *Threat Model*, `internal/netpolicy/`, [SEC §1](../principles/security-principles.md), [SEC §9](../principles/security-principles.md).
 
 **The question.** Host-side enforcement (layer 3) is not available everywhere: on macOS `apple` it needs [D132](#d132--macos-pf-is-driven-through-a-generated-nopasswd-sudoers-grant-that-authorizes-pf-table-membership-and-nothing-else)'s sudoers grant to be installed, on `tart` macOS pf cannot key on a bridge member at all, and any backend can lose enforcement at runtime to a trampled ruleset or a reassigned interface. When a user asks for `--network-isolated` and yoloAI cannot deliver the strongest form, does it refuse the sandbox or run it?
 
@@ -1861,3 +1863,128 @@ Aggregates are a `grep -c`, computed on demand and never stored.
 - The three known v1 defects ride along in v2, per D134's own specification: `expect()` rejects a non-`bool`, a failed control prints its measurements before voiding the verdict, and an arm can be voided without voiding the run.
 - New research uses the newest harness version. Still no gate for it — with two versions a lexical check is now *possible*, but D134's argument stands that a speculative gate gets disabled before it is useful. Revisit at v3.
 - **The enforcement build brief's own status is unchanged by this.** D136 governs how the next round runs; it does not retroactively invalidate the netdev result, which was measured under controls that held. What it does change is that the brief's parts open against a queue.
+
+## D137 — in-guest enforcement is abandoned as a containment boundary; the guest gets one destination and all policy moves to a host-side proxy
+
+**Supersedes the framing of D90's `ip-filter` strategy as a containment layer, and reframes what host-side enforcement is for.** It does not retire any shipped mechanism — see *Consequences*.
+
+**The fact that forced this.** [`agent-privilege-reality.txt`](../design/research/macos-isolation-spike/results/agent-privilege-reality.txt) measured the sandbox as the product actually launches it, with the `sudo` grant as the only variable. `Dockerfile:229` writes `yoloai ALL=(ALL) NOPASSWD:ALL`, and that is deliberate: a sandbox whose agent cannot install a package is a different product. With the grant removed, sysctl writes, file tampering and netlink are all refused. As shipped, sysctl and file tampering both succeed; only netlink stays closed, because a bounding-set capability drop is inherited across `sudo` and ordinary root operations are not.
+
+So the `CAP_NET_ADMIN` drop holds and the sidecar mechanism is not defeated. What neither reaches is the **residue**, and the residue is unbounded by construction: 763 of 780 writable `/proc/sys/net` knobs, and every file in the image including the toolchain a re-install would invoke. The set is a function of everything installed in the sandbox, which is a function of what users put there. That is why hardening kept not converging — each fix was real, and none could reach the property.
+
+**This is the second time the same shape has appeared, which is what makes it structural rather than a gap.** [DF179](../design/findings-unresolved.md) recorded the in-guest allowlist as weak on three backends and sound on docker. It is not sound on docker either: `firewall.py` filters IPv4 only, and a root agent re-enables IPv6 through a sysctl and leaves through a family the rules never covered. Enumerating what an adversarial agent may reach is an open-ended set, and an open-ended set cannot be satisfied by adding cases to it.
+
+### 1. The invariant
+
+**The sandbox's only egress is a host-side proxy running under a principal the agent has no privilege over. Enforcement's entire job is to make that one statement true; it holds no policy of its own.**
+
+Stated this way because it is the part expected to survive. Everything about *how* a backend achieves it is a mechanism, and [D136 §5](#d136--a-verification-round-is-a-fixed-item-set-opened-by-prior-art-closed-once-and-probed-by-harnesses-that-must-show-they-can-report-failure) requires those to be held apart from invariants and settled in a round rather than in a plan.
+
+### 2. What this buys, stated precisely, because the obvious reading is too generous
+
+It does **not** make an adversarial agent harmless. It replaces an *open-ended policy problem* — enumerate every destination, protocol and family the agent might use, and enforce that where the agent is root — with a *closed coverage problem*: one fact enforced outside the guest, and a proxy that must serve the traffic the honest path needs.
+
+The trade is only worth making if the coverage problem really is closed. Two ways it silently reopens:
+
+- **If the proxy's policy is an open-ended hostname allowlist**, the open-ended set has moved rather than closed, and the change of course buys tamper-resistance alone. Tamper-resistance is worth having; it is not what this decision claims. The requirement is that the policy set be **fixed at sandbox creation**, so that what the agent may reach is a property of the sandbox rather than a running negotiation. Whether the shipped agents can work under that constraint is what the census (P1) in [proxy-chokepoint-verification-round.md](../archive/plans/proxy-chokepoint-verification-round.md) measures, and the language is not settled here.
+- **If the proxy matches on a client-supplied name**, the parser-differential class is live, and it has a precedent in this exact product category — Claude Code's own SOCKS5 egress proxy was bypassed for ~5.5 months because its allowlist and its `Dial` disagreed about `evil.com\x00.anthropic.com`. `egress-proxy-build.md`'s SNI-hardening requirements are a hard gate on the build and are not restated here.
+
+### 3. The mechanism is deliberately not decided here
+
+Two shapes satisfy §1 — a guest with a normal stack and exactly one permitted destination, or a guest with no IP stack at all reaching the proxy over a socket. They rank differently on how much has to stay correct, on what happens when it does not, on IPv6, on host state, and on the shipped `--port` feature. The round named above fixes the item set that decides it, and the per-backend answer is expected to differ.
+
+**What is decided is that the answer is per-backend and unified by one conformance assertion**, in the shape [tamper-resistant-network-isolation.md](../design/plans/tamper-resistant-network-isolation.md) already uses: state the property, let backends satisfy it differently, and assert it mechanism-blind from inside the guest with a positive control beside it.
+
+**Rejected.**
+1. **Keep hardening the in-guest layer.** The residue is unbounded, so there is no version of this that terminates. Two candidate fixes were withdrawn on measurement rather than on argument: running the agent non-root is already done (`entrypoint.py:324` execs `gosu yoloai` on every backend) and buys nothing, and dropping `CAP_NET_ADMIN` closes one vector of three while inviting exactly the over-claim this decision exists to stop.
+2. **Withdraw the `sudo` grant.** It closes every measured vector, and it is not a proposal. It changes what the product is.
+3. **Keep the in-guest layer but stop describing it as containment, and build nothing else.** Half-adopted, and this is the honest reading of `prior-art-egress-enforcement.md` §6's "keep the in-sandbox layer" — which predates the privilege measurement and is weaker than when written. The layer stays as defence-in-depth against a *confused* agent, which is a real and common case. It does not count toward the adversarial property, and no user-facing text may imply it does.
+4. **Refuse `--network-isolated` where it cannot be enforced adversarially.** Rejected on [D135](#d135--yoloai-never-refuses-a-sandbox-for-lack-of-enforcement-capability-it-degrades-to-the-strongest-layer-available-and-says-which-one-that-is): degrade and disclose, never refuse. **Superseded 2026-08-13** — D135 is retired and [D138](#d138--automatic-degradation-is-retired-a-network-mode-the-backend-cannot-deliver-is-refused) refuses an undeliverable mode. The rejection stood on a decision that no longer holds. DF179's "cheaper partial" — an explicit `best-effort` spelling — survives this decision and is more urgent under it, because the gap it names is now known to be wider than that entry states.
+5. **Treat `HTTP_PROXY` as the mechanism.** Settled before this decision and not reopened: [`agent-proxy-support.md`](../design/research/agent-proxy-support.md) establishes that env-proxy is a cooperative convention inside the agent's own environment, so it is a convenience hint for the honest path and never a boundary.
+
+**Consequences.**
+- **Nothing shipped is withdrawn by this decision.** The sidecar firewall, the `ip-filter` strategy and `--network-isolated` all keep working and keep their current behaviour. What changes is what they are *claimed* to do, and DF179 now carries the corrected claim.
+- **`netpolicy.md` §Hostile commits in writing to one of the two mechanisms** — "a default-deny egress firewall in the sandbox netns whose only outbound path is forced to a filtering proxy". That is a mechanism statement holding an invariant's position, and the round's synthesis pass owes it an edit whichever way the fork lands.
+- **The layer-3 enforcement work is re-scoped, not discarded.** `enforcement-build.md` was written to enforce an allowlist; under §1 it enforces one destination, which is a strict subset of what round 2 already measured. Live revocation, set scale, DNS re-resolution and allowlist semantics leave the kernel layer entirely. The two-subscription liveness design (V1/V1b) is unaffected and still needed.
+- **The credential broker is the same shape one layer up** and already ships: it holds credentials host-side and points the agent at an injector via `base_url`. The proxy generalizes it from the LLM endpoint to all egress, which is why the LLM path does not depend on the agent honouring proxy environment variables.
+- **This is a promise being narrowed, not a behaviour change**, so it is not a `BREAKING-CHANGES.md` entry on its own. Any user-visible re-spelling that follows from it is, and rides that change.
+
+### What the round settled — 2026-08-12
+
+[`proxy-chokepoint-verification-round.md`](../archive/plans/proxy-chokepoint-verification-round.md) ran seven items against real hardware and the product's own launch path. §1's invariant is unchanged by it. Four things it did change:
+
+**1. The coverage trade in §2 is sound, and the margin is wide.** 99.2% of a real agent session is HTTP or DNS, with **zero QUIC** — the one shape that looks like HTTPS and is not served by an HTTP proxy. A real session completed its task with exactly one permitted destination, exit 0. npm, pip, apt, go, curl and git-over-HTTPS all worked on the standard proxy environment alone, with no per-tool coaxing. Three of the four non-Claude agents routed through the proxy unmodified — including Codex and Aider, which `agent-proxy-support.md` predicted would be the failures. That survey is version-dependent and this measured the *route* rather than a completed task, so the warning is not retired; but the pessimism this decision was drafted under is not supported by measurement.
+
+**2. The DNS half of the trade is better than "closed" — it is absent.** DNS was deliberately not permitted through the chokepoint and nothing noticed, because `CONNECT` carries a name the proxy resolves host-side. The DNS-exfil hole `egress-proxy-build.md` step 2 was designed to kill does not need killing under a chokepoint; the channel is not there. This is `prior-art` §1's Cilium inversion reached from the other end.
+
+**3. The mechanism fork is now priced rather than resolved, and the remaining choice is the owner's.** Both shapes carry the same traffic to the proxy, so all of the above is fork-independent. What separates them is one shipped feature: `--port` composes with `--network-isolated` today and works. A guest with no IP stack cannot publish a port — and the product already refuses `--port` with `--network-none` at the CLI, so shape (B) inherits a decision this codebase has already made rather than inventing one. **The price is therefore one breaking change** (a working, documented flag combination starts being refused, rule 1, with a `BREAKING-CHANGES.md` entry and a version escalation), **not a second channel per backend**, which is what the round opened expecting. Shape (A) does not pay it. Whether a reverse forwarder could restore publishing under (B) is unmeasured and was deliberately not argued.
+
+**4. Two build constraints, neither of which was in any plan.** Both are cheap now and expensive to discover during the build, and they live in `egress-proxy-build.md`.
+
+- **The proxy configuration must be container-wide, not handed to the agent.** `--env` reaches the *agent's process tree only* — measured against `/proc`, not inferred. Under a chokepoint that would leave `yoloai exec`, setup commands, and any process not descended from the agent with no network at all.
+- **The failure a user sees names the wrong thing.** A non-proxy-aware tool fails with `Could not resolve hostname … Temporary failure in name resolution`, because DNS is the first thing it tries. That reads as a broken network rather than a policy decision.
+
+**And one question this decision cannot settle, now stated precisely.** git-over-SSH works through a `CONNECT` tunnel — the stream reached GitHub's sshd. But the image ships no tool that can build one, so supporting it is a product decision about the image; and allowing it costs the closure §2 requires, because `CONNECT host:22` is an opaque byte stream the proxy cannot inspect. An SSH allowance looks like a narrow exception and is not one. P1 saw a session reach for SSH unasked, and P2 saw a session complete with port 22 refused — so it is a real trade with evidence on both sides, and it is the owner's to make. The same applies to the destination list P2 recovered: seven hosts, two of which — the agent updating itself, and telemetry to a third party — were chosen by neither the user nor the task, and which a closed policy has to decide about explicitly.
+
+## D138 — automatic degradation is retired: a network mode the backend cannot deliver is refused
+
+**Date:** 2026-08-12, rewritten 2026-08-13. **Status:** Active. **Retires [D135](#d135--yoloai-never-refuses-a-sandbox-for-lack-of-enforcement-capability-it-degrades-to-the-strongest-layer-available-and-says-which-one-that-is).** **Consumers:** [network-mode-reshape.md](../design/plans/network-mode-reshape.md), `internal/netpolicy/`, [SEC §1](../principles/security-principles.md), [SEC §9](../principles/security-principles.md).
+
+**Decision. Automatic service degradation when the backend cannot deliver the requested enforcement is retired. A network mode that cannot be delivered is refused, with a message naming the mode, the backend, and the strongest mode that backend can deliver.**
+
+**The reason is comprehensibility, not safety, and that is the honest framing.** D135's own argument that degrading beats refusing — a working defense against the primary threat is better than no sandbox — is *not wrong*. It is outweighed. A user cannot hold in their head which of three tiers they got, on which of six backends, under which launch path; a guarantee whose strength varies silently by host is one nobody can reason about, and reasoning about it is the entire point of asking for it. The benefit degradation buys is small and the confusion it costs is not.
+
+**This is a reversal of D135, stated as one.** An earlier draft of this record framed it as a *refinement*, on the argument that naming the modes made refusal safe because a refused `restricted` still leaves `isolated` available. An independent audit took that apart, correctly: the argument does not reach the bottom rung — refusing `isolated` leaves only `open` (no defense) or `none` (which no agent can use), which is precisely D135's rejected option 1. That draft also claimed the tiers had stopped being implicit, when the enum gave D135's *two* in-sandbox tiers a single name. Recorded as [A38](../agent-failures.md); the framing failed because the same author wrote both records on the same day and had no external reading of either.
+
+**What makes the reversal safe is a different change, and it is structural.** The three-tier ladder D135 was built to navigate is gone, because two of its rungs collapsed:
+
+- D135's tiers 1 and 2 — in-guest filtering, and in-guest filtering the agent cannot flush — are **both `isolated`** now. The distinction was an artifact of believing a sandbox's inner machinery could be hardened against a compromised agent. [D137](#d137--in-guest-enforcement-is-abandoned-as-a-containment-boundary-the-guest-gets-one-destination-and-all-policy-moves-to-a-host-side-proxy) measured that it cannot: the agent has `sudo` by design and the residue behind it is unbounded. Tier 2 is a better tier 1, not a different guarantee, so it does not get its own name. Ideas from it may still make `isolated` more robust — worth taking cheaply, not worth new privilege requirements.
+- D135's tier 3 — enforcement outside the sandbox — is **`restricted`**.
+
+So the axis is no longer "how strong is the filter" but **where the machinery sits relative to the agent**: nowhere (`open`), inside (`isolated`), outside (`restricted`), or there is no network (`none`). Four values on one axis, each naming a *trust boundary* rather than a mechanism. That is what a user can hold, and it is why refusing is now tractable where D135 found it intolerable.
+
+**Rejected.**
+1. **Keep degrading and disclose harder.** Disclosure is what D135 already required, and the audit of this workstream found shipped help making a wrong security claim about the tier a user gets — twice. The failure mode is not that the words were missing; it is that the words describe a state that varies per host.
+2. **A separate `--strict` flag.** It can contradict the mode, it needs a default, and the default recreates this question one layer up.
+3. **Refuse for `restricted` only.** Tempting, because it avoids taking anything away from today's `isolated` users. But it leaves the mode axis meaning two different things depending on which value you pick, which is the confusion this retires.
+
+**Consequences.**
+- **Breaking (rule 1):** a sandbox that runs today on a backend lacking the capability stops running. `BREAKING-CHANGES.md` entry; escalates the release. D135 named this cost accurately when it declined to pay it.
+- **D135's amendment is subsumed, not kept.** "A downgrade on restart is refused" follows from refusing anything undeliverable; it no longer needs to be stated separately.
+- **[D137](#d137--in-guest-enforcement-is-abandoned-as-a-containment-boundary-the-guest-gets-one-destination-and-all-policy-moves-to-a-host-side-proxy) rejected alternative 4 is superseded.** It declined to refuse `--network-isolated` where it could not be enforced adversarially, citing D135. That citation no longer holds.
+- **`yoloai doctor` becomes load-bearing**, since a refused create is where most users would first meet their backend's ceiling. The error must name the strongest available mode, so the remedy is in the message rather than in a second command.
+- **The default stays `open`**, which promises nothing and so cannot fail to be delivered.
+## D139 — `restricted` is realised by giving the guest no IP stack and a socket to the proxy; a one-address filter is the fallback where that channel does not exist
+
+**Date:** 2026-08-12. **Status:** Active. **Implements [D137](#d137--in-guest-enforcement-is-abandoned-as-a-containment-boundary-the-guest-gets-one-destination-and-all-policy-moves-to-a-host-side-proxy) §3.** **Consumers:** [egress-proxy-build.md](../design/plans/egress-proxy-build.md), [network-mode-reshape.md](../design/plans/network-mode-reshape.md), `runtime/`, `internal/netpolicy/`.
+
+**The question D137 deliberately left open.** Two shapes satisfy its invariant — *the sandbox's only egress is a host-side proxy under a principal the agent has no privilege over*. **(A)** a normal guest stack with a filter permitting one address; **(B)** a guest with no IP stack at all, reaching the proxy over a socket. The [chokepoint round](../archive/plans/proxy-chokepoint-verification-round.md) measured everything that distinguishes them and found the coverage fork-independent: both present identical traffic to the proxy, because what reaches it is decided by the client's proxy configuration, not by how the route was removed.
+
+**Decision. (B) is the shape.** Where a backend cannot carry the channel, **(A) is a permitted realisation of the same invariant** and the mode is still `restricted` — the shape is an implementation detail below the mode, which is the whole point of stating the invariant separately.
+
+**Why (B), stated as what has to stay correct.** Count the load-bearing parts:
+
+- **(A):** the `CAP_NET_ADMIN` bounding-set drop, **plus** a host filter that is present, correct, and bound to the right interface for the sandbox's entire life, **plus** detection for the cases where it is not.
+- **(B):** the `CAP_NET_ADMIN` bounding-set drop.
+
+That drop is the *one* vector `agent-privilege-reality.txt` measured surviving `sudo` — sysctl `ok`, file tamper `ok`, netlink **refused**, because a bounding-set drop is inherited across `sudo` and ordinary root operations are not. So (B) rests entirely on the single mechanism measured to hold against exactly the adversary this exists to contain, and on nothing else.
+
+**The failure modes differ in kind, not degree.** Under (A) a missing or stale filter leaves the guest with a working stack and full reach — that is [DF194](../design/findings-unresolved.md) and V5's ifindex result, and V6b showed a counter cannot distinguish it. Under (B) **there is nothing to fail open to**: a missing rule is not a hole, because there is no route. Three consequences follow for free rather than by mechanism: `ipv6-sidestep.txt`'s class cannot arise because there is no stack in either family; there is no per-sandbox host state to reap, which is the entire subject of `enforcement-state-reaping.md`; and the acquisition cost V7 measured disappears with the rules.
+
+**The one measured cost, and why it did not decide against.** A stack-less guest cannot publish a port. `--port` composes with `--network-isolated` today, so this is a real capability loss and a rule-1 break. The owner's call is that `--port` is special-purpose — for when something in the sandbox must answer connection requests — and that losing it under a mode whose point is that nothing can reach the sandbox is acceptable, provided it fails loudly. [P7](../design/research/proxy-chokepoint/results/p7-port-publishing.txt) found the CLI already refuses `--port` with `--network-none`, so the message and the code path exist. **The round opened expecting this to cost a second per-backend channel; it costs one flag combination.**
+
+**Prior art converges here**, which per [D136 §1](#d136--a-verification-round-is-a-fixed-item-set-opened-by-prior-art-closed-once-and-probed-by-harnesses-that-must-show-they-can-report-failure) is a constraint rather than a footnote: `prior-art-egress-enforcement.md` §5 records the peer group running "agent VMs with no external interface at all, talking over a virtual socket to a host-side proxy".
+
+**What this makes cheap on the majority backends, and expensive on the minority.** docker, podman and seatbelt get (B) for less machinery than (A) — `--network none` plus a bound socket, no veth, no filter, no IPAM, nothing to reap. The VM backends (apple, tart, containerd/Kata) need the channel to cross a VM boundary, which is the vsock question that belongs to whoever works on macOS. **It blocks nothing:** those backends take (A), whose pf realisation is already measured working on hardware against a genuinely privileged guest. If vsock proves usable, they upgrade later without a mode change.
+
+**Rejected.**
+1. **(A) everywhere, for uniformity.** Uniformity is worth less than the residual it leaves: on the backends where (B) is cheap, choosing (A) means keeping a filter correct for a sandbox's whole life to buy nothing the socket does not already give.
+2. **Wait for the vsock answer before deciding.** It gates one backend family, both shapes satisfy the invariant, and the fallback is measured. Blocking the majority on a question only a Mac can answer is the coupling this workstream's split was made to avoid.
+3. **Keep `--port` under `restricted` via a reverse forwarder.** Unmeasured, and it re-introduces the second per-backend channel that (B)'s cost was feared to be. Buildable later if anyone asks; the mode's contract does not promise it.
+
+**One thing the shape does NOT get to vary.** Where a backend falls back to (A), a one-address filter over a normal stack *could* technically still publish a port — and it must not. `--port` is refused under `restricted` as a property of the **mode's contract**, not of the mechanism that happens to implement it, or the mode means different things on different backends and stops being something a user can reason about. The same applies to anything else the mode balks at.
+
+**Consequences.**
+- **`enforcement-state-reaping.md` loses most of its subject on the (B) backends** and keeps it on the (A) ones. It is not retired; its scope narrows to the fallback.
+- **The two-subscription liveness design (V1/V1b) still applies to (A) and not to (B)**, where there is no rule whose disappearance needs detecting.
+- **A conformance case must be mechanism-blind**, asserting from inside the guest that a non-proxy destination is unreachable while the proxy is, with a positive control beside it ([A22](../agent-failures.md)) — so it passes on either shape and cannot be satisfied by a fake.

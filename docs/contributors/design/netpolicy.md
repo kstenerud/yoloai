@@ -118,6 +118,21 @@ be how seatbelt/tart gain isolation at all (§4).
   flush) is not hostile-grade. Per-agent proxy-env injection stays a *convenience hint* for cooperating agents
   + observability (an agent-layer capability), never the boundary.
 
+**Corrected 2026-08-12 ([D137](../decisions/working-notes.md)): the sentence above states a *mechanism* in an
+*invariant's* position.** "A default-deny firewall in the sandbox netns" is one of two ways to reach the
+property, and this document had committed to it in writing before either was measured — exactly the
+mechanism-as-invariant confusion [D136 §5](../decisions/working-notes.md) exists to prevent. The invariant is:
+
+> **The sandbox's only egress is a host-side proxy running under a principal the agent has no privilege over.
+> Enforcement's entire job is to make that one statement true; it holds no policy of its own.**
+
+A default-deny rule over a normal guest stack satisfies it. So does a guest with **no IP stack at all**,
+reaching the proxy over a socket — which rests on strictly less (the `CAP_NET_ADMIN` bounding-set drop alone,
+the one vector measured to survive `sudo`) and, per `prior-art-egress-enforcement.md` §5, is where the peer
+group converged. The two are priced against each other in D137 § *What the round settled*; the choice is open
+and belongs per backend. Nothing else in this section changes — the *policy model* is strategy-agnostic, which
+is the property that makes holding the mechanism open cost nothing here.
+
 ## Lifecycle
 
 Composed at create; mutated at runtime (`allow`/`deny` re-resolve + live-patch the running enforcement —
