@@ -90,12 +90,14 @@ none, because there is nothing for a credential to reach.
 ### `restricted` — one route out, and it is the proxy
 
 All routes are removed and a single host-side proxy is the only destination
-([D139](../../decisions/working-notes.md)). Several network features cannot survive that. Each is a
-deliberate compromise for the guarantee, not an oversight:
+([D139](../../decisions/working-notes.md)) — **one shape on every backend**, since the Mac round
+found each macOS backend already carries a channel: apple via `container run --publish-socket`,
+tart via Softnet, seatbelt via an SBPL socket literal. Several network features cannot survive
+that. Each is a deliberate compromise for the guarantee, not an oversight:
 
 | Requested | Behaviour | Why |
 | --- | --- | --- |
-| `--port` | **refuse** | a guest with no route cannot answer inbound. A **contract property of the mode**, not of the mechanism — a backend falling back to shape (A) could technically publish and must not, or the mode means different things per backend |
+| `--port` | **refuse** | a guest with no route cannot answer inbound |
 | live `allow` / `deny` | **refuse** | D137 §2 requires the policy set fixed at creation; a runtime-mutable allowlist is the open-ended set moving rather than closing |
 | brokering | **mandatory** | the single destination *is* the broker's injector. A credential must not enter a sandbox whose whole premise is that it cannot be trusted with one |
 | MCP servers needing arbitrary egress | **refuse** | they would need a second route |
@@ -191,20 +193,27 @@ and `sandbox_status` drops `network_mode`. Not a hole today — an MCP caller ca
 cannot express — but it means the four-mode story does not reach that surface, and `restricted` will
 be unrequestable there until it does.
 
-## What must be verified before this ships
+## What the Mac round settled, and what it left open
 
-**`--network-none` is not honoured on containerd, apple or tart.** containerd says so in its own
-comment (*"the `runtime.NetworkMode == "none"` CLI flag is not currently honored… setupCNI is
-unconditional"*); apple reads the mode only for `"isolated"`; tart has no `NetworkMode` handling at
-all. docker and podman honour it natively, and seatbelt omits `(allow network*)`.
+**`--network-none` is confirmed broken on three backends, and in three different ways** — measured,
+no longer a static reading. apple and tart both reach the internet under it, and apple additionally
+holds a **global IPv6 address**, so a v4-only fix still leaves reach. seatbelt is a third behaviour:
+it refuses to start, because SBPL's `network*` covers `AF_UNIX` and tmux loses its socket
+([DF199](../findings-unresolved.md)). apple's remedy is one flag and is measured: `container run
+--network none` works, and `none` is a special value rather than an unattachable network name.
 
-Shipped help says *"it holds on every backend"* and `netpolicy.md` says *"`none` is a hard boundary
-on every backend"*. Both are wrong on half the backends, both are security claims in user-facing
-text, and this is a **live defect independent of this plan** — filed as
-[DF198](../findings-unresolved.md). Static reading only: the containerd half is verifiable on the
-Linux host, apple and tart need the Mac. **Correct the text first, then the backends** — and note
-that under D138 an unenforceable `none` must be *refused*, which needs a `BackendCaps` field that
-does not exist (`runtime.go:284` carries only `NetworkIsolation bool`).
+**The conformance case that should have caught all of this cannot fail and does not run**
+([DF200](../findings-unresolved.md)): its only assertion sits inside `if err == nil`, and it lives
+in the docker-only suite while the five other backends run `RunInterfaceConformance`. Fixing the
+case matters more than fixing any one backend — it is the thing that would have made this a test
+failure in 2026-06 rather than a finding in 2026-08.
+
+**Still open after the round, and none of it blocks step 1:** Softnet's dynamic policy channel
+(JSON-RPC over a unix socket with flow-table clearing — the route to live revocation, already built
+upstream, while `tart run` exposes only boot-time flags); throughput and latency of apple's channel
+under real HTTP; whether a host socket endpoint survives restart and reboot; and UDP/ICMP/DNS on
+tart, since the earlier pf shape filtered TCP only. **`runtime/tart` passes no Softnet flag today**,
+so none of tart's enforcement composes with yoloAI yet.
 
 ## What this does not decide
 

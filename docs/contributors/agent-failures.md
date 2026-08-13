@@ -1561,3 +1561,32 @@ as scarce as the failures and twice as useful.
   code — a `for` loop over a full glob with its totals printed — not a listing read by eye. Concretely
   here: `for f in *.txt; do ...; done | sort | uniq -c` prints 52/7 and cannot be truncated into
   agreement.
+
+### A40 — cited a research result as current authority without checking which harness produced it, one turn before building the system that marks them (2026-08-13)
+
+- **What I claimed:** that tart falls back to a one-address host filter for `restricted`, "whose pf
+  realisation is already measured working on hardware", and that the fallback therefore "blocks
+  nothing". I sourced it from `macos-pf-privileged-path.md:308`.
+- **What was true:** tart's enforcement is **Softnet** — a host process holding the VM's network file
+  descriptor and enforcing its MAC — and it is already default-deny and already adversarial-grade
+  (`c2-softnet-adversarial.txt`: a root guest failed to escape by MAC spoof and by gateway override,
+  with the permitted address answering throughout). The pf result I cited is **pre-v2**, and a v2
+  result covering the same ground — `w8-softnet-enforcement.txt` — was sitting in the same corpus,
+  uncited by me and by the agent I handed the question to.
+- **Caught by:** the Mac agent, who was told to verify it and did. I had at least hedged: the prompt
+  said *"prior art contradicts a claim I made and you should trust the prior art over me."* That
+  hedge was itself wrong in an interesting way — **the prior art was also wrong**, and pointing at it
+  as the corrective would have replaced one stale reading with another.
+- **How far it travelled:** to the owner, as a claim that the fork "blocks nothing" and that the
+  vsock question was optional. It shaped which questions the Mac round was asked to answer, so the
+  round nearly inherited the error rather than finding it.
+- **Why this one stings.** One turn later I built the harness-provenance system — the stamp, the
+  guarantee table, the retrofit — on exactly the premise that **a result's provenance changes what
+  it supports and nothing on the artifact said so**. I had just written that a v1 result "supports
+  *we observed X* and not *X is the case*". The failure and its remedy were in the same session, in
+  that order, and I did not connect them until the correction came back.
+- **The rule:** **before citing a result, check which harness produced it — and check whether a newer
+  run covers the same ground.** The second half is the part I missed: the stale result was not
+  merely unmarked, it was *superseded*, and a `ls` of the same directory would have shown it. A
+  citation is a claim about currency as well as about content, and a document's line number is
+  evidence of neither.

@@ -1153,7 +1153,7 @@ earlier signal and records nothing else.
 
 ### DF199 — `--network-none` makes a seatbelt sandbox fail to start, because SBPL's `network*` class also covers unix sockets
 
-- **Discovered:** 2026-08-13, measuring [DF198](#df198---network-none-is-silently-unenforced-on-containerd-apple-and-tart-while-shipped-help-says-it-holds-on-every-backend) on hardware · **Workstream:** isolation
+- **Discovered:** 2026-08-13, measuring DF198 on hardware · **Workstream:** isolation
 - **Severity:** **MEDIUM** (the mode is unusable on one backend, and fails in a way that names nothing a user could act on)
 - **Disposition:** UNRESOLVED — measured ([`c3-network-none.txt`](research/mac-channel/results/c3-network-none.txt), [`c4-seatbelt-soundness.txt`](research/mac-channel/results/c4-seatbelt-soundness.txt)).
 - **Rides:** **any** — this only makes a currently-broken combination work.
@@ -1165,7 +1165,7 @@ earlier signal and records nothing else.
 
 ### DF200 — the `NetworkNone` conformance case cannot fail, and does not run on any backend that has the defect
 
-- **Discovered:** 2026-08-13, while confirming [DF198](#df198---network-none-is-silently-unenforced-on-containerd-apple-and-tart-while-shipped-help-says-it-holds-on-every-backend) · **Workstream:** testing
+- **Discovered:** 2026-08-13, while confirming DF198 · **Workstream:** testing
 - **Severity:** **MEDIUM** (a green test standing where the only cross-backend check of a security mode should be)
 - **Disposition:** UNRESOLVED — static reading of the test source; the defect it failed to catch is measured.
 - **Rides:** **any**.
