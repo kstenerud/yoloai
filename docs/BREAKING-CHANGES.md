@@ -33,6 +33,27 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+### `.yoloai.yaml` project config is removed entirely
+
+**Previous behavior:** a repo-root `.yoloai.yaml` was read at sandbox creation and could set three
+keys: `archetype:` (overrode archetype auto-detection), `mounts:` (added host bind mounts, expanded
+through tilde expansion only), and `requires:` (printed "version verification not yet implemented;
+continuing" and did nothing else).
+
+**New behavior:** `.yoloai.yaml` is never read. If one is present at the workdir root, `yoloai new`
+prints a warning that the file is ignored, but none of its three keys take effect. `archetype:` no
+longer overrides auto-detection — use `--archetype` instead. `requires:` is gone outright; it never
+enforced anything. **`mounts:` is gone, and a repo relying on it loses those host mounts** — its
+entries passed only tilde expansion, unlike devcontainer.json's `mounts:`, which is filtered
+(`FilterMounts` strips the docker socket, credential dirs, and workdir collisions) before being
+applied. There is no replacement for arbitrary `.yoloai.yaml` mounts; use devcontainer.json's
+`mounts:` (filtered) or `--mount` on the command line.
+
+**Why it changed:** D140. The file was never documented for users (absent from README.md,
+`docs/GUIDE.md`, and shipped help text), two of its three keys were dead weight or a
+strictly-worse unfiltered duplicate of a devcontainer.json capability, and the third duplicated
+`--archetype`. A repo may describe what it is; it may not requisition what it gets.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running

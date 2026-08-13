@@ -37,7 +37,7 @@ Two specific conflations make this worse:
 ┌─────────────────────────────────────────────────────────┐
 │  Layer 1: Environment (high-level, per-project intent)  │
 │                                                         │
-│  auto-detected or declared via --archetype / .yoloai.yaml│
+│  auto-detected or declared via --archetype               │
 │  devcontainer.json and docker-compose.yaml are sources  │
 │                                                         │
 │  simple | compose | devcontainer | apple | ...           │
@@ -76,7 +76,7 @@ For projects that need Docker Compose services alongside the agent (databases, m
 **Expands to:**
 - isolation=container-privileged
 - dockerd auto-started before lifecycle commands
-- `docker compose up -d` as a postStartCommand (unless `.yoloai.yaml` overrides)
+- `docker compose up -d` as a postStartCommand
 - port-forwarding from the compose file's `ports:` declarations
 
 ### `devcontainer`
@@ -265,7 +265,7 @@ For projects that require Xcode to build or test (iOS apps, macOS apps, Swift pa
 
 ## Auto-Detection
 
-When neither `--env` nor `.yoloai.yaml env:` is specified, yoloAI inspects the workdir. Detection runs in priority order:
+When `--archetype` is not specified, yoloAI inspects the workdir. Detection runs in priority order:
 
 1. `.devcontainer/devcontainer.json` or `devcontainer.json` exists → `devcontainer`
 2. `docker-compose.yaml` or `docker-compose.yml` exists (no devcontainer.json) → `compose`
@@ -273,7 +273,6 @@ When neither `--env` nor `.yoloai.yaml env:` is specified, yoloAI inspects the w
 4. Nothing detected → `simple`
 
 **Overrides:**
-- `.yoloai.yaml` in the project root with `archetype:` declared → use that, skip detection
 - `--archetype <name>` on the command line → use that, skip detection
 - `--archetype simple` → explicitly suppress auto-detection and use bare container
 - `--backend seatbelt` alongside `apple` archetype → use lightweight host-process sandbox instead of Tart VM
@@ -360,28 +359,11 @@ Best for: local development where the developer wants the lightest-weight connec
 
 ---
 
-## Project Spec (`.yoloai.yaml`)
+## Project Spec
 
-A project can include a `.yoloai.yaml` at its root. Checked into the project repo. Not for secrets or machine-specific paths.
+A project expresses its environment via `devcontainer.json` (lifecycle commands, port forwarding, VS Code workspace injection, filtered mounts) or `docker-compose.yaml` (the `compose` archetype) — both checked into the project repo. A `--profile` alongside `archetype: devcontainer` takes precedence over the devcontainer `image:`/`build:` fields (with a note in output); all other devcontainer behaviour still applies. The archetype is never suppressed by `--profile`.
 
-```yaml
-# .yoloai.yaml
-archetype: devcontainer    # explicit archetype; suppresses auto-detection
-
-# Mounts evaluated by yoloAI on the host before sandbox start.
-# Use this for credentials that aren't appropriate to put in devcontainer.json
-# (e.g. age keys, SSH keys) — yoloAI evaluates ~ correctly on the host.
-mounts:
-  - ~/.config/sops/age:/home/yoloai/.config/sops/age:ro
-
-# Warn if active profile or devcontainer image doesn't satisfy these.
-requires:
-  go: ">=1.26"
-```
-
-Mount precedence (highest to lowest): CLI flags > `.yoloai.yaml` > profile config > baked-in defaults.
-
-**`.yoloai.yaml` + `--profile` interaction:** When `--profile` is specified alongside `archetype: devcontainer`, the profile image takes precedence over the devcontainer `image:` or `build:` fields (with a note in output). All other archetype behaviour still applies — lifecycle commands, port forwarding, VS Code workspace injection, and mounts from `.yoloai.yaml` are all honoured. The archetype is never suppressed by `--profile`.
+**`.yoloai.yaml` (removed, D140):** an earlier, yoloAI-native project-config file at the repo root (`archetype:`, `mounts:`, `requires:`) was removed — two of its three keys were dead or a strictly-worse unfiltered duplicate of devcontainer.json's mount filtering, and the third duplicated `--archetype`. See `docs/contributors/decisions/working-notes.md` D140.
 
 ---
 
@@ -392,7 +374,7 @@ Profiles and environments serve different purposes and compose cleanly:
 | | Profile | Environment |
 |--|---------|------------|
 | **Scope** | Per-user | Per-project |
-| **Storage** | `~/.yoloai/profiles/` (not in repo) | `.yoloai.yaml` (in repo) |
+| **Storage** | `~/.yoloai/profiles/` (not in repo) | `devcontainer.json` / `docker-compose.yaml` (in repo) |
 | **Controls** | Image (Dockerfile), agent, model, resource limits | Orchestration, services, lifecycle, VS Code config |
 | **Purpose** | Customize what toolchain is in the container | Describe what the project needs to run |
 

@@ -73,6 +73,7 @@ finding or decision first, and lands here only if it should block the release.
 - [DF199](design/findings-unresolved.md) — `--network-none` makes a seatbelt sandbox fail to start, because SBPL's `network*` class also covers unix sockets
 - [DF200](design/findings-unresolved.md) — the `NetworkNone` conformance case cannot fail, and does not run on any backend that has the defect
 - [DF195](design/findings-unresolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox
+- [D140](decisions/working-notes.md#d140--yoloaiyaml-project-config-is-removed-entirely)
 
 ## Candidates — undecided
 

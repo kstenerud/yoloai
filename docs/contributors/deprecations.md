@@ -248,6 +248,20 @@ installs did not actually work, which is evidence about how much it was exercise
 - **Pointer:** `runtime/docker/prune.go` (`pruneManagedImages`, `yoloaiImageName`);
   `runtime/docker/resources/Dockerfile` (`LABEL com.yoloai.managed`); DF137.
 
+### `.yoloai.yaml` existence-check warning
+
+- **Incurred:** 2026-08-13 · **Shipped:** (pending) · **Due:** 2027-02-13 (heuristic with a self-firing trigger, 6mo)
+- **What:** `warnIfYoloAIYamlPresent` (`internal/orchestrator/create/prepare_archetype.go`) stats
+  `<workdir>/.yoloai.yaml` and prints a warning that the file is no longer read — an existence
+  check only, never a parse. D140 removed the file's `archetype:`/`mounts:`/`requires:` keys
+  entirely; this warning exists so a repo relying on `mounts:` learns its host mounts are gone
+  instead of losing them silently.
+- **Retire by:** deleting `warnIfYoloAIYamlPresent` and its call site. The trigger is the warning
+  itself going quiet — once no repo in active use still carries a `.yoloai.yaml`, the check fires
+  never, which is the signal that the population it warns has moved on. This date is the backstop
+  for if the trigger never fires.
+- **Pointer:** `internal/orchestrator/create/prepare_archetype.go` (`warnIfYoloAIYamlPresent`)
+
 ## Not deprecations
 
 Recorded so they are not re-filed. Each looks like a compatibility shim and is not:

@@ -59,7 +59,7 @@ internal/orchestrator/invocation/  → Leaf: agent invocation/command assembly
 internal/envsetup/       → Layer (D91): stages agent-specific sandbox contents host-side — secret-dir, seed files, settings, agent-files, keychain credential sourcing (the substrate's dual). Was internal/orchestrator/provision/.
 internal/orchestrator/profiles/    → Leaf: profile image building (dependency order, staleness)
 internal/orchestrator/runtimeconfig/ → Leaf: ContainerConfig assembly for the runtime layer
-internal/orchestrator/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
+internal/orchestrator/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + VS Code workspace injection
 internal/orchestrator/baseline/    → Leaf: the one place a copy-mode work copy's diff baseline is established; shared by create and reset so they cannot disagree (DF120)
 copyflow/       → Git-format diff/apply machinery for :copy and :rw modes
 internal/orchestrator/state/       → Leaf: shared value types (DirSpec, State, Deps, IsolationPerms/Perms) every F5 leaf imports
@@ -449,13 +449,12 @@ provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}`.
 
 ### `internal/orchestrator/archetype/`
 
-Environment archetype detection, devcontainer.json parsing, `.yoloai.yaml` loading, and VS Code workspace injection. Imported by `orchestrator/` (one-way; archetype/ does not import orchestrator/).
+Environment archetype detection, devcontainer.json parsing, and VS Code workspace injection. Imported by `orchestrator/` (one-way; archetype/ does not import orchestrator/).
 
 | File | Purpose |
 |------|---------|
 | `archetype.go` | `Archetype` type, constants (simple/compose/devcontainer/apple), `ParseArchetype()`, `ValidArchetypes()`, `DetectArchetype()` — auto-detects project type from workdir signals. |
 | `devcontainer.go` | `LifecycleCmd` (string/array/object unmarshaling), `DevcontainerConfig` struct, `LoadDevcontainer()`, `ExtractPorts()`, `FilterMounts()`, `MergedEnv()`, `ParsedRunArgs()`, `WarnIgnoredFields()`, `PostStartCommandUsesCompose()`, `DockerComposeFilePresent()`. Converting a `LifecycleCmd` to `runtime-config.json`'s representation moved to the consumer: unexported `lifecycleCmdToJSON()` in `internal/orchestrator/create/create.go`. |
-| `yoloaiyaml.go` | `YoloAIProjectConfig` struct, `LoadYoloAIYaml()` — loads `.yoloai.yaml` project config with archetype declaration, extra mounts, and requires constraints. |
 | `vscode.go` | `InjectVSCodeWorkspace()` — writes `.vscode/extensions.json` and `.vscode/settings.json` from devcontainer.json customizations into the workdir copy. Existing keys win. |
 
 ### `copyflow/`
@@ -523,7 +522,7 @@ stat-only mode; returns the diff text directly. Lives in `copyflow`.
 ### `orchestrator.CloneOptions`
 Parameters for `Engine.Clone()`. Source and destination sandbox names, optional overrides.
 
-### `archetype.Archetype` / `archetype.DevcontainerConfig` / `archetype.YoloAIProjectConfig`
+### `archetype.Archetype` / `archetype.DevcontainerConfig`
 Project-archetype detection types. Lives in `orchestrator/archetype`.
 
 ### `agent.Definition`

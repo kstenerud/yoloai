@@ -1,5 +1,6 @@
-// ABOUTME: Tests for resolveAndApplyArchetype: CLI flag, .yoloai.yaml, and auto-detection priority.
-// ABOUTME: Covers devcontainer expansion, compose expansion, and transparency output suppression.
+// ABOUTME: Tests for resolveAndApplyArchetype: CLI flag vs auto-detection priority, and that a
+// ABOUTME: stale .yoloai.yaml (D140) is ignored but warned about. Covers devcontainer expansion,
+// ABOUTME: compose expansion, and transparency output suppression.
 
 package create
 
@@ -60,12 +61,17 @@ func TestResolveArchetype_CLIFlagOverridesAll(t *testing.T) {
 	assert.Nil(t, dc)
 }
 
-func TestResolveArchetype_YamlOverridesAutoDetect(t *testing.T) {
+// TestResolveArchetype_YamlArchetypeIgnored is the D140 revert-red test for the
+// archetype: key removal: .yoloai.yaml is no longer read at all, so an
+// archetype: declaration in it must not override auto-detection.
+func TestResolveArchetype_YamlArchetypeIgnored(t *testing.T) {
 	dir := makeWorkdir(t)
-	// Plant a .yoloai.yaml declaring simple (overriding what auto-detect would find)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte("archetype: simple\n"), 0600))
-	// Plant a compose file (auto-detect would pick compose)
-	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
+	// Plant a .yoloai.yaml declaring compose (would have overridden pre-D140)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte("archetype: compose\n"), 0600))
+	// Plant devcontainer signals — auto-detection must pick devcontainer regardless.
+	dcDir := filepath.Join(dir, ".devcontainer")
+	require.NoError(t, os.MkdirAll(dcDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), []byte(`{"name": "test"}`), 0600))
 
 	d := newTestDeps(t)
 	opts := &Options{
@@ -75,7 +81,7 @@ func TestResolveArchetype_YamlOverridesAutoDetect(t *testing.T) {
 
 	arch, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
 	require.NoError(t, err)
-	assert.Equal(t, archetype.ArchetypeSimple, arch)
+	assert.Equal(t, archetype.ArchetypeDevcontainer, arch)
 }
 
 func TestResolveArchetype_AutoDetectSimple(t *testing.T) {
@@ -286,9 +292,15 @@ func TestResolveArchetype_TransparencyOutput_Compose(t *testing.T) {
 	assert.Contains(t, output, "--archetype simple")
 }
 
-// --- .yoloai.yaml mounts merged ---
+// --- .yoloai.yaml is no longer read (D140) ---
 
-func TestResolveArchetype_YamlMountsMerged(t *testing.T) {
+// TestResolveArchetype_YamlMountsNotAdded is the D140 revert-red test for the
+// mounts: key removal. This is the security-relevant behavior change:
+// .yoloai.yaml mounts bypassed FilterMounts entirely (unlike devcontainer.json
+// mounts, which are filtered — docker socket, credential dirs, workdir
+// collisions stripped). The file must no longer be read at all, so a mounts:
+// entry must not reach pr.mounts.
+func TestResolveArchetype_YamlMountsNotAdded(t *testing.T) {
 	dir := makeWorkdir(t)
 	content := "mounts:\n  - /data:/container/data:ro\n"
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
@@ -299,40 +311,17 @@ func TestResolveArchetype_YamlMountsMerged(t *testing.T) {
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
 	require.NoError(t, err)
-	assert.Contains(t, pr.mounts, "/data:/container/data:ro")
+	assert.Empty(t, pr.mounts)
 }
 
-func TestResolveArchetype_YamlMountsDeduped(t *testing.T) {
+// TestResolveArchetype_YamlPresenceWarns is the D140 revert-red test for the
+// existence-check warning: a workdir with a .yoloai.yaml must produce a warning
+// that the file is no longer read, so a repo relying on mounts: learns its host
+// mounts are gone instead of losing them silently.
+func TestResolveArchetype_YamlPresenceWarns(t *testing.T) {
 	dir := makeWorkdir(t)
-	content := "mounts:\n  - /data:/container/data:ro\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte("archetype: simple\n"), 0600))
 
-	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
-	// Pre-existing mount already in pr.mounts
-	pr := &profileResult{mounts: []string{"/data:/container/data:ro"}}
-
-	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
-	require.NoError(t, err)
-	// Should not duplicate
-	count := 0
-	for _, m := range pr.mounts {
-		if m == "/data:/container/data:ro" {
-			count++
-		}
-	}
-	assert.Equal(t, 1, count)
-}
-
-// --- requires: validation ---
-
-func TestResolveArchetype_Requires_WarnsButDoesNotBlock(t *testing.T) {
-	dir := makeWorkdir(t)
-	content := "requires:\n  yoloai: \">=99.0\"\n"
-	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
-
-	// requires: version verification is unimplemented, so the constraint is a
-	// non-blocking warning — creation must proceed regardless (no prompt, no error).
 	var buf bytes.Buffer
 	d := newTestDeps(t)
 	opts := &Options{Workdir: DirSpec{Path: dir}, Output: &buf}
@@ -340,7 +329,7 @@ func TestResolveArchetype_Requires_WarnsButDoesNotBlock(t *testing.T) {
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
 	require.NoError(t, err)
-	assert.Contains(t, buf.String(), "version verification not yet implemented")
+	assert.Contains(t, buf.String(), ".yoloai.yaml is no longer read")
 }
 
 // --- RunArgs expansion ---
@@ -368,7 +357,7 @@ func TestResolveArchetype_DevcontainerRunArgs_CPUMemory(t *testing.T) {
 func TestCreateOutput_PerCallWriterReceivesAdvisories(t *testing.T) {
 	dir := makeWorkdir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"),
-		[]byte("archetype: simple\nrequires:\n  foo: \">=1\"\n"), 0600))
+		[]byte("archetype: simple\n"), 0600))
 
 	var callBuf bytes.Buffer
 	d := newTestDeps(t)
@@ -377,8 +366,8 @@ func TestCreateOutput_PerCallWriterReceivesAdvisories(t *testing.T) {
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, &profileResult{})
 	require.NoError(t, err)
 
-	assert.Contains(t, callBuf.String(), "version verification not yet implemented",
-		"the requires: advisory must reach the per-call writer")
+	assert.Contains(t, callBuf.String(), ".yoloai.yaml is no longer read",
+		"the .yoloai.yaml-present advisory must reach the per-call writer")
 }
 
 // TestCreateOutput_NilWriterIsDiscarded verifies the documented contract: a nil
@@ -387,7 +376,7 @@ func TestCreateOutput_PerCallWriterReceivesAdvisories(t *testing.T) {
 func TestCreateOutput_NilWriterIsDiscarded(t *testing.T) {
 	dir := makeWorkdir(t)
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"),
-		[]byte("archetype: simple\nrequires:\n  foo: \">=1\"\n"), 0600))
+		[]byte("archetype: simple\n"), 0600))
 
 	d := newTestDeps(t)
 	opts := &Options{Workdir: DirSpec{Path: dir}} // Output left nil → io.Discard

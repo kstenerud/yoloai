@@ -1,5 +1,5 @@
 // ABOUTME: Archetype resolution and expansion pipeline — resolves the active
-// ABOUTME: archetype (CLI, .yoloai.yaml, or auto-detect), validates platform
+// ABOUTME: archetype (CLI flag or auto-detect), validates platform
 // ABOUTME: requirements, and expands archetype effects onto opts and profileResult.
 package create
 
@@ -18,21 +18,17 @@ import (
 	"github.com/kstenerud/yoloai/runtime"
 )
 
-// resolveAndApplyArchetype loads .yoloai.yaml, resolves the archetype with priority
-// (CLI > .yoloai.yaml > auto-detect), validates platform requirements, handles
-// requires: prompts, expands archetype effects on opts and pr, and prints transparency output.
+// resolveAndApplyArchetype resolves the archetype with priority (CLI > auto-detect),
+// validates platform requirements, expands archetype effects on opts and pr, and
+// prints transparency output.
 //
 // Returns: (resolved archetype, devcontainer config, safe devcontainer mounts, mount warnings, error).
 func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, error) {
 	workdir := opts.Workdir.Path
 
-	// Step 1: Load .yoloai.yaml
-	yamlCfg, _, yamlErr := archetype.LoadYoloAIYaml(workdir, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation())
-	if yamlErr != nil {
-		return "", nil, nil, nil, fmt.Errorf("load .yoloai.yaml: %w", yamlErr)
-	}
+	warnIfYoloAIYamlPresent(outputFor(opts.Output), workdir)
 
-	arch, signals, source, err := resolveArchetype(opts, yamlCfg, workdir)
+	arch, signals, source, err := resolveArchetype(opts, workdir)
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
@@ -42,23 +38,32 @@ func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, 
 		return "", nil, nil, nil, err
 	}
 
-	// Step 3: requires: validation (warning only — version verification unimplemented)
-	checkRequires(outputFor(opts.Output), yamlCfg)
-
-	// Step 4: Archetype expansion
-	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := expandArchetype(ctx, d, opts, pr, arch, yamlCfg)
+	// Step 3: Archetype expansion
+	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := expandArchetype(ctx, d, opts, pr, arch)
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
 
-	// Step 5: Transparency output
+	// Step 4: Transparency output
 	printArchetypeOutput(outputFor(opts.Output), arch, source, signals, bullets)
 
 	return arch, devcontainerCfg, dcMounts, dcMountWarnings, nil
 }
 
-// resolveArchetype determines the archetype from CLI, .yoloai.yaml, or auto-detection.
-func resolveArchetype(opts *Options, yamlCfg *archetype.YoloAIProjectConfig, workdir string) (archetype.Archetype, []string, string, error) {
+// warnIfYoloAIYamlPresent warns that a workdir's .yoloai.yaml is no longer read.
+// D140 removed the .yoloai.yaml project-config feature; a repo that still has one
+// (most likely for its mounts: key) needs to learn its effect is gone rather than
+// losing host mounts silently. This is an existence check only — the file is never
+// parsed.
+func warnIfYoloAIYamlPresent(output io.Writer, workdir string) {
+	if _, err := os.Stat(filepath.Join(workdir, ".yoloai.yaml")); err != nil {
+		return
+	}
+	fmt.Fprintln(output, "Warning: .yoloai.yaml is no longer read and is ignored (archetype/mounts/requires: all removed, D140). Use --archetype and devcontainer.json's mounts instead.") //nolint:errcheck // best-effort warning
+}
+
+// resolveArchetype determines the archetype from CLI or auto-detection.
+func resolveArchetype(opts *Options, workdir string) (archetype.Archetype, []string, string, error) {
 	switch {
 	case opts.Archetype != "":
 		a, err := archetype.ParseArchetype(opts.Archetype)
@@ -66,12 +71,6 @@ func resolveArchetype(opts *Options, yamlCfg *archetype.YoloAIProjectConfig, wor
 			return "", nil, "", err
 		}
 		return a, nil, "--archetype flag", nil
-	case yamlCfg != nil && yamlCfg.Archetype != "":
-		a, err := archetype.ParseArchetype(yamlCfg.Archetype)
-		if err != nil {
-			return "", nil, "", err
-		}
-		return a, nil, ".yoloai.yaml", nil
 	default:
 		arch, signals := archetype.DetectArchetype(workdir)
 		return arch, signals, "auto-detected", nil
@@ -98,23 +97,9 @@ func checkAppleArchetype(output io.Writer, arch archetype.Archetype, cliArchetyp
 	return nil
 }
 
-// checkRequires warns about the requires: constraints from .yoloai.yaml.
-// Version verification is not yet implemented, so this is a non-blocking
-// notice — there is nothing to enforce, so proceeding is always correct. When
-// real verification lands it should refuse with a typed *RequirementsNotMetError
-// carrying the offending tool/version, not gate on "unverified".
-func checkRequires(output io.Writer, yamlCfg *archetype.YoloAIProjectConfig) {
-	if yamlCfg == nil || len(yamlCfg.Requires) == 0 {
-		return
-	}
-	for tool, constraint := range yamlCfg.Requires {
-		fmt.Fprintf(output, "Warning: requires: %s %s — version verification not yet implemented; continuing.\n", tool, constraint) //nolint:errcheck // best-effort warning
-	}
-}
-
 // expandArchetype applies archetype-specific settings to opts and pr.
 // Returns (devcontainerCfg, dcMounts, dcMountWarnings, bullets, error).
-func expandArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult, arch archetype.Archetype, yamlCfg *archetype.YoloAIProjectConfig) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
+func expandArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult, arch archetype.Archetype) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
 	var bullets []string
 	var devcontainerCfg *archetype.DevcontainerConfig
 	var dcMounts []string
@@ -135,7 +120,6 @@ func expandArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profi
 		// no-op
 	}
 
-	mergeYamlMounts(pr, yamlCfg)
 	return devcontainerCfg, dcMounts, dcMountWarnings, bullets, nil
 }
 
@@ -313,23 +297,6 @@ func appendLifecycleBullets(dc *archetype.DevcontainerConfig, bullets []string) 
 	return bullets
 }
 
-// mergeYamlMounts adds .yoloai.yaml mounts to pr.mounts (dedup).
-func mergeYamlMounts(pr *profileResult, yamlCfg *archetype.YoloAIProjectConfig) {
-	if yamlCfg == nil || len(yamlCfg.Mounts) == 0 {
-		return
-	}
-	seenYamlMounts := make(map[string]bool)
-	for _, mount := range pr.mounts {
-		seenYamlMounts[mount] = true
-	}
-	for _, mount := range yamlCfg.Mounts {
-		if !seenYamlMounts[mount] {
-			pr.mounts = append(pr.mounts, mount)
-			seenYamlMounts[mount] = true
-		}
-	}
-}
-
 // printArchetypeOutput prints transparency information about the resolved archetype.
 func printArchetypeOutput(output io.Writer, arch archetype.Archetype, source string, signals []string, bullets []string) {
 	if arch == archetype.ArchetypeSimple && source == "auto-detected" {
@@ -340,8 +307,6 @@ func printArchetypeOutput(output io.Writer, arch archetype.Archetype, source str
 		for _, sig := range signals {
 			fmt.Fprintf(output, "→ Detected %s\n", sig) //nolint:errcheck // best-effort output
 		}
-	case source == ".yoloai.yaml":
-		fmt.Fprintf(output, "→ .yoloai.yaml declares archetype: %s\n", string(arch)) //nolint:errcheck // best-effort output
 	case source == "--archetype flag":
 		fmt.Fprintf(output, "→ --archetype %s\n", string(arch)) //nolint:errcheck // best-effort output
 	}

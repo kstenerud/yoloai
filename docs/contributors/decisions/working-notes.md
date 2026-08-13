@@ -1989,3 +1989,29 @@ So the axis is no longer "how strong is the filter" but **where the machinery si
 - **The two-subscription liveness design (V1/V1b) has no `restricted` role.** It detected a rule going inert; there is no rule. It stays relevant only to `isolated`.
 - **Two apple constraints are build blockers and belong in `egress-proxy-build.md` before code**: the channel's **direction is inverted** (the host creates the endpoint and the guest connects to it — the guest cannot initiate, and vsock to host CID 2 is refused on every port tried), so a proxy needs either a guest-side shim or a host proxy speaking a reverse protocol; and `sun_path` is **108 bytes**, which a host endpoint under `~/.yoloai/sandboxes/<name>/` can exceed.
 - **tart does not compose with yoloAI yet** — `runtime/tart` passes no Softnet flag today, and `tart run` exposes only boot-time flags. Softnet's dynamic policy channel (JSON-RPC over a unix socket, with flow-table clearing, already built upstream) is the route to live revocation and is unexplored.
+
+## D140 — `.yoloai.yaml` project config is removed entirely
+
+**Date:** 2026-08-13. **Status:** Active. **Supersedes the `yoloai.yaml` element of [D18](../decisions/working-notes-archive.md#d18--environment-archetypes-devcontainer--yoloaiyaml--archetype)** (retroactive, 2026-05-19), which named three archetypes for environment definitions — *devcontainer*, *yoloai.yaml*, and *archetype* — and specifically the text "*yoloai.yaml* — yoloAI-native config in the project root." **Consumers:** `internal/orchestrator/archetype/`, `internal/orchestrator/create/`, `docs/contributors/design/environments.md`.
+
+**Decision. `.yoloai.yaml` is deleted, not deprecated-in-place: its `archetype:`, `mounts:`, and `requires:` keys are no longer read, parsed, or acted on.** A workdir that still has one gets a warning at `yoloai new` naming the file as ignored — an existence check only, never a parse — so a repo relying on `mounts:` learns its host mounts are gone instead of losing them silently. See [deprecations.md](../deprecations.md) for the warning's own retirement clock.
+
+**Why each key goes.**
+- **`archetype:`** duplicated `--archetype` with no capability of its own. Two ways to say the same thing is not two features.
+- **`mounts:`** duplicated devcontainer.json's `mounts:`, and was strictly worse: devcontainer mounts pass `FilterMounts` (strips the docker socket, credential dirs, workdir collisions) before being applied to an untrusted, auto-detected repo; `.yoloai.yaml` mounts passed only tilde expansion. Same untrusted input, no filter — a second, weaker path to the same capability.
+- **`requires:`** printed "version verification not yet implemented; continuing" and did nothing else. It never enforced anything in the time it existed.
+
+**The file was never documented for users** — absent from `README.md`, `docs/GUIDE.md`, and `internal/cli/helpcmd/help/` — so nothing shipped tells a user it exists, and removing it breaks no documented promise.
+
+**The principle: a repo may describe what it is; it may not requisition what it gets.** `devcontainer.json` and `docker-compose.yaml` describe project shape and yoloAI translates that into a sandbox — that stays. A file whose whole job is to reach past yoloAI's own filtering and ask the host for mounts, or to pick the enforcement mode a CLI flag already picks, is not describing the project; it is issuing yoloAI instructions on the project's behalf, from an untrusted, auto-read input. That is the wrong direction for a repo-root file to point.
+
+**Rejected.**
+1. **Keep `archetype:` only, drop `mounts:`/`requires:`.** Considered — `archetype:` is harmless in isolation. Rejected because it still duplicates `--archetype` for zero gain, and a partial removal leaves the file half-alive: still undocumented, still a surface `code-map.md`/`environments.md` must describe, for a capability with an existing single-owner (the flag).
+2. **Filter `.yoloai.yaml` mounts through `FilterMounts` instead of removing them.** Fixes the security gap without a breaking change. Rejected because it leaves two mount sources to keep in sync forever (`devcontainer.json`'s and this file's), for a file nothing documents and no evidence anyone uses — YAGNI once the duplication is named.
+3. **Implement `requires:` for real instead of removing it.** Out of scope of this decision and not free — version verification is its own feature with its own design questions. Nothing forces bundling that build with a config file that duplicates `--archetype` and under-filters mounts.
+
+**Consequences.**
+- **Breaking (rule 1):** `docs/BREAKING-CHANGES.md` entry under `## Unreleased`; escalates the release. A repo whose only mounts came from `.yoloai.yaml` `mounts:` loses them — the CLI `--mount` flag and devcontainer.json's `mounts:` are the replacements.
+- **The existence-check warning is itself a deprecation** (D127) and is registered in [deprecations.md](../deprecations.md), `Incurred: 2026-08-13`.
+- `internal/orchestrator/archetype/yoloaiyaml.go` and its test are deleted outright — no compatibility reader, because there is nothing left to be compatible with once the keys do nothing.
+- `docs/contributors/architecture/code-map.md` and `docs/contributors/design/environments.md` drop `.yoloai.yaml` from their file lists and Project Spec sections (the architecture tier is D124-gated on this; a stale name there fails `make check`).
