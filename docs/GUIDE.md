@@ -682,7 +682,7 @@ yoloai config reset env.OLLAMA_API_BASE
 | `ports` | (empty) | Port mappings (list of `host:container` ports) |
 | `cap_add` | (empty) | Additional Linux capabilities (list, e.g. `SYS_PTRACE`) |
 | `devices` | (empty) | Device mappings (list of `/dev/` paths) |
-| `setup` | (empty) | Shell commands to run inside the container on first start (list) |
+| `setup` | (empty) | Shell commands to run inside the container on every start (list) |
 | `tmux_conf` | `default+host` | Tmux config mode (global config): `default+host` sources yoloAI defaults then your `~/.tmux.conf`; `host` uses only yours |
 | `model_aliases.<alias>` | (empty) | Custom model alias (global config) |
 

@@ -1176,6 +1176,81 @@ earlier signal and records nothing else.
 - **What would close it:** a mechanism-blind reachability assertion in `RunInterfaceConformance` — from inside the instance, a known-reachable destination must fail while a positive control succeeds, per [A22](../agent-failures.md) — built through `Backend.Create` so the flag's own path is under test. D139 already requires exactly this shape for the `restricted` mode; the same case serves `none`.
 - **Pointer:** `runtime/runtimetest/conformance.go:73,165`; `RunConformance` callers `runtime/docker/integration_test.go:24` and `runtime/podman/integration_test.go:26`, against `RunInterfaceConformance` callers `runtime/apple/integration_test.go:84`, `runtime/tart/integration_test.go:108`, `runtime/seatbelt/integration_test.go:192`, `runtime/containerd/integration_test.go:301`.
 
+### DF201 — `agent_files` list form copies credentials the string form strips
+
+- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
+- **Severity:** MEDIUM (list-form `agent_files` puts live credentials into the sandbox where the same key in string form would strip them)
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** `CopyAgentFiles` (`internal/envsetup/agent_files.go:31`) branches on `expanded.IsStringForm()`. The string branch, `copyAgentFilesFromBaseDir` (`:52`), applies the agent's `AgentFilesExclude` globs — the credential denylist (`internal/agent/agent.go:387` Claude excludes `.credentials.json`, `projects/`, `statsig/`; `:481` Gemini excludes `oauth_creds.json`, `gemini-credentials.json`, `google_accounts.json`; `:604` Codex excludes `auth.json`, `sessions/`; `:534` OpenCode the same). The list branch, `copyAgentFilesList` (`:107-141`), **takes no `spec` parameter and never calls the exclusion filter at all** — it copies each entry verbatim with `workspace.CopyDir`/`copyFilePreserve` (`:126`, `:134`). So `agent_files: ["~/.claude"]` copies live credentials into the sandbox where `agent_files: "~"` would strip them.
+- **The docs don't qualify the guarantee to one form.** `docs/GUIDE.md:723` states "Each agent excludes session data and caches" as a blanket property of `agent_files`, with no mention that it holds only in string form. A user who picks list form for its explicitness believes they are protected and are not.
+- **Why this matters beyond one config key:** putting real credentials into the sandbox filesystem is exactly what credential brokering (SeedFiles + the broker) exists to avoid; a second, undocumented path back into the same failure mode undercuts that design.
+- **What would close it:** the remedy is small — thread `spec` into `copyAgentFilesList` and apply `shouldExclude` (`:146`) the same way the string branch does.
+- **Pointer:** `internal/envsetup/agent_files.go:31,52,107-141,126,134,146`; `internal/agent/agent.go:387,481,534,604`; `docs/GUIDE.md:723`.
+
+### DF202 — a file-defined agent can make yoloAI read arbitrary vars from its own environment
+
+- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
+- **Severity:** MEDIUM
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** `internal/config/host_env.go:157-158` deliberately limits config/profile `${VAR}` interpolation to `HOME`, `USER`, `LANG`, `TZ` and the `LC_` prefix — the comment at `:155` says this is what closes arbitrary config interpolation. But `internal/agent/fileagent.go:84,88` lets a YAML file under `~/.yoloai/agents/` declare `api_key_env_vars` and `auth_hint_env_vars`, which reach `HostEnv.EnvForAgentCredentials` (`host_env.go:285`) and are read **from yoloAI's own process environment** and delivered into the sandbox as secrets. So a config file can name `AWS_SECRET_ACCESS_KEY` or `GITHUB_TOKEN` and have it injected — the same capability `${VAR}` was locked down to prevent, reached by another name.
+- **The entire security argument is one `//nolint` comment nobody sees.** `fileagent.go:237` reads the agent YAML with `//nolint:gosec // G304: f is a glob match under AgentsDir(), a trusted data dir (DataDir/agents/)` — that "trusted data dir" assertion is the whole basis for treating declared env-var names as safe to read and forward, and it is stated nowhere a user would encounter it.
+- **Shipped agents already reach wide, which is the existing baseline this defect extends.** `agent.go:503` declares `opencode`'s `AuthHintEnvVars` as `GITHUB_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, `AZURE_OPENAI_ENDPOINT`, among others — the mechanism already forwards broad ambient credentials for a built-in agent; a file-defined agent can name anything at all.
+- **The principle this violates:** ambient config must not be able to leak in via a config file — the CLI (an explicit flag, an explicit `--env`) is the legitimate channel for that. `${VAR}` interpolation was narrowed for exactly this reason, and a sibling mechanism reopens it under a different name.
+- **Pointer:** `internal/config/host_env.go:155-158,285`; `internal/agent/fileagent.go:84,88,237`; `internal/agent/agent.go:503`.
+
+### DF203 — `devices` is accepted and silently ignored on containerd and apple
+
+- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
+- **Severity:** LOW
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** `applyCaps` (`internal/orchestrator/launch/launch.go:1161-1169`) gates `devices` on `Capabilities.CapAdd`, which both containerd (`runtime/containerd/containerd.go:48`) and apple (`runtime/apple/apple.go:69`) set `true` — but neither backend ever reads `InstanceConfig.Devices`; a grep over `runtime/containerd` and `runtime/apple` finds no reference. Only docker honours it (`runtime/docker/docker.go:560-569`); podman inherits that path by embedding `*docker.Runtime` (`runtime/podman/podman.go:87`). So a device request passes the capability gate, is accepted without error, and does nothing on two of the backends that claim to support it.
+- **Pointer:** `internal/orchestrator/launch/launch.go:1161-1169`; `runtime/containerd/containerd.go:48`; `runtime/apple/apple.go:69`; `runtime/docker/docker.go:560-569`; `runtime/podman/podman.go:87`.
+
+### DF204 — `resources` limits are silently ignored on four backends
+
+- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
+- **Severity:** LOW
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** Only docker (`runtime/docker/docker.go:572-577`) and apple (`runtime/apple/apple.go:227-233`) consume `InstanceConfig.Resources`. `containerd`, `podman`, `tart` and `seatbelt` contain no reference to it at all — confirmed by grep over `runtime/`. `--cpus`/`--memory` (and the config keys `resources.cpus`/`resources.memory`) are therefore accepted and inert on those four backends, with no warning at create time.
+- **Pointer:** `runtime/docker/docker.go:572-577`; `runtime/apple/apple.go:227-233`; absence confirmed in `runtime/containerd/`, `runtime/podman/`, `runtime/tart/`, `runtime/seatbelt/`.
+
+### DF205 — `IsolationExplicit` is written, never read, and wrong anyway
+
+- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
+- **Severity:** LOW
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** `internal/orchestrator/create/prepare_profile.go:247` sets `pr.isolationExplicit`, and it reaches `state.go:62` / `create.go:419`, but a repo-wide grep (including tests) finds **no reader**. It is also wrong at the source: `internal/cli/lifecycle/new.go:544` coalesces the `--isolation` flag with the config value (`cliutil.Coalesce(cliutil.FlagStr(cmd, "isolation"), cfgIsolation)`) before the create pipeline ever sees the result, so `opts.Isolation` is non-empty whenever `isolation:` appears in config — and the "explicit" bit is then set for a value nobody typed on the command line.
+- **Why it is worth recording rather than deleting on sight:** it is exactly the provenance signal a future "did the user choose this, or did config?" rule would want (the same question DF206 answers wrong for network mode), and it is a known-bad signal sitting in the state struct looking usable — the next reader who finds the field has no reason to doubt it.
+- **Pointer:** `internal/orchestrator/create/prepare_profile.go:247`; `internal/orchestrator/state/state.go:62`; `internal/orchestrator/create/create.go:419`; `internal/cli/lifecycle/new.go:544`.
+
+### DF206 — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly
+
+- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
+- **Severity:** MEDIUM (the discarded list is the egress allowlist)
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** `internal/orchestrator/create/prepare_profile.go:144` and `:208` gate the entire network block on `opts.Network == NetworkModeDefault`. So any explicitly-set mode makes the block skip, discarding every config- and profile-level `network.allow` entry without a word — **including when the mode was set implicitly by `--network-allow` itself**, which promotes `networkIsolated` to true at `internal/cli/lifecycle/new.go:197-199` before `prepare_profile.go` ever runs. `docs/GUIDE.md:679` documents this key as "additive with agent defaults", with no mention of this silent-discard condition.
+- **This is a fourth instance of DF196's class.** [DF196](#df196----network-none-silently-swallows-an-allowlist---network-allow-is-accepted-discarded-and-never-recorded) and [DF197](#df197----port-is-refused-with---network-none-at-the-cli-only-so-a-profiles-or-archetypes-ports-are-accepted-and-silently-dropped) already establish that `--network-none`/`--network-allow` combinations and profile/archetype ports are accepted, discarded, and left unrecorded because a guard is written at the flag rather than at the point config, profile and flag are finally resolved together; this is the same shape one config key over, on the merge path rather than the CLI path.
+- **Severity is MEDIUM rather than LOW** because the discarded list is the egress allowlist: the user believes a destination is permitted and it is not, or believes their config narrowed something when it was silently dropped.
+- **Pointer:** `internal/orchestrator/create/prepare_profile.go:144,208`; `internal/cli/lifecycle/new.go:197-199`; `docs/GUIDE.md:679`; against [DF196](#df196----network-none-silently-swallows-an-allowlist---network-allow-is-accepted-discarded-and-never-recorded), [DF197](#df197----port-is-refused-with---network-none-at-the-cli-only-so-a-profiles-or-archetypes-ports-are-accepted-and-silently-dropped).
+
+### DF207 — personal defaults leak into profiles, contradicting a bold documented guarantee
+
+- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
+- **Severity:** MEDIUM
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** `docs/contributors/design/config.md:167` states, in bold: *"Personal defaults do not carry into profiles — no exceptions. When a profile is active, settings from `defaults/config.yaml` are completely ignored"*, and `:165` says profile config "merges over baked-in defaults only". The code does otherwise: `internal/orchestrator/create/create.go:485` loads the user's `defaults/config.yaml` via `config.LoadConfig` into `ycfg`; `internal/orchestrator/create/prepare_profile.go:65` passes that `ycfg` as the `base` argument to `config.MergeProfileChain`; and `mergedConfigFromBase` (`internal/config/profile.go:374-418`) copies `Ports`, `CapAdd`, `Devices` and `Setup` out of it into the profile's merged config. Two of those four are privilege-bearing.
+- **This is pre-existing and long-standing, not introduced by recent work.** The retired `mounts:` key had the identical characteristic before it was removed ([D142](../decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset)) — the fix there was retiring the key entirely, which sidesteps this defect for that one field without addressing the general leak.
+- **The documented guarantee is exactly what an auditor would rely on.** Someone treating a profile as self-contained and reproducible — the property the doc bolds and repeats — inherits `ports`, `cap_add`, `devices` and `setup` from whichever machine happens to run it, silently.
+- **The remedy is a choice, not obvious:** either the code stops passing `ycfg` as `base` to `MergeProfileChain` (closing the leak, matching the doc), or the doc's promise is narrowed to name the keys that actually hold. Either is small; neither is done here.
+- **Pointer:** `docs/contributors/design/config.md:165,167`; `internal/orchestrator/create/create.go:485`; `internal/orchestrator/create/prepare_profile.go:65`; `internal/config/profile.go:374-418`.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
