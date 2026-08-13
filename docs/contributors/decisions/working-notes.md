@@ -2060,6 +2060,25 @@ All three are the silent degradation [D138](#d138--automatic-degradation-is-reti
 - The refusal must land before any destructive or expensive step in `prepareSandboxState`, for the same reason the mode-capability validation does: `--replace` tears down an existing sandbox, and Phase 2 copies the whole workdir.
 - Plan: [`repo-request-trust.md`](../design/plans/repo-request-trust.md).
 
+**Amendment, 2026-08-13 (same day, before any implementation) — how consent persists, and how a later edit is handled.** The decision above said what to refuse and who may grant it. It did not say what happens on the *second* launch, and the naive answers are both wrong: refusing to re-read `devcontainer.json` means a user who edits it to declare something they missed gets no effect for their effort, while re-reading it freely means the repo governs a running sandbox.
+
+**At create, the approved `devcontainer.json` is copied verbatim into the sandbox's yoloAI-managed directory.** That copy is the consent record. At every launch, the repo's current file is compared against it, and:
+
+- **The requested set is a subset of the approved set** — proceed, and overwrite the copy with the repo's current file. This happens for any change that does not increase sensitive reach, cosmetic ones included.
+- **The requested set contains anything the approved set does not** — balk, listing exactly the new items. The user grants, and the copy is then overwritten.
+
+**Consent does not accumulate.** The copy is the only memory, so removing an item removes its approval: allow X, delete X, re-add X later, and the re-add balks, because it is an increase against the *current* baseline rather than against a history. There is no ratchet, and nothing has to remember what was ever approved.
+
+**Effective values come from the copy, never from the repo.** This is what makes re-reading safe and what fixes a defect the original decision left standing: `buildEnvironment` (`create.go:723`) currently persists repo-derived `Mounts`, `Ports`, `CapAdd` and `Resources` into `environment.json`, so a grant became permanent and the per-invocation flag was cosmetic — one `--trust-repo` at create, and every later launch re-applied the repo's requests with no flag and no re-consent. Under this amendment `environment.json` carries operator-authored values only, and repo-derived values are re-derived from the approved copy, which nothing but an explicit grant rewrites.
+
+**The safety property, and the reason consulting repo content at every launch does not violate the "not on start, not on restart" rule.** The comparison is default-deny on additions only, so *the worst an agent can achieve by editing `devcontainer.json` is to stop its own sandbox from starting.* It can never grant itself anything. A denial of service against oneself is not an escalation.
+
+**This does not weaken the "flag is never persisted" rule.** The *flag* remains per-invocation and unpersistable; what persists is the *approved file*, which is a record of a human decision about a specific set of requests, not a standing authorisation that applies to requests nobody has seen yet. A stored `trust_repo: true` would grant whatever a repo asks tomorrow; a stored approved copy grants exactly what was on screen when someone said yes.
+
+**The file compared is always the host-side workdir's, never the in-sandbox copy.** Under a `:copy` workdir the sandbox holds its own copy of the repo, and the agent can write it freely; those edits are not a request until the user applies them, at which point they become the host file and are compared like anything else. The rule is not merely that the in-sandbox copy is untrustworthy — it is that a successful comparison *rewrites the consent record*, so reading an agent-writable file would hand the agent write influence over a yoloAI-managed file. Even where no escalation can be constructed from it today, the consent record must only ever be written from a source the operator controls.
+
+**Details.** The comparison is over the extracted request *set*, not the file's bytes — a hash would balk on a reformatted comment or an edited `postCreateCommand`, and a prompt that fires every time is one people learn to dismiss unread. The file is stored verbatim rather than as an extracted set, so both sides of the comparison run through identical extraction logic at compare time and the record cannot drift from what today's parser would detect; it is also auditable as "exactly what you approved". An existing sandbox with no stored copy balks rather than being grandfathered, which needs its own `BREAKING-CHANGES` line: sandboxes created before this will need one re-approval.
+
 ---
 
 ## D142 — The `mounts:` config/profile key is retired; `directories:` is its strict superset

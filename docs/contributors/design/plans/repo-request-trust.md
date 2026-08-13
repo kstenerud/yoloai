@@ -61,6 +61,35 @@ per-category flags to combine and document.
 CLI: set once, silently applied to every sandbox afterwards, including the repo the agent edited
 last week. Unpersistable now is free; retrofitting it after a config depends on it is breaking.
 
+## Consent survives, and the file stays editable
+
+At create the approved `devcontainer.json` is copied verbatim into the sandbox's yoloAI-managed
+directory. That copy is the **consent record**, not config: nothing reads it as "what the user
+configured", and it exists only to answer "what was already approved?"
+
+At every launch the host workdir's current file is compared against the copy:
+
+| Requested set vs approved set | Behaviour |
+| --- | --- |
+| subset (including any cosmetic edit) | proceed, and overwrite the copy |
+| contains anything not approved | balk, listing the new items; on grant, overwrite the copy |
+
+**Consent does not accumulate.** The copy is the only memory, so removing an item removes its
+approval — allow, delete, re-add, and the re-add balks, because it is an increase against the
+*current* baseline rather than against a history.
+
+**Effective values are re-derived from the copy, never from the repo.** This is what stops
+`environment.json` carrying repo-derived `Mounts`/`Ports`/`CapAdd`/`Resources`, which today makes a
+grant permanent and the per-invocation flag cosmetic.
+
+**Always the host workdir's file, never the in-sandbox copy.** A successful comparison *rewrites the
+consent record*, so reading an agent-writable file would give the agent write influence over a
+yoloAI-managed file. Under a `:copy` workdir the agent's edits are not a request until applied.
+
+**Why re-reading the repo every launch is still safe:** the comparison is default-deny on additions
+only, so the worst an agent achieves by editing `devcontainer.json` is stopping its own sandbox from
+starting. It can never grant itself anything.
+
 ## Order of work
 
 1. **Collect instead of apply.** During archetype expansion, gather boundary-widening requests into
@@ -80,6 +109,11 @@ last week. Unpersistable now is free; retrofitting it after a config depends on 
 4. **Delete `FilterMounts` and `dangerousRunArgCaps`.** The refusal needs to know only *that* a
    request exists, never whether it is on a list. Deleting them is what stops the two mechanisms
    from drifting apart, and it is why this is a simplification rather than an addition.
+5. **Write the consent copy at create**, into the sandbox's yoloAI-managed directory, verbatim.
+6. **Compare at every launch**, in the start/restart path, against the host workdir's current file;
+   overwrite the copy on any non-increasing change, balk on any increase. Stop `buildEnvironment`
+   (`create.go:723`) persisting repo-derived `Mounts`/`Ports`/`CapAdd`/`Resources`, and re-derive
+   them from the copy instead.
 
 ## Tests (rule 10)
 
@@ -96,6 +130,14 @@ devcontainer fixtures in `archetype_resolution_test.go` are the model.
   test that fails if someone later moves lifecycle commands to the refused side without a decision.
 - with the flag set → all of the above are granted
 - the flag does not survive into `environment.json`
+- **relaunch after a cosmetic edit** (reformatted JSON, changed `postCreateCommand`) → no balk, and
+  the consent copy now matches the repo's file
+- **relaunch after adding a mount** → balks, naming only the new mount
+- **allow, remove, re-add** → the re-add balks. The test that pins "consent does not accumulate";
+  an implementation keeping an approval log rather than a single baseline passes the other two.
+- **relaunch after the agent edits the in-sandbox copy** of `devcontainer.json` → no balk and no
+  change to the consent record, because only the host file is read
+- **an existing sandbox with no consent copy** → balks rather than being grandfathered
 
 ## Open
 
