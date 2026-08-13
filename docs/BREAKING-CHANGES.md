@@ -88,6 +88,28 @@ on-disk credentials into the sandbox — is now served by four other, machine-co
 that never touched this key: `/run/secrets`, the home-seed mounts, `agent_files`, and macOS
 Keychain/credential brokering.
 
+### A profile no longer inherits any setting from `~/.yoloai/defaults/config.yaml`
+
+**Previous behavior:** when `yoloai new --profile <name>` was used, the profile chain was merged
+over the *user's personal* `~/.yoloai/defaults/config.yaml`, not over yoloAI's baked-in defaults.
+So a profile silently inherited whatever the personal file set for any field the profile itself
+didn't override: `env`, `agent_args`, `agent_files`, `cap_add`, `devices`, `setup`,
+`auto_commit_interval`, `isolation`, `network.allow` (the egress allowlist), `resources`, `ports`,
+`agent`, `model`, `os`, `container_backend`, and `tart_image`. This contradicted
+`docs/contributors/design/config.md`'s documented guarantee that profiles are self-contained and
+that personal defaults "do not carry into profiles — no exceptions."
+
+**New behavior:** a profile merges over yoloAI's baked-in defaults only. None of the fields above
+carry over from `~/.yoloai/defaults/config.yaml` when `--profile` is used. If a profile needs a
+personal `env` var, capability, device, isolation mode, or egress-allowlist entry, it must set
+that value in the profile's own `config.yaml` — that is where `config.md` always said it
+belonged.
+
+**Why it changed:** [DF207](contributors/design/findings-resolved.md). The code passed the
+loaded personal config as the profile merge's base instead of the baked-in defaults; the fix
+makes the code match the documented guarantee. The leak was config-wide, not limited to a
+handful of keys.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running

@@ -62,7 +62,17 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 	if err != nil {
 		return nil, err
 	}
-	merged, err := config.MergeProfileChain(d.Layout, ycfg, chain)
+	// A profile is self-contained (config.md: "Profiles are self-contained
+	// ... Personal defaults do not carry into profiles — no exceptions").
+	// The merge base is therefore the baked-in defaults, never the user's
+	// defaults/config.yaml — that would carry personal env, cap_add,
+	// isolation, network.allow, and everything else in ycfg into a profile
+	// that is supposed to behave identically for everyone (DF207).
+	bakedIn, err := config.LoadBakedInDefaults()
+	if err != nil {
+		return nil, fmt.Errorf("load baked-in defaults: %w", err)
+	}
+	merged, err := config.MergeProfileChain(d.Layout, bakedIn, chain)
 	if err != nil {
 		return nil, fmt.Errorf("merge profile chain: %w", err)
 	}

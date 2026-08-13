@@ -80,7 +80,7 @@ finding or decision first, and lands here only if it should block the release.
 - [DF201](design/findings-unresolved.md) — `agent_files` list form copies credentials the string form strips
 - [DF202](design/findings-unresolved.md) — a file-defined agent can make yoloAI read arbitrary vars from its own environment
 - [DF206](design/findings-unresolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly
-- [DF207](design/findings-unresolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee
+- [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
 
 ## Candidates — undecided
 
