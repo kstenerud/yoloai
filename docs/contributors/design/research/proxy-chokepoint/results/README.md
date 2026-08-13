@@ -15,6 +15,13 @@ because a contradicting one makes you look.
 
 Aggregates are a `grep -c`, computed on demand. Nothing here stores a total.
 
+**Harness provenance: every run here is `research_harness_v2`**, and from the stamp onward each
+report says so in its own header. What that guarantees, and what it does not, is
+[`procedures/verification-rounds.md`](../../../../procedures/verification-rounds.md) § *Which
+harness produced a result* — check it before relying on any of these, because v2 guarantees the
+probe could report failure and guarantees nothing about whether the arms were separable. Two runs
+in this very directory were lost to exactly that gap (P8 runs 1 and 2).
+
 | Run | Verdict | File |
 | --- | --- | --- |
 | P1 — agent traffic census | **RECORD** (run 3) | [`p1-agent-traffic-census.txt`](p1-agent-traffic-census.txt) |

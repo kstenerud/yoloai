@@ -273,6 +273,27 @@ def test_version_is_pinned() -> None:
     assert HARNESS_VERSION == 2
 
 
+def test_report_stamps_its_own_harness_version() -> None:
+    """A raw results file must carry its own provenance.
+
+    Results land in `results/*.txt` as plain text and outlive the script that made
+    them. Without a stamp a reader cannot tell a v1 run from a v2 run, and the two
+    guarantee different things — v1 permits an expectation resting on a probe never
+    shown to report failure, which is the free-negative class.
+    """
+    h = Harness("stamp", "does the report name its harness?")
+    state = {"on": False}
+    probe = h.probe("p", lambda: state["on"])
+    probe.baseline(want=False)
+    state["on"] = True
+    h.expect("it holds", probe.sample("after"), want=True)
+    h.not_tried("everything else")
+    out = io.StringIO()
+    assert h.report(out=out)
+    assert "[harness v2]" in out.getvalue()
+    assert "baselined with the mechanism absent" in out.getvalue()
+
+
 def test_a_false_baseline_does_not_void_the_run() -> None:
     """V1's shape: 'nothing has touched our table yet, so silence is the floor'.
 
