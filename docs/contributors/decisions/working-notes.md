@@ -2040,7 +2040,7 @@ So the axis is no longer "how strong is the filter" but **where the machinery si
 - **Mounts:** `FilterMounts` stripped the docker socket, credential dirs and workdir collisions, then granted the rest. Now the presence of any mount is refused.
 - **`forwardPorts`:** granted silently. Now refused.
 
-All three are the silent degradation [D138](#d138--an-undeliverable-mode-is-refused-not-degraded) retired, surviving in a corner that decision did not sweep.
+All three are the silent degradation [D138](#d138--automatic-degradation-is-retired-a-network-mode-the-backend-cannot-deliver-is-refused) retired, surviving in a corner that decision did not sweep.
 
 **One flag, not per-category, and the reason is that the refusal message *is* the granularity.** The user sees every unsafe request enumerated before deciding, so an all-or-nothing accept is already an informed one. Per-category flags would be real CLI surface bought for a distinction the list already draws. Named for its consequence rather than as a generic override (the `AbandonUnappliedWork` convention): the flag says the repo may widen the sandbox boundary.
 
@@ -2059,3 +2059,28 @@ All three are the silent degradation [D138](#d138--an-undeliverable-mode-is-refu
 - `dangerousRunArgCaps` and `FilterMounts` are deleted rather than rewired — the refusal needs to know only *that* a request exists, never whether it is on a list.
 - The refusal must land before any destructive or expensive step in `prepareSandboxState`, for the same reason the mode-capability validation does: `--replace` tears down an existing sandbox, and Phase 2 copies the whole workdir.
 - Plan: [`repo-request-trust.md`](../design/plans/repo-request-trust.md).
+
+---
+
+## D142 — The `mounts:` config/profile key is retired; `directories:` is its strict superset
+
+**Date:** 2026-08-13. **Status:** Active. **Closes an Open question from [D141](#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed)'s plan, [`repo-request-trust.md`](../design/plans/repo-request-trust.md).** **Consumers:** `internal/config/`, `internal/orchestrator/create/`, `internal/cli/profile/`, `profile_config.go`.
+
+**Decision. The `mounts:` key is removed from both the base config (`~/.yoloai/defaults/config.yaml`) and profile `config.yaml`, along with its public-API mirror `ResolvedProfileConfig.Mounts`. A file that still sets it fails to load with an error naming `directories:` and showing the conversion, rather than silently dropping the mount.** `devcontainer.json`'s own `mounts:` is untouched by this decision — it is a different key, on a different (repo-supplied, untrusted) input, and stays governed by D141.
+
+**Why `directories:` fully subsumes `mounts:`.** `config.ProfileDir{Path, Mode, Mount}` carries a custom container mount point and the `ro`/`rw`/`copy` tiers — everything `mounts:`'s `host:container[:ro]` syntax could express — and additionally flows through every aux-dir guard `prependProfileDirs` wires into `opts.AuxDirs`: dangerous-path refusal, path-overlap detection, duplicate-container-path detection, and the dirty-repo gate. `mounts:`'s own parser (`validateAndExpandMounts`) only checked that the string parsed. **The one thing `mounts:` did that `directories:` does not is skip those checks — that is a defect, not a capability**, and it is not a reason to keep a second mechanism alive.
+
+**Why now, and why the credential-delivery angle matters.** `mounts:`'s original purpose — getting on-disk credentials (SSH keys, `.gitconfig`, cloud CLI config) into the sandbox — is now served by four mechanisms that never touch this key: `/run/secrets` (env-var-sourced secrets), the home-seed mounts (`internal/orchestrator/mounts/mounts.go`, which copy to a staging dir and mount the copy rather than bind-mounting the original), `agent_files`, and macOS Keychain/credential brokering. Every one of them is machine-computed from a narrower, purpose-built input, not a raw host-path string a user hand-writes. `mounts:` had stopped being anyone's only route to anything.
+
+**`directories:` is no longer profile-only — the base config gains it too, as part of this same change, additive rather than breaking.** `config.YoloaiConfig` gets a `Directories []ProfileDir` field, parsed the same way and applied through the same `prependProfileDirs` path a profile uses, so a base-config directory gets identical expansion and identical guards. Pointing the rejection error at a key the offending file could not hold would have been a poor remedy for a removal this decision was already making — better to close that gap than document it. This is what makes the swap clean: every file that could set `mounts:` can set `directories:` in its place, with no capability lost and no asymmetric caveat in the error message.
+
+**Rejected.**
+1. **Keep `mounts:`, but route it through the aux-dir guards.** This is `directories:` with a second spelling — it does not add expressiveness, only a second parser and a second merge path to keep in sync forever.
+2. **Leave `mounts:` as-is and document it properly.** The key has one line of user documentation and no example anywhere (`docs/GUIDE.md:681`, before this change), so under-documentation was never really the defect — the missing guards were. Two mechanisms for one job is exactly what GEN §18 asks to be named before a fix is built, and naming it here is what settles it: `directories:` already solves this, elegantly, on a sibling path.
+3. **Give the base config `directories:` as a follow-up, after shipping the removal with the asymmetric error.** Rejected once raised: `release-v0.12.0` is already a migration-bearing breaking release branch, so there is no schema or caution cost to fold the addition into the same commit, and shipping the removal first would mean shipping a known-poor error message on purpose.
+
+**Consequences.**
+- **Breaking (rule 1):** `docs/BREAKING-CHANGES.md` entry under `## Unreleased`, covering both the config/profile key and the `ResolvedProfileConfig.Mounts` public-API removal, with the conversion shown. The base config gaining `directories:` is additive and carries no entry of its own.
+- **The rejecting reader is a deprecation** (D127): it exists only so a config file written before this decision gets a clear, actionable error instead of a silently-ignored key. Registered in [deprecations.md](../deprecations.md), `Incurred: 2026-08-13`, 12-month user-facing grace period (it waits on people editing config files they forgot they wrote).
+- `store.Environment`'s persisted `mounts` key and `yoloai.Environment.Mounts` are unrelated to this decision and are untouched — they carry devcontainer-derived mounts only, and renaming them would need a schema migration this decision does not incur. The Go field name carrying them on `state.State` is **not** persisted, though, so it is renamed `ConfigMounts` → `ExtraMounts` in the same commit — nothing from config reaches it any more, only devcontainer.json.
+- `pr.mounts` (`internal/orchestrator/create`) keeps its name and type; after this change it starts empty for every sandbox and is populated only by `mergeDcMounts` from devcontainer.json, per D141.

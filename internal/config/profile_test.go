@@ -180,6 +180,25 @@ directories:
 	}
 }
 
+// TestLoadProfile_MountsKeyRejected pins D142: a profile that still sets the
+// retired mounts: key must fail to load, naming directories: as the
+// replacement, rather than silently dropping the mount.
+func TestLoadProfile_MountsKeyRejected(t *testing.T) {
+	yaml := `
+mounts:
+  - /opt/tc:/opt/tc:ro
+`
+	_, layout := setupProfileDir(t, "mounts-profile", yaml)
+
+	_, err := LoadProfile(layout, "mounts-profile")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "directories:") {
+		t.Errorf("error = %q, want it to name directories:", err.Error())
+	}
+}
+
 func TestLoadProfile_TartImage(t *testing.T) {
 	yaml := `
 tart:

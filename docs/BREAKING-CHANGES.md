@@ -56,6 +56,38 @@ devcontainer.json's `mounts:` (filtered). There is no `--mount` command-line fla
 strictly-worse unfiltered duplicate of a devcontainer.json capability, and the third duplicated
 `--archetype`. A repo may describe what it is; it may not requisition what it gets.
 
+### The `mounts:` config/profile key is removed
+
+**Previous behavior:** the base config (`~/.yoloai/defaults/config.yaml`) and a profile's
+`config.yaml` could set `mounts:`, a list of raw `host:container[:ro]` bind-mount strings applied
+at container run time. The public API mirrored this as `ResolvedProfileConfig.Mounts`
+(`profile_config.go`) on the read model returned by `ProfileAdmin.Info()`.
+
+**New behavior:** `mounts:` is no longer read from either file. If a base config or profile still
+sets it, loading fails with an error naming the replacement and showing the conversion, rather
+than silently dropping the host access the entry granted:
+
+```
+mounts: ["/opt/tc:/opt/tc:ro"]   -> directories: [{path: /opt/tc, mode: ro}]
+mounts: ["/data:/mnt/data"]      -> directories: [{path: /data, mount: /mnt/data}]
+```
+
+`directories:` now works in **both** files — the base config (`~/.yoloai/defaults/config.yaml`)
+gains it in this same change, so every file that could set `mounts:` can set `directories:` in
+its place; the conversion above applies identically in either. `ResolvedProfileConfig.Mounts` is
+removed from the public API; `yoloai profile info` (both text and `--json` output) no longer
+shows a `Mounts` field. `devcontainer.json`'s own `mounts:` is unaffected — it still flows
+through and is unrelated to this key (D141).
+
+**Why it changed:** D142. `directories:` is a strict superset of what `mounts:` could do — the
+same host-path expressiveness plus mount-mode tiers plus every aux-dir safety guard
+(dangerous-path refusal, path-overlap detection, duplicate-container-path detection, the
+dirty-repo gate) that `mounts:` never had. The one thing `mounts:` did that `directories:` does
+not is skip those checks, which is a defect, not a capability. Its original purpose — getting
+on-disk credentials into the sandbox — is now served by four other, machine-computed mechanisms
+that never touched this key: `/run/secrets`, the home-seed mounts, `agent_files`, and macOS
+Keychain/credential brokering.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running

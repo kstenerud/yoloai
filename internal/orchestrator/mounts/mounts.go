@@ -290,12 +290,13 @@ func buildGitAndTmuxMounts(st *state.State) []runtime.MountSpec {
 	return mounts
 }
 
-// buildConfigAndSecretsMounts returns mount specs for config/profile mounts and secrets.
+// buildConfigAndSecretsMounts returns mount specs for devcontainer-derived
+// extra mounts and secrets.
 func buildConfigAndSecretsMounts(st *state.State, secretsDir string) []runtime.MountSpec {
 	var mounts []runtime.MountSpec
 
-	// Config/profile mounts (host:container[:ro])
-	for _, m := range st.ConfigMounts {
+	// Devcontainer-derived extra mounts (host:container[:ro])
+	for _, m := range st.ExtraMounts {
 		spec, err := ParseConfigMount(m, st.HomeDir, st.Layout.Env().EnvForConfigInterpolation())
 		if err != nil {
 			continue // skip unparseable mounts (validated at creation time)

@@ -76,6 +76,7 @@ finding or decision first, and lands here only if it should block the release.
 - [D140](decisions/working-notes.md#d140--yoloaiyaml-project-config-is-removed-entirely) — `.yoloai.yaml` project config is removed entirely
 - [D141](decisions/working-notes.md#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed) — A repo may not widen the sandbox boundary; requests that would are refused and listed
 - [repo-request-trust.md](design/plans/repo-request-trust.md) — Repo-request trust — balk and list, never filter and proceed
+- [D142](decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset) — The `mounts:` config/profile key is retired; `directories:` is its strict superset
 
 ## Candidates — undecided
 

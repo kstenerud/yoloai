@@ -306,7 +306,7 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		return nil, err
 	}
 
-	if err := applyConfigDefaults(opts, ycfg, pr); err != nil {
+	if err := applyConfigDefaults(opts, ycfg, pr, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation()); err != nil {
 		return nil, err
 	}
 
@@ -409,7 +409,7 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		NetworkMode:               networkMode,
 		NetworkAllow:              networkAllow,
 		Ports:                     opts.Ports,
-		ConfigMounts:              ri.mergedMounts,
+		ExtraMounts:               ri.mergedMounts,
 		TmuxConf:                  tmuxConf,
 		Resources:                 pr.resources,
 		CapAdd:                    pr.capAdd,

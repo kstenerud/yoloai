@@ -107,11 +107,9 @@ devcontainer fixtures in `archetype_resolution_test.go` are the model.
 - **`--cpus`/`--memory` are on the allowed side** on the grounds that they limit rather than grant.
   A repo asking for more memory than the host has turns into a create failure rather than an
   escalation — worth a transparency bullet, not a refusal.
-- **The `mounts:` config key** is a separate open question: it is fully subsumed by profile
-  `directories:` (`ProfileDir{Path, Mode, Mount}` → `opts.AuxDirs`, with every guard), and its
-  original purpose — getting on-disk credentials into the sandbox — is now served by `/run/secrets`,
-  the home-seed mounts (`mounts.go:147-183`, which copy to a staging dir and mount the copy),
-  `agent_files`, the Keychain, and brokering. None of them touch the key.
+- **The `mounts:` config key** — retired by [D142](../../decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset):
+  it was fully subsumed by `directories:` (now available in both the base config and profiles),
+  so the question this bullet used to hold is settled.
 
 ## Surfaces to sweep (rule 2)
 

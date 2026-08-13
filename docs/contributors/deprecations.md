@@ -262,6 +262,24 @@ installs did not actually work, which is evidence about how much it was exercise
   for if the trigger never fires.
 - **Pointer:** `internal/orchestrator/create/prepare_archetype.go` (`warnIfYoloAIYamlPresent`)
 
+### `mounts:` rejecting reader for the base config and profiles
+
+- **Incurred:** 2026-08-13 · **Shipped:** (pending) · **Due:** 2027-08-13 (user-facing, 12mo)
+- **What:** `checkMountsKeyRemoved` (`internal/config/config.go`) scans a base config or profile
+  document for a top-level `mounts:` key and, if present, fails to load with an error naming
+  `directories:` and showing the conversion, rather than silently dropping the key — D142 retired
+  `mounts:` because `directories:` is a strict superset (same expressiveness plus tiers plus every
+  aux-dir safety guard), but a config file written before this decision still has `mounts:` in it,
+  and dropping it silently would remove host access the user still expects (the degradation D138
+  retired). This is a **user-facing** grace period, not internal: it waits on people editing
+  config files they wrote once and may not touch again for a long time, and they only learn at the
+  next `yoloai new`/`run`/`build`, which may be rare.
+- **Retire by:** deleting `checkMountsKeyRemoved`, its call sites in `parseYAMLRoot` and
+  `LoadProfile`, and `errMountsKeyRemoved` — the key becomes a plain unknown field, caught by the
+  existing "unknown config field(s)" validation instead of a dedicated message.
+- **Pointer:** `internal/config/config.go` (`checkMountsKeyRemoved`, `errMountsKeyRemoved`);
+  `internal/config/profile.go` (`LoadProfile`); D142.
+
 ## Not deprecations
 
 Recorded so they are not re-filed. Each looks like a compatibility shim and is not:

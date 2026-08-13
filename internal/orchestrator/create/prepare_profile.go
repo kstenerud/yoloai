@@ -148,7 +148,6 @@ func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged
 		opts.NetworkAllow = append(merged.Network.Allow, opts.NetworkAllow...)
 	}
 
-	pr.mounts = merged.Mounts
 	pr.capAdd = merged.CapAdd
 	pr.devices = merged.Devices
 	pr.setup = merged.Setup
@@ -180,21 +179,24 @@ func prependProfileDirs(opts *Options, profileDirs []config.ProfileDir, homeDir 
 }
 
 // applyConfigDefaults fills in values from base config when the profile didn't
-// set them, and applies CLI overrides for resources.
-func applyConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profileResult) error {
+// set them, and applies CLI overrides for resources. homeDir and env are used
+// for ~ and ${VAR} expansion in base-config directories: paths; pass
+// layout.HomeDir and layout.Env().EnvForConfigInterpolation().
+func applyConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profileResult, homeDir string, env map[string]string) error {
 	if opts.Profile == "" {
-		applyBaseConfigDefaults(opts, ycfg, pr)
+		if err := applyBaseConfigDefaults(opts, ycfg, pr, homeDir, env); err != nil {
+			return err
+		}
 	}
 	applyBaseResourceDefaults(ycfg, pr)
 	return applyCLIOverrides(opts, pr)
 }
 
-// applyBaseConfigDefaults applies mounts, ports, caps, and network from base
-// config when no profile is active.
-func applyBaseConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profileResult) {
-	if len(ycfg.Mounts) > 0 {
-		pr.mounts = ycfg.Mounts
-	}
+// applyBaseConfigDefaults applies ports, caps, network, and directories from
+// base config when no profile is active. Base-config directories get the
+// same expansion and prepend-before-CLI-dirs treatment as a profile's
+// directories: (D142) — prependProfileDirs is the shared path.
+func applyBaseConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profileResult, homeDir string, env map[string]string) error {
 	if len(ycfg.Ports) > 0 {
 		opts.Ports = append(ycfg.Ports, opts.Ports...)
 	}
@@ -209,6 +211,8 @@ func applyBaseConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profi
 		}
 		opts.NetworkAllow = append(ycfg.Network.Allow, opts.NetworkAllow...)
 	}
+
+	return prependProfileDirs(opts, ycfg.Directories, homeDir, env)
 }
 
 // applyBaseResourceDefaults applies resource limits from base config when the

@@ -678,7 +678,7 @@ yoloai config reset env.OLLAMA_API_BASE
 | `network.isolated` | `false` | Enable network isolation by default |
 | `network.allow` | (empty) | Additional domains to allow (additive with agent defaults) |
 | `auto_commit_interval` | `0` | Auto-commit interval in seconds (0 = disabled) |
-| `mounts` | (empty) | Additional bind mounts (list of `host:container` paths) |
+| `directories` | (empty) | Auxiliary host directories to mount (list of `{path, mode, mount}`) |
 | `ports` | (empty) | Port mappings (list of `host:container` ports) |
 | `cap_add` | (empty) | Additional Linux capabilities (list, e.g. `SYS_PTRACE`) |
 | `devices` | (empty) | Device mappings (list of `/dev/` paths) |

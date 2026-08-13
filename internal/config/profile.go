@@ -58,7 +58,6 @@ type MergedConfig struct {
 	Directories        []ProfileDir      `json:"directories,omitempty"`          // additive across chain
 	Resources          *ResourceLimits   `json:"resources,omitempty"`            // from per-field merge across chain
 	Network            *NetworkConfig    `json:"network,omitempty"`              // isolated overrides (last wins), allow additive
-	Mounts             []string          `json:"mounts,omitempty"`               // additive across chain (host:container[:ro])
 	AgentArgs          map[string]string `json:"agent_args,omitempty"`           // merged across chain (map merge, later wins)
 	AgentFiles         *AgentFilesConfig `json:"agent_files,omitempty"`          // replacement semantics (child replaces parent)
 	CapAdd             []string          `json:"cap_add,omitempty"`              // additive across chain (Docker only)
@@ -175,31 +174,11 @@ func handleProfileWorkdir(cfg *ProfileConfig, val *yaml.Node, env map[string]str
 }
 
 func handleProfileDirectories(cfg *ProfileConfig, val *yaml.Node, env map[string]string) error {
-	if val.Kind != yaml.SequenceNode {
-		return nil
+	dirs, err := parseDirectoriesNode(val, env)
+	if err != nil {
+		return err
 	}
-	for _, item := range val.Content {
-		if item.Kind != yaml.MappingNode {
-			continue
-		}
-		d := ProfileDir{}
-		for k := 0; k < len(item.Content)-1; k += 2 {
-			dKey := item.Content[k].Value
-			expanded, err := expandEnvBraced(item.Content[k+1].Value, env)
-			if err != nil {
-				return fmt.Errorf("directories[].%s: %w", dKey, err)
-			}
-			switch dKey {
-			case "path":
-				d.Path = expanded
-			case "mode":
-				d.Mode = expanded
-			case "mount":
-				d.Mount = expanded
-			}
-		}
-		cfg.Directories = append(cfg.Directories, d)
-	}
+	cfg.Directories = append(cfg.Directories, dirs...)
 	return nil
 }
 
@@ -236,6 +215,9 @@ func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	root := doc.Content[0]
 	if root.Kind != yaml.MappingNode {
 		return cfg, nil
+	}
+	if err := checkMountsKeyRemoved(root); err != nil {
+		return nil, fmt.Errorf("config.yaml for %q: %w", name, err)
 	}
 
 	interpEnv := layout.Env().EnvForConfigInterpolation()
@@ -421,10 +403,6 @@ func mergedConfigFromBase(base *YoloaiConfig) *MergedConfig {
 			copy(merged.Network.Allow, base.Network.Allow)
 		}
 	}
-	if len(base.Mounts) > 0 {
-		merged.Mounts = make([]string, len(base.Mounts))
-		copy(merged.Mounts, base.Mounts)
-	}
 	if len(base.Ports) > 0 {
 		merged.Ports = make([]string, len(base.Ports))
 		copy(merged.Ports, base.Ports)
@@ -470,7 +448,6 @@ func applyProfileToMerged(merged *MergedConfig, profile *ProfileConfig) {
 
 	// Additive fields
 	merged.Ports = append(merged.Ports, profile.Ports...)
-	merged.Mounts = append(merged.Mounts, profile.Mounts...)
 	merged.CapAdd = append(merged.CapAdd, profile.CapAdd...)
 	merged.Devices = append(merged.Devices, profile.Devices...)
 	merged.Setup = append(merged.Setup, profile.Setup...)

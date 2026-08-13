@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -199,6 +200,30 @@ func TestResolveArchetype_DevcontainerDockerComposeFileErrors(t *testing.T) {
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "Compose devcontainers are not supported")
+}
+
+// TestResolveProfileAndArchetype_DevcontainerMountsStillWork is the D142
+// regression guard: removing the config/profile mounts: key must not touch
+// devcontainer.json's own mounts:, which stays governed by D141 and flows
+// through the full pipeline (resolveProfileAndArchetype, not just the lower
+// archetype-resolution step) into the merged mount list.
+func TestResolveProfileAndArchetype_DevcontainerMountsStillWork(t *testing.T) {
+	dir := makeWorkdir(t)
+	safePath := t.TempDir()
+	dcContent := fmt.Sprintf(`{"mounts": ["%s:/container/safe:ro"]}`, safePath)
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
+
+	d := newTestDeps(t)
+	opts := &Options{Workdir: DirSpec{Path: dir}}
+	var agentDef *agent.Definition
+	ycfg := &config.YoloaiConfig{}
+	gcfg := &config.GlobalConfig{}
+
+	ri, err := resolveProfileAndArchetype(context.Background(), d, opts, agentDef, ycfg, gcfg)
+	require.NoError(t, err)
+	require.Len(t, ri.mergedMounts, 1)
+	assert.Contains(t, ri.mergedMounts[0], safePath)
+	assert.Contains(t, ri.mergedMounts[0], "/container/safe:ro")
 }
 
 func TestResolveArchetype_DevcontainerFiltersMounts(t *testing.T) {

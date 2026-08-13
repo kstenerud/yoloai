@@ -56,7 +56,7 @@ network:
   # Additional domains to allow when isolation is active (additive with agent defaults).
   allow: []
 
-# --- Files and mounts ---
+# --- Files ---
 
 # Files copied into the sandbox's agent-state directory on first run.
 # String form: base directory (agent subdir appended), e.g. "${HOME}"
@@ -65,10 +65,13 @@ network:
 # WARNING: ${HOME} and other env vars are expanded at runtime — values differ per machine.
 # agent_files: ""
 
-# Extra bind mounts added at container run time.
-# Format: host-path:container-path[:ro]
-# WARNING: paths are machine-specific. Personal mounts belong in defaults/, not profiles.
-mounts: []
+# Auxiliary directories mounted into the sandbox. Same shape as a profile's
+# directories: — path (host), mode (rw, copy, or omit for read-only), and an
+# optional custom container mount point.
+# WARNING: paths are machine-specific. Personal directories belong in defaults/, not profiles.
+# directories:
+#   - path: ~/.ssh
+#     mode: ro
 
 # --- Ports and resources ---
 

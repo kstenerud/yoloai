@@ -202,7 +202,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		NetworkMode:  np.Mode,
 		NetworkAllow: np.Allow,
 		Ports:        meta.Ports,
-		ConfigMounts: meta.Mounts,
+		ExtraMounts:  meta.Mounts,
 		TmuxConf:     cfgJSON.TmuxConf,
 		Resources:    meta.Resources,
 		CapAdd:       meta.CapAdd,

@@ -52,7 +52,7 @@ type State struct {
 	NetworkMode       string
 	NetworkAllow      []string
 	Ports             []string
-	ConfigMounts      []string // extra bind mounts from config/profile (host:container[:ro])
+	ExtraMounts       []string // devcontainer-derived bind mounts (host:container[:ro]); config/profile mounts: retired (D142), governed by D141 now
 	TmuxConf          string
 	Resources         *config.ResourceLimits
 	CapAdd            []string              // Linux capabilities from config/profile
