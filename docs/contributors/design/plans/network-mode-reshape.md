@@ -7,7 +7,7 @@
 - **Status:** PLANNED — designed, no code.
 - **Depends on:** egress-proxy-build.md
 
-  Only step 5 needs it — steps 1–4 depend on nothing.
+  Only step 4 needs it — steps 1–3 depend on nothing.
 - **Rides:** **a migration.** See § *Why this is migration-bearing* — a released binary reading a
   `restricted` record does not error, it silently produces an unisolated sandbox. Per rule 12 /
   [D131](../../decisions/working-notes.md) the work goes to `release-v0.12.0` and **not to `main`**.
@@ -119,19 +119,46 @@ rule 9 deprecation entry — and rule 12: **`release-v0.12.0`, not `main`.**
 Each refusal is newly-rejected input: a `BREAKING-CHANGES.md` entry and a test that goes red on
 revert (rule 10).
 
-**Where the checks belong: below the CLI.** Every refusal has at least three doors — the flag, a
-profile, and the library API — and `netpolicy.Compose` (single call site, `prepare_dirs.go:342`) is
-downstream of all of them. The existing `--port`-under-`none` check is the counter-example to copy
-*away* from: `new.go:207` reads the flag only, so profile- and archetype-supplied ports slip past
-([DF197](../findings-unresolved.md)). The runtime path already gets this right — `Network.Allow`
-refuses on a `none` sandbox — and creation is the one entry point that does not.
+**These are not per-flag guards. They are one validation the product does not have.**
+
+The tempting fix is a check per flag, and it is wrong twice over. It would be the fourth mechanism
+for one job (GEN §18), and it would sit in the layer that the door most worth defending does not
+pass through: **the library**. `Client.CreateSandbox` → `SandboxCreateOptions.toInternal()` →
+`Engine.Create` never enters `internal/cli`, and `toInternal` is a pure field copy — it carries
+`Network`, `NetworkAllow` and `Ports` across verbatim (`sandbox_options.go:165-167`) and nothing
+validates any of them afterwards. So an integrator can ask for `none` with an allowlist and ports
+today and be told nothing. A profile is a third door, and archetypes a fourth for ports.
+
+**The resolved mode and the fully-merged request coexist at exactly one point**, and that is where
+the check goes: inside `create.Create`, after Phase 1 has merged profile and archetype ports into
+`opts.Ports` (`prepare_profile.go:141`, `:199`, `prepare_archetype.go:283`) and after Phase 3's
+`buildConfigAndEnvironment` has resolved the mode. One function — *does this configuration fit this
+mode?* — answers every row of both tables above, from every door, and extends to `restricted`'s
+balk list without new machinery.
+
+`netpolicy.Compose` still gets the allowlist half: it has one call site (`prepare_dirs.go:342`),
+downstream of all doors, and refusing there means the discard cannot happen even if the outer check
+is bypassed. But `Compose` sees only a mode and two domain lists — not ports, not the agent, not the
+broker — so it was never going to be the whole answer, and an earlier draft of this plan said it
+was.
+
+The runtime path is the model to copy: `Network.Allow` → `requireIsolated` refuses on a `none`
+sandbox regardless of how the request arrived, because it validates against the **stored mode**
+rather than against the flag that produced it. The existing `--port` check is the counter-example —
+`new.go:207` reads `cmd.Flags().GetStringSlice("port")`, so every non-flag door slips past
+([DF197](../findings-unresolved.md)).
 
 **One correction to an earlier draft, because it changes what the argument rests on:** a profile has
 no mode key at all. `config.NetworkConfig` is `Isolated bool` + `Allow []string`, so a profile can
-supply the allowlist half but never `none`. The conclusion survives — all doors still converge on
-`Compose` — but four modes mean a **new config key**, which is a rule-1 rename carrying a 12-month
-user-facing deprecation, a real parser (`handleYoloaiNetwork` validates nothing today), and edits to
-the shipped default config and the profile scaffold.
+supply the allowlist half but never `none`. The conclusion survives — but four modes mean a **new
+config key**, which is a rule-1 rename carrying a 12-month user-facing deprecation, a real parser
+(`handleYoloaiNetwork` validates nothing today), and edits to the shipped default config and the
+profile scaffold.
+
+**MCP reaches none of this.** No tool accepts a network mode or ports (`internal/mcpsrv/tools.go`),
+and `sandbox_status` drops `network_mode`. Not a hole today — an MCP caller cannot request a mode it
+cannot express — but it means the four-mode story does not reach that surface, and `restricted` will
+be unrequestable there until it does.
 
 ## What must be verified before this ships
 
@@ -164,15 +191,17 @@ does not exist (`runtime.go:284` carries only `NetworkIsolation bool`).
 
 ## Order of work
 
-1. **`Compose` refuses what a mode cannot honour** — allowlist under `none`, real agent under
-   `none`. Fixes a live defect ([DF196](../findings-unresolved.md)); needs nothing else.
-2. **Move `--port`'s refusal below the CLI** ([DF197](../findings-unresolved.md)) — same shape, same
-   layer, second instance of the class, so fix them together (GEN §18).
-3. **Correct the `none` claims in shipped help and `netpolicy.md`** ([DF198](../findings-unresolved.md)),
-   then fix or refuse `none` per backend.
-4. **`--network=` enum**, booleans as deprecated aliases, both registered in `deprecations.md` with
+1. **One mode-capability validation in `create.Create`**, covering allowlist, ports, agent and
+   broker in a single pass, plus `Compose` refusing the allowlist half at its own layer. Closes
+   [DF196](../findings-unresolved.md) and [DF197](../findings-unresolved.md) together — they are two
+   symptoms of this step being absent, so fixing them separately would build the mechanism twice.
+   Needs nothing else, and the test that matters covers the **library** door.
+2. **Correct the `none` claims in shipped help and `netpolicy.md`** ([DF198](../findings-unresolved.md)),
+   then fix or refuse `none` per backend. The text has to be rewritten for the new modes anyway, so
+   it lands with them rather than ahead of them.
+3. **`--network=` enum**, booleans as deprecated aliases, both registered in `deprecations.md` with
    the date incurred (rule 9). Carries the schema bump and the migrator.
-5. **`restricted` becomes selectable** once `egress-proxy-build.md` has something behind it. Until
+4. **`restricted` becomes selectable** once `egress-proxy-build.md` has something behind it. Until
    then the value does not exist, rather than existing and degrading — which D138 retires.
 
 ## Surfaces to sweep (rule 2)
