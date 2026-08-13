@@ -129,18 +129,40 @@ pass through: **the library**. `Client.CreateSandbox` → `SandboxCreateOptions.
 validates any of them afterwards. So an integrator can ask for `none` with an allowlist and ports
 today and be told nothing. A profile is a third door, and archetypes a fourth for ports.
 
-**The resolved mode and the fully-merged request coexist at exactly one point**, and that is where
-the check goes: inside `create.Create`, after Phase 1 has merged profile and archetype ports into
-`opts.Ports` (`prepare_profile.go:141`, `:199`, `prepare_archetype.go:283`) and after Phase 3's
-`buildConfigAndEnvironment` has resolved the mode. One function — *does this configuration fit this
-mode?* — answers every row of both tables above, from every door, and extends to `restricted`'s
-balk list without new machinery.
+**Where it goes, and it is earlier than it looks.** Everything the check needs — `opts.Network`,
+`opts.NetworkAllow`, `opts.Ports`, `opts.Agent` — is **final at the end of Phase 1**
+(`resolveProfileAndArchetype`, `create.go:237`); the last writes are `prepare_profile.go:141`,
+`:199`, `:146`, `:208`, `:99` and `prepare_archetype.go:283`, and nothing writes them afterwards.
+`buildNetworkConfig` (`prepare_dirs.go:341`) is a pure function of those, so the resolved mode is
+available immediately.
 
-`netpolicy.Compose` still gets the allowlist half: it has one call site (`prepare_dirs.go:342`),
-downstream of all doors, and refusing there means the discard cannot happen even if the outer check
-is bypassed. But `Compose` sees only a mode and two domain lists — not ports, not the agent, not the
-broker — so it was never going to be the whole answer, and an earlier draft of this plan said it
-was.
+**So the check goes right after `create.go:240` — before `replaceSandboxIfNeeded`.** That ordering
+is not cosmetic: `replaceSandboxIfNeeded` (`:242`) calls `launch.Teardown` and **destroys the user's
+existing sandbox**, and Phase 2 (`:253`, `:266`) copies the whole workdir. Validating after Phase 3,
+as an earlier draft of this plan said, would mean `yoloai new box . --replace --network=none
+--port 3000` tears down a working sandbox, copies the tree, and *then* refuses. The `defer
+os.RemoveAll` cleans up the new directory; nothing restores the old one.
+
+**One caveat that decides where the code cannot go:** `prepareSandboxState` takes `opts` **by
+value** (`create.go:230`). The merged ports exist only inside it — a validator in `create.Run` or
+`Engine.Create` would read pre-merge values and be silently wrong.
+
+**`Compose` takes the user-allowlist half and only that.** It has one call site
+(`prepare_dirs.go:342`), so refusing there means the discard cannot happen even if the outer check
+is bypassed. But it must refuse on a non-empty **`userAllow`** *only* — it receives `agentFloor` as
+a list and cannot see *which* agent produced it, so a floor-based refusal there would kill
+`--agent claude --network=none` inside `Compose`, make the outer agent check dead code, **and still
+wave `aider` through**, since aider has no floor. The agent predicate belongs in the outer
+validator, where `opts.Agent` and `agentDef` are both in scope.
+
+**The broker is not in this validation at all**, and cannot be. `create.Options` has no broker
+field: `SandboxCreateOptions.Broker`/`NoBroker` exist but `toInternal()` drops them
+(`sandbox_options.go:145-181`), the CLI routes them through `SandboxStartOptions` instead, they are
+persisted to meta at **start** (`start.go:99`), and they are consumed at **launch**
+(`brokerCredentials`, `launch.go:592`). `restricted`'s "brokering is mandatory" is also unevaluable
+at create — it depends on `resolveBrokerReach`, which needs a live backend. So **the broker and
+credential-delivery rows of both tables are launch-side work**, sitting beside the existing refusal
+at `launch.go:613`, and they are not part of step 1.
 
 The runtime path is the model to copy: `Network.Allow` → `requireIsolated` refuses on a `none`
 sandbox regardless of how the request arrived, because it validates against the **stored mode**
@@ -191,11 +213,32 @@ does not exist (`runtime.go:284` carries only `NetworkIsolation bool`).
 
 ## Order of work
 
-1. **One mode-capability validation in `create.Create`**, covering allowlist, ports, agent and
-   broker in a single pass, plus `Compose` refusing the allowlist half at its own layer. Closes
-   [DF196](../findings-unresolved.md) and [DF197](../findings-unresolved.md) together — they are two
-   symptoms of this step being absent, so fixing them separately would build the mechanism twice.
-   Needs nothing else, and the test that matters covers the **library** door.
+1. **One mode-capability validation in `prepareSandboxState`**, after `create.go:240` and before
+   the destructive replace, covering **allowlist, ports and agent** — plus `Compose` refusing a
+   non-empty user allowlist at its own layer. Closes [DF196](../findings-unresolved.md) and
+   [DF197](../findings-unresolved.md) together; they are two symptoms of this step being absent, so
+   fixing them separately would build the mechanism twice.
+
+   **Decide two open rows before writing a line**, because both change where code goes: whether a
+   non-empty *agent floor* under `none` is an error (it must not be `Compose`'s call — see above),
+   and whether an allowlist under **`open`** is an error. The second is a **third instance of the
+   same class**: `Compose`'s `default` branch discards `userAllow` for the empty mode exactly as the
+   `none` branch does, hidden from the CLI only because `--network-allow` promotes to
+   `--network-isolated`, and therefore live on the library and profile doors. It is in neither
+   finding.
+
+   **Rule 10 without a new fake.** `prepareSandboxState` runs end to end against the existing
+   `fakeRuntime` in `create_prepare_test.go`, untagged and inside `make check` — three cases there
+   (`none` + allowlist, `none` + profile ports, `none` + real agent) plus inverting
+   `compose_test.go:51` and `create_prepare_test.go:105`, which currently *assert* the silent
+   discard. The library door is then covered by a `toInternal` field-carry assertion rather than a
+   ~40-method `runtime.Backend` fake in the root package, which is what testing `Client.CreateSandbox`
+   directly would cost. `toInternal` is a pure copy, so the two together prove the door.
+
+   **It reaches only new sandboxes.** `restart.go:200` rebuilds state from `netpolicy.json` and
+   `meta.Ports` and never re-validates, so an existing `none`-plus-ports sandbox keeps relaunching.
+   Say so in the BREAKING-CHANGES entry, and decide whether step 3's migrator repairs or rejects
+   such a record — that decision sets step 3's scope.
 2. **Correct the `none` claims in shipped help and `netpolicy.md`** ([DF198](../findings-unresolved.md)),
    then fix or refuse `none` per backend. The text has to be rewritten for the new modes anyway, so
    it lands with them rather than ahead of them.
