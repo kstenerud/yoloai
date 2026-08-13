@@ -23,6 +23,72 @@ into this file skips the merge-conflict collision check that ID-ordering gives t
 a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
 of at rebase. Later, but still before it can ship.
 
+### DF208 — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from the user's personal `defaults/config.yaml`, not baked-in defaults (RESOLVED 2026-08-13)
+
+- **Discovered:** 2026-08-13, fixing DF207 · **Workstream:** config/trust seams
+- **Severity:** MEDIUM
+- **Rides:** any.
+- **Description:** DF207 was the same shape at the `create` (`yoloai new`) call site. Three more call
+  sites had it: `internal/orchestrator/lifecycle/lifecycle.go:106` (`resolveAgentArgs`) and
+  `internal/orchestrator/lifecycle/restart.go:70,88` (`resolvedAgentFiles`, `resolveEnvForRestart`)
+  each called `config.LoadConfig(layout)` — the personal `defaults/config.yaml` — and passed the
+  result straight to `config.MergeProfileChain` as `base` whenever `meta.Profile != ""`, leaking
+  `agent_args`, `agent_files`, and `env` on the restart/relaunch/attach path for any sandbox created
+  with `--profile`. Left as a config-wide-shape defect (DF207's description already covered why:
+  `mergedConfigFromBase` copies essentially the whole config out of `base`).
+- **Why fixing this was urgent rather than parked:** `env`, `agent_args`, and `agent_files` are
+  exactly the fields DF207's create-path fix could not persist into `environment.json` (they are
+  recomputed on every restart, not stored). So between DF207 landing and this fix, a profile
+  sandbox resolved clean values at create and personal-default-contaminated values on every restart
+  afterward — the sandbox changed shape between its first launch and its second. That is a worse
+  failure than the uniform leak DF207 fixed, which is why this could not stay parked.
+- **The fix turned out to be two defects at one site, not one defect at three.** `resolveAgentArgs`
+  and `resolveEnvForRestart` were a plain base-argument swap, exactly matching
+  `prepare_profile.go`'s DF207 fix: both assign `merged.AgentArgs[...]` / `merged.Env` directly on
+  success, so swapping `base` from the personal config to `config.LoadBakedInDefaults()` closes the
+  leak outright. `resolvedAgentFiles` did not close with the same swap: `agent_files` is commented
+  out of the baked-in defaults, so a profile that sets no `agent_files` of its own merges to a `nil`
+  `MergedConfig.AgentFiles` regardless of `base` — and the pre-fix code specifically fell back to
+  the *personal* `cfg.AgentFiles` whenever `merged.AgentFiles` was `nil`. A base-only swap was
+  provably a no-op there: before and after, the function returned the personal value whenever the
+  profile itself didn't set `agent_files`. Closing it required dropping that nil-fallback and
+  returning `merged.AgentFiles` unconditionally on success, matching the unconditional assignment
+  `prepare_profile.go:123` already used on the create path.
+- **The chain-resolution/merge error fallback at `resolvedAgentFiles` also changed direction.** On a
+  profile-chain error, the pre-fix code returned the personal `cfg.AgentFiles` — and `agent_files`'
+  list form applies no credential-exclusion filter at all
+  ([DF201](findings-unresolved.md#df201--agent_files-list-form-copies-credentials-the-string-form-strips)),
+  so that fallback degraded a profile-active error into "copy the user's personal agent state,
+  unfiltered, into a profile sandbox." The fix returns `nil` on error instead, when a profile is
+  active; the no-profile path (`meta.Profile == ""`) is unaffected and still returns `cfg.AgentFiles`.
+- **No new convention.** `config.md:165,167` already stated the rule correctly — "profile config
+  merges over baked-in defaults only" and personal defaults "do not carry into profiles — no
+  exceptions." The code was wrong at four call sites, not the doc, so nothing graduates out of this
+  finding (or DF207's).
+- **The original filing's option (a), caller-side, was taken over option (b), a library-side
+  `MergeProfileChain` entry point that removes the `base` parameter's sharp edge entirely.** All
+  four known call sites are now fixed, but the edge the filing named — `MergeProfileChain`'s
+  signature accepts any `*YoloaiConfig` as `base` with nothing marking `LoadBakedInDefaults()` as
+  the only doc-correct choice for a profile-active caller — is unchanged. A fifth caller could
+  still repeat the mistake; that risk was named, not acted on, consistent with rule 7 leaving the
+  choice to the owner.
+- **Pins:** `TestResolveAgentArgs_PersonalDefaultsDoNotLeakIntoProfile`,
+  `TestResolvedAgentFiles_PersonalDefaultsDoNotLeakIntoProfile` (fails on either half of that site's
+  fix being reverted — the base swap or the nil-fallback removal),
+  `TestResolvedAgentFiles_ProfileOwnValueStillApplies`,
+  `TestResolvedAgentFiles_ErrorPathReturnsNilNotPersonalValue` (pins the error-direction change),
+  `TestResolveEnvForRestart_PersonalDefaultsDoNotLeakIntoProfile`,
+  `TestRestartPath_NoProfile_PersonalDefaultsStillApply` (no-profile regression guard),
+  `TestRestartPath_ProfileResolution_MatchesCreatePathGuarantee` (restart-path resolution asserted
+  against the same expectations as DF207's create-path headline test). All in
+  `internal/orchestrator/lifecycle/profile_config_test.go`; verified red on revert per site.
+- **Breaking change recorded** in `docs/BREAKING-CHANGES.md` under `## Unreleased`, extending the
+  DF207 entry rather than duplicating it: the restart/relaunch path is now named alongside create.
+- **Pointer:** `internal/orchestrator/lifecycle/lifecycle.go` (`resolveAgentArgs`);
+  `internal/orchestrator/lifecycle/restart.go` (`resolvedAgentFiles`, `resolveEnvForRestart`);
+  `internal/config/profile.go:493` (`MergeProfileChain`), `:374-419` (`mergedConfigFromBase`);
+  `docs/contributors/design/config.md:165,167`; against DF207 (resolved, above).
+
 ### DF207 — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
 
 - **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams

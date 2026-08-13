@@ -101,11 +101,18 @@ func resolveAgentArgs(layout config.Layout, agentName, profileName string) strin
 		return ""
 	}
 	if profileName != "" {
+		// A profile is self-contained (config.md:165,167): the merge base is the
+		// baked-in defaults, never the user's personal defaults/config.yaml — that
+		// would carry a personal agent_args override into a profile that is
+		// supposed to behave identically for everyone (DF207/DF208).
 		chain, chainErr := config.ResolveProfileChain(layout, profileName)
 		if chainErr == nil {
-			merged, mergeErr := config.MergeProfileChain(layout, cfg, chain)
-			if mergeErr == nil {
-				return merged.AgentArgs[agentName]
+			bakedIn, bakedErr := config.LoadBakedInDefaults()
+			if bakedErr == nil {
+				merged, mergeErr := config.MergeProfileChain(layout, bakedIn, chain)
+				if mergeErr == nil {
+					return merged.AgentArgs[agentName]
+				}
 			}
 		}
 	}

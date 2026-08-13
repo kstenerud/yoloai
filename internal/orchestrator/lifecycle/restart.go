@@ -58,18 +58,41 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 
 // resolvedAgentFiles returns the effective AgentFiles config after merging the
 // profile chain if a profile is set. Returns nil if no AgentFiles are configured.
+//
+// A profile is self-contained (config.md:165,167): the merge base is the
+// baked-in defaults, never the user's personal defaults/config.yaml, and a
+// profile whose chain sets no agent_files resolves to nil — not to the
+// personal value (DF207/DF208). Unlike resolveAgentArgs/resolveEnvForRestart,
+// this cannot be a plain base-argument swap: agent_files is commented out of
+// the baked-in defaults, so a profile that doesn't set it merges to a nil
+// MergedConfig.AgentFiles, and the old code specifically fell back to the
+// personal cfg.AgentFiles whenever merged.AgentFiles was nil — silently
+// re-leaking the exact value the base swap was meant to keep out. That
+// fallback is gone; merged.AgentFiles is now returned unconditionally on
+// success, matching prepare_profile.go's create-path pattern.
+//
+// The chain-resolution/merge error fallback also changed direction, from
+// cfg.AgentFiles to nil, when a profile is active: agent_files' list form
+// copies host files into the sandbox with no credential-exclusion filter at
+// all (DF201), so degrading a profile-active error to "copy the user's
+// personal agent state, unfiltered, into a profile sandbox" is the unsafe
+// direction. The no-profile path is unaffected and still returns
+// cfg.AgentFiles — that is correct and documented.
 func resolvedAgentFiles(layout config.Layout, cfg *config.YoloaiConfig, meta *store.Environment) *config.AgentFilesConfig {
-	agentFilesConfig := cfg.AgentFiles
 	if meta.Profile == "" {
-		return agentFilesConfig
+		return cfg.AgentFiles
 	}
 	chain, err := config.ResolveProfileChain(layout, meta.Profile)
 	if err != nil {
-		return agentFilesConfig
+		return nil
 	}
-	merged, err := config.MergeProfileChain(layout, cfg, chain)
-	if err != nil || merged.AgentFiles == nil {
-		return agentFilesConfig
+	bakedIn, err := config.LoadBakedInDefaults()
+	if err != nil {
+		return nil
+	}
+	merged, err := config.MergeProfileChain(layout, bakedIn, chain)
+	if err != nil {
+		return nil
 	}
 	return merged.AgentFiles
 }
@@ -83,11 +106,19 @@ func resolveEnvForRestart(layout config.Layout, meta *store.Environment) (map[st
 	}
 	envVars := cfg.Env
 	if meta.Profile != "" {
+		// A profile is self-contained (config.md:165,167): the merge base is the
+		// baked-in defaults, never the user's personal defaults/config.yaml — that
+		// would carry personal env (secrets, per DF207's description) into a
+		// profile that is supposed to behave identically for everyone
+		// (DF207/DF208).
 		chain, chainErr := config.ResolveProfileChain(layout, meta.Profile)
 		if chainErr == nil {
-			merged, mergeErr := config.MergeProfileChain(layout, cfg, chain)
-			if mergeErr == nil {
-				envVars = merged.Env
+			bakedIn, bakedErr := config.LoadBakedInDefaults()
+			if bakedErr == nil {
+				merged, mergeErr := config.MergeProfileChain(layout, bakedIn, chain)
+				if mergeErr == nil {
+					envVars = merged.Env
+				}
 			}
 		}
 	}

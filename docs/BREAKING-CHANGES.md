@@ -99,16 +99,24 @@ didn't override: `env`, `agent_args`, `agent_files`, `cap_add`, `devices`, `setu
 `docs/contributors/design/config.md`'s documented guarantee that profiles are self-contained and
 that personal defaults "do not carry into profiles — no exceptions."
 
-**New behavior:** a profile merges over yoloAI's baked-in defaults only. None of the fields above
-carry over from `~/.yoloai/defaults/config.yaml` when `--profile` is used. If a profile needs a
-personal `env` var, capability, device, isolation mode, or egress-allowlist entry, it must set
-that value in the profile's own `config.yaml` — that is where `config.md` always said it
-belonged.
+The same leak was independently present on the restart/relaunch path: `yoloai start`, `yoloai
+reset`, and any resume/custom-prompt relaunch of a `--profile` sandbox re-resolved `env`,
+`agent_args`, and `agent_files` from `~/.yoloai/defaults/config.yaml` on every restart, even
+though the sandbox was created clean. A profile sandbox's `env`/`agent_args`/`agent_files` could
+therefore differ between its first launch and any restart afterward, depending on what the
+personal config held at restart time.
 
-**Why it changed:** [DF207](contributors/design/findings-resolved.md). The code passed the
+**New behavior:** a profile merges over yoloAI's baked-in defaults only, on both the create path
+and the restart/relaunch path. None of the fields above carry over from
+`~/.yoloai/defaults/config.yaml` when `--profile` is used. If a profile needs a personal `env`
+var, capability, device, isolation mode, or egress-allowlist entry, it must set that value in the
+profile's own `config.yaml` — that is where `config.md` always said it belonged.
+
+**Why it changed:** [DF207/DF208](contributors/design/findings-resolved.md). The code passed the
 loaded personal config as the profile merge's base instead of the baked-in defaults; the fix
 makes the code match the documented guarantee. The leak was config-wide, not limited to a
-handful of keys.
+handful of keys, and present at four call sites (one on create, three on restart/relaunch), not
+just one.
 
 ## v0.11.0
 
