@@ -68,7 +68,7 @@ except Exception:
 '''
 
 
-def serve_forever():
+def serve_forever() -> None:
     if os.path.exists(SOCK):
         os.unlink(SOCK)
     s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -88,17 +88,17 @@ def serve_forever():
             pass
 
 
-def write_profile(name, body):
+def write_profile(name: str, body: str) -> str:
     p = f"{S}/{name}.sb"
     with open(p, "w") as f:
         f.write(body)
     return p
 
 
-def run_client(profile=None, sudo=False):
+def run_client(profile: str | None = None, sudo: bool = False) -> str:
     with open(f"{S}/c4h_client.py", "w") as f:
         f.write(CLIENT)
-    argv = []
+    argv: list[str] = []
     if profile:
         argv += ["sandbox-exec", "-f", profile]
     if sudo:
@@ -108,15 +108,15 @@ def run_client(profile=None, sudo=False):
     return p.stdout
 
 
-def tcp_ok(profile=None, sudo=False):
+def tcp_ok(profile: str | None = None, sudo: bool = False) -> bool:
     return "TCP=OK" in run_client(profile, sudo)
 
 
-def unix_ok(profile=None, sudo=False):
+def unix_ok(profile: str | None = None, sudo: bool = False) -> bool:
     return "UNIX=OK" in run_client(profile, sudo)
 
 
-def main():
+def main() -> int:
     h = Harness("C4", "what makes shape (B) sound on seatbelt, which has no capability bounding set?")
 
     h.require("sandbox-exec is present", subprocess.run(["which", "sandbox-exec"], capture_output=True).returncode == 0)
@@ -132,7 +132,7 @@ def main():
     write_profile("h_permissive", "(version 1)\n(allow default)\n")
 
     # ---- 1. can the platform express shape (B) at all? -----------------------
-    arm = {"profile": None}
+    arm: dict[str, str | None] = {"profile": None}
     tcp = h.probe("the sandboxed process reaches the open internet over TCP",
                   lambda: tcp_ok(arm["profile"]))
     unix = h.probe("the sandboxed process reaches the host proxy socket",
@@ -174,15 +174,15 @@ def main():
     m_unres = pathgrant.sample("the same grant, written unresolved (/tmp/...)")
 
     # ---- 2. can it be relaxed from inside? ----------------------------------
-    def nested_reaches(outer):
+    def nested_reaches(outer: str) -> bool:
         """Run a permissive nested sandbox-exec, optionally already inside `outer`."""
         inner = f"sandbox-exec -f {S}/h_permissive.sb /usr/bin/python3 {S}/c4h_client.py"
         argv = (["sandbox-exec", "-f", outer] if outer else []) + ["/bin/sh", "-c", inner]
         return "TCP=OK" in subprocess.run(argv, capture_output=True, text=True, timeout=90).stdout
 
-    outer = {"profile": None}
+    outer: dict[str, str | None] = {"profile": None}
     nest = h.probe("a nested, fully permissive sandbox-exec reaches the internet",
-                   lambda: nested_reaches(outer["profile"]))
+                   lambda: nested_reaches(str(outer["profile"])))
     outer["profile"] = None
     nest.baseline(want=True, detail="the identical nested command run from an UNsandboxed parent — so "
                                     "a later refusal is the outer profile holding, not a broken command")

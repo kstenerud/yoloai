@@ -20,6 +20,7 @@ import os
 import socket
 import subprocess
 import sys
+from typing import cast
 import threading
 import time
 
@@ -35,15 +36,16 @@ SOCKDIR = "/tmp/yc1"
 PROBEDIR = os.path.dirname(os.path.abspath(__file__))
 
 
-def sh(*args, timeout=180):
+def sh(*args: str, timeout: int = 180) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout)
 
 
-def rm_container(name):
+def rm_container(name: str) -> None:
     sh(CONTAINER, "rm", "-f", name)
 
 
-def start_guest_server(name, sockpath, extra_args=()):
+def start_guest_server(name: str, sockpath: str,
+                       extra_args: tuple[str, ...] = ()) -> subprocess.CompletedProcess[str]:
     """Start a detached guest listening on a unix socket inside the guest."""
     rm_container(name)
     args = [CONTAINER, "run", "-d", "--name", name]
@@ -56,10 +58,10 @@ def start_guest_server(name, sockpath, extra_args=()):
 # the samples are two instruments that merely look alike — the shape that produced
 # `pf-no-state` run 5. So the arm's host socket lives here and the arm switches it,
 # rather than each sample binding its own path.
-ARM = {"hostsock": None, "egress_args": ()}
+ARM: dict[str, object] = {"hostsock": None, "egress_args": ()}
 
 
-def host_roundtrip(hostsock, payload=b"PING\n", timeout=8):
+def host_roundtrip(hostsock: str, payload: bytes = b"PING\n", timeout: int = 8) -> bool:
     """True only if the host both sent and received bytes over the channel."""
     try:
         c = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
@@ -73,7 +75,7 @@ def host_roundtrip(hostsock, payload=b"PING\n", timeout=8):
         return False
 
 
-def guest_egress_ok(extra_args=()):
+def guest_egress_ok(extra_args: tuple[str, ...] = ()) -> bool:
     """True if a guest reaches an external address."""
     args = [CONTAINER, "run", "--rm"] + list(extra_args) + [
         IMAGE, "sh", "-c",
@@ -83,7 +85,7 @@ def guest_egress_ok(extra_args=()):
     return "REACHED" in p.stdout
 
 
-def main():
+def main() -> int:
     h = Harness("C1", "does the apple backend expose a host<->guest data channel, and does it survive a guest with no IP stack?")
 
     h.require("the container CLI is present", os.path.exists(CONTAINER))
@@ -111,7 +113,7 @@ def main():
     time.sleep(4)
     ARM["hostsock"] = bare_sock
     channel = h.probe("the host completes a round trip with the guest over a published socket",
-                      lambda: host_roundtrip(ARM["hostsock"]))
+                      lambda: host_roundtrip(cast(str, ARM["hostsock"])))
     channel.baseline(want=False,
                      detail="same guest, same listener, but the container was started without "
                             "--publish-socket, so there is no host end to connect to")
@@ -147,7 +149,7 @@ def main():
     # ---- probe 2: egress, so 'stackless' is a measurement and not a label -----
     ARM["egress_args"] = ()
     egress = h.probe("a guest reaches an external address",
-                     lambda: guest_egress_ok(ARM["egress_args"]))
+                     lambda: guest_egress_ok(cast("tuple[str, ...]", ARM["egress_args"])))
     egress.baseline(want=True, detail="default network, no flags — the positive control A22 requires")
     ARM["egress_args"] = ("--network", "none")
     m_egress_none = egress.sample("under --network none",
@@ -166,13 +168,15 @@ def main():
     # Concurrency: a proxy needs more than one connection at a time.
     conc = sum(1 for _ in range(5) if host_roundtrip(none_sock, b"PING\n"))
     h.measure("sequential round trips over one published socket (of 5)", conc)
-    parallel_ok = []
+    parallel_ok: list[bool] = []
 
-    def worker():
+    def worker() -> None:
         parallel_ok.append(host_roundtrip(none_sock, b"PING\n"))
     ts = [threading.Thread(target=worker) for _ in range(5)]
-    [t.start() for t in ts]
-    [t.join() for t in ts]
+    for t in ts:
+        t.start()
+    for t in ts:
+        t.join()
     h.measure("concurrent round trips over one published socket (of 5)", sum(parallel_ok),
               detail="a chokepoint proxy needs many in flight; one accept-loop served them")
 

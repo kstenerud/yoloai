@@ -47,20 +47,20 @@ GUEST_PATH = "export PATH=/sbin:/usr/sbin:/bin:/usr/bin;"
 ENV = dict(os.environ, PATH="/opt/homebrew/bin:" + os.environ.get("PATH", ""))
 
 
-def sh(*args, timeout=180):
+def sh(*args: str, timeout: int = 180) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=ENV)
 
 
-def guest(script, timeout=120):
+def guest(script: str, timeout: int = 120) -> subprocess.CompletedProcess[str]:
     return sh(TART, "exec", VM, "sh", "-c", GUEST_PATH + script, timeout=timeout)
 
 
-def stop_vm():
+def stop_vm() -> None:
     sh(TART, "stop", VM, timeout=90)
     time.sleep(3)
 
 
-def boot(flags):
+def boot(flags: list[str]) -> bool:
     stop_vm()
     subprocess.Popen([TART, "run", VM, "--no-graphics"] + flags,
                      stdout=open("/tmp/yc1/tart-c2.log", "w"), stderr=subprocess.STDOUT, env=ENV)
@@ -71,12 +71,12 @@ def boot(flags):
     return False
 
 
-def http_code(dest):
+def http_code(dest: str) -> str:
     out = guest(f'curl -s -m 8 -o /dev/null -w "%{{http_code}}" http://{dest}').stdout.strip()
     return out.splitlines()[-1].strip() if out else ""
 
 
-def reaches(dest):
+def reaches(dest: str) -> bool:
     c = http_code(dest)
     return c.isdigit() and c != "000"
 
@@ -85,7 +85,7 @@ DEFAULT_DENY = ["--net-softnet-block=0.0.0.0/0", f"--net-softnet-allow={PERMITTE
 PERMISSIVE = ["--net-softnet-allow=0.0.0.0/0"]
 
 
-def main():
+def main() -> int:
     h = Harness("C2", "can a root guest defeat tart's Softnet default-deny policy?")
 
     h.require("tart is present", os.path.exists(TART))

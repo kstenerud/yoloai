@@ -28,7 +28,7 @@ import subprocess
 import sys
 
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "..", "..", "..", "..", "scripts"))
-from research_harness_v2 import Harness  # noqa: E402
+from research_harness_v2 import Harness, Measurement  # noqa: E402
 
 YOLOAI = "/tmp/yc1/yoloai"
 WORKDIR = "/tmp/yc1/wd"
@@ -37,17 +37,17 @@ DEST = "http://1.1.1.1"
 ENV = dict(os.environ, PATH="/usr/local/bin:/opt/homebrew/bin:" + os.environ.get("PATH", ""))
 
 
-def sh(*args, timeout=900):
+def sh(*args: str, timeout: int = 900) -> subprocess.CompletedProcess[str]:
     return subprocess.run(args, capture_output=True, text=True, timeout=timeout, env=ENV)
 
 
-def destroy(name):
+def destroy(name: str) -> None:
     # By name only, never --all: this host carries unrelated sandboxes belonging to
     # the owner, and a research run must not be able to reach them.
     sh(YOLOAI, "destroy", "--abandon-unapplied", name)
 
 
-def create(name, backend, none, os_flag=None):
+def create(name: str, backend: str, none: bool, os_flag: str | None = None) -> subprocess.CompletedProcess[str]:
     destroy(name)
     args = [YOLOAI, "new", name, WORKDIR, "--backend", backend, "--agent", "test"]
     if os_flag:
@@ -57,7 +57,7 @@ def create(name, backend, none, os_flag=None):
     return sh(*args)
 
 
-def reaches(name):
+def reaches(name: str) -> bool:
     """True only if a curl inside the sandbox got an HTTP status back."""
     p = sh(YOLOAI, "exec", name, "--", "sh", "-c",
            f'curl -s -m 8 -o /dev/null -w "%{{http_code}}" {DEST} 2>/dev/null || echo CURLFAIL')
@@ -73,18 +73,18 @@ BACKENDS = [
 ]
 
 
-def main():
+def main() -> int:
     h = Harness("C3", "is --network-none enforced on apple, tart and seatbelt, through yoloAI's own launch path?")
 
     h.require("the yoloai binary under test exists", os.path.exists(YOLOAI),
               detail="built from the working tree at the round's HEAD")
     h.require("a workdir exists", os.path.isdir(WORKDIR))
 
-    arm = {"name": None}
+    arm: dict[str, str | None] = {"name": None}
     probe = h.probe("the sandbox reaches an external address",
-                    lambda: reaches(arm["name"]))
+                    lambda: reaches(str(arm["name"])))
 
-    results = {}
+    results: dict[str, Measurement | None] = {}
     for backend, os_flag in BACKENDS:
         open_name = f"c3-{backend}-open"
         none_name = f"c3-{backend}-none"
