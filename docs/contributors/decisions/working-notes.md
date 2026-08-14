@@ -2112,6 +2112,35 @@ All three are the silent degradation [D138](#d138--automatic-degradation-is-reti
 
 **Decision. Each configuration source is parsed into its own layer, tagged with where it came from, and the layers travel together to a single resolver that applies a declared per-key policy.** Values stop being merged eagerly at each boundary, so *"who supplied this?"* survives to the point where it is needed instead of being destroyed on the way.
 
+**Four layers, and the count matters — two things that look like layers are not.**
+
+| # | Layer | Loaded from |
+| --- | --- | --- |
+| 1 | baked-in defaults | `config.DefaultConfigYAML` — **must be total** |
+| 2 | persistent preference | the named profile if there is one, **otherwise** the user's `defaults/config.yaml` |
+| 3 | repo | `devcontainer.json`, translated |
+| 4 | caller | `SandboxCreateOptions` — the CLI included |
+
+**Layer 2 is one layer with two mutually exclusive sources, not two layers.** The exclusivity is total and deliberate (`config.md:165,167`), both sources hold the same keys, and both sit at the same precedence position — so "when a profile is present, drop the user-defaults layer" is not a rule the resolver applies, it is *how the layer is loaded*. That distinction is the whole point: as a rule it is something callers construct, and four of four constructed it wrong; as a loader it is unrepresentable otherwise. A guarantee that cannot be expressed incorrectly beats one that is merely enforced.
+
+**The CLI is not a layer — it is a caller, and already is one architecturally** (it builds `SandboxCreateOptions` and calls `Client.CreateSandbox`). What makes it *look* like a layer is a defect: it **also** reads the user's config, at six sites — `ResolveBackend`, `rawBackendPreference`, `ResolveContainerBackendConfig`, `ResolveAgentFromConfig`, `ResolveModelFromConfig` (`cli/cliutil/client.go:62,90,132,357,376`) and `resolveNewIsolationOS` (`cli/lifecycle/new.go:538`) — while the library reads the same file independently at `create/create.go:485`. Two readers of one file, and the CLI's read is the one that collapses flag-and-config into a single string before the library can tell them apart.
+
+**Every key the CLI resolves from config is broken, worked around, or handled by a different mechanism. Six for six:**
+
+| Key | State |
+| --- | --- |
+| `agent` | works — but only because `baseAgent` (`prepare_profile.go:99`) was hand-built to recover what the CLI destroyed |
+| `model` | personal config beats the profile — DF209 |
+| `isolation` | same — DF209 |
+| `os` | a profile's `os:` is parsed, merged into `MergedConfig`, and **never read** — DF210 |
+| `backend`, `container_backend` | not merged at all; validated as a constraint via `ValidateProfileBackend` |
+
+So the fix is **subtractive**: the CLI stops reading config and does one job — translate flags into a caller layer. `Coalesce`, `ResolveAgentFromConfig`, `ResolveModelFromConfig` and the isolation/os fallbacks largely disappear, and **DF209 becomes unrepresentable**: a value never loaded cannot be merged. This requires the caller layer to express *unset* (below), so the two changes are one change.
+
+**Totality invariant: layer 1 specifies every key, so resolution never falls off the end.** Two keys break it today and both have already cost something: `agent_files` is *commented out* of the shipped template (`defaults.go:66`), which is exactly why `resolvedAgentFiles`' nil-fallback re-leaked the personal value (DF208); and `isolation` is present but empty, where empty is a **meaningful value** meaning "ask the backend". So the invariant's precise form is: layer 1 specifies every key, and "defer to the backend" is a *named value* rather than an absence — otherwise "unspecified" and "specified as defer" stay the same bit pattern.
+
+**Two things adjacent to the stack that are deliberately outside it.** The **agent definition** contributes a `NetworkAllowlist` *floor* that `netpolicy.Compose` prepends after every layer and no layer may lower — different semantics, so it sits beside the resolver rather than in the stack. The **backend** resolves `isolation: ""` to its own base mode (`process` on seatbelt, `vm` on apple), which is a step *after* layering, not a layer. Keeping both out is what stops the resolver needing a special case for "this layer is different".
+
 **The problem is not any one defect; it is that the answer is unavailable.** yoloAI collapses sources early — `Coalesce(flag, config)` at the CLI (`new.go:544`), `MergeProfileChain(base, chain)` in the merge, `append(profileValue, cliValue...)` in the pipeline — and every collapse discards which source won. Nine findings from one audit are the same missing answer wearing different clothes:
 
 | Question that could not be asked | Filed as |

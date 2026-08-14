@@ -1258,6 +1258,29 @@ earlier signal and records nothing else.
 - **Shipped text was corrected rather than left overclaiming.** The `BREAKING-CHANGES.md` entry for DF207/DF208 originally said a profile "no longer inherits any setting" from personal defaults; it now names these two exceptions explicitly and points here.
 - **Pointer:** `internal/cli/lifecycle/new.go:544`; `internal/cli/cliutil/client.go:68`; `internal/orchestrator/create/prepare_profile.go:117,165,255-257`; the working counter-example at `prepare_profile.go:99`; `docs/contributors/design/config.md:165,167`.
 
+### DF210 — a profile's `os:` is parsed, merged, and never read
+
+- **Discovered:** 2026-08-14, while modelling the config layers for [D143](../decisions/working-notes.md) · **Workstream:** config/trust seams
+- **Severity:** LOW
+- **Disposition:** UNRESOLVED — PARKED, pending [D143](../decisions/working-notes.md)
+- **Rides:** **any**.
+- **Description:** `MergedConfig.OS` is written twice — seeded from the base config at `internal/config/profile.go:378` and merged across the profile chain at `:427` — and a repo-wide grep finds **no reader**. So a profile declaring `os: mac` is parsed, validated as a known key, merged, and silently discarded. The effective OS comes only from the CLI, which resolves it as `Coalesce(FlagStr(cmd, "os"), cfgOS)` (`internal/cli/lifecycle/new.go:545`) — flag, else the *personal* config — so a profile cannot influence it at all.
+- **Same class as [DF203](#df203--backendcapscapadd-is-one-boolean-for-three-features-so-devices-is-a-silent-no-op-on-two-backends-and-setup-is-refused-on-two-others), [DF204](#df204--resources-limits-are-silently-ignored-on-four-backends) and [DF205](#df205--isolationexplicit-is-written-never-read-and-wrong-anyway):** a key that is accepted, carried, and inert. Four instances now, which is the argument that the config surface is not tested against "does setting this change anything".
+- **What would close it:** D143's per-key policy table makes an unread key visible by construction, since a key with no consumer has no policy row. Until then, either apply `merged.OS` or reject `os:` in a profile — silently accepting it is the one option that should not survive.
+- **Pointer:** `internal/config/profile.go:378,427`; `internal/cli/lifecycle/new.go:545`; `internal/cli/cliutil/client.go:69`.
+
+### DF211 — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist
+
+- **Discovered:** 2026-08-14, while checking whether the user config selects a default profile ([D143](../decisions/working-notes.md)) · **Workstream:** config/trust seams
+- **Severity:** LOW
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** `ResolveProfile` (`internal/cli/cliutil/client.go:385-393`) returns `""` when `--no-profile` is set, `""` when no profile flag is given at all, and the flag's value otherwise. `--profile` and `--no-profile` are mutually exclusive (`internal/cli/lifecycle/new.go:75`). So `--no-profile` produces exactly the result the user would get by passing nothing: **it is a no-op on every path.**
+- **Its help text documents a feature that was never built.** `internal/cli/lifecycle/new.go:52` reads *"Use base image even if config sets a default profile"* — but no config key selects a default profile. `YoloaiConfig` has no such field and `ResolveProfile` consults no config file. The flag is the vestige of a default-profile feature that does not exist, and the help text is the only place it is still described as real.
+- **Note the shipped-text angle (rule 2):** this is user-facing help, so the text promises behaviour a user can neither get nor detect the absence of — they pass `--no-profile`, it appears to work, and it did nothing.
+- **What would close it:** either remove the flag and its help text, or implement the default-profile key it describes. This is a product call, not a defect fix — but it should not stay in the middle, where the flag exists and the feature does not.
+- **Pointer:** `internal/cli/cliutil/client.go:385-393`; `internal/cli/lifecycle/new.go:52,75`.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

@@ -29,16 +29,28 @@ measurement that says this is architectural rather than careless.
 
 ## Shape
 
-**Layers, innermost first.** Each source is *parsed into* a common layer shape carrying only the
-keys it can express — sources are not the same shape, and translating at the edge is what keeps the
-resolver from knowing what a devcontainer is.
+**Four layers, innermost first.** Each source is *parsed into* a common layer shape carrying only
+the keys it can express — sources are not the same shape, and translating at the edge is what keeps
+the resolver from knowing what a devcontainer is.
 
-1. baked-in defaults (`config.DefaultConfigYAML`)
-2. user defaults (`~/.yoloai/defaults/config.yaml`)
-3. profile chain (root → leaf)
-4. repo (`devcontainer.json`, translated)
-5. library caller (`SandboxCreateOptions`)
-6. CLI flags
+| # | Layer | Loaded from |
+| --- | --- | --- |
+| 1 | baked-in defaults | `config.DefaultConfigYAML` — **must be total** |
+| 2 | persistent preference | the named profile if there is one, **otherwise** `~/.yoloai/defaults/config.yaml` |
+| 3 | repo | `devcontainer.json`, translated |
+| 4 | caller | `SandboxCreateOptions` — the CLI included |
+
+**Layer 2 has two mutually exclusive sources; it is not two layers.** "When a profile is present,
+drop the user-defaults layer" then stops being a rule the resolver applies and becomes *how the
+layer is loaded* — which is why it is worth insisting on. As a rule it is something callers
+construct, and four of four constructed it wrong; as a loader there is nothing to construct.
+
+**The CLI is a caller, not a layer.** It already is one architecturally. What makes it look like a
+layer is that it *also* reads the user's config — six sites (`cliutil/client.go:62,90,132,357,376`,
+`lifecycle/new.go:538`) — while the library reads the same file at `create/create.go:485`. Every key
+it resolves that way is broken (`model`, `isolation` — DF209), inert (`os` — DF210), worked around
+(`agent`, via `baseAgent`), or handled by a different mechanism (`backend`). The CLI stops reading
+config and only translates flags into the caller layer; DF209 then cannot be represented.
 
 **One resolver, one declared per-key policy.** Layers supply inputs; a single resolver applies the
 table. If each consumer resolved for itself, the 4-of-4 divergence returns with better inputs.
@@ -53,12 +65,18 @@ table. If each consumer resolved for itself, the 4-of-4 divergence returns with 
 That table exists today only as the implicit order of assignments across three files, which is why
 reconstructing it took a full audit. Written down, it is testable and diffable.
 
-**Layer rules, expressed once.** The rule that pays for the work:
+**Totality invariant.** Layer 1 specifies every key, so resolution never falls off the end with no
+value. Two keys break it today: `agent_files` is commented out of the shipped template
+(`defaults.go:66`) — which is why `resolvedAgentFiles`' nil-fallback re-leaked the personal value in
+DF208 — and `isolation` is present but empty, where empty *means* "ask the backend". So the precise
+form is: layer 1 specifies every key, and "defer to the backend" is a **named value**, not an
+absence.
 
-> when a profile layer is present, drop the user-defaults layer.
-
-One line, replacing a per-key re-implementation at four call sites — which is how DF207, DF208 and
-DF209 happened.
+**Outside the stack, deliberately.** The **agent definition** contributes a `NetworkAllowlist`
+*floor* that `netpolicy.Compose` prepends after every layer and no layer may lower — different
+semantics, so it sits beside the resolver. The **backend** resolves `isolation: ""` to its own base
+mode (`process` on seatbelt, `vm` on apple) — a step after layering. Keeping both out is what stops
+the resolver needing a special case for "this layer is different".
 
 ## Constraints
 
