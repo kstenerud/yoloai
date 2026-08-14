@@ -8,8 +8,40 @@
 - **Depends on:** —
 - **Blocks:** `repo-request-trust.md` (D141), `network-mode-reshape.md` step 1. Both need provenance;
   building them first means building it twice, in two places, badly.
-- **Rides:** **any.** No user-visible change if the policy table is faithful to today's precedence.
-  See [D143](../../decisions/working-notes.md).
+- **Rides:** **breaking** — and it is **the headline of v0.12.0**, alongside the config/trust fixes
+  that already landed (D140, D142, DF207/DF208). The resolver itself is user-invisible if the policy
+  table is faithful, but the caller layer must be able to express *unset*, and that reaches the
+  public `SandboxCreateOptions`. See "Expressing unset" below. See [D143](../../decisions/working-notes.md).
+
+## Release scoping
+
+**v0.12.0 = the configuration release.** Already built: `.yoloai.yaml` removed (D140), `mounts:`
+retired and `directories:` generalised (D142), the profile merge-base leak closed on both paths
+(DF207/DF208). This plan is the remaining piece, and it is what makes those fixes structural rather
+than four spot repairs.
+
+Closed as consequences rather than as separate work: **DF209** (unrepresentable once the CLI stops
+reading config), **DF205** (`IsolationExplicit` deleted, not repaired), **DF206** (the
+`NetworkModeDefault` sentinel gates go away), **DF210** (a key with no consumer has no policy row,
+so it cannot hide).
+
+**Deferred to v0.13.0**, both of which build on this: `repo-request-trust.md` (D141) and
+`network-mode-reshape.md`. The migration rides with the latter — **no migration lands in v0.12.0**,
+so this branch carries none and rule 12's constraint does not apply to it.
+
+## Expressing unset
+
+The caller layer needs "did not set" distinguishable from "set to the zero value". Two shapes, and
+the choice decides whether v0.12.0 breaks the library surface:
+
+1. **Named sentinel values** — a reserved value meaning *unset*, per key whose zero value is already
+   meaningful (`isolation: ""` means "ask the backend"; `network: ""` means open). No struct change,
+   and it matches the totality invariant: absence is never how anything is expressed.
+2. **Pointers or an option type** on the affected fields of `SandboxCreateOptions`. Unambiguous, and
+   a public API break for every integrator.
+
+Prefer (1); reach for (2) only where no value can be reserved. Whichever is chosen, `nil`-vs-empty
+is already distinguishable for the slice and map keys, so this question is confined to scalars.
 
 ## Why
 

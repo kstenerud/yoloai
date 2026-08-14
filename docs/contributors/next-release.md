@@ -60,6 +60,32 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
+*v0.12.0 is the **configuration** release: the config/trust fixes already landed, plus the layering
+that makes them structural rather than four spot repairs.*
+
+- [DF195](design/findings-unresolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox
+- [D140](decisions/working-notes.md#d140--yoloaiyaml-project-config-is-removed-entirely) — `.yoloai.yaml` project config is removed entirely
+- [D142](decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset) — The `mounts:` config/profile key is retired; `directories:` is its strict superset
+- [DF209](design/findings-unresolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close
+- [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) — Configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
+- [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
+- [DF210](design/findings-unresolved.md) — a profile's `os:` is parsed, merged, and never read
+- [DF211](design/findings-unresolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist
+- [DF201](design/findings-unresolved.md) — `agent_files` list form copies credentials the string form strips
+- [DF202](design/findings-unresolved.md) — a file-defined agent can make yoloAI read arbitrary vars from its own environment
+- [DF206](design/findings-unresolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly
+- [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
+- [DF208](design/findings-resolved.md) — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from personal defaults, not baked-in defaults (RESOLVED 2026-08-13)
+
+## Deferred to v0.13.0 — the network release
+
+*Not "dropped" and not "done": scoped out of this cut, deliberately, on 2026-08-14. Both remaining
+plans build on [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary)'s
+provenance — D141 must tell operator-authored from repo-derived, and the network mode validation must
+tell a typed port from an inherited one — so building either first means building provenance twice,
+in two places, and then owning both. **The migration rides with `network-mode-reshape.md`, so v0.12.0
+carries none** and rule 12's constraint applies to v0.13.0's branch rather than this one.*
+
 - [enforcement-build.md](design/plans/enforcement-build.md) — Host-side enforcement — build brief
 - [DF188](design/findings-unresolved.md) — `resolve_domains` accepts whatever a resolver returns, so a sinkholed allowlist domain installs a rule that matches nothing and says nothing
 - [DF189](design/findings-unresolved.md) — yoloAI's CNI subnet is byte-identical to podman's default allocator pool, so two sandboxes on one host can hold the same address
@@ -72,21 +98,8 @@ finding or decision first, and lands here only if it should block the release.
 - [DF198](design/findings-unresolved.md) — `--network-none` is silently unenforced on containerd, apple and tart, while shipped help says it holds on every backend
 - [DF199](design/findings-unresolved.md) — `--network-none` makes a seatbelt sandbox fail to start, because SBPL's `network*` class also covers unix sockets
 - [DF200](design/findings-unresolved.md) — the `NetworkNone` conformance case cannot fail, and does not run on any backend that has the defect
-- [DF195](design/findings-unresolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox
-- [D140](decisions/working-notes.md#d140--yoloaiyaml-project-config-is-removed-entirely) — `.yoloai.yaml` project config is removed entirely
 - [D141](decisions/working-notes.md#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed) — A repo may not widen the sandbox boundary; requests that would are refused and listed
 - [repo-request-trust.md](design/plans/repo-request-trust.md) — Repo-request trust — balk and list, never filter and proceed
-- [D142](decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset) — The `mounts:` config/profile key is retired; `directories:` is its strict superset
-- [DF209](design/findings-unresolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close
-- [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) — Configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
-- [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
-- [DF210](design/findings-unresolved.md) — a profile's `os:` is parsed, merged, and never read
-- [DF211](design/findings-unresolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist
-- [DF201](design/findings-unresolved.md) — `agent_files` list form copies credentials the string form strips
-- [DF202](design/findings-unresolved.md) — a file-defined agent can make yoloAI read arbitrary vars from its own environment
-- [DF206](design/findings-unresolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly
-- [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
-- [DF208](design/findings-resolved.md) — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from personal defaults, not baked-in defaults (RESOLVED 2026-08-13)
 
 ## Candidates — undecided
 
