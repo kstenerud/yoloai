@@ -77,6 +77,9 @@ finding or decision first, and lands here only if it should block the release.
 - [D141](decisions/working-notes.md#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed) — A repo may not widen the sandbox boundary; requests that would are refused and listed
 - [repo-request-trust.md](design/plans/repo-request-trust.md) — Repo-request trust — balk and list, never filter and proceed
 - [D142](decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset) — The `mounts:` config/profile key is retired; `directories:` is its strict superset
+- [DF209](design/findings-unresolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close
+- [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) — Configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
+- [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [DF201](design/findings-unresolved.md) — `agent_files` list form copies credentials the string form strips
 - [DF202](design/findings-unresolved.md) — a file-defined agent can make yoloAI read arbitrary vars from its own environment
 - [DF206](design/findings-unresolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly

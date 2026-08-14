@@ -107,10 +107,19 @@ therefore differ between its first launch and any restart afterward, depending o
 personal config held at restart time.
 
 **New behavior:** a profile merges over yoloAI's baked-in defaults only, on both the create path
-and the restart/relaunch path. None of the fields above carry over from
+and the restart/relaunch path. The fields above no longer carry over from
 `~/.yoloai/defaults/config.yaml` when `--profile` is used. If a profile needs a personal `env`
-var, capability, device, isolation mode, or egress-allowlist entry, it must set that value in the
-profile's own `config.yaml` — that is where `config.md` always said it belonged.
+var, capability, device, or egress-allowlist entry, it must set that value in the profile's own
+`config.yaml` — that is where `config.md` always said it belonged.
+
+**Two exceptions remain, and they are not fixed by this change: `isolation` and `model`.** Both
+reach the sandbox by a second route that this fix does not touch — the CLI resolves each one as
+"flag, else `~/.yoloai/defaults/config.yaml`" into a single value before the profile is merged, so
+a personal `isolation:` or `model:` still overrides a profile's. Setting either in your personal
+config and then using `--profile` still gives you the personal value, not the profile's. Tracked as
+[DF209](contributors/design/findings-unresolved.md); closing it needs the value's *source* to
+survive the CLI boundary, which is [D143](contributors/decisions/working-notes.md)'s subject. Until
+then, treat `config.md`'s "no exceptions" as holding for every field **except** these two.
 
 **Why it changed:** [DF207/DF208](contributors/design/findings-resolved.md). The code passed the
 loaded personal config as the profile merge's base instead of the baked-in defaults; the fix

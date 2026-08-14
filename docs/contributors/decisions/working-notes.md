@@ -2103,3 +2103,42 @@ All three are the silent degradation [D138](#d138--automatic-degradation-is-reti
 - **The rejecting reader is a deprecation** (D127): it exists only so a config file written before this decision gets a clear, actionable error instead of a silently-ignored key. Registered in [deprecations.md](../deprecations.md), `Incurred: 2026-08-13`, 12-month user-facing grace period (it waits on people editing config files they forgot they wrote).
 - `store.Environment`'s persisted `mounts` key and `yoloai.Environment.Mounts` are unrelated to this decision and are untouched — they carry devcontainer-derived mounts only, and renaming them would need a schema migration this decision does not incur. The Go field name carrying them on `state.State` is **not** persisted, though, so it is renamed `ConfigMounts` → `ExtraMounts` in the same commit — nothing from config reaches it any more, only devcontainer.json.
 - `pr.mounts` (`internal/orchestrator/create`) keeps its name and type; after this change it starts empty for every sandbox and is populated only by `mergeDcMounts` from devcontainer.json, per D141.
+
+---
+
+## D143 — configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
+
+**Date:** 2026-08-14. **Status:** Active — designed, not built. **Consumers:** `internal/config/`, `internal/orchestrator/create/`, `internal/orchestrator/lifecycle/`, `internal/cli/`. **Plan:** [`config-provenance-layers.md`](../design/plans/config-provenance-layers.md).
+
+**Decision. Each configuration source is parsed into its own layer, tagged with where it came from, and the layers travel together to a single resolver that applies a declared per-key policy.** Values stop being merged eagerly at each boundary, so *"who supplied this?"* survives to the point where it is needed instead of being destroyed on the way.
+
+**The problem is not any one defect; it is that the answer is unavailable.** yoloAI collapses sources early — `Coalesce(flag, config)` at the CLI (`new.go:544`), `MergeProfileChain(base, chain)` in the merge, `append(profileValue, cliValue...)` in the pipeline — and every collapse discards which source won. Nine findings from one audit are the same missing answer wearing different clothes:
+
+| Question that could not be asked | Filed as |
+| --- | --- |
+| did the user type this port, or did a profile / `devcontainer.json` supply it? | DF197 |
+| did the user set this mode, or did config? | DF196, DF206 |
+| is this value the profile's or the machine's personal default? | DF207, DF208, **DF209** |
+| did the user choose this isolation mode deliberately? | DF205 |
+| is this mount operator-authored or repo-derived? | D141 |
+
+**The evidence that this is architectural rather than sloppy: four of four call sites got the same thing wrong.** Every caller of `MergeProfileChain` passed the user's personal config as the base, against a guarantee `config.md:165,167` states in bold. Not three of four with one correct example to copy — all of them. A parameter whose only correct value is one specific thing is not a parameter, it is a trap with a slot for the wrong answer, and a 100% failure rate is the measurement.
+
+**What it retires.** The provenance mechanisms this codebase already grew, one per key, each in a different style: `baseAgent` (`prepare_profile.go:99`, comparing against the config value to detect a CLI override — the one that *works*), `IsolationExplicit` (`state.go:62`, a side-channel bit that is written, never read, and `true` for values nobody typed — DF205), and the `opts.Network == NetworkModeDefault` gates (`prepare_profile.go:144,208`, which infer provenance from a sentinel and silently discard a list when they guess — DF206). Three answers to one question, and the one that works was never generalised.
+
+**One resolver, not per-consumer resolution.** Layers give consumers the inputs; if each then decides precedence for itself, the 4-of-4 divergence returns with better raw material. Precedence is genuinely non-uniform — `ports`/`network.allow`/`directories` are additive, `mounts`/`env`/`isolation` replace, `agent_args` map-merges — so the policy is a **declared per-key table**, in one place, testable and diffable. Today that table exists only as the implicit order of assignments across three files, which is why reconstructing it took a full audit.
+
+**The rule that pays for the whole thing.** *Profiles are self-contained* becomes one line — **when a profile layer is present, drop the user-defaults layer** — instead of being re-implemented per key at four call sites, which is how DF207/DF208/DF209 happened. Nothing is left for a fifth caller to get wrong, because there is no `base` argument to pass.
+
+**Three constraints, each a real cost.**
+1. **Presence must be explicit.** A layer must distinguish "did not set this key" from "set it to empty", so keys need pointers or an option type rather than zero values. This also resolves a live ambiguity: `isolation: ""` is currently a *meaningful sentinel* meaning "ask the backend" (`runtime/isomode.go`), so the zero value already does double duty.
+2. **Sources are not the same shape.** `devcontainer.json` is not a `YoloaiConfig`; profiles hold keys the base config does not. Each edge therefore **translates** into a common layer shape carrying only the keys it can express — the parse-don't-validate rule applied one level up, and what keeps the resolver from needing to know what a devcontainer is.
+3. **It is invisible when it works.** If the policy table reproduces today's precedence, nothing user-visible changes except the defects that disappear — which also means the tests must pin the *policy*, not the outcome of one path.
+
+**Rejected.**
+1. **Fix each finding where it manifests.** What we have been doing, and DF209 is the specimen: the create-path leak was fixed, and the identical leak through the CLI's `Coalesce` survived because the information was already gone by then. Some of these defects are *unfixable* at their site.
+2. **Add a provenance flag per key, as needed.** This is `IsolationExplicit`, which is dead, wrong, and looks usable — the worst of the three outcomes. Special machinery per key is what generated the inconsistency.
+3. **Generalise `baseAgent`'s comparison trick.** It works, but only because `agent` is a scalar whose config value can be carried alongside and compared. It does not extend to additive lists, where "who contributed this element" is per-element, not per-key.
+4. **Do it later, after D141 and the network mode work.** Rejected because both need provenance: D141 must distinguish operator-authored from repo-derived, and the network validation must distinguish a typed port from an inherited one. Building them first means building provenance twice, badly, in two places — and then owning both.
+
+**Consequences.** No user-visible change if the policy table is faithful; the defects it closes are listed above. It touches `YoloaiConfig`, `MergedConfig`, `ProfileConfig`, `create.Options` and `profileResult`, so it is sequenced before D141 and before `network-mode-reshape.md` step 1 rather than alongside them. DF205 is subsumed rather than fixed: `IsolationExplicit` is deleted by this work, not repaired.
