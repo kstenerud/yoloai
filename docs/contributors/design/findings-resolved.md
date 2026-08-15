@@ -23,6 +23,19 @@ into this file skips the merge-conflict collision check that ID-ordering gives t
 a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
 of at rebase. Later, but still before it can ship.
 
+### DF201 — `agent_files` list form copies credentials the string form strips (RESOLVED 2026-08-15)
+
+- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
+- **Severity:** MEDIUM (list-form `agent_files` puts live credentials into the sandbox where the same key in string form would strip them)
+- **Disposition:** **RESOLVED 2026-08-15.**
+- **Description:** `CopyAgentFiles` branches on `expanded.IsStringForm()`. The string branch, `copyAgentFilesFromBaseDir`, applied the agent's `AgentFilesExclude` globs — the credential denylist (`internal/agent/agent.go:387` Claude excludes `.credentials.json`, `projects/`, `statsig/`; `:481` Gemini `oauth_creds.json`, `gemini-credentials.json`, `google_accounts.json`; `:604` Codex `auth.json`, `sessions/`; `:534` OpenCode the same). The list branch, `copyAgentFilesList`, **took no `spec` parameter and never called the exclusion filter at all** — it copied each entry verbatim with `workspace.CopyDir`/`copyFilePreserve`. So `agent_files: ["~/.claude"]` copied live credentials into the sandbox where `agent_files: "~"` would strip them.
+- **The docs did not qualify the guarantee to one form.** `docs/GUIDE.md:723` states "Each agent excludes session data and caches" as a blanket property of `agent_files`. A user who picked the list form for its explicitness believed they were protected and were not.
+- **Fixed.** `copyAgentFilesList` now takes the `EnvSpec` and applies `AgentFilesExclude`, so the denylist holds for both forms. A directory entry is walked by a new `copyDirExcluding` — the same filter and the same relative-path basis the string form uses — instead of a bare `workspace.CopyDir`. An entry naming an excluded path **directly** is refused too, with a `slog.Warn`, because that is how a config would ask for the credential file by name; a silently skipped entry the user explicitly listed would be its own surprise.
+- **Pinned by `TestArch_AgentFilesNeverCopiesExcludedCredentials`**, cited from `principles/security-principles.md` under the one-convention rule, so the claim now fails `make check` rather than drifting. Verified red-on-revert in both directions: with the fix stashed, `.credentials.json` and `projects/` land in the sandbox's `agent-runtime/`.
+- **The convention graduated out of this finding** (rule 7): the worked example lives in `security-principles.md` §"a security mechanism follows ONE convention", where it is the canonical instance — an audit reading *either* implementation alone finds it correct, and only the comparison shows the gap.
+- **No `BREAKING-CHANGES` entry.** `docs/GUIDE.md:723` already documented the exclusions as a property of `agent_files` without qualifying them to a form, so nothing promised stopped working; what changed is that the promise became true on both paths.
+- **Pointer:** `internal/envsetup/agent_files.go` (`CopyAgentFiles`, `copyAgentFilesList`, `copyDirExcluding`, `shouldExclude`); `internal/agent/agent.go:387,481,534,604`; `docs/GUIDE.md:723`.
+
 ### DF208 — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from the user's personal `defaults/config.yaml`, not baked-in defaults (RESOLVED 2026-08-13)
 
 - **Discovered:** 2026-08-13, fixing DF207 · **Workstream:** config/trust seams
@@ -57,7 +70,7 @@ of at rebase. Later, but still before it can ship.
 - **The chain-resolution/merge error fallback at `resolvedAgentFiles` also changed direction.** On a
   profile-chain error, the pre-fix code returned the personal `cfg.AgentFiles` — and `agent_files`'
   list form applies no credential-exclusion filter at all
-  ([DF201](findings-unresolved.md#df201--agent_files-list-form-copies-credentials-the-string-form-strips)),
+  ([DF201](#df201--agent_files-list-form-copies-credentials-the-string-form-strips-resolved-2026-08-15)),
   so that fallback degraded a profile-active error into "copy the user's personal agent state,
   unfiltered, into a profile sandbox." The fix returns `nil` on error instead, when a profile is
   active; the no-profile path (`meta.Profile == ""`) is unaffected and still returns `cfg.AgentFiles`.

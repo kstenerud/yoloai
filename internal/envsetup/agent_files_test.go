@@ -243,3 +243,53 @@ func TestShouldExclude(t *testing.T) {
 		})
 	}
 }
+
+// TestArch_AgentFilesNeverCopiesExcludedCredentials is the executable form of
+// the claim in principles/security-principles.md: an agent's AgentFilesExclude
+// denylist holds for BOTH agent_files forms.
+//
+// It did not until 2026-08-15 (DF201). copyAgentFilesList used a bare
+// workspace.CopyDir, so `agent_files: ["~/.claude"]` copied .credentials.json
+// into the sandbox while `agent_files: "~"` stripped it — the same denylist,
+// honoured on one form and ignored on the other. docs/GUIDE.md documented the
+// exclusions without qualifying them to a form, so a user reading the docs
+// believed the list form protected them.
+//
+// Both directions matter and both are asserted here: a directory entry whose
+// CONTENTS include a credential, and an entry naming the credential DIRECTLY —
+// the latter being how a config would ask for the file by name.
+func TestArch_AgentFilesNeverCopiesExcludedCredentials(t *testing.T) {
+	spec := agentSpec(agent.GetAgent("claude"))
+
+	home := t.TempDir()
+	claudeDir := filepath.Join(home, ".claude")
+	require.NoError(t, os.MkdirAll(filepath.Join(claudeDir, "projects", "p"), 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "settings.json"), []byte("keep"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte("SECRET"), 0600))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, "projects", "p", "d.json"), []byte("SESSION"), 0600))
+
+	t.Run("directory entry excludes its credential contents", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		agentStateDir := store.AgentRuntimePath(sandboxDir)
+		require.NoError(t, os.MkdirAll(agentStateDir, 0750))
+
+		af := &config.AgentFilesConfig{Files: []string{claudeDir}}
+		require.NoError(t, CopyAgentFiles(spec, sandboxDir, af, "", nil))
+
+		// The non-excluded file still arrives — this is a filter, not an outage.
+		assert.FileExists(t, filepath.Join(agentStateDir, ".claude", "settings.json"))
+		assert.NoFileExists(t, filepath.Join(agentStateDir, ".claude", ".credentials.json"))
+		assert.NoDirExists(t, filepath.Join(agentStateDir, ".claude", "projects"))
+	})
+
+	t.Run("entry naming the credential directly is refused", func(t *testing.T) {
+		sandboxDir := t.TempDir()
+		agentStateDir := store.AgentRuntimePath(sandboxDir)
+		require.NoError(t, os.MkdirAll(agentStateDir, 0750))
+
+		af := &config.AgentFilesConfig{Files: []string{filepath.Join(claudeDir, ".credentials.json")}}
+		require.NoError(t, CopyAgentFiles(spec, sandboxDir, af, "", nil))
+
+		assert.NoFileExists(t, filepath.Join(agentStateDir, ".credentials.json"))
+	})
+}

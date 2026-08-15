@@ -6,6 +6,7 @@ package envsetup
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
@@ -13,7 +14,6 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
-	"github.com/kstenerud/yoloai/internal/workspace"
 	"github.com/kstenerud/yoloai/store"
 )
 
@@ -42,7 +42,7 @@ func CopyAgentFiles(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFil
 		return copyAgentFilesFromBaseDir(spec, sandboxDir, expanded.BaseDir)
 	}
 
-	return copyAgentFilesList(sandboxDir, expanded.Files)
+	return copyAgentFilesList(spec, sandboxDir, expanded.Files)
 }
 
 // copyAgentFilesFromBaseDir copies the agent's state directory from a base
@@ -104,7 +104,15 @@ func copyAgentFilesFromBaseDir(spec EnvSpec, sandboxDir, baseDir string) error {
 // copyAgentFilesList copies explicit file/directory paths into agent-runtime.
 // Each entry is copied to agent-runtime/basename. Missing entries are skipped.
 // Existing files are not overwritten.
-func copyAgentFilesList(sandboxDir string, files []string) error {
+//
+// AgentFilesExclude applies here exactly as it does to the string form (DF201).
+// It did not until 2026-08-15, so `agent_files: ["~/.claude"]` copied
+// .credentials.json into the sandbox while `agent_files: "~"` stripped it —
+// the same denylist, honoured on one form and ignored on the other, with
+// docs/GUIDE.md documenting the exclusions without qualifying them to a form.
+// Credentials reaching the agent's filesystem is the outcome credential
+// brokering exists to prevent, so the two forms have to agree.
+func copyAgentFilesList(spec EnvSpec, sandboxDir string, files []string) error {
 	agentStateDir := store.AgentRuntimePath(sandboxDir)
 
 	for _, src := range files {
@@ -118,12 +126,22 @@ func copyAgentFilesList(sandboxDir string, files []string) error {
 
 		dst := filepath.Join(agentStateDir, filepath.Base(src))
 
+		// An entry naming an excluded path directly is the sharpest case: it is
+		// how a config would ask for the credential file by name. Refuse it the
+		// same way the walk below refuses it in a subdirectory, and say so —
+		// a silently skipped entry a user explicitly listed is a surprise.
+		if shouldExclude(filepath.Base(src), info.IsDir(), spec.AgentFilesExclude) {
+			slog.Warn("agent_files entry skipped: excluded by the agent's AgentFilesExclude patterns",
+				"event", "agentfiles.excluded", "path", src, "agent_state_dir", spec.StateRelPath)
+			continue
+		}
+
 		if info.IsDir() {
 			// Don't overwrite if destination already exists
 			if _, err := os.Stat(dst); err == nil {
 				continue
 			}
-			if err := workspace.CopyDir(src, dst); err != nil {
+			if err := copyDirExcluding(spec, src, dst); err != nil {
 				return fmt.Errorf("copy directory %s: %w", src, err)
 			}
 		} else {
@@ -138,6 +156,46 @@ func copyAgentFilesList(sandboxDir string, files []string) error {
 	}
 
 	return nil
+}
+
+// copyDirExcluding copies srcDir to dstDir, applying the agent's
+// AgentFilesExclude patterns to every path relative to srcDir — the same
+// filter, and the same relative-path basis, that copyAgentFilesFromBaseDir
+// applies. It replaces a bare workspace.CopyDir, which copied everything.
+func copyDirExcluding(spec EnvSpec, srcDir, dstDir string) error {
+	return filepath.WalkDir(srcDir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+
+		rel, relErr := filepath.Rel(srcDir, path)
+		if relErr != nil {
+			return relErr
+		}
+		if rel == "." {
+			return fileutil.MkdirAll(dstDir, 0750)
+		}
+
+		if shouldExclude(rel, d.IsDir(), spec.AgentFilesExclude) {
+			if d.IsDir() {
+				return filepath.SkipDir
+			}
+			return nil
+		}
+
+		dst := filepath.Join(dstDir, rel)
+
+		if d.IsDir() {
+			return fileutil.MkdirAll(dst, 0750)
+		}
+
+		// Don't overwrite files that already exist (SeedFiles win)
+		if _, err := os.Stat(dst); err == nil {
+			return nil
+		}
+
+		return copyFilePreserve(path, dst)
+	})
 }
 
 // shouldExclude checks if a relative path matches any exclusion pattern.

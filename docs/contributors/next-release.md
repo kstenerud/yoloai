@@ -71,7 +71,7 @@ that makes them structural rather than four spot repairs.*
 - [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [DF210](design/findings-unresolved.md) — a profile's `os:` is parsed, merged, and never read
 - [DF211](design/findings-unresolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist
-- [DF201](design/findings-unresolved.md) — `agent_files` list form copies credentials the string form strips
+- [DF201](design/findings-resolved.md) — `agent_files` list form copies credentials the string form strips (RESOLVED 2026-08-15)
 - [DF202](design/findings-unresolved.md) — a file-defined agent can make yoloAI read arbitrary vars from its own environment
 - [DF206](design/findings-unresolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly
 - [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)

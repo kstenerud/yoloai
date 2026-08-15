@@ -1176,18 +1176,6 @@ earlier signal and records nothing else.
 - **What would close it:** a mechanism-blind reachability assertion in `RunInterfaceConformance` — from inside the instance, a known-reachable destination must fail while a positive control succeeds, per [A22](../agent-failures.md) — built through `Backend.Create` so the flag's own path is under test. D139 already requires exactly this shape for the `restricted` mode; the same case serves `none`.
 - **Pointer:** `runtime/runtimetest/conformance.go:73,165`; `RunConformance` callers `runtime/docker/integration_test.go:24` and `runtime/podman/integration_test.go:26`, against `RunInterfaceConformance` callers `runtime/apple/integration_test.go:84`, `runtime/tart/integration_test.go:108`, `runtime/seatbelt/integration_test.go:192`, `runtime/containerd/integration_test.go:301`.
 
-### DF201 — `agent_files` list form copies credentials the string form strips
-
-- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
-- **Severity:** MEDIUM (list-form `agent_files` puts live credentials into the sandbox where the same key in string form would strip them)
-- **Disposition:** UNRESOLVED — PARKED
-- **Rides:** **any**.
-- **Description:** `CopyAgentFiles` (`internal/envsetup/agent_files.go:31`) branches on `expanded.IsStringForm()`. The string branch, `copyAgentFilesFromBaseDir` (`:52`), applies the agent's `AgentFilesExclude` globs — the credential denylist (`internal/agent/agent.go:387` Claude excludes `.credentials.json`, `projects/`, `statsig/`; `:481` Gemini excludes `oauth_creds.json`, `gemini-credentials.json`, `google_accounts.json`; `:604` Codex excludes `auth.json`, `sessions/`; `:534` OpenCode the same). The list branch, `copyAgentFilesList` (`:107-141`), **takes no `spec` parameter and never calls the exclusion filter at all** — it copies each entry verbatim with `workspace.CopyDir`/`copyFilePreserve` (`:126`, `:134`). So `agent_files: ["~/.claude"]` copies live credentials into the sandbox where `agent_files: "~"` would strip them.
-- **The docs don't qualify the guarantee to one form.** `docs/GUIDE.md:723` states "Each agent excludes session data and caches" as a blanket property of `agent_files`, with no mention that it holds only in string form. A user who picks list form for its explicitness believes they are protected and are not.
-- **Why this matters beyond one config key:** putting real credentials into the sandbox filesystem is exactly what credential brokering (SeedFiles + the broker) exists to avoid; a second, undocumented path back into the same failure mode undercuts that design.
-- **What would close it:** the remedy is small — thread `spec` into `copyAgentFilesList` and apply `shouldExclude` (`:146`) the same way the string branch does.
-- **Pointer:** `internal/envsetup/agent_files.go:31,52,107-141,126,134,146`; `internal/agent/agent.go:387,481,534,604`; `docs/GUIDE.md:723`.
-
 ### DF202 — a file-defined agent can make yoloAI read arbitrary vars from its own environment
 
 - **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
