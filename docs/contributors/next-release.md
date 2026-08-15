@@ -63,7 +63,7 @@ finding or decision first, and lands here only if it should block the release.
 *v0.12.0 is the **configuration** release: the config/trust fixes already landed, plus the layering
 that makes them structural rather than four spot repairs.*
 
-- [DF195](design/findings-unresolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox
+- [DF195](design/findings-resolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox (RESOLVED 2026-08-15)
 - [D140](decisions/working-notes.md#d140--yoloaiyaml-project-config-is-removed-entirely) — `.yoloai.yaml` project config is removed entirely
 - [D142](decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset) — The `mounts:` config/profile key is retired; `directories:` is its strict superset
 - [DF209](design/findings-resolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close

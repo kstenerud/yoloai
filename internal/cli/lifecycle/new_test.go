@@ -37,6 +37,19 @@ func TestNewCmd_NoProfileFlagRemoved(t *testing.T) {
 	assert.Nil(t, cmd.Flags().Lookup("no-profile"))
 }
 
+func TestNewCmd_EnvFlagDoesNotSplitOnComma(t *testing.T) {
+	// DF195: --env was a StringSlice, which splits its value on commas, while
+	// start/restart/reset register the same flag as StringArray, which doesn't.
+	// A comma is ordinary in an env value (e.g. NO_PROXY=localhost,127.0.0.1), so
+	// new must match the other three: one --env occurrence is one variable.
+	cmd := NewNewCmd("test")
+	require.NoError(t, cmd.Flags().Parse([]string{"--env", "NO_PROXY=localhost,127.0.0.1"}))
+
+	got, err := cmd.Flags().GetStringArray("env")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"NO_PROXY=localhost,127.0.0.1"}, got)
+}
+
 func TestParseNewCmdPositional_Errors(t *testing.T) {
 	tests := []struct {
 		name      string

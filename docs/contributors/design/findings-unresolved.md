@@ -1094,18 +1094,6 @@ earlier signal and records nothing else.
 - **Not established:** whether any backend restores a destroyed interface *without* going through yoloAI's start path, which is the case that would turn this into a live escape rather than a restart hazard. Nothing tests rootless podman or containerd here, and nothing measures whether a guest can time the destruction to race a reinstall.
 - **Pointer:** `design/research/linux-enforcement/results/v4-hostile-guest-vs-netdev.txt` (the five attacks and the teardown), `v2-v5-netdev-device-binding.txt` (the ifindex binding), `v1b-link-event-coverage.txt` (the link event, hostile arm), `design/plans/enforcement-build.md` § *Part 0*.
 
-### DF195 — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox
-
-- **Discovered:** 2026-08-12, building the P2 chokepoint harness · **Workstream:** CLI
-- **Severity:** LOW–MEDIUM (a shipped flag rejects ordinary input on two commands and accepts it on three, and the error blames the user's value)
-- **Disposition:** UNRESOLVED — found while doing something else, recorded rather than fixed mid-round
-- **Rides:** **any** for the fix itself. Arguably **breaking** in one direction: anyone relying on `--env A=1,B=2` to set *two* variables in one flag would lose that, and it works today by accident.
-- **Description:** `internal/cli/lifecycle/new.go:66` declares `--env` as `StringSlice`, which splits every value on commas. So `--env NO_PROXY=localhost,127.0.0.1` is parsed as two values, the second has no `=`, and the command exits 2 with `invalid --env value "127.0.0.1": must be KEY=VAL` — an error naming a fragment the user never wrote as a value. Commas are ordinary in environment values: `NO_PROXY`, `JAVA_TOOL_OPTIONS`, `GOFLAGS`, any comma-separated list.
-- **Why it is a defect rather than a preference: three sibling paths already do it the other way.** `restart.go:42`, `start.go:41` and `reset.go:46` all declare the *same* `--env` flag as `StringArrayVar`, which does not split. So `--env NO_PROXY=localhost,127.0.0.1` is rejected by `yoloai new` and accepted by `yoloai restart` — the same spelling, the same flag name, opposite behaviour, decided by which command you reached it through. The fix direction is therefore to make `new`/`run` match the three that are already right, not to invent a mechanism ([GEN §18](../principles/general-principles.md)).
-- **The shape, checked rather than assumed.** `new.go` has three other `StringSlice` flags and they are not the same case: `--network-allow` takes domains, `--port` takes `host:container`, and neither can contain a comma, so splitting is correct there and is arguably the point. `--dir` is the one other value that is a filesystem path and could in principle contain a comma; it is far rarer and is not separately filed. `--runtime` is already `StringArray`. So this is one flag with the wrong type, not a class.
-- **What would close it:** `StringSlice` → `StringArray` for `--env` on `new`/`run`, plus a test that a value containing a comma survives to the sandbox as one variable. Rule 10's red-on-revert is straightforward here. Decide at the same time whether the lost split is worth a `BREAKING-CHANGES.md` entry — it is a withdrawal of behaviour that works today, even though nothing documents it.
-- **Pointer:** `internal/cli/lifecycle/new.go:66` and `:219`, against `internal/cli/lifecycle/restart.go:42`, `start.go:41`, `reset.go:46`.
-
 ### DF196 — `--network-none` silently swallows an allowlist: `--network-allow` is accepted, discarded, and never recorded
 
 - **Discovered:** 2026-08-12, checking the loud-failure requirement for the network-mode reshape · **Workstream:** isolation

@@ -184,6 +184,28 @@ default-profile config key that has never existed.
 feature nobody built, is worse than no flag: it looks like it works. A real default-profile
 feature is later work, not a reason to keep a no-op flag around in the meantime.
 
+### `--env` no longer splits its value on commas, on `yoloai new` and `yoloai run`
+
+**Previous behavior:** `new` and `run` registered `--env` as a `StringSlice`, which splits every
+occurrence's value on commas. `--env NO_PROXY=localhost,127.0.0.1` was parsed as two values,
+`NO_PROXY=localhost` and `127.0.0.1`; the second has no `=`, so the command exited 2 with `invalid
+--env value "127.0.0.1": must be KEY=VAL` — an error naming a fragment the user never wrote as a
+value. `start`, `restart`, and `reset` already registered the same flag as `StringArray`, which
+does not split, so the identical invocation worked on those three and failed only on the two
+commands that create a sandbox.
+
+**New behavior:** `new` and `run` register `--env` as `StringArray`, matching `start`/`restart`/
+`reset`. `--env NO_PROXY=localhost,127.0.0.1` now sets one variable whose value contains a comma,
+on every command. Passing two variables now always requires repeating the flag
+(`--env A=1 --env B=2`) rather than joining them with a comma — that was already the only way to
+do it on `start`/`restart`/`reset`, and it never reliably worked on `new`/`run` either, since it
+broke on any value that itself contained a comma.
+
+**Why it changed:** DF195. A comma is ordinary in an environment value (`NO_PROXY`,
+`JAVA_TOOL_OPTIONS`, `GOFLAGS`, any comma-separated list), so splitting on it is the wrong default
+— and it was already wrong on three of the five commands that accept `--env`. Repeating a flag,
+not commas inside it, is how multiple values are meant to be passed.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running
