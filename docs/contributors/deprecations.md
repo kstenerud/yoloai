@@ -280,6 +280,22 @@ installs did not actually work, which is evidence about how much it was exercise
 - **Pointer:** `internal/config/config.go` (`checkMountsKeyRemoved`, `errMountsKeyRemoved`);
   `internal/config/profile.go` (`LoadProfile`); D142.
 
+### `os:` rejecting reader for profiles
+
+- **Incurred:** 2026-08-15 · **Shipped:** (pending) · **Due:** 2027-08-15 (user-facing, 12mo)
+- **What:** `checkOSKeyRejectedInProfile` (`internal/config/profile.go`) scans a profile document
+  for a top-level `os:` key and, if present, fails to load rather than silently discarding it.
+  `os:` was accepted, parsed, and merged into `MergedConfig.OS` on every prior release, but nothing
+  ever read that field — the effective guest OS is resolved at the CLI, before backend selection
+  and before any profile is loaded, so a profile's `os:` never took effect (DF210). **User-facing**
+  grace period: a profile written on an earlier release may still carry `os:`, and its owner only
+  learns at the next `yoloai new --profile <name>`, which may be rare.
+- **Retire by:** deleting `checkOSKeyRejectedInProfile` and `errOSKeyNotAppliedFromProfile` — the
+  key becomes a plain unknown field, caught by the same house-pattern validation `mounts:` retires
+  to above, rather than a dedicated message.
+- **Pointer:** `internal/config/profile.go` (`checkOSKeyRejectedInProfile`,
+  `errOSKeyNotAppliedFromProfile`, `LoadProfile`); DF210.
+
 ## Not deprecations
 
 Recorded so they are not re-filed. Each looks like a compatibility shim and is not:

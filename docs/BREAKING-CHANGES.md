@@ -150,6 +150,24 @@ it — an inconsistency found while making that documented promise executable
 `knownDefaultsKeys` into this file (the scaffold generator and `yoloai config set` both stay
 within it), so this closes a silent-typo gap without a known legitimate writer to break.
 
+### A profile's `os:` key is now rejected
+
+**Previous behavior:** a profile's `config.yaml` could set `os:`, and it was parsed, validated as
+a known key, and merged across the profile chain into `MergedConfig.OS` — but nothing ever read
+that field. The guest OS is resolved once, at the CLI, as `Coalesce(FlagStr(cmd, "os"), cfgOS)`
+(flag, else the *base* config), before backend selection and before a profile is even loaded. A
+profile's `os:` therefore never had any effect: it was accepted and silently discarded, on every
+version that ever supported it.
+
+**New behavior:** `LoadProfile` fails when a profile's `config.yaml` sets `os:`, with an error
+naming the key, saying it has no effect in a profile, and pointing at `--os` or the base config
+(`~/.yoloai/defaults/config.yaml`) instead.
+
+**Why it changed:** DF210. Nothing that worked stops working — the key never took effect from a
+profile — but a silent no-op became a load-time error, matching the `mounts:` precedent (D142):
+an inert key is rejected loudly rather than accepted and discarded. `os:` in the *base* config is
+unaffected; it is still read and still resolves `--os`'s default.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running

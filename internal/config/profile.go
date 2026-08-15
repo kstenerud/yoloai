@@ -4,6 +4,7 @@ package config
 // ABOUTME: Profiles are self-contained environment definitions in ~/.yoloai/profiles/<name>/.
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -219,6 +220,9 @@ func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	if err := checkMountsKeyRemoved(root); err != nil {
 		return nil, fmt.Errorf("config.yaml for %q: %w", name, err)
 	}
+	if err := checkOSKeyRejectedInProfile(root); err != nil {
+		return nil, fmt.Errorf("config.yaml for %q: %w", name, err)
+	}
 
 	interpEnv := layout.Env().EnvForConfigInterpolation()
 	for i := 0; i < len(root.Content)-1; i += 2 {
@@ -239,6 +243,32 @@ func LoadProfile(layout Layout, name string) (*ProfileConfig, error) {
 	}
 
 	return cfg, nil
+}
+
+// checkOSKeyRejectedInProfile scans a profile document's top-level keys for
+// "os" and, if present, rejects it (DF210). The effective guest OS is
+// resolved at the CLI — Coalesce(FlagStr(cmd, "os"), cfgOS) in
+// internal/cli/lifecycle/new.go — before a Client or the create pipeline
+// exists, and that resolution feeds backend selection, which happens before
+// any profile is read. A profile's os: therefore cannot take effect no
+// matter where in this package it is applied, so — unlike a merged field
+// whose consumer just needs wiring up — there is no fix but to say so. Same
+// house pattern as checkMountsKeyRemoved (D142): name the key, say why, and
+// point at the working alternative, rather than silently discarding it.
+func checkOSKeyRejectedInProfile(root *yaml.Node) error {
+	for i := 0; i < len(root.Content)-1; i += 2 {
+		if root.Content[i].Value == "os" {
+			return errOSKeyNotAppliedFromProfile()
+		}
+	}
+	return nil
+}
+
+// errOSKeyNotAppliedFromProfile builds the DF210 rejection message.
+func errOSKeyNotAppliedFromProfile() error {
+	return errors.New("\"os:\" has no effect in a profile (DF210): the guest OS is resolved " +
+		"before a profile is read; use \"--os\" or set \"os:\" in the base config " +
+		"(~/.yoloai/defaults/config.yaml) instead")
 }
 
 // BaseImage is yoloAI's own artifact: byte-identical for every principal, so
