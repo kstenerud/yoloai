@@ -77,6 +77,7 @@ that makes them structural rather than four spot repairs.*
 - [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
 - [DF208](design/findings-resolved.md) — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from personal defaults, not baked-in defaults (RESOLVED 2026-08-13)
 - [DF212](design/findings-unresolved.md) — a running sandbox's config is not fully sourced from `state.State`; three sites re-read config files live
+- [DF213](design/findings-unresolved.md) — a profile's `agent:` key is silently ignored on a default install
 
 ## Deferred to v0.13.0 — the network release
 

@@ -4,7 +4,10 @@
 
 # Config provenance layers — one resolver, one policy table
 
-- **Status:** PLANNED — designed, no code.
+- **Status:** PLANNED — designed, no code. **Deferred to v0.13.0 per the 2026-08-15 audit of D143** (D143's Status now
+  splits the decision into a repair that stands and a reversal left undecided; this plan builds the
+  whole layer refactor, so it moves with the undecided half rather than starting early on the part
+  that stands).
 - **Depends on:** —
 - **Blocks:** `repo-request-trust.md` (D141), `network-mode-reshape.md` step 1. Both need provenance;
   building them first means building it twice, in two places, badly.
@@ -51,7 +54,7 @@ Every configuration boundary in yoloAI collapses its inputs and discards which o
 | --- | --- |
 | `Coalesce(FlagStr(cmd, "isolation"), cfgIsolation)` — `cli/lifecycle/new.go:544` | flag vs personal config |
 | `MergeProfileChain(layout, base, chain)` — `config/profile.go:493` | which layer set a field |
-| `opts.Ports = append(merged.Ports, opts.Ports...)` — `create/prepare_profile.go:141` | which element came from where |
+| `opts.Ports = append(merged.Ports, opts.Ports...)` — `create/prepare_profile.go:151` | which element came from where |
 | `mergeDcMounts(pr, dcMounts)` — `create/create.go:518` | operator-authored vs repo-derived |
 
 Nine findings from one audit are the same missing answer: DF196, DF197, DF205, DF206, DF207,
@@ -90,12 +93,18 @@ table. If each consumer resolved for itself, the 4-of-4 divergence returns with 
 | Merge kind | Keys |
 | --- | --- |
 | additive | `ports`, `network.allow`, `directories`, `cap_add`, `devices`, `setup` |
-| replace | `mounts`, `agent_files`, `isolation`, `model`, `agent`, `os` |
+| replace | `agent_files`, `isolation`, `model`, `agent`, `os` |
 | map-merge | `env`, `agent_args` |
 | per-field | `resources` |
 
 That table exists today only as the implicit order of assignments across three files, which is why
 reconstructing it took a full audit. Written down, it is testable and diffable.
+
+**This table is known incomplete** — it predates D142 (which retired `mounts:`, removed above) and
+was never checked against the current `YoloaiConfig` struct fields. At least `container_backend`,
+`tart.image`, `auto_commit_interval`, `network.isolated`, `workdir` and `backend` have no row. It
+must be rebuilt from the actual struct fields when this work is built, not trusted as written —
+perfecting a table for work that is not yet in scope is not worth doing now.
 
 **Totality invariant.** Layer 1 specifies every key, so resolution never falls off the end with no
 value. Two keys break it today: `agent_files` is commented out of the shipped template
@@ -132,8 +141,8 @@ the resolver needing a special case for "this layer is different".
 4. **Move the layer rules in** — profile-drops-user-defaults first, since it closes DF207/DF208's
    residue and DF209.
 5. **Delete the ad-hoc provenance mechanisms**: `IsolationExplicit` (`state.go:62`, DF205),
-   the `baseAgent` comparison (`prepare_profile.go:99`), the
-   `opts.Network == NetworkModeDefault` gates (`prepare_profile.go:144,208`, DF206).
+   the `baseAgent` comparison (`prepare_profile.go:109`), the
+   `opts.Network == NetworkModeDefault` gates (`prepare_profile.go:154,218`, DF206).
 6. **Expose provenance to consumers**, unblocking D141 (operator-authored vs repo-derived) and the
    network validation (typed vs inherited ports).
 
