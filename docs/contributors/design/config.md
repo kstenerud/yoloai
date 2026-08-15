@@ -97,7 +97,7 @@ env: {}                               # Environment variables forwarded to conta
 #   memory: 8g                        # docker --memory
 ```
 
-Settings are managed via `yoloai config get/set` or by editing the file directly. Unknown fields in either config file are an error — `yoloai new` fails with a clear message listing the unrecognized keys.
+Settings are managed via `yoloai config get/set` or by editing the file directly. **Unknown fields in either config file are an error** (`TestArch_UnknownConfigKeysAreRejected`) — `yoloai new` fails with a clear message listing the unrecognized keys.
 
 **Implemented settings:**
 

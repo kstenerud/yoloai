@@ -610,6 +610,14 @@ func mergeConfigs(base, override *YoloaiConfig) *YoloaiConfig {
 }
 
 // LoadConfig reads DataDir/defaults/config.yaml and extracts known fields.
+//
+// Validated against knownDefaultsKeys, same as LoadDefaultsConfig — an
+// unknown top-level key is an error here too. Before this fix it passed nil
+// and skipped validation entirely, so defaults/config.yaml was checked on the
+// no-profile path (LoadDefaultsConfig) and not on this one, even though both
+// read the identical file; `yoloai new` (via validateAndLoadConfig) always
+// calls this path, so a typo'd key went unreported precisely on the command
+// that config.md promised would catch it (TestArch_UnknownConfigKeysAreRejected).
 func LoadConfig(layout Layout) (*YoloaiConfig, error) {
 	configPath := layout.DefaultsConfigPath()
 
@@ -621,7 +629,7 @@ func LoadConfig(layout Layout) (*YoloaiConfig, error) {
 		return nil, fmt.Errorf("read config.yaml: %w", err)
 	}
 
-	return parseConfigYAML(data, configPath, nil, layout.Env().EnvForConfigInterpolation())
+	return parseConfigYAML(data, configPath, knownDefaultsKeys, layout.Env().EnvForConfigInterpolation())
 }
 
 // LoadGlobalConfig reads DataDir/config.yaml and extracts global settings.

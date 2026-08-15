@@ -127,6 +127,29 @@ makes the code match the documented guarantee. The leak was config-wide, not lim
 handful of keys, and present at four call sites (one on create, three on restart/relaunch), not
 just one.
 
+### An unknown key in `~/.yoloai/defaults/config.yaml` is now rejected on every path, not just the no-profile one
+
+**Previous behavior:** `defaults/config.yaml` was validated against the known-keys list on the
+no-profile path (`LoadDefaultsConfig`, used when `--profile` is not given) but not on the path
+`yoloai new`, `yoloai start`/`restart`/`reset`, and the tart/injector config reads actually use
+(`config.LoadConfig`, called by `validateAndLoadConfig` at creation and by launch/restart/tart
+directly). `LoadConfig` passed `nil` for the known-keys check, so it silently parsed and ignored
+any unrecognized top-level key — a typo'd or renamed setting (`enviroment:` instead of `env:`, a
+key retired by a prior release) was accepted without a word on the command someone actually runs
+most often.
+
+**New behavior:** `LoadConfig` validates against the same `knownDefaultsKeys` list
+`LoadDefaultsConfig` already used. An unrecognized top-level key in `defaults/config.yaml` now
+fails every one of `LoadConfig`'s callers with `unknown config field(s): <keys>`, matching what
+`docs/contributors/design/config.md` already promised: "Unknown fields in either config file are
+an error."
+
+**Why it changed:** the same file was checked on one path and not the other, even though both read
+it — an inconsistency found while making that documented promise executable
+(`TestArch_UnknownConfigKeysAreRejected`). Nothing in the codebase writes a key outside
+`knownDefaultsKeys` into this file (the scaffold generator and `yoloai config set` both stay
+within it), so this closes a silent-typo gap without a known legitimate writer to break.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running
