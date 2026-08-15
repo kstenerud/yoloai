@@ -69,11 +69,11 @@ that makes them structural rather than four spot repairs.*
 - [DF209](design/findings-resolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close
 - [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) — Configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
 - [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
-- [DF210](design/findings-unresolved.md) — a profile's `os:` is parsed, merged, and never read
+- [DF210](design/findings-resolved.md) — a profile's `os:` is parsed, merged, and never read (RESOLVED 2026-08-15)
 - [DF211](design/findings-unresolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist
 - [DF201](design/findings-resolved.md) — `agent_files` list form copies credentials the string form strips (RESOLVED 2026-08-15)
 - [DF202](design/findings-unresolved.md) — a file-defined agent can make yoloAI read arbitrary vars from its own environment
-- [DF206](design/findings-unresolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly
+- [DF206](design/findings-resolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly (RESOLVED 2026-08-15)
 - [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
 - [DF208](design/findings-resolved.md) — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from personal defaults, not baked-in defaults (RESOLVED 2026-08-13)
 - [DF212](design/findings-unresolved.md) — a running sandbox's config is not fully sourced from `state.State`; three sites re-read config files live
