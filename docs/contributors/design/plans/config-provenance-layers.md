@@ -11,26 +11,29 @@
 - **Depends on:** —
 - **Blocks:** `repo-request-trust.md` (D141), `network-mode-reshape.md` step 1. Both need provenance;
   building them first means building it twice, in two places, badly.
-- **Rides:** **breaking** — and it is **the headline of v0.12.0**, alongside the config/trust fixes
-  that already landed (D140, D142, DF207/DF208). The resolver itself is user-invisible if the policy
-  table is faithful, but the caller layer must be able to express *unset*, and that reaches the
-  public `SandboxCreateOptions`. See "Expressing unset" below. See [D143](../../decisions/working-notes.md).
+- **Rides:** **breaking**, in **v0.13.0** — the caller layer must express *unset*, and that reaches
+  the public `SandboxCreateOptions`. See "Expressing unset" below, and [D143](../../decisions/working-notes.md).
 
 ## Release scoping
 
-**v0.12.0 = the configuration release.** Already built: `.yoloai.yaml` removed (D140), `mounts:`
-retired and `directories:` generalised (D142), the profile merge-base leak closed on both paths
-(DF207/DF208). This plan is the remaining piece, and it is what makes those fixes structural rather
-than four spot repairs.
+**This plan does not ship in v0.12.0.** An earlier revision made it that release's headline; the
+2026-08-15 audit of D143 moved it. v0.12.0 keeps the config/trust fixes that already landed
+(`.yoloai.yaml` removed — D140; `mounts:` retired and `directories:` generalised — D142; the profile
+merge-base leak closed on both paths — DF207/DF208), and closes the remaining findings **directly**
+rather than as consequences of a refactor.
 
-Closed as consequences rather than as separate work: **DF209** (unrepresentable once the CLI stops
-reading config), **DF205** (`IsolationExplicit` deleted, not repaired), **DF206** (the
-`NetworkModeDefault` sentinel gates go away), **DF210** (a key with no consumer has no policy row,
-so it cannot hide).
+That reversal is the substantive change, so it is stated rather than quietly dropped: this plan
+previously claimed DF205, DF206, DF209 and DF210 would close *as consequences* of the layer model.
+They do not need it. **DF205** deletes a field with zero readers. **DF206** splits one over-broad
+gate. **DF209** needs provenance for two scalars, which is a matched-inputs fix (see DF213 for why
+the existing mechanism it named does not work). **DF210** applies or rejects one key. Four small,
+independent fixes, none of which requires a resolver.
 
-**Deferred to v0.13.0**, both of which build on this: `repo-request-trust.md` (D141) and
-`network-mode-reshape.md`. The migration rides with the latter — **no migration lands in v0.12.0**,
-so this branch carries none and rule 12's constraint does not apply to it.
+What the layer model is still *for* is the consumers that need **per-element** provenance —
+`repo-request-trust.md` (D141) and `network-mode-reshape.md` — and both are themselves deferred to
+v0.13.0. Building the resolver alongside them means building it against known consumers instead of
+speculative ones. The migration rides with `network-mode-reshape.md`, so **no migration lands in
+v0.12.0**.
 
 ## Expressing unset
 
@@ -58,9 +61,12 @@ Every configuration boundary in yoloAI collapses its inputs and discards which o
 | `mergeDcMounts(pr, dcMounts)` — `create/create.go:518` | operator-authored vs repo-derived |
 
 Nine findings from one audit are the same missing answer: DF196, DF197, DF205, DF206, DF207,
-DF208, DF209, plus D141's whole subject. **Four of four `MergeProfileChain` callers passed the wrong
-base** — a 100% failure rate against a guarantee `config.md:165,167` states in bold, which is the
-measurement that says this is architectural rather than careless.
+DF208, DF209, plus D141's whole subject. **Four of seven `MergeProfileChain` callers passed the wrong
+base**, against a guarantee `config.md:165,167` states in bold. The three correct ones live in the
+repo-root `profile.go` and had been right since 2026-06-03 — which sharpens the diagnosis rather
+than softening it: every wrong site was an orchestrator function that already had a `ycfg`/`cfg` in
+scope, and every right one had to load something and loaded the right thing. **The trap is "a config
+is already in hand"**, not the parameter's existence.
 
 ## Shape
 
@@ -78,17 +84,18 @@ the resolver from knowing what a devcontainer is.
 **Layer 2 has two mutually exclusive sources; it is not two layers.** "When a profile is present,
 drop the user-defaults layer" then stops being a rule the resolver applies and becomes *how the
 layer is loaded* — which is why it is worth insisting on. As a rule it is something callers
-construct, and four of four constructed it wrong; as a loader there is nothing to construct.
+construct, and four of seven constructed it wrong; as a loader there is nothing to construct.
 
 **The CLI is a caller, not a layer.** It already is one architecturally. What makes it look like a
 layer is that it *also* reads the user's config — six sites (`cliutil/client.go:62,90,132,357,376`,
 `lifecycle/new.go:538`) — while the library reads the same file at `create/create.go:485`. Every key
 it resolves that way is broken (`model`, `isolation` — DF209), inert (`os` — DF210), worked around
-(`agent`, via `baseAgent`), or handled by a different mechanism (`backend`). The CLI stops reading
+(`agent` — and that workaround is itself broken, DF213), or handled by a different mechanism
+(`backend`). The CLI stops reading
 config and only translates flags into the caller layer; DF209 then cannot be represented.
 
 **One resolver, one declared per-key policy.** Layers supply inputs; a single resolver applies the
-table. If each consumer resolved for itself, the 4-of-4 divergence returns with better inputs.
+table. If each consumer resolved for itself, that divergence returns with better inputs.
 
 | Merge kind | Keys |
 | --- | --- |
@@ -109,9 +116,12 @@ perfecting a table for work that is not yet in scope is not worth doing now.
 **Totality invariant.** Layer 1 specifies every key, so resolution never falls off the end with no
 value. Two keys break it today: `agent_files` is commented out of the shipped template
 (`defaults.go:66`) — which is why `resolvedAgentFiles`' nil-fallback re-leaked the personal value in
-DF208 — and `isolation` is present but empty, where empty *means* "ask the backend". So the precise
-form is: layer 1 specifies every key, and "defer to the backend" is a **named value**, not an
-absence.
+DF208. The `isolation` half of this claim was **wrong**: `defaults.go:42` reads `isolation:
+container`. The real gap is worse — there are **two loaders with different layer sets**
+(`LoadDefaultsConfig` merges baked-in defaults, `LoadConfig` does not), so the no-profile create
+path never applies layer 1 at all. Making layer 1 total *and always applied* would change
+`isolation` from the backend base mode to `container` there, which is user-visible on seatbelt and
+apple and must be costed.
 
 **Outside the stack, deliberately.** The **agent definition** contributes a `NetworkAllowlist`
 *floor* that `netpolicy.Compose` prepends after every layer and no layer may lower — different
@@ -126,7 +136,10 @@ the resolver needing a special case for "this layer is different".
   a *meaningful sentinel* meaning "ask the backend" (`runtime/isomode.go:19-22`), so the zero value
   already does double duty today.
 - **Provenance is per-element for additive keys.** "Who contributed this port" is not a per-key
-  fact. This is why `baseAgent`'s scalar comparison trick cannot be generalised.
+  fact — a different problem from `baseAgent`'s scalar comparison, which is separately broken
+  (DF213). Note `netpolicy.WithProvenance` (`compose.go:7-50`, public at `network.go:16-31`) already
+  does per-element provenance for `network.allow` by set membership, and its own docstring records
+  the limitation: provenance "degrades gracefully to 'everything looks user-added'".
 - **It is invisible when it works**, so tests must pin the *policy*, not one path's outcome.
 
 ## Order of work
