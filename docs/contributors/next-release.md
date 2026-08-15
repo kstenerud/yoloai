@@ -78,6 +78,10 @@ that makes them structural rather than four spot repairs.*
 - [DF208](design/findings-resolved.md) — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from personal defaults, not baked-in defaults (RESOLVED 2026-08-13)
 - [DF212](design/findings-unresolved.md) — a running sandbox's config is not fully sourced from `state.State`; three sites re-read config files live
 - [DF213](design/findings-unresolved.md) — a profile's `agent:` key is silently ignored on a default install
+- [DF214](design/findings-unresolved.md) — shipped text disagrees with the code it describes, in ten places, and every one sits inside text an existing gate already reads
+- [DF215](design/findings-unresolved.md) — `docs/contributors/standards/cli.md` mandates two flags the CLI does not have, and builds a convention on them
+- [DF216](design/findings-unresolved.md) — two architecture docs instruct a contributor to write code the linter rejects
+- [DF217](design/findings-unresolved.md) — the config-docs gate validates against a looser predicate than the command it certifies
 
 ## Deferred to v0.13.0 — the network release
 
