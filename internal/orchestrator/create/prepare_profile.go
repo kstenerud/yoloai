@@ -81,8 +81,35 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 		return nil, err
 	}
 
+	// baseAgent is "what the agent would be if the user passed no --agent", and
+	// it must be resolved from the SAME layers the CLI resolved opts.Agent from,
+	// or the comparison in applyMergedProfileToOpts compares two different
+	// questions. It did until 2026-08-15 (DF213): this passed ycfg.Agent, and
+	// ycfg comes from config.LoadConfig — the user's file ONLY, with no baked-in
+	// merge — while the CLI's ResolveAgentFromConfig uses LoadDefaultsConfig,
+	// which does merge. A fresh install's defaults/config.yaml has every line
+	// commented out (GenerateScaffoldConfig), so ycfg.Agent was "" while
+	// opts.Agent was "claude", the guard never fired, and a profile's agent: key
+	// silently did nothing for anyone who had not hand-edited that file.
+	//
+	// Residual, and it is why D143's provenance is the real fix: an explicit
+	// --agent that happens to equal the resolved default is still
+	// indistinguishable from no flag at all, so the profile wins there. That is
+	// a comparison trick standing in for provenance the pipeline does not carry.
+	baseAgent := ycfg.Agent
+	if baseAgent == "" {
+		baseAgent = bakedIn.Agent
+	}
+	// Same mismatch, same fix, for --model (DF209): the CLI resolves
+	// opts.Model as flag-else-config, so a personal model: made opts.Model
+	// non-empty and the profile's model never applied.
+	baseModel := ycfg.Model
+	if baseModel == "" {
+		baseModel = bakedIn.Model
+	}
+
 	homeDir := d.Layout.HomeDir
-	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, ycfg.Agent, homeDir, d.Layout.Env().EnvForConfigInterpolation()); err != nil {
+	if err := applyMergedProfileToOpts(opts, agentDef, merged, pr, baseAgent, baseModel, homeDir, d.Layout.Env().EnvForConfigInterpolation()); err != nil {
 		return nil, err
 	}
 
@@ -104,7 +131,7 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 // layout.Env().EnvForConfigInterpolation().
 // baseAgent is the agent name from the base config (ycfg.Agent), used to
 // detect whether the CLI override has been applied.
-func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent string, homeDir string, env map[string]string) error {
+func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged *config.MergedConfig, pr *profileResult, baseAgent, baseModel string, homeDir string, env map[string]string) error {
 	// Apply merged values where CLI didn't override
 	if opts.Agent == baseAgent && merged.Agent != "" {
 		opts.Agent = merged.Agent
@@ -114,7 +141,12 @@ func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged
 		}
 		*agentDef = def
 	}
-	if opts.Model == "" && merged.Model != "" {
+	// The profile layer decides the model whenever the CLI did not: assign
+	// merged.Model even when it is empty, so a personal `model:` is *cleared*
+	// rather than surviving into a profile the user expects to be
+	// self-contained (DF209). An explicit --model differs from baseModel and
+	// is kept.
+	if opts.Model == "" || opts.Model == baseModel {
 		opts.Model = merged.Model
 	}
 
@@ -199,7 +231,21 @@ func applyConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profileRe
 		}
 	}
 	applyBaseResourceDefaults(ycfg, pr)
-	return applyCLIOverrides(opts, pr)
+
+	// baseIsolation is what --isolation would resolve to from config alone.
+	// The CLI coalesces flag-else-config into one string (DF209), so without
+	// this an `isolation:` in the user's personal config is indistinguishable
+	// from an explicit --isolation and overrides the profile's — against
+	// config.md's "personal defaults do not carry into profiles".
+	bakedIn, err := config.LoadBakedInDefaults()
+	if err != nil {
+		return fmt.Errorf("load baked-in defaults: %w", err)
+	}
+	baseIsolation := ycfg.Isolation
+	if baseIsolation == "" {
+		baseIsolation = bakedIn.Isolation
+	}
+	return applyCLIOverrides(opts, pr, baseIsolation)
 }
 
 // applyBaseConfigDefaults applies ports, caps, network, and directories from
@@ -235,7 +281,7 @@ func applyBaseResourceDefaults(ycfg *config.YoloaiConfig, pr *profileResult) {
 }
 
 // applyCLIOverrides applies CLI flag overrides for resources, isolation, and env.
-func applyCLIOverrides(opts *Options, pr *profileResult) error {
+func applyCLIOverrides(opts *Options, pr *profileResult, baseIsolation string) error {
 	if opts.CPUs != "" {
 		if pr.resources == nil {
 			pr.resources = &config.ResourceLimits{}
@@ -253,8 +299,19 @@ func applyCLIOverrides(opts *Options, pr *profileResult) error {
 		if err := config.ValidateIsolationMode(string(opts.Isolation)); err != nil {
 			return err
 		}
-		pr.isolation = opts.Isolation
-		pr.isolationExplicit = true
+		// With a profile active, an isolation that merely equals what config
+		// resolves to is a personal default wearing a CLI flag's clothes, and
+		// must not override the profile (DF209). Scoped to the profile path on
+		// purpose: on the no-profile path pr.isolation already came from the
+		// same config, so suppressing the assignment there would silently
+		// change which mode an unconfigured sandbox gets on backends whose base
+		// mode is not `container` — a user-visible macOS change that belongs to
+		// D143's layer work, with its own breaking-change entry, not here.
+		personalDefaultInProfile := opts.Profile != "" && string(opts.Isolation) == baseIsolation
+		if !personalDefaultInProfile {
+			pr.isolation = opts.Isolation
+			pr.isolationExplicit = true
+		}
 	}
 
 	if len(opts.Env) > 0 {

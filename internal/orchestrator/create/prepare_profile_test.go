@@ -76,29 +76,26 @@ func TestResolveProfileConfig_PersonalDefaultsDoNotLeakIntoProfile(t *testing.T)
 // the user's personal resources.cpus/memory anyway. That gap is closed in
 // the same change as this test (prepare_profile.go's applyConfigDefaults).
 //
-// Excluded here on purpose, not silently and not by asserting the current
-// wrong behaviour (DF209): `isolation` and `model` also leak from personal
-// defaults into an active profile, but through a second route this
-// create-package test cannot exercise. The CLI resolves them before Options
-// ever reaches this package — internal/cli/lifecycle/new.go:544
-// (`resolveNewIsolationOS`) and internal/cli/cliutil/client.go:366-380
-// (`ResolveModel`) coalesce --isolation/--model with the SAME personal
-// config this test builds, so by the time resolveProfileConfig runs, a
-// personal isolation/model already reads as an explicit CLI choice
-// (prepare_profile.go:117,255-257). Setting ycfg.Isolation/ycfg.Model here
-// and asserting they don't leak would pass without proving DF209 closed,
-// since this test's Options start clean regardless. Leaving them out is the
-// honest reflection of that boundary; adding them back — with an assertion,
-// not a comment — is exactly the DF209 fix.
+// `isolation` and `model` are included, and they are the reason this test has
+// to simulate the CLI rather than build clean Options. The CLI coalesces
+// flag-else-config into one string before the library sees it
+// (internal/cli/lifecycle/new.go `resolveNewIsolationOS`,
+// internal/cli/cliutil/client.go `ResolveModel`), so a personal isolation/model
+// arrives here looking exactly like an explicit --isolation/--model. Options
+// below therefore carry the personal values, as the CLI would have produced
+// them; asserting against clean Options would pass without proving anything
+// (DF209, and this comment previously said so while excluding them).
 func TestArch_ProfileIgnoresPersonalDefaults(t *testing.T) {
 	d := newTestDeps(t)
 	writeProfile(t, d.Layout, "leaktest", "agent: test\n") // profile sets nothing else
 
 	ycfg := &config.YoloaiConfig{
-		Agent:   "claude",
-		CapAdd:  []string{"SYS_ADMIN"},
-		Devices: []string{"/dev/personal"},
-		Setup:   []string{"echo personal-setup"},
+		Agent:     "claude",
+		Isolation: "vm",
+		Model:     "personal-model",
+		CapAdd:    []string{"SYS_ADMIN"},
+		Devices:   []string{"/dev/personal"},
+		Setup:     []string{"echo personal-setup"},
 		Network: &config.NetworkConfig{
 			Allow: []string{"personal.example.com"},
 		},
@@ -108,7 +105,15 @@ func TestArch_ProfileIgnoresPersonalDefaults(t *testing.T) {
 		Resources: &config.ResourceLimits{CPUs: "16", Memory: "64g"},
 	}
 	gcfg := &config.GlobalConfig{}
-	opts := &Options{Name: "sb-claim-a", Profile: "leaktest", Agent: "claude"}
+	// As the CLI would build them: --agent/--isolation/--model were NOT passed,
+	// so each already carries the personal config's value (flag-else-config).
+	opts := &Options{
+		Name:      "sb-claim-a",
+		Profile:   "leaktest",
+		Agent:     "claude",
+		Isolation: "vm",
+		Model:     "personal-model",
+	}
 	agentDef := agent.GetAgent("claude")
 
 	pr, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
@@ -129,6 +134,12 @@ func TestArch_ProfileIgnoresPersonalDefaults(t *testing.T) {
 		assert.NotEqual(t, "16", pr.resources.CPUs, "personal resources.cpus must not carry into a profile")
 		assert.NotEqual(t, "64g", pr.resources.Memory, "personal resources.memory must not carry into a profile")
 	}
+
+	// DF209: the two keys that reach the pipeline pre-coalesced by the CLI.
+	assert.NotEqual(t, runtime.IsolationMode("vm"), pr.isolation,
+		"a personal isolation: must not override an active profile")
+	assert.NotEqual(t, "personal-model", opts.Model,
+		"a personal model: must not survive into an active profile")
 }
 
 // TestResolveProfileConfig_ProfileOwnValuesStillApply guards against fixing
@@ -192,38 +203,57 @@ func TestResolveProfileConfig_NoProfileSeedsFromUserConfig(t *testing.T) {
 // different, legitimate use of the personal config — detecting whether the
 // CLI overrode the agent — and DF207 does not touch it.
 func TestResolveProfileConfig_AgentPrecedence(t *testing.T) {
-	t.Run("profile agent wins over personal default when CLI did not override", func(t *testing.T) {
+	// The "default install" case is the one that mattered and the one the
+	// previous version of this test could not reach (DF213). It hand-built
+	// ycfg = {Agent: "claude"}, i.e. a user who had edited defaults/config.yaml
+	// to set an agent explicitly — so it exercised the only shape where the
+	// old comparison happened to work, and certified a path that was broken for
+	// everyone else. A fresh install's defaults/config.yaml has every line
+	// commented out, so ycfg.Agent is "" while the CLI has already resolved
+	// opts.Agent to "claude" via LoadDefaultsConfig.
+	t.Run("profile agent wins on a default install, where the user config sets nothing", func(t *testing.T) {
 		d := newTestDeps(t)
 		writeProfile(t, d.Layout, "agentprofile", "agent: aider\n")
 
-		ycfg := &config.YoloaiConfig{Agent: "claude"}
+		ycfg := &config.YoloaiConfig{} // fresh install: nothing set
 		gcfg := &config.GlobalConfig{}
-		// Simulates CLI resolution when --agent was not passed: opts.Agent
-		// already equals the personal default (cliutil.ResolveAgentFromConfig).
 		opts := &Options{Name: "sb4", Profile: "agentprofile", Agent: "claude"}
 		agentDef := agent.GetAgent("claude")
 
-		pr, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
+		_, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
 		require.NoError(t, err)
-		_ = pr
+
+		assert.Equal(t, "aider", opts.Agent, "a profile's agent: must apply when the user passed no --agent")
+	})
+
+	t.Run("profile agent wins over an agent set in the user config", func(t *testing.T) {
+		d := newTestDeps(t)
+		writeProfile(t, d.Layout, "agentprofile2", "agent: aider\n")
+
+		ycfg := &config.YoloaiConfig{Agent: "gemini"}
+		gcfg := &config.GlobalConfig{}
+		// The CLI resolved opts.Agent from that same personal default.
+		opts := &Options{Name: "sb5", Profile: "agentprofile2", Agent: "gemini"}
+		agentDef := agent.GetAgent("gemini")
+
+		_, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
+		require.NoError(t, err)
 
 		assert.Equal(t, "aider", opts.Agent)
 	})
 
 	t.Run("CLI --agent wins over profile agent", func(t *testing.T) {
 		d := newTestDeps(t)
-		writeProfile(t, d.Layout, "agentprofile2", "agent: aider\n")
+		writeProfile(t, d.Layout, "agentprofile3", "agent: aider\n")
 
-		ycfg := &config.YoloaiConfig{Agent: "claude"}
+		ycfg := &config.YoloaiConfig{}
 		gcfg := &config.GlobalConfig{}
-		// Simulates an explicit --agent codex on the CLI: opts.Agent differs
-		// from the personal default.
-		opts := &Options{Name: "sb5", Profile: "agentprofile2", Agent: "codex"}
+		// An explicit --agent codex: opts.Agent differs from the resolved default.
+		opts := &Options{Name: "sb6", Profile: "agentprofile3", Agent: "codex"}
 		agentDef := agent.GetAgent("codex")
 
-		pr, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
+		_, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
 		require.NoError(t, err)
-		_ = pr
 
 		assert.Equal(t, "codex", opts.Agent)
 	})
