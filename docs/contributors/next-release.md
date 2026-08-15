@@ -66,7 +66,7 @@ that makes them structural rather than four spot repairs.*
 - [DF195](design/findings-unresolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox
 - [D140](decisions/working-notes.md#d140--yoloaiyaml-project-config-is-removed-entirely) — `.yoloai.yaml` project config is removed entirely
 - [D142](decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset) — The `mounts:` config/profile key is retired; `directories:` is its strict superset
-- [DF209](design/findings-unresolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close
+- [DF209](design/findings-resolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close
 - [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) — Configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
 - [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [DF210](design/findings-unresolved.md) — a profile's `os:` is parsed, merged, and never read
@@ -77,7 +77,7 @@ that makes them structural rather than four spot repairs.*
 - [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
 - [DF208](design/findings-resolved.md) — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from personal defaults, not baked-in defaults (RESOLVED 2026-08-13)
 - [DF212](design/findings-unresolved.md) — a running sandbox's config is not fully sourced from `state.State`; three sites re-read config files live
-- [DF213](design/findings-unresolved.md) — a profile's `agent:` key is silently ignored on a default install
+- [DF213](design/findings-resolved.md) — a profile's `agent:` key is silently ignored on a default install
 - [DF214](design/findings-unresolved.md) — shipped text disagrees with the code it describes, in ten places, and every one sits inside text an existing gate already reads
 - [DF215](design/findings-unresolved.md) — `docs/contributors/standards/cli.md` mandates two flags the CLI does not have, and builds a convention on them
 - [DF216](design/findings-unresolved.md) — two architecture docs instruct a contributor to write code the linter rejects
