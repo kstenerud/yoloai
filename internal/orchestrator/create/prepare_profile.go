@@ -32,7 +32,6 @@ type profileResult struct {
 	setup              []string
 	autoCommitInterval int
 	isolation          runtime.IsolationMode
-	isolationExplicit  bool // true when isolation was set via --isolation flag (not config/profile default)
 	userAliases        map[string]string
 	// Archetype-specific resolved fields
 	archetypeDockerDRequired bool // true when archetype requires dockerd auto-start
@@ -317,7 +316,6 @@ func applyCLIOverrides(opts *Options, pr *profileResult, baseIsolation string) e
 		personalDefaultInProfile := opts.Profile != "" && string(opts.Isolation) == baseIsolation
 		if !personalDefaultInProfile {
 			pr.isolation = opts.Isolation
-			pr.isolationExplicit = true
 		}
 	}
 

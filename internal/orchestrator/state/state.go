@@ -59,7 +59,6 @@ type State struct {
 	Devices           []string              // host devices from config/profile
 	Setup             []string              // setup commands from config/profile
 	Isolation         runtime.IsolationMode // isolation mode from config/profile
-	IsolationExplicit bool                  // true when isolation was set via --isolation flag
 	VscodeTunnel      bool                  // true when VS Code Remote Tunnel is enabled
 	BrokerCredentials bool                  // forced-on: --broker was given (persisted). On a backend that can't host an injector this is an error, not a silent skip (D106)
 	BrokerDisabled    bool                  // forced-off: --no-broker was given (persisted). Suppresses the default-on brokering. At most one of these two is set; both false = auto (broker where supported)
