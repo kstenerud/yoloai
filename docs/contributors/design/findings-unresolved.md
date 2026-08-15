@@ -1211,18 +1211,6 @@ earlier signal and records nothing else.
 - **Description:** Only docker (`runtime/docker/docker.go:572-577`) and apple (`runtime/apple/apple.go:227-233`) consume `InstanceConfig.Resources`. `containerd`, `tart` and `seatbelt` contain no reference to it at all — confirmed by grep over `runtime/`. **`podman`'s own package is the same** — no reference either — **but podman is not a fourth independent gap**: `Runtime.Create` (`runtime/podman/podman.go:195`) ends with `return r.Runtime.Create(ctx, cfg)`, delegating unmodified to the embedded `*docker.Runtime` ([DF203](#df203--backendcapscapadd-is-one-boolean-for-three-features-so-devices-is-a-silent-no-op-on-two-backends-and-setup-is-refused-on-two-others) already establishes this embedding for `Devices`; `Resources` is handled in that same `docker.Runtime.Create`, one call after it, at `docker.go:572-577`). So podman *does* honour `resources.cpus`/`resources.memory` — the four-backend count was wrong; the honest list is **three backends with no handling at all** (containerd, tart, seatbelt) **plus docker and podman, which share one code path that does**. `--cpus`/`--memory` (and the config keys `resources.cpus`/`resources.memory`) are accepted and inert only on those three, with no warning at create time.
 - **Pointer:** `runtime/docker/docker.go:560-569,572-577`; `runtime/apple/apple.go:227-233`; `runtime/podman/podman.go:87,195` (embeds and delegates to `docker.Runtime`); absence confirmed in `runtime/containerd/`, `runtime/tart/`, `runtime/seatbelt/`; cross-referenced at [DF203](#df203--backendcapscapadd-is-one-boolean-for-three-features-so-devices-is-a-silent-no-op-on-two-backends-and-setup-is-refused-on-two-others).
 
-### DF211 — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist
-
-- **Discovered:** 2026-08-14, while checking whether the user config selects a default profile ([D143](../decisions/working-notes.md)) · **Workstream:** config/trust seams
-- **Severity:** LOW
-- **Disposition:** UNRESOLVED — PARKED
-- **Rides:** **any**.
-- **Description:** `ResolveProfile` (`internal/cli/cliutil/client.go:385-393`) returns `""` when `--no-profile` is set, `""` when no profile flag is given at all, and the flag's value otherwise. `--profile` and `--no-profile` are mutually exclusive (`internal/cli/lifecycle/new.go:75`). So `--no-profile` produces exactly the result the user would get by passing nothing: **it is a no-op on every path.**
-- **Its help text documents a feature that was never built.** `internal/cli/lifecycle/new.go:52` reads *"Use base image even if config sets a default profile"* — but no config key selects a default profile. `YoloaiConfig` has no such field and `ResolveProfile` consults no config file. The flag is the vestige of a default-profile feature that does not exist, and the help text is the only place it is still described as real.
-- **Note the shipped-text angle (rule 2):** this is user-facing help, so the text promises behaviour a user can neither get nor detect the absence of — they pass `--no-profile`, it appears to work, and it did nothing.
-- **What would close it:** either remove the flag and its help text, or implement the default-profile key it describes. This is a product call, not a defect fix — but it should not stay in the middle, where the flag exists and the feature does not.
-- **Pointer:** `internal/cli/cliutil/client.go:385-393`; `internal/cli/lifecycle/new.go:52,75`.
-
 ### DF212 — a running sandbox's config is not fully sourced from `state.State`; three sites re-read config files live
 
 - **Discovered:** 2026-08-15, while making config.md's architectural claims executable (config-claim-citations build) · **Workstream:** config/trust seams

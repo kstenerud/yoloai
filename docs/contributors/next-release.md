@@ -70,7 +70,7 @@ that makes them structural rather than four spot repairs.*
 - [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) — Configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
 - [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [DF210](design/findings-resolved.md) — a profile's `os:` is parsed, merged, and never read (RESOLVED 2026-08-15)
-- [DF211](design/findings-unresolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist
+- [DF211](design/findings-resolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist (RESOLVED 2026-08-15)
 - [DF201](design/findings-resolved.md) — `agent_files` list form copies credentials the string form strips (RESOLVED 2026-08-15)
 - [DF202](design/findings-unresolved.md) — a file-defined agent can make yoloAI read arbitrary vars from its own environment
 - [DF206](design/findings-resolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly (RESOLVED 2026-08-15)

@@ -203,7 +203,6 @@ Options:
 - `--network-none`: Run with `--network none` for full network isolation (agent API calls will also fail). Mutually exclusive with `--network-isolated` and `--network-allow`. **Warning:** Most agents (Claude, Codex) require network access to reach their API endpoints. This flag is useful for testing container setup without agent execution or for agents with locally-hosted models.
 - `--port <host:container>`: Expose a container port on the host (can be repeated). Example: `--port 3000:3000` for web dev. Without this, container services are not reachable from the host browser. Ports must be specified at creation time — Docker does not support adding port mappings to running containers. To add ports later, use `yoloai new --abandon-unapplied`.
 - `--backend <name>`: Runtime backend to use (see `yoloai system backends`). Overrides the config default.
-- `--no-profile`: Use the base image even when config sets a default profile.
 - `--isolation <mode>`: Isolation mode: `container` (default), `container-enhanced` (gVisor), `container-privileged` (`--privileged`, for Docker-in-Docker), `vm` (Kata+QEMU), `vm-enhanced` (Kata+Firecracker).
 - `--os <os>`: Target OS: `linux` (default) or `mac`.
 - `--cpus <n>` / `--memory <size>`: Per-sandbox resource limits (e.g. `--cpus 2.5`, `--memory 8g`).

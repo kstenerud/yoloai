@@ -168,6 +168,22 @@ profile — but a silent no-op became a load-time error, matching the `mounts:` 
 an inert key is rejected loudly rather than accepted and discarded. `os:` in the *base* config is
 unaffected; it is still read and still resolves `--os`'s default.
 
+### `--no-profile` is removed from `yoloai new` and `yoloai run`
+
+**Previous behavior:** `--no-profile` was accepted alongside `--profile` (mutually exclusive with
+it). `ResolveProfile` returned `""` when `--no-profile` was set, and also returned `""` when no
+profile flag was given at all — so passing `--no-profile` produced exactly the result of passing
+nothing. No behaviour was ever lost by dropping it: it could not change any outcome on any path.
+Its help text — "Use base image even if config sets a default profile" — described a
+default-profile config key that has never existed.
+
+**New behavior:** `--no-profile` is gone. `yoloai new ... --no-profile` and `yoloai run ...
+--no-profile` now fail with `unknown flag: --no-profile` instead of silently doing nothing.
+
+**Why it changed:** DF211. A flag that cannot change any outcome, whose help text promises a
+feature nobody built, is worse than no flag: it looks like it works. A real default-profile
+feature is later work, not a reason to keep a no-op flag around in the meantime.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running

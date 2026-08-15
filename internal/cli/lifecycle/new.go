@@ -49,7 +49,6 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("model", "m", "", "Model name or alias")
 	cmd.Flags().String("agent", "", "Agent to use (default from config or claude)")
 	cmd.Flags().String("profile", "", "Profile to use (from ~/.yoloai/profiles/)")
-	cmd.Flags().Bool("no-profile", false, "Use base image even if config sets a default profile")
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (IPv4 iptables allowlist; IPv6 unfiltered; a guardrail, not containment for a hostile agent — see 'yoloai help security')")
@@ -72,7 +71,6 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("copy-strict", false, "For :copy dirs, strip git history instead of preserving it (fresh baseline). Use for repos with unrotated secrets in history. Per-dir :copy-all / :copy-strict suffixes still win.")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
-	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")
 	cmd.MarkFlagsMutuallyExclusive("broker", "no-broker")
 }
 

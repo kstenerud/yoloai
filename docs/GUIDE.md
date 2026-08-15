@@ -406,9 +406,6 @@ yoloai new task ./project --broker      # require brokering (error if unsupporte
 # Use a profile
 yoloai new task ./project --profile go-dev
 
-# Use base image even if config sets a default profile
-yoloai new task ./project --no-profile
-
 # Resource limits
 yoloai new task ./project --cpus 4 --memory 8g
 

@@ -23,6 +23,18 @@ into this file skips the merge-conflict collision check that ID-ordering gives t
 a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
 of at rebase. Later, but still before it can ship.
 
+### DF211 — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist (RESOLVED 2026-08-15)
+
+- **Discovered:** 2026-08-14, while checking whether the user config selects a default profile ([D143](../decisions/working-notes.md)) · **Workstream:** config/trust seams
+- **Severity:** LOW
+- **Disposition:** **RESOLVED 2026-08-15.**
+- **Rides:** **any**.
+- **Description:** `ResolveProfile` (`internal/cli/cliutil/client.go:385-393`) returned `""` when `--no-profile` was set, `""` when no profile flag was given at all, and the flag's value otherwise. `--profile` and `--no-profile` were mutually exclusive (`internal/cli/lifecycle/new.go:75`). So `--no-profile` produced exactly the result of passing nothing: **a no-op on every path.**
+- **Its help text documented a feature that was never built.** `internal/cli/lifecycle/new.go:52` read *"Use base image even if config sets a default profile"* — but no config key ever selected a default profile. `YoloaiConfig` had no such field and `ResolveProfile` consulted no config file. The flag was the vestige of a default-profile feature that does not exist, and the help text was the only place it was still described as real.
+- **Fixed 2026-08-15**, by the owner's decision: deleted rather than repaired — a real default-profile feature is later work, not a reason to keep a no-op flag around in the meantime. The flag registration and its `MarkFlagsMutuallyExclusive("profile", "no-profile")` are gone from `internal/cli/lifecycle/new.go`'s `addCreateFlags` (shared by `new` and `run`), and `ResolveProfile` collapses to a bare `--profile` read — kept as a function rather than inlined at its three call sites (`new.go`, `run.go`, `mcp.go`), since a generic-looking one-liner duplicated across two packages is worse than the small helper. Swept from `docs/GUIDE.md`, `docs/contributors/design/commands.md`, and the `--no-*` convention example in `docs/contributors/standards/cli.md` (replaced with `--no-broker`, which is real). `docs/BREAKING-CHANGES.md` carries the Unreleased entry: no behaviour is lost, since the flag never had any — an invocation using it now fails with `unknown flag` instead of silently doing nothing.
+- **Pinned by `TestNewCmd_NoProfileFlagRemoved`** (`internal/cli/lifecycle/new_test.go`), asserting `cmd.Flags().Lookup("no-profile")` is nil, and by `TestResolveProfile_IgnoresNoProfileFlag` (`internal/cli/cliutil/client_test.go`), asserting a stray `no-profile` flag on the command is not consulted. Verified red on revert of `new.go` and of `client.go` independently — each alone restores a different half of the old behaviour, and each has its own pin.
+- **Pointer:** `internal/cli/cliutil/client.go` (`ResolveProfile`); `internal/cli/lifecycle/new.go` (`addCreateFlags`); `internal/cli/lifecycle/new_test.go`; `internal/cli/cliutil/client_test.go`; `docs/BREAKING-CHANGES.md`.
+
 ### DF205 — `IsolationExplicit` is written, never read, and wrong anyway (RESOLVED 2026-08-15)
 
 - **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams

@@ -29,6 +29,14 @@ func TestNewCmd_DirtyWorkdirFlags(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("allow-dirty"))
 }
 
+func TestNewCmd_NoProfileFlagRemoved(t *testing.T) {
+	// DF211: --no-profile could never change ResolveProfile's outcome — "set" and
+	// "not set" produced the same result on every path — so it was deleted rather
+	// than kept as a permanent no-op.
+	cmd := NewNewCmd("test")
+	assert.Nil(t, cmd.Flags().Lookup("no-profile"))
+}
+
 func TestParseNewCmdPositional_Errors(t *testing.T) {
 	tests := []struct {
 		name      string

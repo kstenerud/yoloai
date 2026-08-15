@@ -29,7 +29,8 @@ import (
 //   - ResolveBackendForSandbox: reads from environment.json, not a flag; used by
 //     lifecycle commands (start, stop, attach, diff, apply, destroy).
 //   - ResolveAgent: similar flag→config→default; new command only.
-//   - ResolveProfile: has a --no-profile bypass that the others don't have.
+//   - ResolveProfile: flag only, no config fallback (DF211 — there is no
+//     default-profile config key to fall back to).
 //
 // These differences make a generic abstraction more obscure than the small
 // amount of duplicated structure.
@@ -380,16 +381,11 @@ func ResolveModelFromConfig() string {
 	return ""
 }
 
-// ResolveProfile determines the profile name from --no-profile, then --profile flag,
-// then empty string (no default profile). Used by the new command.
+// ResolveProfile returns the --profile flag's value, or empty string if unset
+// (no default profile). Used by new/run/mcp.
 func ResolveProfile(cmd *cobra.Command) string {
-	if noProfile, _ := cmd.Flags().GetBool("no-profile"); noProfile {
-		return ""
-	}
-	if p, _ := cmd.Flags().GetString("profile"); p != "" {
-		return p
-	}
-	return ""
+	p, _ := cmd.Flags().GetString("profile")
+	return p
 }
 
 // SandboxErrorHint wraps an error with the sandbox directory path and a hint
