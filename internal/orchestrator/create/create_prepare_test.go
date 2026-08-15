@@ -385,7 +385,19 @@ func TestApplyConfigDefaults_NetworkFromConfigWhenNoProfile(t *testing.T) {
 	assert.Equal(t, []string{"example.com"}, opts.NetworkAllow)
 }
 
-func TestApplyConfigDefaults_NetworkSkippedWhenCLIOverrides(t *testing.T) {
+// TestApplyConfigDefaults_NetworkAllowMergesWhenCLIOverridesMode pins DF206:
+// the mode *promotion* to isolated stays gated on the mode being unset (a
+// CLI-set mode wins), but the allowlist merge is unconditional. Before the
+// fix, the whole network block — including the allowlist — was gated on
+// opts.Network == NetworkModeDefault, so any explicitly-set mode silently
+// discarded every config-level network.allow entry.
+//
+// Under --network-none specifically, these merged entries still end up
+// discarded — netpolicy.Compose drops both lists for that mode — but that is
+// DF196, a separate open finding, not this one. This test's mode is
+// NetworkModeNone precisely to keep that boundary visible: the allowlist is
+// assembled here and discarded one layer down, not tidied away at this site.
+func TestApplyConfigDefaults_NetworkAllowMergesWhenCLIOverridesMode(t *testing.T) {
 	opts := &Options{Network: NetworkModeNone}
 	ycfg := &config.YoloaiConfig{
 		Network: &config.NetworkConfig{
@@ -396,9 +408,10 @@ func TestApplyConfigDefaults_NetworkSkippedWhenCLIOverrides(t *testing.T) {
 	pr := &profileResult{}
 
 	require.NoError(t, applyConfigDefaults(opts, ycfg, pr, "/home/user", nil))
-	// NetworkNone takes priority; config network should not apply
+	// Mode promotion is still suppressed: the CLI-set mode wins.
 	assert.Equal(t, NetworkModeNone, opts.Network)
-	assert.Empty(t, opts.NetworkAllow)
+	// Allowlist merge is unconditional (the DF206 fix).
+	assert.Equal(t, []string{"example.com"}, opts.NetworkAllow)
 }
 
 func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {

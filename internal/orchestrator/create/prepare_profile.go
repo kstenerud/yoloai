@@ -182,9 +182,14 @@ func applyMergedProfileToOpts(opts *Options, agentDef **agent.Definition, merged
 	// Profile ports: additive
 	opts.Ports = append(merged.Ports, opts.Ports...)
 
-	// Network: apply merged config as defaults (CLI flags override later)
-	if merged.Network != nil && opts.Network == NetworkModeDefault {
-		if merged.Network.Isolated {
+	// Network: apply merged config as defaults (CLI flags override later).
+	// The allowlist merge is unconditional — only the mode *promotion* to
+	// isolated depends on the mode still being unset. Gating the whole block
+	// on opts.Network == NetworkModeDefault silently discarded a profile's
+	// network.allow whenever the mode had already been set, including when
+	// --network-allow itself set it (DF206).
+	if merged.Network != nil {
+		if opts.Network == NetworkModeDefault && merged.Network.Isolated {
 			opts.Network = NetworkModeIsolated
 		}
 		opts.NetworkAllow = append(merged.Network.Allow, opts.NetworkAllow...)
@@ -261,8 +266,10 @@ func applyBaseConfigDefaults(opts *Options, ycfg *config.YoloaiConfig, pr *profi
 	pr.setup = ycfg.Setup
 	pr.isolation = runtime.IsolationMode(ycfg.Isolation)
 
-	if ycfg.Network != nil && opts.Network == NetworkModeDefault {
-		if ycfg.Network.Isolated {
+	// Same split as the profile-merge site (DF206): the allowlist merge is
+	// unconditional, only the mode promotion depends on the mode being unset.
+	if ycfg.Network != nil {
+		if opts.Network == NetworkModeDefault && ycfg.Network.Isolated {
 			opts.Network = NetworkModeIsolated
 		}
 		opts.NetworkAllow = append(ycfg.Network.Allow, opts.NetworkAllow...)

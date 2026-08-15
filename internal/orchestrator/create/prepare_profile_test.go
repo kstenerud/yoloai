@@ -173,6 +173,47 @@ env:
 	assert.Equal(t, "profile-value", pr.env["PROFILE_VAR"])
 }
 
+// TestResolveProfileConfig_NetworkAllowMergesWhenModeAlreadySet pins DF206 at
+// the profile-merge site. --network-allow promotes opts.Network to
+// NetworkModeIsolated at the CLI (internal/cli/lifecycle/new.go:197-199)
+// before resolveProfileConfig ever runs, so by the time this code sees it the
+// mode is already non-default — exactly the sharpest case DF206 named: a user
+// who adds one domain on the CLI must not silently lose every domain their
+// profile declared. Before the fix, the whole network block (mode promotion
+// AND allowlist merge) was gated on opts.Network == NetworkModeDefault, so
+// this profile's network.allow never reached opts.NetworkAllow.
+func TestResolveProfileConfig_NetworkAllowMergesWhenModeAlreadySet(t *testing.T) {
+	d := newTestDeps(t)
+	writeProfile(t, d.Layout, "netmerge", `
+network:
+  allow:
+    - profile.example.com
+`)
+
+	ycfg := &config.YoloaiConfig{}
+	gcfg := &config.GlobalConfig{}
+	// Simulate what the CLI does for --network-allow cli.example.com: promote
+	// the mode to isolated and seed opts.NetworkAllow, before the create
+	// pipeline (and this function) ever runs.
+	opts := &Options{
+		Name:         "sb-netmerge",
+		Profile:      "netmerge",
+		Agent:        "claude",
+		Network:      NetworkModeIsolated,
+		NetworkAllow: []string{"cli.example.com"},
+	}
+	agentDef := agent.GetAgent("claude")
+
+	_, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
+	require.NoError(t, err)
+
+	// Mode is unchanged (already isolated; promotion is a no-op here either way).
+	assert.Equal(t, NetworkModeIsolated, opts.Network)
+	// Both the CLI-supplied and the profile's allowlist entries survive.
+	assert.Contains(t, opts.NetworkAllow, "cli.example.com")
+	assert.Contains(t, opts.NetworkAllow, "profile.example.com")
+}
+
 // TestResolveProfileConfig_NoProfileSeedsFromUserConfig is the regression
 // guard for the unaffected no-profile path: without --profile, resolveProfileConfig
 // must still seed straight from the user's defaults/config.yaml, exactly as
