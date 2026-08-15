@@ -82,6 +82,7 @@ that makes them structural rather than four spot repairs.*
 - [DF215](design/findings-unresolved.md) — `docs/contributors/standards/cli.md` mandates two flags the CLI does not have, and builds a convention on them
 - [DF216](design/findings-unresolved.md) — two architecture docs instruct a contributor to write code the linter rejects
 - [DF217](design/findings-unresolved.md) — the config-docs gate validates against a looser predicate than the command it certifies
+- [DF218](design/findings-unresolved.md) — draining a finding renames its anchor, silently breaking every cross-reference to it
 
 ## Deferred to v0.13.0 — the network release
 

@@ -1321,6 +1321,18 @@ earlier signal and records nothing else.
 - **The general form, worth stating because it will recur:** a gate whose oracle is not the code path it certifies proves only that two of the project's own functions agree with each other, not that either agrees with what a user can observe.
 - **Pointer:** `internal/cli/docs_sync_test.go:239,252`; `internal/config/yamlnode.go:25,60,217-220,285-292`; `system_config.go:55-67`; `docs/GUIDE.md:679,681,682,683,684,685,699`; verified via `yoloai config get`/`yoloai config get <key>`/`yoloai config set <key> <value>` against a freshly built binary and a clean `HOME`.
 
+### DF218 — draining a finding renames its anchor, silently breaking every cross-reference to it
+
+- **Discovered:** 2026-08-15, while draining DF201/DF209/DF213 · **Workstream:** documentation infrastructure
+- **Severity:** LOW (caught by a gate every time; the cost is churn, not breakage)
+- **Disposition:** UNRESOLVED — PARKED for the documentation-infrastructure review
+- **Rides:** **any**.
+- **Description:** Resolving a finding moves it from `findings-unresolved.md` to `findings-resolved.md` and appends `(RESOLVED <date>)` to its heading. A markdown anchor is the heading's GitHub slug, so **the rename changes the anchor**, and every `](...#df<n>--...)` link pointing at the old form stops resolving. Draining three findings in one sitting broke four cross-references across three files — including one in `design/config.md` that had nothing to do with the work in hand.
+- **Nothing ships broken:** `TestRepoHygiene_MarkdownAnchors_Resolve` catches every instance. The cost is that **every drain is an unbounded multi-file edit**, and it scales with how well cross-referenced the finding is — so the better the writing, the more expensive it is to resolve. That is a bad gradient: it prices the thing the process wants people to do.
+- **Two shapes of fix, and the choice is the review's:** either the drain stops renaming (keep the heading verbatim and carry the resolution date in the body, where every other piece of an entry's state already lives), or links stop being slug-coupled (an explicit `<a id="df209">` anchor, or a stable `DF<n>` link convention the gate resolves by ID rather than by title). The first is a one-line convention change; the second is a gate change.
+- **A third option worth naming and probably rejecting:** repointing by hand. That is what happened here, and it only worked because the whole set was recomputed from the current headings in one pass — a hand-edit per link is how a set like this goes half-stale.
+- **Pointer:** `docs/contributors/design/findings-resolved.md` (the newest-first + `(RESOLVED <date>)` conventions, stated in its own preamble); `repo_hygiene_test.go` (`mdHeadingSlug`, `TestRepoHygiene_MarkdownAnchors_Resolve`). Related: [DF214](#df214--shipped-text-disagrees-with-the-code-it-describes-in-ten-places-and-every-one-sits-inside-text-an-existing-gate-already-reads), [DF215](#df215--docscontributorsstandardsclimd-mandates-two-flags-the-cli-does-not-have-and-builds-a-convention-on-them), [DF216](#df216--two-architecture-docs-instruct-a-contributor-to-write-code-the-linter-rejects), [DF217](#df217--the-config-docs-gate-validates-against-a-looser-predicate-than-the-command-it-certifies) — the same review.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
