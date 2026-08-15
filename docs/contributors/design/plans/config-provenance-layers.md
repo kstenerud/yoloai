@@ -151,11 +151,18 @@ the resolver needing a special case for "this layer is different".
    changes yet; the existing merge keeps running.
 3. **Introduce the resolver** behind the existing signatures, so `MergeProfileChain` and friends
    become thin wrappers. Step 1's table must still pass.
-4. **Move the layer rules in** — profile-drops-user-defaults first, since it closes DF207/DF208's
-   residue and DF209.
-5. **Delete the ad-hoc provenance mechanisms**: `IsolationExplicit` (`state.go:62`, DF205),
-   the `baseAgent` comparison (`prepare_profile.go:109`), the
-   `opts.Network == NetworkModeDefault` gates (`prepare_profile.go:154,218`, DF206).
+4. **Move the layer rules in** — profile-drops-user-defaults first. DF207/DF208/DF209 are already
+   closed directly (see below), so what remains here is making the rule structural rather than a
+   comparison.
+5. ~~**Delete the ad-hoc provenance mechanisms.**~~ **Done ahead of this plan, 2026-08-15, and that
+   changes what step 6 inherits.** `IsolationExplicit` is deleted (DF205 — it had zero readers), and
+   the `opts.Network == NetworkModeDefault` gates are split so only the mode promotion is
+   conditional (DF206). The `baseAgent` comparison **stays**: it was broken and is now fixed (DF213),
+   and `model`/`isolation` were given the same treatment (DF209), so three keys now carry a working
+   comparison that this plan proposes to replace with something structural. That is the honest state
+   — not "the mechanisms are gone", but "they work, and a comparison is still standing in for
+   provenance". The residual they all share is the argument for building this: **an explicit flag
+   whose value equals the resolved default is indistinguishable from no flag.**
 6. **Expose provenance to consumers**, unblocking D141 (operator-authored vs repo-derived) and the
    network validation (typed vs inherited ports).
 
