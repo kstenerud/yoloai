@@ -52,6 +52,33 @@ func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrSandboxExists)
 }
 
+// TestArch_LibraryNeverDefaultsAgent is the claim cited by config.md's
+// "Implemented settings" table for `agent` and by sandbox_options.go:48-51:
+// AgentType/Agent is a required input the library refuses to default, not an
+// optional one it silently fills in with "claude" or any other agent — an
+// unset agent is a missing input, and the caller (the CLI, or an embedder)
+// owns picking one. See the TestArch_ prefix convention, AGENTS.md
+// "Preparing a PR". The refusal itself lives at create.go:443-445.
+func TestArch_LibraryNeverDefaultsAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	d := state.Deps{
+		Runtime: &mockRuntime{},
+		Layout:  layout,
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := create.Run(context.Background(), d, create.Options{
+		Name:    "no-agent",
+		Workdir: create.DirSpec{Path: tmpDir},
+		// Agent deliberately left empty.
+		Version: "test",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "agent is required")
+}
+
 func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 	tmpDir := t.TempDir()
 

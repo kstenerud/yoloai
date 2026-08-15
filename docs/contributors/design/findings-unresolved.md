@@ -1281,6 +1281,18 @@ earlier signal and records nothing else.
 - **What would close it:** either remove the flag and its help text, or implement the default-profile key it describes. This is a product call, not a defect fix — but it should not stay in the middle, where the flag exists and the feature does not.
 - **Pointer:** `internal/cli/cliutil/client.go:385-393`; `internal/cli/lifecycle/new.go:52,75`.
 
+### DF212 — a running sandbox's config is not fully sourced from `state.State`; three sites re-read config files live
+
+- **Discovered:** 2026-08-15, while making config.md's architectural claims executable (config-claim-citations build) · **Workstream:** config/trust seams
+- **Severity:** LOW
+- **Disposition:** UNRESOLVED — PARKED
+- **Rides:** **any**.
+- **Description:** The natural reading of the create/launch/restart split is that a sandbox's per-run configuration is captured once, at creation, into `state.State`, and every later operation (launch, restart, injector reconciliation) acts on that frozen record rather than re-consulting `~/.yoloai/defaults/config.yaml` live. That is false at three call sites, all bypassing `state.State` to call `config.LoadConfig` directly: `runtime/tart/tart.go:244` (resolves `tart.image` fresh on every backend construction), `internal/orchestrator/launch/launch.go:68` (`LaunchContainer` falls back to a live config read for env vars when `st.Env` is nil), and `internal/orchestrator/launch/launch.go:858` (`reconcileInjector` loads config fresh on every reconcile pass to resolve the credential-broker secret). Each is a live read of the same file a personal edit can change between the sandbox's creation and any later operation on it — a `tart.image` bump, an `env:` edit, or a credential rotation in `defaults/config.yaml` retroactively changes an already-created sandbox's behavior, silently.
+- **Not evaluated for harm, only for truth.** This finding is about a documentation claim, not a proven defect: no code currently asserts "`state.State` is the only per-run config", so nothing is contradicted yet — but writing that claim (as `docs/contributors/design/config.md` was about to, per AGENTS.md rule 10's trap) would have been false the moment it was written. Filed instead of asserted; see the config-claim-citations build's own report.
+- **`tart.go:244` additionally swallows its own error.** `if cfg, err := config.LoadConfig(layout); err == nil && cfg.TartImage != ""` discards a `LoadConfig` error outright, so the newly-added unknown-key validation (this same build, `internal/config/config.go`) makes a typo'd `defaults/config.yaml` silently fall back to the default tart image on this path instead of surfacing the "clear message listing the unrecognized keys" `config.md:100` promises elsewhere.
+- **What would close it:** either fold these three reads into `state.State` at creation time (accepting that a personal config edit no longer retroactively affects existing sandboxes — arguably the more predictable behavior) or state plainly, wherever `state.State`'s scope is documented, that it is not exhaustive and name these three exceptions. Either is a design call, not a one-line fix.
+- **Pointer:** `runtime/tart/tart.go:244`; `internal/orchestrator/launch/launch.go:68,858`.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

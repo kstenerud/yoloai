@@ -260,7 +260,15 @@ crosscheck:
 gate-coverage:
 	python3 scripts/check_gate_coverage.py
 
-check: lint lint-cross lint-speculative-api gate-coverage vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
+## claim-citations: a `TestArch_` claim citation in a gated doc (config.md,
+## architecture/, principles/, decisions/working-notes.md) must name a real
+## test, and every TestArch_ test must be cited by one of them — see
+## scripts/check_claim_citations.py and AGENTS.md "Preparing a PR".
+.PHONY: claim-citations
+claim-citations:
+	python3 scripts/check_claim_citations.py
+
+check: lint lint-cross lint-speculative-api gate-coverage claim-citations vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## The Python surface is part of the app (contributors can modify it), so it is

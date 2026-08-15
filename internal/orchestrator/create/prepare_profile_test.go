@@ -65,6 +65,72 @@ func TestResolveProfileConfig_PersonalDefaultsDoNotLeakIntoProfile(t *testing.T)
 	assert.Empty(t, opts.Ports, "personal ports must not carry into a profile")
 }
 
+// TestArch_ProfileIgnoresPersonalDefaults is the claim cited by config.md:
+// "Profiles are self-contained" / "Personal defaults do not carry into
+// profiles" (see the TestArch_ prefix convention, AGENTS.md "Preparing a
+// PR"). It is broader than TestResolveProfileConfig_PersonalDefaultsDoNotLeakIntoProfile
+// above: it drives the full pipeline a profile-active create.Run uses
+// (resolveProfileConfig, then applyConfigDefaults) and adds `resources`,
+// which the DF207 fix above did not reach — applyBaseResourceDefaults used
+// to run unconditionally, so a profile that left resources unset picked up
+// the user's personal resources.cpus/memory anyway. That gap is closed in
+// the same change as this test (prepare_profile.go's applyConfigDefaults).
+//
+// Excluded here on purpose, not silently and not by asserting the current
+// wrong behaviour (DF209): `isolation` and `model` also leak from personal
+// defaults into an active profile, but through a second route this
+// create-package test cannot exercise. The CLI resolves them before Options
+// ever reaches this package — internal/cli/lifecycle/new.go:544
+// (`resolveNewIsolationOS`) and internal/cli/cliutil/client.go:366-380
+// (`ResolveModel`) coalesce --isolation/--model with the SAME personal
+// config this test builds, so by the time resolveProfileConfig runs, a
+// personal isolation/model already reads as an explicit CLI choice
+// (prepare_profile.go:117,255-257). Setting ycfg.Isolation/ycfg.Model here
+// and asserting they don't leak would pass without proving DF209 closed,
+// since this test's Options start clean regardless. Leaving them out is the
+// honest reflection of that boundary; adding them back — with an assertion,
+// not a comment — is exactly the DF209 fix.
+func TestArch_ProfileIgnoresPersonalDefaults(t *testing.T) {
+	d := newTestDeps(t)
+	writeProfile(t, d.Layout, "leaktest", "agent: test\n") // profile sets nothing else
+
+	ycfg := &config.YoloaiConfig{
+		Agent:   "claude",
+		CapAdd:  []string{"SYS_ADMIN"},
+		Devices: []string{"/dev/personal"},
+		Setup:   []string{"echo personal-setup"},
+		Network: &config.NetworkConfig{
+			Allow: []string{"personal.example.com"},
+		},
+		Env:       map[string]string{"PERSONAL_SECRET": "leak-me-not"},
+		AgentArgs: map[string]string{"test": "--personal-flag"},
+		Ports:     []string{"9999:9999"},
+		Resources: &config.ResourceLimits{CPUs: "16", Memory: "64g"},
+	}
+	gcfg := &config.GlobalConfig{}
+	opts := &Options{Name: "sb-claim-a", Profile: "leaktest", Agent: "claude"}
+	agentDef := agent.GetAgent("claude")
+
+	pr, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
+	require.NoError(t, err)
+	require.NoError(t, applyConfigDefaults(opts, ycfg, pr, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation()))
+
+	assert.Empty(t, pr.capAdd, "personal cap_add must not carry into a profile")
+	assert.Empty(t, pr.devices, "personal devices must not carry into a profile")
+	assert.Empty(t, pr.setup, "personal setup must not carry into a profile")
+	assert.Empty(t, opts.NetworkAllow, "personal network.allow must not carry into a profile")
+	assert.NotContains(t, pr.env, "PERSONAL_SECRET", "personal env must not carry into a profile")
+	assert.NotEqual(t, "--personal-flag", pr.agentArgs["test"], "personal agent_args must not carry into a profile")
+	assert.Empty(t, opts.Ports, "personal ports must not carry into a profile")
+	// pr.resources is non-nil (the baked-in defaults set resources.cpus/memory
+	// to "" rather than omitting the key), so the claim is about its VALUES,
+	// not the pointer.
+	if pr.resources != nil {
+		assert.NotEqual(t, "16", pr.resources.CPUs, "personal resources.cpus must not carry into a profile")
+		assert.NotEqual(t, "64g", pr.resources.Memory, "personal resources.memory must not carry into a profile")
+	}
+}
+
 // TestResolveProfileConfig_ProfileOwnValuesStillApply guards against fixing
 // the DF207 leak by breaking profiles outright: a profile's own settings must
 // still resolve, even though they now merge over baked-in defaults instead of
