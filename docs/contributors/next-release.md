@@ -68,7 +68,6 @@ that makes them structural rather than four spot repairs.*
 - [D142](decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset) — The `mounts:` config/profile key is retired; `directories:` is its strict superset
 - [DF209](design/findings-resolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close
 - [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) — Configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
-- [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [DF210](design/findings-resolved.md) — a profile's `os:` is parsed, merged, and never read (RESOLVED 2026-08-15)
 - [DF211](design/findings-resolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist (RESOLVED 2026-08-15)
 - [DF201](design/findings-resolved.md) — `agent_files` list form copies credentials the string form strips (RESOLVED 2026-08-15)
@@ -93,6 +92,7 @@ tell a typed port from an inherited one — so building either first means build
 in two places, and then owning both. **The migration rides with `network-mode-reshape.md`, so v0.12.0
 carries none** and rule 12's constraint applies to v0.13.0's branch rather than this one.*
 
+- [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [enforcement-build.md](design/plans/enforcement-build.md) — Host-side enforcement — build brief
 - [DF188](design/findings-unresolved.md) — `resolve_domains` accepts whatever a resolver returns, so a sinkholed allowlist domain installs a rule that matches nothing and says nothing
 - [DF189](design/findings-unresolved.md) — yoloAI's CNI subnet is byte-identical to podman's default allocator pool, so two sandboxes on one host can hold the same address
