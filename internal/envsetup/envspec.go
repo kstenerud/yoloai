@@ -46,6 +46,16 @@ type EnvSpec struct {
 
 	// ShortLivedOAuthWarning emits the OAuth-token warning when auth files were copied.
 	ShortLivedOAuthWarning bool
+
+	// AgentName is the declaring agent's Type (e.g. "claude", "diamond"). Not
+	// used by any staging logic — carried solely so DescribeInjectedCredentials
+	// can name the declaration in the D144 line-2 launch-time disclosure.
+	AgentName string
+
+	// UserDefined mirrors agent.Definition.UserDefined: true when the
+	// declaring agent came from the user's own ~/.yoloai/agents/*.yaml rather
+	// than shipped with yoloai. Also disclosure-only (see AgentName).
+	UserDefined bool
 }
 
 // SeedFile mirrors agent.SeedFile as plain data (no agent import).

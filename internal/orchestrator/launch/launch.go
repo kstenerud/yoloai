@@ -81,6 +81,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	// — so both paths broker identically (D105/D106).
 	spec := envspec.BuildEnvSpec(st.Agent)
 	secretEnv := envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
+	discloseInjectedCredentials(st, spec)
 	bro, err := brokerCredentials(ctx, d.Runtime, st, secretEnv)
 	if err != nil {
 		return err
@@ -1517,4 +1518,21 @@ func outputOr(o io.Writer) io.Writer {
 		return o
 	}
 	return io.Discard
+}
+
+// discloseInjectedCredentials writes the D144 line-2 disclosure to st.Output,
+// naming the credential env vars actually resolved from the host-env snapshot
+// for spec's declaring agent — a grant selection may not make silently
+// (D144: "Selection ... may not grant them invisibly"). A no-op when nothing
+// resolved: DescribeInjectedCredentials returns "" in that case, and silence
+// must mean "nothing was granted".
+//
+// Written to st.Output (via outputOr, nil-safe): on `new`/`run` that is the
+// create pipeline's progress writer, streamed straight to stderr; on
+// `start`/`reset` it is wrapped as a noticeWriter and surfaces through the
+// result's Notices (F8) — both reach a human running the command.
+func discloseInjectedCredentials(st *state.State, spec envsetup.EnvSpec) {
+	if line := envsetup.DescribeInjectedCredentials(spec, st.Layout); line != "" {
+		fmt.Fprintln(outputOr(st.Output), line) //nolint:errcheck // best-effort output
+	}
 }

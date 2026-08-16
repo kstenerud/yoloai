@@ -50,6 +50,8 @@ func agentSpec(agentDef *agent.Definition) EnvSpec {
 		AgentFilesExclude:      agentDef.AgentFilesExclude,
 		SettingsPatches:        patches,
 		ShortLivedOAuthWarning: agentDef.ShortLivedOAuthWarning,
+		AgentName:              string(agentDef.Type),
+		UserDefined:            agentDef.UserDefined,
 	}
 }
 
@@ -310,6 +312,88 @@ func TestResolveAndStageSecretEnv_HonorsStagingRoot(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, rootResolved, filepath.Dir(dirResolved),
 		"secrets dir must be created under the injected staging root")
+}
+
+// DescribeInjectedCredentials tests (D144 line 2: the launch-time disclosure)
+
+func TestDescribeInjectedCredentials_NothingResolvedIsSilent(t *testing.T) {
+	spec := agentSpec(agent.GetAgent("claude"))
+
+	got := DescribeInjectedCredentials(spec, config.Layout{})
+
+	assert.Empty(t, got, "no key resolved from the host snapshot must produce no line")
+}
+
+func TestDescribeInjectedCredentials_NamesTheShippedAgent(t *testing.T) {
+	spec := agentSpec(agent.GetAgent("claude"))
+	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test"})
+
+	got := DescribeInjectedCredentials(spec, hostEnv)
+
+	assert.Equal(t, `credentials injected from the environment: ANTHROPIC_API_KEY (declared by agent "claude")`, got)
+}
+
+func TestDescribeInjectedCredentials_NamesTheUserDefinedAgentAndSortsKeys(t *testing.T) {
+	spec := EnvSpec{
+		AgentName:       "diamond",
+		UserDefined:     true,
+		APIKeyEnvVars:   []string{"GITHUB_TOKEN", "DIAMOND_KEY"},
+		AuthHintEnvVars: nil,
+	}
+	hostEnv := config.Layout{}.WithEnv(map[string]string{
+		"GITHUB_TOKEN": "gh-test",
+		"DIAMOND_KEY":  "dk-test",
+	})
+
+	got := DescribeInjectedCredentials(spec, hostEnv)
+
+	assert.Equal(t, `credentials injected from the environment: DIAMOND_KEY, GITHUB_TOKEN (declared by user-defined agent "diamond")`, got)
+}
+
+func TestDescribeInjectedCredentials_OnlyNamesKeysResolvedFromHost(t *testing.T) {
+	// A key present only in configEnv (the user typed it) or merely declared but
+	// unset on the host must never appear — DescribeInjectedCredentials takes no
+	// configEnv argument at all, precisely so it cannot see that source.
+	spec := EnvSpec{
+		AgentName:     "claude",
+		APIKeyEnvVars: []string{"ANTHROPIC_API_KEY", "UNSET_KEY"},
+	}
+	hostEnv := config.Layout{}.WithEnv(map[string]string{"ANTHROPIC_API_KEY": "sk-test"})
+
+	got := DescribeInjectedCredentials(spec, hostEnv)
+
+	assert.Equal(t, `credentials injected from the environment: ANTHROPIC_API_KEY (declared by agent "claude")`, got)
+}
+
+// TestArch_LibraryNeverReadsAmbientEnv pins D144 line 1 as a behavioural claim,
+// not just an enforced call. `forbidigo` bans os.Getenv/os.Environ/os.LookupEnv/
+// os.ExpandEnv/syscall.Getenv/syscall.Environ repo-wide (one path exemption:
+// cliutil/layout.go's licensed os.Environ() read) — that proves the call is
+// absent, not that a variable which is live in the process but missing from the
+// threaded snapshot stays out of the sandbox. This test proves the behaviour
+// directly: it sets a real process-env var a shipped agent declares, builds a
+// config.Layout whose snapshot omits it, and asserts ResolveSecretEnv — the
+// resolver that delivers credentials into the sandbox — never sees it.
+//
+// Verified red on revert: temporarily rewriting ResolveSecretEnv's host-lookup
+// to fall back to os.Getenv when the snapshot misses a declared key made this
+// test fail (the ambient value leaked through), confirming it is wired to the
+// behaviour and not just to the call site.
+func TestArch_LibraryNeverReadsAmbientEnv(t *testing.T) {
+	claudeDef := agent.GetAgent("claude")
+	require.NotNil(t, claudeDef)
+	require.Contains(t, claudeDef.APIKeyEnvVars, "ANTHROPIC_API_KEY")
+
+	t.Setenv("ANTHROPIC_API_KEY", "sk-ambient-leak")
+	_, present := os.LookupEnv("ANTHROPIC_API_KEY")
+	require.True(t, present, "sanity: the var must actually be live in the process env")
+
+	spec := agentSpec(claudeDef)
+	hostEnv := config.Layout{} // zero-value snapshot: does not carry ANTHROPIC_API_KEY
+
+	got := ResolveSecretEnv(spec, nil, hostEnv)
+
+	assert.NotContains(t, got, "ANTHROPIC_API_KEY")
 }
 
 // CopySeedFiles tests

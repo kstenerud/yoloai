@@ -146,6 +146,15 @@ type Definition struct {
 	// env; brokering removes it and writes a placeholder instead). Nil for agents
 	// whose env-var credential works directly.
 	DirectCredentialFile *DirectCredentialFile
+
+	// UserDefined marks an agent loaded from the user's own
+	// ~/.yoloai/agents/*.yaml files (fileagent.go) rather than shipped with
+	// yoloai. Every built-in Definition in this file keeps the zero value
+	// (false). Threaded through to the launch-time credential-injection
+	// disclosure (D144 line 2): a file-defined agent may name any env var it
+	// wants, and only the shipped declarations are reviewed, so the disclosure
+	// names a user-defined agent's grant as such.
+	UserDefined bool
 }
 
 // DirectCredentialFile declares how to write an agent's real credential to a

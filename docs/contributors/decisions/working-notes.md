@@ -2186,3 +2186,35 @@ Each describes the CLI reading config as the deliberate, documented shape — no
 2. **The reversal (undecided, deferred to v0.13.0).** Whether the CLI stops reading config files at all — the part "What this reverses" names above — is not decided by this entry. It reverses a documented design choice and needs its own review, on its own timeline, separate from the repair.
 
 **Consequences.** No user-visible change if the policy table is faithful; the defects it closes are listed above. It touches `YoloaiConfig`, `MergedConfig`, `ProfileConfig`, `create.Options` and `profileResult`, so it is sequenced before D141 and before `network-mode-reshape.md` step 1 rather than alongside them. `IsolationExplicit` (DF205) was already deleted directly, ahead of this decision — see the second audit correction above — so this work has nothing left to retire there; the provenance question it stood in for is still this decision's to answer.
+
+---
+
+## D144 — ambient environment: read once at the CLI, name freely in an agent definition, never grant invisibly
+
+**Date:** 2026-08-16. **Status:** Active — lines 1 and 3 already hold; line 2's disclosure is the new work. **Supersedes no decision**, but *states* a policy that until now existed only as enforcement (`forbidigo` rules + `development-principles.md` §12) with no decision saying what it is for. **Consumers:** `internal/cli/cliutil/`, `internal/config/host_env.go`, `internal/envsetup/`, `internal/agent/`.
+
+**Decision. Three lines, and they are about three different things that kept getting conflated.**
+
+1. **Reading.** yoloAI reads the ambient process environment at exactly one place — `cliutil/layout.go`'s licensed `os.Environ()` — and threads the snapshot down as data. The library never reads the live environment; `ClientOptions.Env` is the only source it resolves credentials and `${VAR}` references from, and a caller that passes nothing gets nothing. *Already true, and gated: `os.Getenv`, `os.Environ`, `os.LookupEnv`, `os.ExpandEnv`, `syscall.Getenv` and `syscall.Environ` are forbidden repo-wide by `forbidigo`, with one path exemption.*
+2. **Selection.** Any agent definition — shipped or file-defined — may name the env keys its agent needs. **What it may not do is grant them invisibly: the keys actually injected are disclosed at launch, naming the declaration that asked for them and whether that declaration is user-authored.**
+3. **Values.** `--env KEY=VAL` is literal and per-invocation. yoloAI performs no ambient read for it; the shell expands `$FOO` if the user writes it.
+
+**The distinction that makes line 1 stable, and that resolves an argument [D143](#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) left open.** Configuration files and the ambient environment are not the same kind of source, so "who may read it" has different answers. A config file is **deterministic given a layout** — any caller pointing at the same layout gets the same values, so reading it deep in the library is safe. The ambient environment is **process-scoped and invisible** — a daemon's environment is not its callers', so reading it below the boundary silently attributes one principal's credentials to another. D143 proposes moving config reading *down*; this decision keeps ambient reading *up*. Both follow from the same test: **is this source deterministic given the caller's inputs?**
+
+**Why line 2 is disclosure and not a bound — the first draft of this decision was wrong.** It said the set of injectable keys should be fixed in code. The owner's objection killed it in one sentence: a code allowlist can only enumerate agents yoloAI ships, so a new harness needing `DIAMOND_KEY` would be refused by construction — which makes file-defined agents useless for the one thing they exist for. Extensibility is the feature.
+
+**What the actual risk is, once that is admitted.** `~/.yoloai/agents/*.yaml` is the user's own data dir, not repo content and not attacker-reachable without write access to their yoloAI state. A file agent naming `DIAMOND_KEY` is the user configuring their own machine — the same act as `--env DIAMOND_KEY=$DIAMOND_KEY`, only persistent. So this is **not an escalation**, and [DF202](../design/findings-resolved.md) is re-rated LOW accordingly. What remains is real but narrower:
+- **The grant is invisible at the moment it matters.** A declaration is written once, in a file, and consumed silently forever. An agent file copied from a blog post or a colleague can declare `GITHUB_TOKEN`, and nothing tells the user that every sandbox using that agent hands the token to the untrusted party.
+- **Shipped and user-authored declarations are indistinguishable at the point of use**, though only ours are reviewed. The reach is not new with file agents — `opencode` already declares `GITHUB_TOKEN`, `AWS_ACCESS_KEY_ID` and `AWS_PROFILE` (`agent.go:503`) — file agents only extend who may widen it.
+
+**Rejected.**
+1. **A code-baked allowlist of injectable keys.** Rejected on the owner's objection above: it cannot enumerate what it does not ship.
+2. **A denylist of high-value credentials** (SSH keys, cloud root creds). Rejected for the reason [D141](#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed) rejected the `cap_add` denylist: it cannot be complete, and its incompleteness is invisible. A denylist that misses `DIAMOND_KEY` reads exactly like one that considered it.
+3. **Per-invocation consent for file-agent credentials.** Rejected as ceremony: unlike a repo, the file *is* the user's own configuration, so re-confirming it on every run trains the user to dismiss the prompt — the failure D141's own "balk once, list everything" shape exists to avoid.
+4. **Refusing file agents credentials entirely** (name keys, but require `--env` for values). Rejected because it defeats the convenience the mechanism exists for, and pushes users toward pasting credentials into shell history.
+
+**Consequences.**
+- Disclosure at launch, where `ResolveSecretEnv` runs (`launch.go:83`), naming the injected keys and the declaring agent. `agent.Definition` gains a marker for file-defined agents; it has none today.
+- Line 1 becomes a claim rather than an enforcement detail: `TestArch_LibraryNeverReadsAmbientEnv` asserts that a variable present in the live process environment but absent from the threaded snapshot does not reach a sandbox. `forbidigo` bans the call; the test pins the behaviour, which is the half a linter cannot check.
+- **No BREAKING-CHANGES entry.** Nothing is refused that was accepted before; output is added.
+

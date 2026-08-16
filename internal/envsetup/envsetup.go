@@ -7,6 +7,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
@@ -25,10 +26,45 @@ func ResolveSecretEnv(spec EnvSpec, configEnv map[string]string, hostEnv config.
 	for k, v := range configEnv {
 		out[k] = v
 	}
-	for k, v := range hostEnv.Env().EnvForAgentCredentials(append(spec.APIKeyEnvVars, spec.AuthHintEnvVars...)) {
+	for k, v := range resolvedHostCredentials(spec, hostEnv) {
 		out[k] = v
 	}
 	return out
+}
+
+// resolvedHostCredentials returns the subset of spec's declared credential
+// keys (APIKeyEnvVars + AuthHintEnvVars) actually present in hostEnv's
+// snapshot. Factored out so ResolveSecretEnv (what gets injected) and
+// DescribeInjectedCredentials (what gets disclosed) can never compute a
+// different set — D144 line 2 requires the disclosure name exactly what was
+// injected from the host, not what was merely declared.
+func resolvedHostCredentials(spec EnvSpec, hostEnv config.Layout) map[string]string {
+	return hostEnv.Env().EnvForAgentCredentials(append(spec.APIKeyEnvVars, spec.AuthHintEnvVars...))
+}
+
+// DescribeInjectedCredentials returns a human-readable D144 line-2 disclosure
+// line naming the credential env vars actually resolved from hostEnv's
+// snapshot for spec's declaring agent (spec.AgentName) — never the
+// merely-declared set, and never config's env: entries, since those are
+// values the user typed themselves rather than a grant an agent declaration
+// pulled in. "" when nothing resolved: silence must mean nothing was
+// granted, so an unconditional line would train a reader to ignore it.
+func DescribeInjectedCredentials(spec EnvSpec, hostEnv config.Layout) string {
+	resolved := resolvedHostCredentials(spec, hostEnv)
+	if len(resolved) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(resolved))
+	for k := range resolved {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	declarer := fmt.Sprintf("agent %q", spec.AgentName)
+	if spec.UserDefined {
+		declarer = fmt.Sprintf("user-defined agent %q", spec.AgentName)
+	}
+	return fmt.Sprintf("credentials injected from the environment: %s (declared by %s)", strings.Join(keys, ", "), declarer)
 }
 
 // StageSecretEnv writes a resolved secret map to a fresh owner-only temp dir as

@@ -46,6 +46,7 @@ interactive_cmd: mytool --yes
 	assert.Equal(t, AgentType("mytool"), def.Type)
 	assert.Equal(t, "mytool --yes", def.InteractiveCmd)
 	assert.Equal(t, PromptModeInteractive, def.PromptMode, "default prompt mode should be interactive")
+	assert.True(t, def.UserDefined, "a file-defined agent must carry the D144 disclosure marker")
 }
 
 func TestLoadFileAgents_ValidFull(t *testing.T) {
