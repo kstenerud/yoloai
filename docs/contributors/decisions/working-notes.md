@@ -2218,3 +2218,39 @@ Each describes the CLI reading config as the deliberate, documented shape — no
 - Line 1 becomes a claim rather than an enforcement detail: `TestArch_LibraryNeverReadsAmbientEnv` asserts that a variable present in the live process environment but absent from the threaded snapshot does not reach a sandbox. `forbidigo` bans the call; the test pins the behaviour, which is the half a linter cannot check.
 - **No BREAKING-CHANGES entry.** Nothing is refused that was accepted before; output is added.
 
+---
+
+## D145 — all feedback is a structured record routed by the caller; a threaded `io.Writer` is not a channel
+
+**Date:** 2026-08-16. **Status:** Active — designed, build scoped to v0.12.0. **Supersedes no decision**, but completes one that was only half-enforced: `forbidigo` already bans direct printing, and this closes the bypass that ban leaves open. **Consumers:** `internal/orchestrator/`, `internal/envsetup/`, `internal/cli/`. **Plan:** [`feedback-routing.md`](../design/plans/feedback-routing.md).
+
+**Decision. Library code emits structured records; it never formats text for a human. Exactly one layer — the caller's routing point, which for this repo is the CLI — decides where a record goes and what it looks like.** A `*slog.Logger` threaded as a parameter is the emission channel. A threaded `io.Writer` is not.
+
+**Why the existing ban does not cover this.** `fmt.Print*`, `println` and `log.Print*` are forbidden repo-wide by `forbidigo` — the *"no println outside the routing layer"* half is real and enforced. But `fmt.Fprintf(w, …)` to a threaded writer satisfies that ban while violating its purpose, and it is the dominant pattern: **19 writer parameters across `internal/`, 26 `fmt.Fprint*` calls in `internal/orchestrator/` alone.** A threaded writer *looks* disciplined — an explicit parameter, not a global — while hardcoding the one assumption a non-CLI consumer cannot satisfy: that a human is watching a text stream, now, in order.
+
+**Why it matters here specifically.** yoloAI has four consumer shapes already — the CLI, the MCP server, library embedders, and the daemon the D141/D144 work keeps designing for. Each wants different routing: stdout, stderr, a system log, a structured feed shipped onward over HTTPS. A formatted string has already thrown away what the routing needs — level, event identity, and the fields that would let a consumer filter or re-render. **Formatting is a rendering decision, and rendering belongs to whoever knows the destination.**
+
+**Four mechanisms exist today, not two.** Naming them all matters, because consolidating onto the wrong one imports a different defect:
+
+| Mechanism | Scale | Problem |
+| --- | --- | --- |
+| threaded `io.Writer` + `fmt.Fprint*` | 19 params / 26 calls | unstructured; assumes a watching human |
+| `noticeWriter` → `StartResult.Notices` | start/reset paths | structured-ish, and *returned* — the closest thing to right |
+| threaded `*slog.Logger` | 4 sites | the target shape |
+| `slog.Default()` | 8 sites | **ambient** — the thing §12 forbids everywhere else |
+
+**So the decision says *threaded* logger, never the default.** "Use slog" without that word would move the ambient-configuration problem into the feedback path instead of removing it, and eight sites already reach for the global.
+
+**The open question, deliberately not settled here.** `StartResult.Notices` exists because a library caller wants notices **attached to the result** — inspectable, testable, ordered with the call — not scraped from a handler they had to install. A logger is fire-and-forget; a return value is not. So the likely shape is *emit once, fan out to both* — a handler for streaming and a collector for the result — rather than "everything goes to the logger". `noticeWriter` is already a half-built version of that, and the plan owns choosing.
+
+**Rejected.**
+1. **Keep the threaded writer and document it.** Rejected: it is not a documentation gap. The writer *cannot* carry level or fields, so no amount of convention makes it routable — a consumer receives bytes and has to parse them back into the structure the emitter already had and discarded.
+2. **`slog.Default()` everywhere.** Rejected: ambient. It is the same defect DEV §12 exists to prevent, and a multi-principal embedder would get one process-wide sink for every principal's output.
+3. **Convert only new code and leave the 26 sites.** Rejected on `security-principles.md §11`: a mechanism that follows one convention here and another there is a hygiene defect in its own right, and the drift is what an audit misses. It also means two conventions live indefinitely, since nothing would force the second conversion.
+4. **Defer to v0.13.0.** The recommendation was to defer on size — 19 signatures, 26 call sites, and every test asserting on captured text. Overruled by the owner: it lands in v0.12.0 with the D144 work it is adjacent to.
+
+**Consequences.**
+- The D144 credential disclosure (`launch.go`'s `discloseInjectedCredentials`, shipped in `78d68d20`) writes to `state.Output` and is instance 27. It converts with the class, not before it — a lone site differing from its 26 siblings is precisely rejected-alternative 3.
+- Tests asserting on captured output text become tests asserting on records. That is a net improvement — asserting a field beats asserting a substring — but it is real work and is the bulk of the diff.
+- `forbidigo` gains a rule for the bypass once the conversion lands, or the ban is decoration: **the gate is what stops mechanism five appearing.**
+
