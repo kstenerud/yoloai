@@ -72,7 +72,7 @@ that makes them structural rather than four spot repairs.*
 - [DF210](design/findings-resolved.md) — a profile's `os:` is parsed, merged, and never read (RESOLVED 2026-08-15)
 - [DF211](design/findings-resolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist (RESOLVED 2026-08-15)
 - [DF201](design/findings-resolved.md) — `agent_files` list form copies credentials the string form strips (RESOLVED 2026-08-15)
-- [DF202](design/findings-unresolved.md) — a file-defined agent can make yoloAI read arbitrary vars from its own environment
+- [DF202](design/findings-resolved.md) — a file-defined agent's declared credentials were an invisible, persistent grant (RESOLVED 2026-08-16)
 - [DF206](design/findings-resolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly (RESOLVED 2026-08-15)
 - [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
 - [DF208](design/findings-resolved.md) — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from personal defaults, not baked-in defaults (RESOLVED 2026-08-13)

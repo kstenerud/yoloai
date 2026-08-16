@@ -1164,18 +1164,6 @@ earlier signal and records nothing else.
 - **What would close it:** a mechanism-blind reachability assertion in `RunInterfaceConformance` — from inside the instance, a known-reachable destination must fail while a positive control succeeds, per [A22](../agent-failures.md) — built through `Backend.Create` so the flag's own path is under test. D139 already requires exactly this shape for the `restricted` mode; the same case serves `none`.
 - **Pointer:** `runtime/runtimetest/conformance.go:73,165`; `RunConformance` callers `runtime/docker/integration_test.go:24` and `runtime/podman/integration_test.go:26`, against `RunInterfaceConformance` callers `runtime/apple/integration_test.go:84`, `runtime/tart/integration_test.go:108`, `runtime/seatbelt/integration_test.go:192`, `runtime/containerd/integration_test.go:301`.
 
-### DF202 — a file-defined agent can make yoloAI read arbitrary vars from its own environment
-
-- **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
-- **Severity:** MEDIUM
-- **Disposition:** UNRESOLVED — PARKED
-- **Rides:** **any**.
-- **Description:** `internal/config/host_env.go:157-158` deliberately limits config/profile `${VAR}` interpolation to `HOME`, `USER`, `LANG`, `TZ` and the `LC_` prefix — the comment at `:155` says this is what closes arbitrary config interpolation. But `internal/agent/fileagent.go:84,88` lets a YAML file under `~/.yoloai/agents/` declare `api_key_env_vars` and `auth_hint_env_vars`, which reach `HostEnv.EnvForAgentCredentials` (`host_env.go:285`) and are read **from yoloAI's own process environment** and delivered into the sandbox as secrets. So a config file can name `AWS_SECRET_ACCESS_KEY` or `GITHUB_TOKEN` and have it injected — the same capability `${VAR}` was locked down to prevent, reached by another name.
-- **The entire security argument is one `//nolint` comment nobody sees.** `fileagent.go:237` reads the agent YAML with `//nolint:gosec // G304: f is a glob match under AgentsDir(), a trusted data dir (DataDir/agents/)` — that "trusted data dir" assertion is the whole basis for treating declared env-var names as safe to read and forward, and it is stated nowhere a user would encounter it.
-- **Shipped agents already reach wide, which is the existing baseline this defect extends.** `agent.go:503` declares `opencode`'s `AuthHintEnvVars` as `GITHUB_TOKEN`, `AWS_ACCESS_KEY_ID`, `AWS_PROFILE`, `AZURE_OPENAI_ENDPOINT`, among others — the mechanism already forwards broad ambient credentials for a built-in agent; a file-defined agent can name anything at all.
-- **The principle this violates:** ambient config must not be able to leak in via a config file — the CLI (an explicit flag, an explicit `--env`) is the legitimate channel for that. `${VAR}` interpolation was narrowed for exactly this reason, and a sibling mechanism reopens it under a different name.
-- **Pointer:** `internal/config/host_env.go:155-158,285`; `internal/agent/fileagent.go:84,88,237`; `internal/agent/agent.go:503`.
-
 ### DF203 — `BackendCaps.CapAdd` is one boolean for three features, so `devices` is a silent no-op on two backends and `setup` is refused on two others
 
 - **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams
