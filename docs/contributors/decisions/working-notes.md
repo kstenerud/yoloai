@@ -2237,11 +2237,20 @@ Each describes the CLI reading config as the deliberate, documented shape — no
 | threaded `io.Writer` + `fmt.Fprint*` | 19 params / 26 calls | unstructured; assumes a watching human |
 | `noticeWriter` → `StartResult.Notices` | start/reset paths | structured-ish, and *returned* — the closest thing to right |
 | threaded `*slog.Logger` | 4 sites | the target shape |
-| `slog.Default()` | 8 sites | **ambient** — the thing §12 forbids everywhere else |
+| the process-global logger | **~111 sites** — 8 `slog.Default()` plus **103 package-level `slog.Info/Warn/Error/Debug(`**, against 114 calls on a threaded logger | ambient *only when the destination was never declared* — see below |
 
-**So the decision says *threaded* logger, never the default.** "Use slog" without that word would move the ambient-configuration problem into the feedback path instead of removing it, and eight sites already reach for the global.
+**A correction that changed this decision's shape.** The first draft counted 8 global sites. That was wrong by an order of magnitude: package-level `slog.Info(…)` writes to the same process-global handler as `slog.Default()`, and there are 103 of those. The number reached the owner and informed a scoping call before it was checked.
 
-**The open question, deliberately not settled here.** `StartResult.Notices` exists because a library caller wants notices **attached to the result** — inspectable, testable, ordered with the call — not scraped from a handler they had to install. A logger is fire-and-forget; a return value is not. So the likely shape is *emit once, fan out to both* — a handler for streaming and a collector for the result — rather than "everything goes to the logger". `noticeWriter` is already a half-built version of that, and the plan owns choosing.
+**Feedback and diagnostics are different, and only one of them must be threaded.** The distinguishing test is **who is addressed**:
+
+- **Feedback is addressed to the *caller* of this API** — what happened to *their* sandbox, in *their* invocation. It is per-call and per-principal, so it must be threaded or returned. A process-global sink cannot express "this belongs to that caller", and in a multi-principal daemon it merges principals.
+- **Diagnostics are addressed to the *operator of the process*.** They are process-scoped by nature, so a **singleton is the better match than dependency injection** — threading a logger through every function to serve a process-wide concern is ceremony that buys nothing.
+
+**So the rule is not "no globals" but "no undeclared destination".** What §12 objects to is *ambient* — nobody chose it, it was simply there. A singleton whose handler is **explicitly installed at process start** — by the CLI, or by a daemon before it launches its web service — is a declared destination, and is fine. What is forbidden is *implicit defaulting*: reaching for the global when nothing has set it, so output goes wherever the runtime happens to send it.
+
+That narrows the work sharply: most of the 103 are diagnostics and stay where they are, provided each entrypoint declares its handler and the declaration is checkable.
+
+**Exposure is per-API, not one global answer.** The first draft posed "is a record a stream event or a return value?" as one question needing one answer. It is not. The same record is legitimately a **return value** on `Create` — the caller has a result in hand and wants notices attached to it — and a **stream event** on a long-running `Start` or `Attach`, where there is nothing to attach to yet. Emission is uniform: one record, one helper. **Exposure is declared by each API surface as part of its contract**, chosen for what that surface's caller is actually doing. This removes the risk of converting every site onto a shape that suits `Create` and fights `Attach`.
 
 **Rejected.**
 1. **Keep the threaded writer and document it.** Rejected: it is not a documentation gap. The writer *cannot* carry level or fields, so no amount of convention makes it routable — a consumer receives bytes and has to parse them back into the structure the emitter already had and discarded.
@@ -2253,4 +2262,5 @@ Each describes the CLI reading config as the deliberate, documented shape — no
 - The D144 credential disclosure (`launch.go`'s `discloseInjectedCredentials`, shipped in `78d68d20`) writes to `state.Output` and is instance 27. It converts with the class, not before it — a lone site differing from its 26 siblings is precisely rejected-alternative 3.
 - Tests asserting on captured output text become tests asserting on records. That is a net improvement — asserting a field beats asserting a substring — but it is real work and is the bulk of the diff.
 - `forbidigo` gains a rule for the bypass once the conversion lands, or the ban is decoration: **the gate is what stops mechanism five appearing.**
+- **The ban generalises from a list to a class**, at the owner's direction: *any API whose behaviour depends on ambient process state rather than on its arguments*. Today `forbidigo` enumerates — `os.Getenv`, `os.Environ`, `os.UserHomeDir`, `os.Getwd`, `time.Local`, `user.Current` — and an enumeration drifts. The proof it already has: **`filepath.Abs` is used 4 times, is not banned, and silently calls `os.Getwd()`, which is** — the same ambient read wearing a path-manipulation name, walking past the gate. `os.TempDir` (2 uses, reads `TMPDIR`) is the same shape. `exec.LookPath` (28 uses, ambient `PATH`) is probably a legitimate exception and should be a *declared* one rather than an oversight.
 

@@ -28,31 +28,48 @@ gone.
 | --- | --- | --- |
 | threaded `io.Writer` + `fmt.Fprint*` | 19 params / 26 calls | **replace** |
 | `noticeWriter` → `StartResult.Notices` | start/reset | **generalise** — closest to right |
-| threaded `*slog.Logger` | 4 sites | **the target** |
-| `slog.Default()` | 8 sites | **replace** — ambient, the thing §12 forbids |
+| threaded logger calls | 114 | **the target** |
+| process-global logger | **~111** — 8 `slog.Default()` + 103 package-level `slog.Info/Warn/Error/Debug(` | **triage, do not mass-convert** |
 
-The last row is why the decision says *threaded* logger and not just "slog": eight sites reach for
-the global today, and consolidating without that word moves the ambient-config defect into the
-feedback path rather than removing it.
+**The last row is not 8, as an earlier draft said.** Package-level `slog.Info(…)` writes to the same
+process-global handler; there are 103. But most are **diagnostics**, and diagnostics are allowed to
+use a singleton — see below. Only the feedback ones convert.
 
-## The open question this plan must answer first
+## Feedback vs diagnostics — the line that sizes this work
 
-**Is a record a stream event, a return value, or both?**
+**Who is addressed?**
 
-`StartResult.Notices` exists because a library caller wants notices *attached to the result* —
-inspectable, testable, ordered with the call — not scraped from a handler they had to install. A
-logger is fire-and-forget; a return value is not. The likely answer is **emit once, fan out to
-both**: a handler for streaming and a collector that populates the result. `noticeWriter` is already
-a half-built version of exactly that, and `Notice`/`NoticeLevel` are already public types
-(`types.go:187,191`).
+- **The caller of this API** → feedback. Per-call, per-principal; must be threaded or returned. A
+  process-global sink cannot say "this belongs to that caller", and a multi-principal daemon merges
+  principals into one stream.
+- **The operator of the process** → diagnostics. Process-scoped by nature, so a **singleton beats
+  DI**: threading a logger through every function to serve a process-wide concern is ceremony.
 
-Settle this before converting any call site — it decides whether the emission API is
-`log.InfoContext(ctx, …)` or something that returns.
+**The rule is "no undeclared destination", not "no globals".** A singleton whose handler is
+explicitly installed at process start — by the CLI, or by a daemon before it launches its web
+service — is a *declared* destination. What is forbidden is *implicit defaulting*: reaching for the
+global when nothing has set it, so output lands wherever the runtime decides.
+
+**So the conversion is the 19 writers / 26 `Fprint` calls plus whichever of the 103 turn out to be
+caller-addressed — not all 111.** Triaging that set is step 1's real work, and the sizing cannot be
+trusted until it is done.
+
+## Exposure is per-API
+
+The same record is legitimately a **return value** on `Create` — the caller has a result and wants
+notices attached — and a **stream event** on a long-running `Start` or `Attach`, where there is
+nothing to attach to yet. So: **emission is uniform (one record, one helper); exposure is declared by
+each API surface as part of its contract.** `Notice`/`NoticeLevel` are already public
+(`types.go:187,191`) and `noticeWriter` is a half-built collector to build on.
+
+This is deliberately *not* one global answer — choosing one would fit `Create` and fight `Attach`.
 
 ## Order of work
 
-1. **Answer the question above**, and write the emission API. One helper, one shape, so a converted
-   site cannot invent a variant.
+1. **Triage the 103 package-level calls** into caller-addressed (convert) and operator-addressed
+   (leave, but ensure the destination is declared), and write the emission API — one helper, one
+   shape, so a converted site cannot invent a variant. **The sizing of this plan is not known until
+   this step is done**; an earlier draft's "8 sites" was wrong by an order of magnitude.
 2. **Stand up the collector + handler pair** behind the existing `Output` fields, so nothing changes
    for callers yet and the old and new paths produce identical bytes. This is the step that lets the
    rest be mechanical.
@@ -61,10 +78,18 @@ Settle this before converting any call site — it decides whether the emission 
    and D144's credential disclosure (`launch.go`'s `discloseInjectedCredentials`, instance 27, which
    converts **with** the class and not before it — a lone divergent site is `security-principles.md`
    §11's hygiene defect).
-4. **Replace the 8 `slog.Default()` sites** with the threaded logger.
-5. **Retire the public `Output` fields**, or redefine them as "install this handler" — a public API
+4. **Make every entrypoint declare its handler** — CLI, MCP server, test mains — and make the
+   declaration checkable, so an unconfigured default is a failure rather than a silent fallback to
+   whatever the runtime chose. Replace the `slog.Default()` accessor sites; leave operator-addressed
+   package-level calls alone once the destination is declared.
+5. **Generalise the `forbidigo` ban from a list to a class**: any API whose behaviour depends on
+   ambient process state rather than its arguments. The list is already incomplete —
+   **`filepath.Abs` (4 uses) silently calls the banned `os.Getwd()`**, and `os.TempDir` (2 uses)
+   reads `TMPDIR`. `exec.LookPath` (28 uses) is likely a legitimate exception and should be declared
+   as one rather than left as an oversight.
+6. **Retire the public `Output` fields**, or redefine them as "install this handler" — a public API
    change either way, with its `BREAKING-CHANGES.md` entry.
-6. **Gate the bypass**: a `forbidigo` rule for `fmt.Fprint*` to a threaded writer outside the routing
+7. **Gate the bypass**: a `forbidigo` rule for `fmt.Fprint*` to a threaded writer outside the routing
    layer. Without it nothing stops mechanism five, and the ban stays decoration.
 
 ## Tests (rule 10)
@@ -76,7 +101,7 @@ Settle this before converting any call site — it decides whether the emission 
 - Byte-compatibility during step 2: the CLI's rendered output is unchanged while both paths exist.
   That is the safety net making steps 3–4 mechanical.
 - A claim test for the invariant, cited per rule 13: **library code emits records, never formatted
-  text.** The `forbidigo` rule from step 6 bans the call; the claim pins the behaviour.
+  text.** The `forbidigo` rule from step 7 bans the call; the claim pins the behaviour.
 
 ## Surfaces to sweep (rule 2)
 
