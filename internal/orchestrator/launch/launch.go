@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
@@ -55,7 +56,13 @@ const secretsConsumedTimeout = 30 * time.Second
 // literal is what stops the producer and the classifier from drifting apart,
 // which is how every line of build progress came to be reported as a warning
 // (DF157).
-const WarningPrefix = "Warning: "
+//
+// The literal now lives in feedback/, which is where a rendering decision
+// belongs and which the record-based renderer also reads. This alias is the
+// migration seam: it exists only while sites still write the prefix into text
+// by hand instead of emitting a level, and goes when the last of them does
+// (D145).
+const WarningPrefix = feedback.WarningPrefix
 
 // LaunchContainer creates a sandbox instance from State, starts it,
 // and cleans up credential temp files. Used by both initial creation and

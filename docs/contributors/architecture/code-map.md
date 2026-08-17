@@ -498,6 +498,7 @@ Deliberately absent: no universal record type (results are per-API and typed), n
 |------|---------|
 | `feedback.go` | `Notice` (semantic dotted `Event`, `Level`, rendered `Message`, optional `Fields`), `LevelInfo`/`LevelWarn`, and the `Infof`/`Warnf` emission helpers. `Event` is what makes a consumer a lookup rather than a match on message text, so it is a required argument, not a field a site may omit. |
 | `sink.go` | `Sink` (one method, `Notice`), `SinkFunc`, `Discard`, `Collector` (mutex-guarded — prune fans out across backends), `Tee`. A `nil` Sink panics naming `Discard`: dropping notices is legitimate, so it is stated rather than caused by a zero-valued field. Not a channel — a channel imposes a drain/close lifecycle, and an unbuffered one nobody reads deadlocks the library mid-operation. |
+| `writer.go` | `WriterSink` and `WarningPrefix` — the adapter for a caller who handed over an `io.Writer`, rendering one line per notice in the bytes yoloAI has always written. It renders and discards, so the event and fields die here; that is the loss records exist to avoid, which is why it is the fallback for the byte-stream contract rather than the shape to build on. `launch.WarningPrefix` aliases the constant for the migration window. |
 
 ### `internal/workspace/`
 

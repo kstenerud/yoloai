@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -61,4 +62,36 @@ func TestNoticeWriter_ClassifiesAcrossSplitWrites(t *testing.T) {
 	assert.Equal(t, "half a line and the rest", n.list[0].Message)
 	assert.Equal(t, NoticeInfo, n.list[1].Level)
 	assert.Equal(t, "progress line", n.list[1].Message)
+}
+
+// TestNoticeWriter_RoundTripsWhatWriterSinkRenders is the safety net for the
+// D145 conversion. The create path and the restart path share every helper but
+// give it a different destination: create hands over a terminal, restart hands
+// over a noticeWriter. Converting a helper to emit records is only safe if the
+// two destinations still agree about what it said — so a notice rendered to
+// bytes by feedback.WriterSink and read back by noticeWriter must come out the
+// same notice.
+//
+// Without this, a converted site could silently change level or wording on one
+// path only, and the paths are exercised by different commands.
+func TestNoticeWriter_RoundTripsWhatWriterSinkRenders(t *testing.T) {
+	emitted := []Notice{
+		{Event: "image.building", Level: NoticeInfo, Message: "#35 exporting layers 75.9s done"},
+		{Event: "ports.unavailable", Level: NoticeWarn, Message: "skipping port 8080:80 — host port 8080 is already in use"},
+	}
+
+	n := &notices{}
+	w := &noticeWriter{notices: n}
+	rendered := feedback.WriterSink(w)
+	for _, want := range emitted {
+		rendered.Notice(want)
+	}
+
+	require.Len(t, n.list, len(emitted))
+	for i, want := range emitted {
+		assert.Equal(t, want.Level, n.list[i].Level,
+			"level survived rendering to bytes and back for %q", want.Event)
+		assert.Equal(t, want.Message, n.list[i].Message,
+			"message survived rendering to bytes and back for %q", want.Event)
+	}
 }

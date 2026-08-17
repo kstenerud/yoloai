@@ -1,6 +1,7 @@
 // ABOUTME: Notice is a user-facing advisory message returned by orchestration
 // ABOUTME: methods instead of being written to a coupled output Writer (F8). The
-// ABOUTME: caller (CLI / embedder) decides how to render it.
+// ABOUTME: caller (CLI / embedder) decides how to render it. The type itself now
+// ABOUTME: lives in feedback/, below every layer that emits one (D145).
 
 package lifecycle
 
@@ -9,28 +10,31 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
 )
 
 // NoticeLevel classifies a Notice for rendering — informational status vs. a
-// warning the user should heed.
-type NoticeLevel string
+// warning the user should heed. See feedback.Level.
+type NoticeLevel = feedback.Level
 
 const (
 	// NoticeInfo is an informational status message ("Sandbox X resumed").
-	NoticeInfo NoticeLevel = "info"
+	NoticeInfo = feedback.LevelInfo
 	// NoticeWarn is a warning the user should notice ("could not fully remove …").
-	NoticeWarn NoticeLevel = "warn"
+	NoticeWarn = feedback.LevelWarn
 )
 
 // Notice is a single user-facing message produced by an orchestration method.
 // The library formats the message text but returns it on the method's result
 // rather than writing to an output Writer, so embedders receive it as data and
 // the CLI owns presentation (F8 / Q-F: library returns data, caller renders).
-type Notice struct {
-	Level   NoticeLevel
-	Message string
-}
+//
+// The definition moved to feedback/ so that the layers doing most of the
+// emitting — runtime/, store/, copyflow/ — can reach it without importing an
+// orchestration package that sits above them (D145). These names stay as
+// aliases: they are what the public yoloai surface re-exports.
+type Notice = feedback.Notice
 
 // notices accumulates Notices across an orchestration call and its helpers. A
 // per-call value (not stored on the shared Engine) threaded through helpers
