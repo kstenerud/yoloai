@@ -33,6 +33,20 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+### A `Client` with no `Logger` now discards diagnostics instead of using `slog.Default()`
+
+**Previous behavior:** `ClientCreateOptions.Logger` defaulted to `slog.Default()`, so an embedder
+that set nothing saw yoloAI's diagnostics appear in whatever handler the process had installed.
+
+**New behavior:** it defaults to a logger that discards everything. An embedder wanting library
+diagnostics passes a logger explicitly — `slog.Default()` still works if that is what they want.
+The CLI is unaffected: it installs its handler in `cliutil.InitLogger` and passes it explicitly.
+
+**Why it changed:** D145. The rule is "no undeclared destination", not "no globals". A singleton an
+entrypoint installs deliberately is fine; a library reaching for one because the caller said nothing
+publishes to wherever the runtime happens to point, and an embedder who never asked for output gets
+it anyway — in a daemon, mixed across principals.
+
 ### The three prune methods on `runtime.Backend` no longer take an `io.Writer`
 
 **Previous behavior:** `Backend.Prune`, `CachePruner.PruneCache` and `StaleBasePruner.PruneStaleBases`

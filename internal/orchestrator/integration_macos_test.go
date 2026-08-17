@@ -79,7 +79,7 @@ func seatbeltMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	require.NoError(t, err, "seatbelt backend must be available on this platform")
 	t.Cleanup(func() { _ = rt.Close() })
 
-	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 	return mgr, ctx
 }
@@ -106,7 +106,7 @@ func appleMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	require.NoError(t, err, "apple container backend must be available (macOS 26 + Apple Silicon)")
 	t.Cleanup(func() { _ = rt.Close() })
 
-	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 	return mgr, ctx
 }

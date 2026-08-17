@@ -75,7 +75,7 @@ func tartIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) 
 	// t000NNNN namespace, so the developer's real VMs are untouchable.
 	testutil.ReapLeakedInstances(ctx, t, rt)
 
-	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
 
 	// Pre-seed the provision checksum, exactly as the docker tier does in
 	// integration_main_test.go, and for exactly the same reason. It is the seed —

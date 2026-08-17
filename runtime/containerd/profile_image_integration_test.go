@@ -167,7 +167,7 @@ func TestIntegration_DockerBuildLabel_SurvivesImportIntoContainerd(t *testing.T)
 	require.NoError(t, err, "docker build:\n%s", out)
 
 	var importOut strings.Builder
-	require.NoError(t, rt.importFromDocker(ctx, dockerBin, tag, &importOut),
+	require.NoError(t, rt.importFromDocker(ctx, dockerBin, tag, &importOut, slog.New(slog.DiscardHandler)),
 		"import output:\n%s", importOut.String())
 	t.Logf("import path taken:\n%s", importOut.String())
 

@@ -189,7 +189,7 @@ func TestApple_SetupBuildsBase(t *testing.T) {
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0o755)) //nolint:gosec // G301: test dir under t.TempDir(), no sudo chown concern
 
 	var buf bytes.Buffer
-	require.NoError(t, rt.Setup(ctx, layout, "", &buf, slog.Default(), false),
+	require.NoError(t, rt.Setup(ctx, layout, "", &buf, slog.New(slog.DiscardHandler), false),
 		"Setup must build yoloai-base from our Dockerfile under Apple's builder")
 
 	ready, err := rt.IsReady(ctx)
@@ -198,7 +198,7 @@ func TestApple_SetupBuildsBase(t *testing.T) {
 
 	// Second Setup: image present + marker current → skip (no rebuild).
 	var buf2 bytes.Buffer
-	require.NoError(t, rt.Setup(ctx, layout, "", &buf2, slog.Default(), false))
+	require.NoError(t, rt.Setup(ctx, layout, "", &buf2, slog.New(slog.DiscardHandler), false))
 	assert.NotContains(t, buf2.String(), "Building base image", "re-run must skip")
 	assert.NotContains(t, buf2.String(), "rebuilding", "re-run must not hit NeedsBuild")
 }

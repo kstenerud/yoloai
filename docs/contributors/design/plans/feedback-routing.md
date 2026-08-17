@@ -5,10 +5,12 @@
 # Feedback routing — one record, four consumers, the caller renders
 
 - **Status:** IN-PROGRESS — built: the `feedback` package (emission API, `Sink`, `Collector`, `Tee`,
-  `WriterSink`); `Notice` moved below every layer that emits one; the create/launch advisories; and
-  the prune trio, whose writers are gone and whose lines are now typed `PruneItem`s carrying an
-  `Action` and a `Reason`. Remaining: the rest of `runtime/` (~36 writes, mostly `tart/build.go` and
-  `containerd/image.go`), `internal/envsetup` (4), and steps 4–7 below.
+  `WriterSink`); `Notice` moved below every layer that emits one; the create/launch advisories; the
+  prune trio, whose writers are gone and whose lines are now typed `PruneItem`s carrying an `Action`
+  and a `Reason`; the `envsetup` OAuth advisory; and step 4 (every diagnostic destination is now
+  declared, enforced by `forbidigo`). Remaining: steps 5–7 below, plus the three advisories named
+  under "The residual the settled shape leaves". The ~30 writes still in `runtime/` are build
+  progress and stay.
 - **Depends on:** —
 - **Rides:** **breaking.** `SandboxCreateOptions.Output` and `ClientOptions.Output` are public
   `io.Writer` fields (`sandbox_options.go:140`, `client_options.go:60`); an embedder sets them today.
@@ -101,10 +103,16 @@ This is deliberately *not* one global answer — choosing one would fit `Create`
    and D144's credential disclosure (`launch.go`'s `discloseInjectedCredentials`, instance 27, which
    converts **with** the class and not before it — a lone divergent site is `security-principles.md`
    §11's hygiene defect).
-4. **Make every entrypoint declare its handler** — CLI, MCP server, test mains — and make the
-   declaration checkable, so an unconfigured default is a failure rather than a silent fallback to
-   whatever the runtime chose. Replace the `slog.Default()` accessor sites; leave operator-addressed
-   package-level calls alone once the destination is declared.
+4. ~~**Make every entrypoint declare its handler**~~ — **done.** `forbidigo` now bans `slog.Default`
+   outside `internal/cli/` and `cmd/`, which is where the handler is installed
+   (`cliutil.InitLogger` calls `slog.SetDefault`), so reading it back there is propagating a
+   declared destination rather than reaching for one nobody set. The library's own default is
+   **silence**: `ClientCreateOptions.Logger` unset yields `slog.New(slog.DiscardHandler)`, not
+   `slog.Default()` — a break, recorded in BREAKING-CHANGES. `state.Deps` gained a `Logger` so the
+   four sites that fabricated `slog.Default()` one frame before calling a function that takes one
+   now pass what the caller declared; `System` holds the Client's logger for the same reason. Two
+   sites keep the global with an inline nolint: `runtime/docker`'s inspect-flap warnings are
+   operator-addressed and sit on a path (`IsReady` → `imageExists`) with no logger to thread.
 5. **Generalise the `forbidigo` ban from a list to a class**: any API whose behaviour depends on
    ambient process state rather than its arguments. The list is already incomplete —
    **`filepath.Abs` (4 uses) silently calls the banned `os.Getwd()`**, and `os.TempDir` (2 uses)

@@ -6,7 +6,6 @@ package create
 import (
 	"context"
 	"fmt"
-	"log/slog"
 	"maps"
 
 	"github.com/kstenerud/yoloai/internal/agent"
@@ -116,7 +115,7 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 	pr.imageRef = config.ResolveProfileImage(d.Layout, opts.Profile, chain)
 
 	// Build profile image if needed (Docker only)
-	logger := slog.Default()
+	logger := d.LoggerOr()
 	if err := profiles.EnsureProfileImage(ctx, d.Runtime, d.Layout, opts.Profile, profiles.AutoBuildSecrets(d.Layout.HomeDir), outputFor(opts.Output), logger, false); err != nil {
 		return nil, fmt.Errorf("build profile image: %w", err)
 	}

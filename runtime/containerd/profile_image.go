@@ -108,7 +108,7 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 		return fmt.Errorf("docker build: %w%s", err, tail.ErrorSuffix())
 	}
 
-	return r.importFromDocker(ctx, dockerBin, tag, output)
+	return r.importFromDocker(ctx, dockerBin, tag, output, logger)
 }
 
 // importFromDocker makes a docker-built tag available in the yoloai containerd
@@ -116,9 +116,9 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 // `docker save | ctr import`. Shared with Setup's base-image path — the two must
 // not drift, since a profile image that is present for docker and absent for
 // containerd fails at run with a pull of a local-only tag (DF154).
-func (r *Runtime) importFromDocker(ctx context.Context, dockerBin string, tag string, output io.Writer) error {
+func (r *Runtime) importFromDocker(ctx context.Context, dockerBin string, tag string, output io.Writer, logger *slog.Logger) error {
 	nsCtx := r.withNamespace(ctx)
-	if r.tryLink(nsCtx, tag, output) {
+	if r.tryLink(nsCtx, tag, output, logger) {
 		return nil
 	}
 	return r.slowPathImport(nsCtx, dockerBin, tag, output)

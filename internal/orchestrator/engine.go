@@ -110,6 +110,11 @@ func WithLayout(layout config.Layout) EngineOption {
 // the CLI command handlers always pass WithLayout; only direct
 // test construction needs to remember it (use config.NewLayout
 // with t.TempDir-based DataDir).
+// Logger returns the destination the Engine was constructed with, so a sibling
+// handle built from the same Client (System) inherits it rather than reaching
+// for the process-global handler (D145).
+func (e *Engine) Logger() *slog.Logger { return e.logger }
+
 func NewEngine(backend runtime.BackendType, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
 	return newEngine(backend, nil, false, logger, input, opts...)
 }
@@ -213,7 +218,7 @@ func (e *Engine) Close() error {
 // opened the runtime (or via TryEnsure for the host-only-fallback verbs, where a
 // nil runtime is acceptable).
 func (e *Engine) deps() state.Deps {
-	return state.Deps{Runtime: e.runtime, Layout: e.layout, Input: e.input}
+	return state.Deps{Runtime: e.runtime, Layout: e.layout, Input: e.input, Logger: e.logger}
 }
 
 // Layout returns the Engine's path-resolution Layout. Read-only —

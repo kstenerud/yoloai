@@ -83,7 +83,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	// while Docker still holds a current yoloai-base image. When the build
 	// inputs are unchanged, re-linking is near-instant — a full rebuild here is
 	// the cold-build footgun we are eliminating.
-	if !force && !dockerrt.NeedsBuild(layout, "containerd") && r.tryLink(ctx, imageRef, output) {
+	if !force && !dockerrt.NeedsBuild(layout, "containerd") && r.tryLink(ctx, imageRef, output, logger) {
 		return nil
 	}
 
@@ -102,7 +102,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	// blob in the yoloai namespace via a pure bolt metadata write. GC ref
 	// labels are set on each parent blob so the garbage collector can trace
 	// the full manifest tree and keep all blobs reachable.
-	if r.tryLink(ctx, imageRef, output) {
+	if r.tryLink(ctx, imageRef, output, logger) {
 		return nil
 	}
 
@@ -116,7 +116,7 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 // only when the image is fully linked into the yoloai namespace. A false return
 // is expected when Docker is not in containerd-snapshotter mode; the caller then
 // falls back to a build and/or the slow `docker save | ctr import` path.
-func (r *Runtime) tryLink(ctx context.Context, tag string, output io.Writer) bool {
+func (r *Runtime) tryLink(ctx context.Context, tag string, output io.Writer, logger *slog.Logger) bool {
 	fmt.Fprintln(output, "Linking image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
 	if err := r.linkFromDockerNamespace(ctx, tag); err != nil {
 		// Say why. A false return costs the caller a `docker save | ctr import`,
@@ -126,7 +126,7 @@ func (r *Runtime) tryLink(ctx context.Context, tag string, output io.Writer) boo
 		// permission or content error (not). Same discarded-diagnostic class as
 		// DF144/DF145.
 		fmt.Fprintf(output, "Fast namespace link unavailable (%v); falling back to import.\n", err) //nolint:errcheck // best-effort output
-		slog.Default().Debug("containerd namespace link failed; falling back to import", "tag", tag, "err", err)
+		logger.Debug("containerd namespace link failed; falling back to import", "tag", tag, "err", err)
 		return false
 	}
 	fmt.Fprintln(output, "Image ready.") //nolint:errcheck // best-effort output

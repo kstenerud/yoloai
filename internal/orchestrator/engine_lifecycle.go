@@ -126,7 +126,7 @@ func (e *Engine) depsForSandbox(ctx context.Context, name string) (state.Deps, f
 	if rtErr != nil {
 		return state.Deps{}, noop, fmt.Errorf("connect to %s backend for %q: %w", meta.BackendType, name, rtErr)
 	}
-	return state.Deps{Runtime: rt, Layout: e.layout, Input: e.input}, func() { _ = rt.Close() }, nil
+	return state.Deps{Runtime: rt, Layout: e.layout, Input: e.input, Logger: e.logger}, func() { _ = rt.Close() }, nil
 }
 
 // DestroyForOverwrite tears down a pre-existing destination sandbox so a clone

@@ -170,7 +170,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	}
 	mnts = append(mnts, scriptMount...)
 
-	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro, baseChecksum); err != nil {
+	if err = buildAndStart(ctx, d.Runtime, d.LoggerOr(), st, mnts, ports, secretsDir != "", secretEnv, bro, baseChecksum); err != nil {
 		return err // the deferred rollbackPartialLaunch reaps the injector + container + netns
 	}
 	return nil
@@ -200,7 +200,7 @@ func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) (str
 	if !ok {
 		return "", nil
 	}
-	out, logger := outputOr(st.Output), slog.Default()
+	out, logger := outputOr(st.Output), d.LoggerOr()
 
 	// No profile means the sandbox runs yoloai-base itself, and Setup is the
 	// check for that image. EnsureProfileImage cannot be used here: it resolves a
@@ -327,7 +327,7 @@ func UsesSidecarFirewall(rt runtime.Backend, isolation runtime.IsolationMode, ne
 // comes up on a keepalive_only holder and sandbox-setup.py is launched as a
 // separate process over it — the S3 re-route. Otherwise it follows the legacy
 // path: the agent is welded into the entrypoint as before.
-func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, baseChecksum string) error {
+func buildAndStart(ctx context.Context, rt runtime.Backend, logger *slog.Logger, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, baseChecksum string) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	sidecarFirewall := UsesSidecarFirewall(rt, st.Isolation, st.NetworkMode)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, bro, sidecarFirewall, baseChecksum)
@@ -348,11 +348,11 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	// condition, so the two stay in sync — a backend on the legacy bring-up also
 	// gets legacy /run/secrets staging.
 	if launcher, ok := usesAgentFreeLaunch(rt, st.Isolation); ok {
-		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv, bro, sidecarFirewall); err != nil {
+		if err := startViaLaunch(ctx, rt, logger, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv, bro, sidecarFirewall); err != nil {
 			return err
 		}
 	} else {
-		if err := startLegacy(ctx, rt, st, cname, instanceCfg, markerPath, hasSecrets); err != nil {
+		if err := startLegacy(ctx, rt, logger, st, cname, instanceCfg, markerPath, hasSecrets); err != nil {
 			return err
 		}
 	}
@@ -375,7 +375,7 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 //     + named vars); there is no /run/secrets read on this path.
 //  5. The secrets-consumed marker wait is SKIPPED on the Launch path (hasSecrets is
 //     false; secrets were not staged to a host dir so no synchronization is needed).
-func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, sidecarFirewall bool) error {
+func startViaLaunch(ctx context.Context, rt runtime.Backend, logger *slog.Logger, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, sidecarFirewall bool) error {
 	if err := patchKeepaliveOnly(st.SandboxDir, true); err != nil {
 		return fmt.Errorf("patch keepalive_only: %w", err)
 	}
@@ -403,7 +403,7 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	readyPath := store.SubstrateReadyMarkerPath(st.SandboxDir)
 	_ = os.Remove(readyPath)
 
-	if err := createWithImageRecovery(ctx, rt, st, instanceCfg); err != nil {
+	if err := createWithImageRecovery(ctx, rt, logger, st, instanceCfg); err != nil {
 		return err
 	}
 	if err := rt.Start(ctx, cname); err != nil {
@@ -934,8 +934,8 @@ func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach r
 // runtime.ProcessLauncher: create the instance, start it, and wait for the
 // entrypoint (which runs sandbox-setup.py inline) to consume secrets.
 // No keepalive_only patch; the agent is welded into the entrypoint as before.
-func startLegacy(ctx context.Context, rt runtime.Backend, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
-	if err := createWithImageRecovery(ctx, rt, st, instanceCfg); err != nil {
+func startLegacy(ctx context.Context, rt runtime.Backend, logger *slog.Logger, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
+	if err := createWithImageRecovery(ctx, rt, logger, st, instanceCfg); err != nil {
 		return err
 	}
 	if err := rt.Start(ctx, cname); err != nil {
@@ -1255,7 +1255,7 @@ var rebuildProfileImage = profiles.EnsureProfileImage
 // genuinely broken Dockerfile has to fail rather than spin, and both failure
 // paths below say a rebuild was already attempted, because "it failed twice for
 // the same reason" is a materially different diagnosis from the first failure.
-func createWithImageRecovery(ctx context.Context, rt runtime.Backend, st *state.State, instanceCfg runtime.InstanceConfig) error {
+func createWithImageRecovery(ctx context.Context, rt runtime.Backend, logger *slog.Logger, st *state.State, instanceCfg runtime.InstanceConfig) error {
 	err := gvisorStartHint(st.Isolation, rt.Create(ctx, instanceCfg))
 	if err == nil {
 		return nil
@@ -1274,7 +1274,7 @@ func createWithImageRecovery(ctx context.Context, rt runtime.Backend, st *state.
 	})
 
 	if buildErr := rebuildProfileImage(ctx, rt, st.Layout, st.Profile,
-		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, slog.Default(), true); buildErr != nil {
+		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, logger, true); buildErr != nil {
 		return fmt.Errorf("%w\n\nThis was an automatic rebuild of %q, triggered because creating "+
 			"the instance failed with: %v", buildErr, instanceCfg.ImageRef, err)
 	}

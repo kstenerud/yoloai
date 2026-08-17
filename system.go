@@ -45,6 +45,11 @@ import (
 // acquire backend-internal locks where applicable.
 type System struct {
 	layout config.Layout
+	// logger is the destination the Client was given. It is held here rather
+	// than reached for at each use because System's build path calls into
+	// functions that take a logger, and fabricating slog.Default() one frame
+	// before such a call discards whatever the caller declared (D145).
+	logger *slog.Logger
 }
 
 // Config returns the configuration-management sub-handle.
@@ -467,9 +472,9 @@ func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildIm
 	}
 	defer rt.Close() //nolint:errcheck // best-effort
 	if opts.Profile != "" {
-		return orchestrator.EnsureProfileImage(ctx, rt, s.layout, opts.Profile, opts.Secrets, out, slog.Default(), opts.Rebuild)
+		return orchestrator.EnsureProfileImage(ctx, rt, s.layout, opts.Profile, opts.Secrets, out, s.loggerOr(), opts.Rebuild)
 	}
-	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, slog.Default(), opts.Rebuild)
+	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, s.loggerOr(), opts.Rebuild)
 }
 
 // CheckPrerequisitesOptions configures System.Check.
@@ -739,6 +744,15 @@ type RefusedSandbox struct {
 type TrashSummary struct {
 	Count int
 	Bytes int64
+}
+
+// loggerOr returns the Client's logger, or one that discards. Silence when
+// nothing was declared, never the process-global handler — see state.Deps.LoggerOr.
+func (s *System) loggerOr() *slog.Logger {
+	if s.logger != nil {
+		return s.logger
+	}
+	return slog.New(slog.DiscardHandler)
 }
 
 // staleTempFileAge is the threshold for considering yoloai temp dirs

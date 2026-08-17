@@ -283,6 +283,17 @@ linters:
           msg: "builtin println writes to stderr — use an injected io.Writer or the threaded slog.Logger; §12"
         - pattern: "^log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)$"
           msg: "the log default logger writes to stderr — use the threaded slog.Logger; §12"
+        # D145: slog.Default() is a backdoor to ambient configuration. The rule
+        # is "no undeclared destination", not "no globals" — an entrypoint that
+        # installs a handler and passes it down has declared one, and that is
+        # fine. What is banned is *reaching* for the global: a library that does
+        # so publishes wherever the runtime happens to point, and in a daemon
+        # merges every principal's diagnostics into one stream. The CLI is
+        # excluded below (it owns the handler, installed in cliutil.InitLogger);
+        # everything else takes a threaded *slog.Logger, or carries an inline
+        # nolint naming why the diagnostic is operator-addressed.
+        - pattern: "^slog\\.Default$"
+          msg: "reaching for the process-global logger is an undeclared destination — take a threaded *slog.Logger (state.Deps.Logger, or a parameter); §12 / D145"
         - pattern: "^syscall\\.Getenv$"
           msg: "ambient env backdoor below os — forbidden; §12"
         - pattern: "^syscall\\.Setenv$"
@@ -476,10 +487,16 @@ linters:
       # io.Reader/Writer instead (justified inline where they legitimately
       # can't). The CLI in practice uses fmt.Fprintf(cmd.OutOrStdout()); this
       # exclusion just keeps the boundary unconstrained.
+      #
+      # slog.Default is here for the same reason and only for this path: the
+      # CLI *installs* the handler (cliutil.InitLogger calls slog.SetDefault),
+      # so reading it back is propagating a destination it declared, not
+      # reaching for one nobody set. That is exactly the distinction D145 draws,
+      # and it is why the ban is on the reach and not on the global.
       - path: "^(internal/cli/|cmd/)"
         linters:
           - forbidigo
-        text: "fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)"
+        text: "fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|slog\\.Default"
 
       # The MCP stdio proxy is a transport boundary: it bridges the MCP
       # client's stdin/stdout to the in-sandbox process, so owning the

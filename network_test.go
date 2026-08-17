@@ -75,7 +75,7 @@ func clientWithSandbox(t *testing.T) (*Client, *System) {
 	// soft-fails (Runtime() is nil) rather than panicking.
 	c := &Client{
 		layout: sys.layout,
-		engine: orchestrator.NewEngine("", slog.Default(), bytes.NewReader(nil), orchestrator.WithLayout(sys.layout)),
+		engine: orchestrator.NewEngine("", slog.New(slog.DiscardHandler), bytes.NewReader(nil), orchestrator.WithLayout(sys.layout)),
 	}
 	return c, sys
 }

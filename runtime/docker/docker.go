@@ -451,10 +451,17 @@ func (r *Runtime) imageExists(ctx context.Context, imageRef string) (bool, error
 	}
 	if present {
 		if waits == 0 {
-			slog.Default().Warn("image present in list but ImageInspect reported it missing; treating as present (containerd-store inspect flap)",
+			// slog.Default is legitimate here and nowhere near it: this is
+			// operator-addressed — a note that the daemon disagreed with
+			// itself — and imageExists is reached from IsReady, a Backend
+			// method with no logger to thread. The destination is declared by
+			// the entrypoint (cliutil.InitLogger), which is the distinction
+			// D145 draws: the ban is on reaching for a handler nobody set,
+			// not on the global itself.
+			slog.Default().Warn("image present in list but ImageInspect reported it missing; treating as present (containerd-store inspect flap)", //nolint:forbidigo // operator-addressed diagnostic on a path with no threaded logger (D145)
 				"image", imageRef)
 		} else {
-			slog.Default().Warn("image surfaced in list only after backoff; treating as present (containerd store warm-up)",
+			slog.Default().Warn("image surfaced in list only after backoff; treating as present (containerd store warm-up)", //nolint:forbidigo // operator-addressed diagnostic on a path with no threaded logger (D145)
 				"image", imageRef, "retries", waits)
 		}
 	}

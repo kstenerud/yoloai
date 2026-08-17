@@ -126,7 +126,13 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 
 	logger := opts.Logger
 	if logger == nil {
-		logger = slog.Default()
+		// Silence, not slog.Default(). A library that reaches for the
+		// process-global handler when the caller declared nothing publishes
+		// wherever the runtime happens to point — an undeclared destination,
+		// which is the thing D145 forbids. The CLI installs its handler in
+		// cliutil.InitLogger and passes it explicitly; an embedder that wants
+		// library diagnostics says so the same way.
+		logger = slog.New(slog.DiscardHandler)
 	}
 	output := opts.Output
 	if output == nil {
@@ -208,7 +214,7 @@ func (c *Client) Sandbox(name string) (*Sandbox, error) {
 // System returns the admin sub-handle for system-level operations.
 // Always non-nil; never errors. See System for the surface.
 func (c *Client) System() *System {
-	return &System{layout: c.layout}
+	return &System{layout: c.layout, logger: c.engine.Logger()}
 }
 
 // ListSandboxes returns info for all sandboxes.

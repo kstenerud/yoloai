@@ -53,7 +53,13 @@ type ClientCreateOptions struct {
 	// is opened lazily on the first backend-bound op, not at construction.
 	BackendType BackendType
 
-	// Logger receives structured log output. Default: slog.Default().
+	// Logger receives structured log output.
+	//
+	// Default: a logger that discards everything — NOT slog.Default(). The
+	// library never picks a destination the caller did not state, because
+	// reaching for the process-global handler publishes wherever the runtime
+	// happens to point, which is an undeclared destination (D145). Set this to
+	// slog.Default() explicitly if that is what you want; the CLI does.
 	Logger *slog.Logger
 
 	// Output receives human-readable progress messages. Default: io.Discard.

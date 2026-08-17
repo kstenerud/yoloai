@@ -148,7 +148,7 @@ func TestEngine_WorkCopyGit_DispatchesToRuntime(t *testing.T) {
 	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai")).WithPrincipal(config.CLIPrincipal)
 	const name = "dispatchbox"
 	seedCopySandbox(t, layout, name)
-	e := NewEngine("gitdispatchmock", slog.Default(), strings.NewReader(""), WithLayout(layout))
+	e := NewEngine("gitdispatchmock", slog.New(slog.DiscardHandler), strings.NewReader(""), WithLayout(layout))
 	t.Cleanup(func() { _ = e.Close() })
 	ctx := context.Background()
 

@@ -121,7 +121,7 @@ func warmDockerBase(ctx context.Context) error {
 		// error. There is no *testing.T here to log through, and io.Discard is what
 		// reduced a real failure to a bare "docker build exited with code 1" with
 		// the cause thrown away (DF97). On success the buffer is dropped.
-		mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+		mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
 		var out bytes.Buffer
 		step("ensuring base image is ready", func() {
 			if err := mgr.EnsureSetup(ctx, &out); err != nil {
@@ -164,7 +164,7 @@ func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { _ = rt.Close() })
 
-	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
@@ -204,7 +204,7 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 	require.NoError(t, err, "Docker must be running for integration tests")
 	t.Cleanup(func() { _ = rt.Close() })
 
-	mgr := orchestrator.NewEngineWithRuntime(&legacyDockerRuntime{Runtime: rt}, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+	mgr := orchestrator.NewEngineWithRuntime(&legacyDockerRuntime{Runtime: rt}, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
@@ -249,7 +249,7 @@ func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	require.NoError(t, err, "podman must be available and provisioned when YOLOAI_TEST_BACKEND=podman")
 	t.Cleanup(func() { _ = rt.Close() })
 
-	mgr := orchestrator.NewEngineWithRuntime(rt, slog.Default(), strings.NewReader(""), orchestrator.WithLayout(layout))
+	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
 	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
 
 	return mgr, ctx
