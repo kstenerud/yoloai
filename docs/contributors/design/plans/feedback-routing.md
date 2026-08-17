@@ -54,6 +54,25 @@ global when nothing has set it, so output lands wherever the runtime decides.
 caller-addressed — not all 111.** Triaging that set is step 1's real work, and the sizing cannot be
 trusted until it is done.
 
+## Settled shape (D145 amendment, 2026-08-17)
+
+- **No universal record type.** Results are per-API and typed; the common thing is the *advisory*,
+  which is the already-public `Notice`. Give it a chosen level and fields, and make it emittable.
+- **Sinks, not channels.** A channel imposes drain/close lifecycle on the caller — an unbuffered one
+  that nobody reads deadlocks mid-call. `OnNotice = func(n) { ch <- n }` is one line; the reverse is
+  a goroutine and a close protocol forced on everyone.
+- **Event ID is internal and semantic** — what happened, not who emitted it. It is what makes the
+  renderer a lookup rather than a message-text match. Dotted, self-describing, readable without the
+  code. The five CLI/orchestrator collisions resolve by **dropping the CLI's duplicates**.
+- **No `Error` notices** — errors are returned.
+- **Progress is a third category**: only meaningful live, not accumulated into a result. ~20 in
+  `runtime/tart` alone. Stays on the stream.
+- **Writers stay where they carry a stream we do not own** — `Setup`, `BuildProfileImage`,
+  `StdioExec`. They go from `Prune`/`PruneCache`/`PruneStaleBases`, whose lines are a *report* and
+  become richer typed results. **Three interface methods change, not eight.**
+- **Counts, corrected:** 108 advisory writes in library code, 79 of them in `runtime/`; ~18 of 103
+  package-level slog calls are caller-addressed.
+
 ## Exposure is per-API
 
 The same record is legitimately a **return value** on `Create` — the caller has a result and wants
