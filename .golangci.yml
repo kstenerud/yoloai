@@ -294,6 +294,29 @@ linters:
         # nolint naming why the diagnostic is operator-addressed.
         - pattern: "^slog\\.Default$"
           msg: "reaching for the process-global logger is an undeclared destination — take a threaded *slog.Logger (state.Deps.Logger, or a parameter); §12 / D145"
+
+        # D145 step 5: the ban is a *class*, not a list — any API whose result
+        # depends on ambient process state rather than its arguments. The list
+        # was already incomplete in two places that read nothing named "env":
+        #
+        #   filepath.Abs calls os.Getwd, which is banned two dozen lines above.
+        #   Resolving a caller's relative path against the *process's* working
+        #   directory is right by coincidence in a single-principal CLI and
+        #   wrong everywhere else — a daemon resolves against its own cwd,
+        #   never the caller's. See DF222.
+        #
+        #   os.TempDir reads $TMPDIR. yoloAI owns a temp root (layout.TempDir);
+        #   falling back to the ambient one puts sandbox state somewhere the
+        #   layout does not know about and prune cannot sweep.
+        #
+        # NOT banned, and declared here so it stops looking like an oversight:
+        # exec.LookPath reads $PATH, and that is the point — it answers "is this
+        # backend's binary installed on this host", which is a question about
+        # the host and has no non-ambient form. Its ~20 uses are all that.
+        - pattern: "^filepath\\.Abs$"
+          msg: "resolves against the process working directory (it calls the banned os.Getwd) — resolve at the CLI edge and pass an absolute path down; §12 / DF222"
+        - pattern: "^os\\.TempDir$"
+          msg: "reads $TMPDIR — use layout.TempDir(), which prune knows how to sweep; §12"
         - pattern: "^syscall\\.Getenv$"
           msg: "ambient env backdoor below os — forbidden; §12"
         - pattern: "^syscall\\.Setenv$"
@@ -480,6 +503,14 @@ linters:
         linters:
           - forbidigo
         text: "os\\.(Stdin|Stdout|Stderr|Args)"
+
+      # The CLI is where a user's relative path becomes absolute: its working
+      # directory IS the caller's, which is the one place that is true. Library
+      # code must receive the resolved path (§12 / DF222).
+      - path: "^internal/cli/"
+        linters:
+          - forbidigo
+        text: "filepath\\.Abs"
 
       # §12 stdio-by-mechanism boundary: the CLI and the cmd/ entrypoint own
       # the process's stdin/stdout/stderr, so they may print/scan through fmt,

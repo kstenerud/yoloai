@@ -1284,6 +1284,18 @@ earlier signal and records nothing else.
 - **What a sweep should decide, beyond deleting five fields:** whether anything prevents the sixth. Options worth weighing — a `TestArch_` claim that every `State` field has a reader (mechanical, and the only one that would have caught these), narrowing `State` toward per-stage inputs so the assembly site stops being a dumping ground, or accepting the shape and gating it. Deleting without answering that leaves the generator running.
 - **Pointer:** `internal/orchestrator/state/state.go` (the `State` struct); `internal/orchestrator/create/create.go` (the assembly site); `internal/orchestrator/lifecycle/restart.go`. Siblings: [DF205](findings-resolved.md), [DF219](findings-resolved.md).
 
+### DF222 — `Files.Import` resolves a relative path against the process's working directory, inside the library
+
+- **Discovered:** 2026-08-17, generalising the ambient-API ban ([D145](../decisions/working-notes.md) step 5) · **Workstream:** feedback routing
+- **Severity:** LOW for the CLI, MEDIUM for an embedder or a daemon
+- **Disposition:** UNRESOLVED — PARKED (the fix is a public-API behaviour change; not slipped into a conversion commit)
+- **Rides:** **breaking**, if the library is made to reject a relative path.
+- **Description:** `orchestrator.ImportFile` (`internal/orchestrator/files.go`) calls `filepath.Abs(hostPath)`, which resolves against the **process working directory** — an ambient read, in library code, of exactly the kind DEV §12 forbids. The CLI (`internal/cli/workflow/files.go`, `runFilesPut`) passes the user's argument through unresolved, so today the ambient CWD *is* the user's CWD and the behaviour is right by coincidence.
+- **Why it is a real defect and not a style point.** The coincidence holds only for a single-principal CLI. `Files.Import("data.txt")` from an embedder resolves against whatever directory that process was started in; from a daemon it resolves against the daemon's, which is never the caller's. That is the failure mode DEV §12 exists to prevent, and it is invisible in the one configuration anyone tests — the trap AGENTS.md rule 10 names: *"a change that is invisible in the single-principal CLI, because two values coincide there, is exactly the change no manual check will ever catch."*
+- **The fix has two halves and the second is the decision.** The CLI resolves at its edge (uncontroversial). The library then either rejects a relative `hostPath` outright — a behaviour change for any embedder relying on today's resolution — or documents that it resolves against the process CWD, which is the thing being objected to. **Rejecting is right**; it is deferred only because it is a public break that does not belong in a feedback-routing commit.
+- **Currently carried by an inline `//nolint:forbidigo`** naming this finding, added when `filepath.Abs` joined the ambient-API ban. The nolint is the marker, not the resolution.
+- **Pointer:** `internal/orchestrator/files.go` (`ImportFile`); `internal/cli/workflow/files.go` (`runFilesPut`); `files.go` (the public `Files.Import`); `.golangci.yml` (the `filepath.Abs` ban).
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

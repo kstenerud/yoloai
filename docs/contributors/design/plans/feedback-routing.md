@@ -113,11 +113,15 @@ This is deliberately *not* one global answer — choosing one would fit `Create`
    now pass what the caller declared; `System` holds the Client's logger for the same reason. Two
    sites keep the global with an inline nolint: `runtime/docker`'s inspect-flap warnings are
    operator-addressed and sit on a path (`IsReady` → `imageExists`) with no logger to thread.
-5. **Generalise the `forbidigo` ban from a list to a class**: any API whose behaviour depends on
-   ambient process state rather than its arguments. The list is already incomplete —
-   **`filepath.Abs` (4 uses) silently calls the banned `os.Getwd()`**, and `os.TempDir` (2 uses)
-   reads `TMPDIR`. `exec.LookPath` (28 uses) is likely a legitimate exception and should be declared
-   as one rather than left as an oversight.
+5. ~~**Generalise the `forbidigo` ban from a list to a class**~~ — **done.** `filepath.Abs` and
+   `os.TempDir` are banned; `internal/cli/` is excluded for `filepath.Abs`, because its working
+   directory *is* the caller's and that is the one place it is. `exec.LookPath` is **declared as a
+   legitimate exception in the config rather than banned**: it answers "is this backend's binary on
+   this host", a question about the host with no non-ambient form. Three sites carry a justified
+   inline nolint, and one of them turned out to be a real defect rather than an exception —
+   `ImportFile` resolves a caller's relative path against the *process's* cwd, which is right only
+   because a single-principal CLI makes two values coincide (**DF222**, parked: the fix is a public
+   break).
 6. **Retire the public `Output` fields**, or redefine them as "install this handler" — a public API
    change either way, with its `BREAKING-CHANGES.md` entry.
 7. **Gate the bypass**: a `forbidigo` rule for `fmt.Fprint*` to a threaded writer outside the routing

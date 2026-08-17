@@ -30,7 +30,10 @@ const staleTestHomeAge = time.Hour
 // lingers). Post-DF56 the test pre-seed keeps podman from building into the HOME
 // so this is rare; `make clean-testtmp` clears those via `podman unshare`.
 func SweepStaleTestHomes(prefix string) {
-	matches, err := filepath.Glob(filepath.Join(os.TempDir(), prefix+"*"))
+	// The ambient temp dir is the subject, not an accident: this sweeps HOMEs
+	// that t.TempDir() created in *earlier* runs, and t.TempDir() puts them
+	// under $TMPDIR. Looking anywhere else would find nothing.
+	matches, err := filepath.Glob(filepath.Join(os.TempDir(), prefix+"*")) //nolint:forbidigo // sweeping debris left by t.TempDir(), which is $TMPDIR by definition
 	if err != nil {
 		return
 	}

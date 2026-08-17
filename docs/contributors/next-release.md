@@ -87,6 +87,7 @@ that makes them structural rather than four spot repairs.*
 - [DF219](design/findings-resolved.md) — `state.State.DevcontainerMountWarnings` was written on every create and read by nothing
 - [DF220](design/findings-resolved.md) — a mount-strip test named a branch it never reached, because its assertion matched the path it printed
 - [DF221](design/findings-unresolved.md) — `state.State` has five more write-only fields, and two were already deleted as one-offs
+- [DF222](design/findings-unresolved.md) — `Files.Import` resolves a relative path against the process's working directory, inside the library
 
 ## Deferred to v0.13.0 — the network release
 

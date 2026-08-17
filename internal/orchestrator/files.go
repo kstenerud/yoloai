@@ -49,7 +49,12 @@ func ImportFile(ctx context.Context, layout config.Layout, name, hostPath string
 		return ImportResult{}, fmt.Errorf("create files directory: %w", err)
 	}
 
-	absSrc, err := filepath.Abs(hostPath)
+	// DF222: this resolves against the *process's* working directory, not the
+	// caller's. Right by coincidence for the CLI, wrong for an embedder and
+	// wrong for a daemon. The fix is to resolve at the CLI edge and reject a
+	// relative path here — a public behaviour change, so it is filed rather
+	// than slipped in. This nolint is the marker, not the resolution.
+	absSrc, err := filepath.Abs(hostPath) //nolint:forbidigo // DF222: known ambient resolution; fix is a public break, parked
 	if err != nil {
 		return ImportResult{}, fmt.Errorf("resolve path %s: %w", hostPath, err)
 	}
