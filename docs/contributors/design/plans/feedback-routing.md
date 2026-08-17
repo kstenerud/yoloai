@@ -115,6 +115,26 @@ This is deliberately *not* one global answer — choosing one would fit `Create`
 7. **Gate the bypass**: a `forbidigo` rule for `fmt.Fprint*` to a threaded writer outside the routing
    layer. Without it nothing stops mechanism five, and the ban stays decoration.
 
+## The residual the settled shape leaves
+
+`Setup` and `BuildProfileImage` keep their `io.Writer` because they carry a build stream we do not
+own — a decision made deliberately, and mostly right: the ~30 lines in `tart/build.go`,
+`containerd/image.go` and `docker/docker.go` are progress, only meaningful live.
+
+But **three advisories ride those streams and cannot be converted without changing those
+interfaces**:
+
+- `runtime/apple/apple.go` — "build secrets are not supported on the apple backend; N secret(s)
+  will not be available to the build". A capability gap the user needs, buried in build output.
+- `runtime/containerd/image.go` — "Fast namespace link unavailable (…); falling back to import."
+- `runtime/tart/build.go` — the `tart run output:` dump, a diagnostic emitted on failure.
+
+Each is caller-addressed, and each currently reaches the caller only as text inside a stream. The
+options are a second parameter (a sink alongside the writer), a return value on `Setup`, or leaving
+them — and the choice is not obvious enough to make while converting. **Named rather than silently
+left**, which is the whole point of writing it down: at the end of the conversion, "no library code
+formats an advisory" will be *nearly* true, and these are the three places it is not.
+
 ## Tests (rule 10)
 
 - Every converted site: a test asserting on the **record** (event name, level, fields) rather than a

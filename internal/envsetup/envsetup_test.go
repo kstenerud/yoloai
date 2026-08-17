@@ -13,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -806,4 +807,56 @@ func TestHasAnyAuthHint_ConfigEnvSet(t *testing.T) {
 func TestHasAnyAuthHint_NeitherSet(t *testing.T) {
 	agentDef := agent.GetAgent("aider")
 	assert.False(t, HasAnyAuthHint(agentSpec(agentDef), nil, config.Layout{}))
+}
+
+// TestSeedSandbox_ShortLivedOAuthIsAWarningRecord covers the one advisory
+// SeedSandbox emits.
+//
+// It matters because of what it says: the credentials the sandbox was seeded
+// with expire in about thirty minutes, so a long agent run will fail partway
+// through with an auth error that looks like anything but a token expiry. As
+// three Fprintlns it could only ever be read; as a record a caller can route
+// it, or act on it before starting a long session.
+func TestSeedSandbox_ShortLivedOAuthIsAWarningRecord(t *testing.T) {
+	tmpDir := t.TempDir()
+
+	// A host OAuth credential and no API key is what makes RefreshHomeSeed copy
+	// it — the condition the warning is about.
+	claudeDir := filepath.Join(tmpDir, ".claude")
+	require.NoError(t, os.MkdirAll(claudeDir, 0750))
+	require.NoError(t, os.WriteFile(filepath.Join(claudeDir, ".credentials.json"), []byte(`{"token":"x"}`), 0600))
+
+	sandboxDir := filepath.Join(tmpDir, "sandbox")
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
+
+	spec := agentSpec(agent.GetAgent("claude"))
+	require.True(t, spec.ShortLivedOAuthWarning, "the claude agent is the one that declares this")
+
+	var got feedback.Collector
+	_, err := SeedSandbox(spec, sandboxDir, nil, tmpDir, config.Layout{}, nil, &got)
+	require.NoError(t, err)
+
+	notices := got.Notices()
+	require.Len(t, notices, 1, "seeding a short-lived OAuth credential must say so")
+	assert.Equal(t, "credentials.short_lived_oauth", notices[0].Event)
+	assert.Equal(t, feedback.LevelWarn, notices[0].Level,
+		"at info level this is suppressed under --json, which is where a long unattended run is started")
+	assert.Contains(t, notices[0].Message, "30 minutes")
+}
+
+// TestSeedSandbox_NoOAuthWarningWithoutTheCredential pins the silence. A notice
+// emitted unconditionally would train the user to ignore it, which costs more
+// than not having it.
+func TestSeedSandbox_NoOAuthWarningWithoutTheCredential(t *testing.T) {
+	tmpDir := t.TempDir()
+	sandboxDir := filepath.Join(tmpDir, "sandbox")
+	require.NoError(t, os.MkdirAll(store.AgentRuntimePath(sandboxDir), 0750))
+	require.NoError(t, os.MkdirAll(store.HomeSeedPath(sandboxDir), 0750))
+
+	var got feedback.Collector
+	_, err := SeedSandbox(agentSpec(agent.GetAgent("claude")), sandboxDir, nil, tmpDir, config.Layout{}, nil, &got)
+	require.NoError(t, err)
+
+	assert.Empty(t, got.Notices(), "nothing was seeded, so there is nothing to warn about")
 }
