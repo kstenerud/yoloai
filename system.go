@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
@@ -657,12 +658,40 @@ type SystemPruneOptions struct {
 // that might hold user data is refused-and-reported or quarantined, never
 // silently deleted.
 type PruneResult struct {
-	RemovedItems       []PruneItem
+	RemovedItems []PruneItem
+	// SkippedItems lists resources prune identified but did not reclaim —
+	// a removal that failed, or one deliberately not attempted. Each carries
+	// the reason. These are kept out of RemovedItems on purpose: that list
+	// drives a destructive confirmation and a count shown to the user, so a
+	// resource that is still there must never inflate it.
+	SkippedItems       []PruneItem
 	FreedBytes         int64 // best-effort; 0 when no backend reported byte counts
 	Trashed            []TrashedSandbox
 	RefusedDataBearing []RefusedSandbox
 	TrashContents      TrashSummary
+	// Notices are the advisories that are not about any one resource — a
+	// backend subcommand that failed, an estimate that could not be taken, a
+	// caveat about how the host actually frees the space. They are also
+	// rendered to Output as they were before, so a caller reading text sees no
+	// change; a caller wanting to route or filter them now can (D145).
+	Notices []Notice
 }
+
+// PruneAction says what happened, or would happen, to a PruneItem.
+// See runtime.PruneAction.
+type PruneAction = runtime.PruneAction
+
+// Prune dispositions. See runtime.PruneAction.
+const (
+	// PruneActionRemoved: the resource is gone.
+	PruneActionRemoved = runtime.PruneActionRemoved
+	// PruneActionWouldRemove: a dry run identified it; nothing was touched.
+	PruneActionWouldRemove = runtime.PruneActionWouldRemove
+	// PruneActionFailed: removal was attempted and did not succeed.
+	PruneActionFailed = runtime.PruneActionFailed
+	// PruneActionSkipped: removal was deliberately not attempted.
+	PruneActionSkipped = runtime.PruneActionSkipped
+)
 
 // PruneItem describes one removed (or removable) item.
 type PruneItem struct {
@@ -678,6 +707,11 @@ type PruneItem struct {
 	// BytesReclaimed is the space freed by removing this item; 0 when the
 	// backend can't report it.
 	BytesReclaimed int64
+	// Action is what became of the resource. An item on RemovedItems is always
+	// Removed or WouldRemove; one on SkippedItems is Failed or Skipped.
+	Action PruneAction
+	// Reason explains a Failed or Skipped action. Empty otherwise.
+	Reason string
 }
 
 // TrashedSandbox is a sandbox directory Prune quarantined to the trash
@@ -725,26 +759,29 @@ func (s *System) Prune(ctx context.Context, opts SystemPruneOptions) (*PruneResu
 	}
 	known, broken := s.classifySandboxes(ctx)
 	result := &PruneResult{}
+	// Notices reach the caller on the result AND, unchanged, the Output writer:
+	// this is the boundary where a record becomes the text it always was. The
+	// backends stopped formatting; the aggregation point renders (D145).
+	collected := &feedback.Collector{}
+	sink := feedback.Tee(collected, feedback.WriterSink(out))
 
 	for _, desc := range runtime.Descriptors() {
-		items, reclaimed := s.pruneBackend(ctx, desc.Type, known, opts, out)
-		result.RemovedItems = append(result.RemovedItems, items...)
-		result.FreedBytes += reclaimed
+		s.pruneBackend(ctx, desc.Type, known, opts, sink, result)
 	}
 
 	// Apply host-side sandbox-dir classifications.
-	s.applyBrokenClassifications(broken, opts.DryRun, out, result)
+	s.applyBrokenClassifications(broken, opts.DryRun, sink, result)
 
 	// Sweep orphaned <name>.lock files with no live holder. Runs after the
 	// dir classifications above so locks beside a just-deleted never-init
 	// dir are caught too.
-	swept, err := store.SweepStaleLocks(s.layout, opts.DryRun, out)
+	swept, err := store.SweepStaleLocks(s.layout, opts.DryRun, sink)
 	if err != nil {
-		fmt.Fprintf(out, "Warning: lock sweep failed: %v\n", err) //nolint:errcheck // best-effort progress
+		feedback.Warnf(sink, "prune.lock_sweep_failed", "lock sweep failed: %v", err)
 	}
 	for _, name := range swept {
 		result.RemovedItems = append(result.RemovedItems, PruneItem{
-			Kind: PruneKindLockFile, Name: name,
+			Kind: PruneKindLockFile, Name: name, Action: actionFor(opts.DryRun),
 		})
 	}
 
@@ -752,22 +789,34 @@ func (s *System) Prune(ctx context.Context, opts SystemPruneOptions) (*PruneResu
 	// Backend-owned host artifacts (containerd netns, seatbelt tmux) are swept
 	// inside each backend's Prune above; the broker is cross-backend, so it is
 	// reconciled here against the sandbox registry.
-	result.RemovedItems = append(result.RemovedItems, s.reapOrphanInjectors(opts.DryRun, out)...)
+	result.RemovedItems = append(result.RemovedItems, s.reapOrphanInjectors(opts.DryRun, sink)...)
 
-	tempItems, err := s.pruneTempFiles(opts.DryRun, out)
+	tempItems, err := s.pruneTempFiles(opts.DryRun, sink)
 	result.RemovedItems = append(result.RemovedItems, tempItems...)
 	if err != nil {
+		result.Notices = collected.Notices()
 		return result, err
 	}
 
 	result.TrashContents = s.trashSummary()
+	result.Notices = collected.Notices()
 	return result, nil
+}
+
+// actionFor is the disposition of a removal this layer performs itself, where
+// success is the only outcome that reaches an item — a failure here is reported
+// as a notice and the item is not recorded at all.
+func actionFor(dryRun bool) PruneAction {
+	if dryRun {
+		return PruneActionWouldRemove
+	}
+	return PruneActionRemoved
 }
 
 // applyBrokenClassifications carries out (or, under dryRun, records) the
 // disposition for each broken sandbox dir: refuse-and-report, delete, or
 // quarantine to trash. Per-entry failures are logged to out, not fatal.
-func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun bool, out io.Writer, result *PruneResult) {
+func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun bool, sink feedback.Sink, result *PruneResult) {
 	for _, c := range broken {
 		switch c.action {
 		case actionRefuse:
@@ -777,19 +826,23 @@ func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun b
 		case actionDelete:
 			if !dryRun {
 				if err := os.RemoveAll(c.path); err != nil {
-					fmt.Fprintf(out, "Warning: remove %s failed: %v\n", c.path, err) //nolint:errcheck // best-effort progress
+					result.SkippedItems = append(result.SkippedItems, PruneItem{
+						Kind: PruneKindSandboxDir, Name: c.name,
+						Action: PruneActionFailed, Reason: err.Error(),
+					})
+					feedback.Warnf(sink, "prune.sandbox_dir_remove_failed", "remove %s failed: %v", c.path, err)
 					continue
 				}
 			}
 			result.RemovedItems = append(result.RemovedItems, PruneItem{
-				Kind: PruneKindSandboxDir, Name: c.name,
+				Kind: PruneKindSandboxDir, Name: c.name, Action: actionFor(dryRun),
 			})
 		case actionTrash:
 			dest := c.path
 			if !dryRun {
 				moved, err := store.QuarantineSandbox(s.layout, c.name)
 				if err != nil {
-					fmt.Fprintf(out, "Warning: quarantine %s failed: %v\n", c.name, err) //nolint:errcheck // best-effort progress
+					feedback.Warnf(sink, "prune.quarantine_failed", "quarantine %s failed: %v", c.name, err)
 					continue
 				}
 				dest = moved
@@ -807,64 +860,88 @@ func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun b
 // prune reclaims the build cache (no rebuild forced), and IncludeBaseImage also
 // drops the base images. Per-backend failures are logged to opts.Output rather
 // than aborting the whole prune.
-func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []string, opts SystemPruneOptions, out io.Writer) ([]PruneItem, int64) {
+func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []string, opts SystemPruneOptions, sink feedback.Sink, result *PruneResult) {
 	rt, err := runtime.New(ctx, backend, s.layout)
 	if err != nil {
-		return nil, 0
+		return
 	}
 	defer rt.Close() //nolint:errcheck // best-effort
 
-	scan, err := rt.Prune(ctx, known, true, out)
+	scan, err := rt.Prune(ctx, known, true)
 	if err != nil {
-		fmt.Fprintf(out, "Warning: scan %s failed: %v\n", backend, err) //nolint:errcheck
-		return nil, 0
+		feedback.Warnf(sink, "prune.backend_scan_failed", "scan %s failed: %v", backend, err)
+		return
 	}
+	s.recordNotices(sink, result, scan.Notices)
 
-	var items []PruneItem
+	// The scan is a dry run; re-run for real only when there is something to
+	// remove and the caller is not itself dry-running. Either way the items
+	// recorded are the ones from the run that actually happened, so an item's
+	// Action never claims a removal that was not attempted.
+	items := scan.Items
 	if !opts.DryRun && len(scan.Items) > 0 {
-		actual, pruneErr := rt.Prune(ctx, known, false, out)
+		actual, pruneErr := rt.Prune(ctx, known, false)
 		if pruneErr != nil {
-			fmt.Fprintf(out, "Warning: prune %s failed: %v\n", backend, pruneErr) //nolint:errcheck
-			return nil, 0
+			feedback.Warnf(sink, "prune.backend_failed", "prune %s failed: %v", backend, pruneErr)
+			return
 		}
-		for _, item := range actual.Items {
-			items = append(items, PruneItem{
-				BackendType: backend,
-				Kind:        PruneItemKind(item.Kind),
-				Name:        item.Name,
-			})
-		}
-	} else {
-		for _, item := range scan.Items {
-			items = append(items, PruneItem{
-				BackendType: backend,
-				Kind:        PruneItemKind(item.Kind),
-				Name:        item.Name,
-			})
-		}
+		s.recordNotices(sink, result, actual.Notices)
+		items = actual.Items
 	}
+	s.recordItems(result, backend, items, "")
 
-	reclaimed, err := runtime.PruneCacheFor(ctx, rt, opts.IncludeBaseImage, opts.DryRun, out)
+	cache, err := runtime.PruneCacheFor(ctx, rt, opts.IncludeBaseImage, opts.DryRun)
 	if err != nil {
-		fmt.Fprintf(out, "Warning: cache prune %s failed: %v\n", backend, err) //nolint:errcheck
+		feedback.Warnf(sink, "prune.cache_failed", "cache prune %s failed: %v", backend, err)
 	}
+	s.recordNotices(sink, result, cache.Notices)
+	s.recordItems(result, backend, cache.Items, "")
+	result.FreedBytes += cache.BytesReclaimed
 
 	if opts.IncludeStaleBases {
-		refs, staleReclaimed, staleErr := runtime.PruneStaleBasesFor(ctx, rt, opts.DryRun, out)
+		stale, staleErr := runtime.PruneStaleBasesFor(ctx, rt, opts.DryRun)
 		if staleErr != nil {
-			fmt.Fprintf(out, "Warning: stale-base prune %s failed: %v\n", backend, staleErr) //nolint:errcheck
+			feedback.Warnf(sink, "prune.stale_base_failed", "stale-base prune %s failed: %v", backend, staleErr)
 		}
-		for _, ref := range refs {
-			items = append(items, PruneItem{
-				BackendType: backend,
-				Kind:        PruneKindStaleBase,
-				Name:        ref,
-			})
-		}
-		reclaimed += staleReclaimed
+		s.recordNotices(sink, result, stale.Notices)
+		s.recordItems(result, backend, stale.Items, PruneKindStaleBase)
+		result.FreedBytes += stale.BytesReclaimed
 	}
+}
 
-	return items, reclaimed
+// recordItems files a backend's items into the removed/skipped halves of the
+// result. The split is the point: RemovedItems drives a destructive
+// confirmation and the count the user is shown, so anything still on disk has
+// to be somewhere else. kindOverride replaces the backend's own Kind when the
+// caller knows better (stale bases come back as generic items).
+func (s *System) recordItems(result *PruneResult, backend BackendType, items []runtime.PruneItem, kindOverride PruneItemKind) {
+	for _, item := range items {
+		kind := PruneItemKind(item.Kind)
+		if kindOverride != "" {
+			kind = kindOverride
+		}
+		public := PruneItem{
+			BackendType:    backend,
+			Kind:           kind,
+			Name:           item.Name,
+			BytesReclaimed: item.BytesReclaimed,
+			Action:         item.Action,
+			Reason:         item.Reason,
+		}
+		if item.Removable() {
+			result.RemovedItems = append(result.RemovedItems, public)
+			continue
+		}
+		result.SkippedItems = append(result.SkippedItems, public)
+	}
+}
+
+// recordNotices forwards a backend's notices to the caller's sink, which both
+// renders them to Output and collects them for the result.
+func (s *System) recordNotices(sink feedback.Sink, _ *PruneResult, notices []Notice) {
+	for _, n := range notices {
+		feedback.Emit(sink, n)
+	}
 }
 
 // pruneTempFiles scans (and, when !dryRun, removes) stale yoloai temp dirs.
@@ -873,17 +950,18 @@ func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []
 // match what truly happened. Dirs that matched but couldn't be removed (e.g.
 // root-owned from a sudo run) are surfaced as warnings to out rather than
 // silently dropped or, worse, falsely reported as removed.
-func (s *System) pruneTempFiles(dryRun bool, out io.Writer) ([]PruneItem, error) {
+func (s *System) pruneTempFiles(dryRun bool, sink feedback.Sink) ([]PruneItem, error) {
 	removed, failed, err := orchestrator.PruneTempFiles(s.layout, dryRun, staleTempFileAge)
 	if err != nil {
 		return nil, fmt.Errorf("prune temp files: %w", err)
 	}
 	items := make([]PruneItem, 0, len(removed))
 	for _, path := range removed {
-		items = append(items, PruneItem{Kind: PruneKindTempDir, Name: path})
+		items = append(items, PruneItem{Kind: PruneKindTempDir, Name: path, Action: actionFor(dryRun)})
 	}
 	for _, f := range failed {
-		fmt.Fprintf(out, "Warning: could not remove temp dir %s: %v (try 'sudo yoloai system prune')\n", f.Path, f.Err) //nolint:errcheck // best-effort progress
+		feedback.Warnf(sink, "prune.temp_dir_remove_failed",
+			"could not remove temp dir %s: %v (try 'sudo yoloai system prune')", f.Path, f.Err)
 	}
 	return items, nil
 }
@@ -892,15 +970,17 @@ func (s *System) pruneTempFiles(dryRun bool, out io.Writer) ([]PruneItem, error)
 // gone (DF71). The keep-set is every live sandbox's recorded injector PID; the
 // broker sweep reaps any running injector not in it. Best-effort: an enumeration
 // failure is a warning, not fatal to the prune.
-func (s *System) reapOrphanInjectors(dryRun bool, out io.Writer) []PruneItem {
+func (s *System) reapOrphanInjectors(dryRun bool, sink feedback.Sink) []PruneItem {
 	reaped, err := broker.ReapOrphanInjectors(s.liveInjectorPIDs(), dryRun)
 	if err != nil {
-		fmt.Fprintf(out, "Warning: injector sweep failed: %v\n", err) //nolint:errcheck // best-effort progress
+		feedback.Warnf(sink, "prune.injector_sweep_failed", "injector sweep failed: %v", err)
 		return nil
 	}
 	items := make([]PruneItem, 0, len(reaped))
 	for _, pid := range reaped {
-		items = append(items, PruneItem{Kind: PruneKindProcess, Name: fmt.Sprintf("__inject pid %d", pid)})
+		items = append(items, PruneItem{
+			Kind: PruneKindProcess, Name: fmt.Sprintf("__inject pid %d", pid), Action: actionFor(dryRun),
+		})
 	}
 	return items
 }

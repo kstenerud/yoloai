@@ -10,6 +10,7 @@ import (
 	"io"
 	"log/slog"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime/caps"
 )
@@ -655,16 +656,30 @@ func RuntimeScriptProviderOf(rt Backend) (RuntimeScriptProvider, bool) {
 // "machine dedicated to yoloai" operation. Returns the bytes reclaimed on the
 // backend's data filesystem (best-effort; 0 when unmeasurable or dry-run).
 type CachePruner interface {
-	PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error)
+	PruneCache(ctx context.Context, includeImages, dryRun bool) (CachePruneResult, error)
 }
 
-// PruneCacheFor calls rt.PruneCache if implemented (returning the bytes
-// reclaimed); for backends without a cache it's a no-op returning (0, nil).
-func PruneCacheFor(ctx context.Context, rt Backend, includeImages, dryRun bool, output io.Writer) (int64, error) {
+// CachePruneResult reports what a cache prune reclaimed.
+//
+// BytesReclaimed is the headline and the reason this is not just a
+// []PruneItem: most backends can only measure the total, by asking the daemon
+// for its disk usage before and after. Items carry whatever individual
+// resources the backend can name; Notices carry what is about the operation
+// rather than any resource — a subcommand that failed, an estimate that could
+// not be taken, a caveat about how the host actually frees the space.
+type CachePruneResult struct {
+	BytesReclaimed int64
+	Items          []PruneItem
+	Notices        []feedback.Notice
+}
+
+// PruneCacheFor calls rt.PruneCache if implemented; for backends without a
+// cache it's a no-op returning a zero result.
+func PruneCacheFor(ctx context.Context, rt Backend, includeImages, dryRun bool) (CachePruneResult, error) {
 	if p, ok := rt.(CachePruner); ok {
-		return p.PruneCache(ctx, includeImages, dryRun, output)
+		return p.PruneCache(ctx, includeImages, dryRun)
 	}
-	return 0, nil
+	return CachePruneResult{}, nil
 }
 
 // StaleBasePruner is an optional interface for backends that can accumulate
@@ -679,16 +694,26 @@ func PruneCacheFor(ctx context.Context, rt Backend, includeImages, dryRun bool, 
 // Returns the removed (or, under dryRun, removable) image refs and the bytes
 // reclaimed (best-effort; 0 when unmeasurable or dry-run).
 type StaleBasePruner interface {
-	PruneStaleBases(ctx context.Context, dryRun bool, output io.Writer) (refs []string, reclaimed int64, err error)
+	PruneStaleBases(ctx context.Context, dryRun bool) (StaleBasePruneResult, error)
+}
+
+// StaleBasePruneResult reports the superseded bases found, and what became of
+// each. Items carry Kind "stale-base"; the refs a caller used to receive as a
+// []string are their Names, now with the action and any failure reason
+// attached rather than printed past the caller on a writer.
+type StaleBasePruneResult struct {
+	BytesReclaimed int64
+	Items          []PruneItem
+	Notices        []feedback.Notice
 }
 
 // PruneStaleBasesFor calls rt.PruneStaleBases if implemented; for backends
-// without superseded bases it's a no-op returning (nil, 0, nil).
-func PruneStaleBasesFor(ctx context.Context, rt Backend, dryRun bool, output io.Writer) ([]string, int64, error) {
+// without superseded bases it's a no-op returning a zero result.
+func PruneStaleBasesFor(ctx context.Context, rt Backend, dryRun bool) (StaleBasePruneResult, error) {
 	if p, ok := rt.(StaleBasePruner); ok {
-		return p.PruneStaleBases(ctx, dryRun, output)
+		return p.PruneStaleBases(ctx, dryRun)
 	}
-	return nil, 0, nil
+	return StaleBasePruneResult{}, nil
 }
 
 // LogTailer is an optional interface for backends that can return recent

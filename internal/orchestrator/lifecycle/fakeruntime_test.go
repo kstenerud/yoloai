@@ -117,7 +117,7 @@ func (m *lifecycleMockRuntime) InteractiveExec(_ context.Context, _ string, _ []
 	return errMockNotImplemented
 }
 func (m *lifecycleMockRuntime) Close() error { return nil }
-func (m *lifecycleMockRuntime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
+func (m *lifecycleMockRuntime) Prune(_ context.Context, _ []string, _ bool) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, errMockNotImplemented
 }
 func (m *lifecycleMockRuntime) Logs(_ context.Context, _ string, _ int) string { return "" }

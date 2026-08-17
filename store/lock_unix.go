@@ -8,7 +8,6 @@ package store
 import (
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -18,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/locking"
 	"github.com/kstenerud/yoloai/yoerrors"
@@ -215,7 +215,7 @@ func RemoveLockFile(layout config.Layout, name string) error {
 // a concurrent create/destroy.
 //
 // dryRun reports without removing.
-func SweepStaleLocks(layout config.Layout, dryRun bool, out io.Writer) ([]string, error) {
+func SweepStaleLocks(layout config.Layout, dryRun bool, sink feedback.Sink) ([]string, error) {
 	dir := layout.SandboxesDir()
 	entries, err := os.ReadDir(dir)
 	if err != nil {
@@ -256,7 +256,12 @@ func SweepStaleLocks(layout config.Layout, dryRun bool, out io.Writer) ([]string
 			// Surface, don't swallow: a lock we can't remove keeps blocking its
 			// sandbox name, so the user needs to know why it persists. Matches
 			// the backend prunes' warn-and-skip convention.
-			fmt.Fprintf(out, "Warning: could not remove stale lock %s: %v\n", path, rmErr) //nolint:errcheck // best-effort progress
+			feedback.Emit(sink, feedback.Notice{
+				Event:   "lock.stale_remove_failed",
+				Level:   feedback.LevelWarn,
+				Message: fmt.Sprintf("could not remove stale lock %s: %v", path, rmErr),
+				Fields:  map[string]any{"path": path},
+			})
 			continue
 		}
 		removed = append(removed, name)

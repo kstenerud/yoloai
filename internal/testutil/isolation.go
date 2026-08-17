@@ -64,11 +64,20 @@ func ReapLeakedInstances(ctx context.Context, t *testing.T, rt yrt.Backend) {
 	t.Helper()
 	// nil knownInstances: nothing under a test principal is legitimately alive
 	// before the test starts, so every match is debris from an earlier run.
-	res, err := rt.Prune(ctx, nil, false, LogWriter(t))
+	res, err := rt.Prune(ctx, nil, false)
 	if err != nil {
 		t.Fatalf("reap leaked instances under test principal: %v", err)
 	}
+	for _, n := range res.Notices {
+		t.Logf("prune notice [%s] %s", n.Event, n.Message)
+	}
 	for _, item := range res.Items {
+		if !item.Removable() {
+			// Debris that survived the reap: the next run inherits it, so say
+			// so loudly rather than logging it as if it were cleaned up.
+			t.Logf("LEAKED %s %q could not be reaped (%s): %s", item.Kind, item.Name, item.Action, item.Reason)
+			continue
+		}
 		t.Logf("reaped leaked %s %q from an earlier run (DF110) — this run provisions its own", item.Kind, item.Name)
 	}
 }

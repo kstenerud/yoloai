@@ -76,7 +76,7 @@ func (r *rerouteBaseRuntime) Setup(_ context.Context, _ config.Layout, _ string,
 }
 func (r *rerouteBaseRuntime) IsReady(_ context.Context) (bool, error) { return true, nil }
 func (r *rerouteBaseRuntime) Close() error                            { return nil }
-func (r *rerouteBaseRuntime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
+func (r *rerouteBaseRuntime) Prune(_ context.Context, _ []string, _ bool) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, nil
 }
 func (r *rerouteBaseRuntime) Logs(_ context.Context, _ string, _ int) string { return "" }

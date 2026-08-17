@@ -49,7 +49,7 @@ func (f *fakeRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _
 	return errFakeNotImplemented
 }
 func (f *fakeRuntime) Close() error { return nil }
-func (f *fakeRuntime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
+func (f *fakeRuntime) Prune(_ context.Context, _ []string, _ bool) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, errFakeNotImplemented
 }
 func (f *fakeRuntime) Logs(_ context.Context, _ string, _ int) string { return "" }

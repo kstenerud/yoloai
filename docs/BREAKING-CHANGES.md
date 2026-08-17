@@ -33,6 +33,46 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+### The three prune methods on `runtime.Backend` no longer take an `io.Writer`
+
+**Previous behavior:** `Backend.Prune`, `CachePruner.PruneCache` and `StaleBasePruner.PruneStaleBases`
+each took an `output io.Writer` and wrote their findings to it as formatted text — which container
+failed to remove, which image would be removed, how many bytes were reclaimed. `PruneCache` returned
+`(int64, error)`; `PruneStaleBases` returned `([]string, int64, error)`. `runtime.PruneItem` was
+`{Kind, Name}`. `store.SweepStaleLocks` also took an `io.Writer`.
+
+**New behavior:** the writers are gone and everything comes back on the result.
+
+- `Prune(ctx, knownInstances, dryRun) (PruneResult, error)` — `PruneResult` gains `Notices`.
+- `PruneCache(ctx, includeImages, dryRun) (CachePruneResult, error)` — `{BytesReclaimed, Items, Notices}`.
+- `PruneStaleBases(ctx, dryRun) (StaleBasePruneResult, error)` — same shape; the `[]string` of refs
+  is now `Items[].Name`.
+- `runtime.PruneItem` gains `Action` (`removed` / `would-remove` / `failed` / `skipped`), `Reason`,
+  and `BytesReclaimed`, plus a `Removable()` predicate.
+- `store.SweepStaleLocks(layout, dryRun, sink feedback.Sink)`.
+
+An out-of-tree backend implementing `runtime.Backend` will not compile until its prune methods are
+updated. Nothing in the CLI's behaviour is lost: the advisories are still rendered to
+`SystemPruneOptions.Output` exactly as before, by `System.Prune`.
+
+**Why it changed:** D145. Text on a writer cannot be counted, filtered or serialised, and prune's
+output is a report. A removal that failed used to be dropped from the result entirely and mentioned
+only in a warning line, so a prune that reclaimed nothing was indistinguishable from a prune with
+nothing to reclaim — and under `--json` the failure was invisible.
+
+### `yoloai system prune` reports what it could not reclaim
+
+**Previous behavior:** a resource prune found but could not remove was silently absent from the
+result. In human mode a warning line appeared among the backend progress; under `--json` there was
+no trace at all.
+
+**New behavior:** `PruneResult` gains `SkippedItems` alongside `RemovedItems`, each entry carrying
+the action and the reason. Human mode prints an "N resource(s) not reclaimed" summary; `--json`
+gains a `skipped` array. `RemovedItems` keeps its exact meaning — only things that were, or would
+be, removed — because it drives the removal count and the destructive confirmation prompt.
+
+**Why it changed:** D145. This is the data the writer was carrying; it now has a typed home.
+
 ### `.yoloai.yaml` project config is removed entirely
 
 **Previous behavior:** a repo-root `.yoloai.yaml` was read at sandbox creation and could set three

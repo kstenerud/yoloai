@@ -14,6 +14,8 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -119,23 +121,50 @@ func TestPruneRemovesOrphanButKeepsBase(t *testing.T) {
 		"some-other-vm",      // not ours — must be ignored
 	})
 
-	result, err := r.Prune(context.Background(), []string{"yoloai-cli-keep"}, false, os.Stderr)
+	result, err := r.Prune(context.Background(), []string{"yoloai-cli-keep"}, false)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"yoloai-cli-orphan"}, deletedNames(t, deleteLog))
 	require.Len(t, result.Items, 1)
 	require.Equal(t, "yoloai-cli-orphan", result.Items[0].Name)
+	require.Equal(t, runtime.PruneActionRemoved, result.Items[0].Action)
+	require.True(t, result.Items[0].Removable())
 }
 
 func TestPruneDryRunDeletesNothing(t *testing.T) {
 	r, deleteLog := fakeTart(t, []string{provisionedImageName, "yoloai-cli-orphan"})
 
-	result, err := r.Prune(context.Background(), nil, true, os.Stderr)
+	result, err := r.Prune(context.Background(), nil, true)
 	require.NoError(t, err)
 
 	require.Empty(t, deletedNames(t, deleteLog))
 	require.Len(t, result.Items, 1) // reported, not removed
 	require.Equal(t, "yoloai-cli-orphan", result.Items[0].Name)
+	require.Equal(t, runtime.PruneActionWouldRemove, result.Items[0].Action,
+		"a dry run must not report the resource as gone")
+}
+
+// TestPruneReportsAFailedDeleteInsteadOfDroppingIt is the behaviour change the
+// typed action buys.
+//
+// A delete that fails used to `continue`: the VM stayed on disk and vanished
+// from the result, so a prune that reclaimed nothing was indistinguishable
+// from a prune with nothing to reclaim, and the only trace was a warning line
+// written past the caller to a writer it may not have been reading. Now the VM
+// comes back as an item the caller can count, show, or act on.
+func TestPruneReportsAFailedDeleteInsteadOfDroppingIt(t *testing.T) {
+	r, deleteLog := fakeTartFailingDelete(t, []string{provisionedImageName, "yoloai-cli-orphan"})
+
+	result, err := r.Prune(context.Background(), nil, false)
+	require.NoError(t, err, "one resource that will not delete must not fail the whole sweep")
+
+	require.Empty(t, deletedNames(t, deleteLog), "the stub refused the delete")
+	require.Len(t, result.Items, 1, "a resource that could not be removed must still be reported")
+	assert.Equal(t, "yoloai-cli-orphan", result.Items[0].Name)
+	assert.Equal(t, runtime.PruneActionFailed, result.Items[0].Action)
+	assert.False(t, result.Items[0].Removable(),
+		"a failed removal must not be counted as reclaimed — it drives a destructive confirmation")
+	assert.NotEmpty(t, result.Items[0].Reason, "the caller needs to be able to say why")
 }
 
 // TestPruneReclaimsLegacyCLIVMs covers DF125's tart half: a VM created before the
@@ -154,7 +183,7 @@ func TestPruneReclaimsLegacyCLIVMs(t *testing.T) {
 		"some-other-vm",            // not ours — ignored
 	})
 
-	result, err := r.Prune(context.Background(), []string{"yoloai-cli-keep"}, false, os.Stderr)
+	result, err := r.Prune(context.Background(), []string{"yoloai-cli-keep"}, false)
 	require.NoError(t, err)
 
 	require.ElementsMatch(t,
@@ -171,7 +200,7 @@ func TestPruneReclaimsLegacyCLIVMs(t *testing.T) {
 func TestPruneSparesKnownLegacyVM(t *testing.T) {
 	r, deleteLog := fakeTart(t, []string{"yoloai-unmigrated", "yoloai-legacyorphan"})
 
-	result, err := r.Prune(context.Background(), []string{"yoloai-unmigrated"}, false, os.Stderr)
+	result, err := r.Prune(context.Background(), []string{"yoloai-unmigrated"}, false)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"yoloai-legacyorphan"}, deletedNames(t, deleteLog),
@@ -193,7 +222,7 @@ func TestPruneSparesKnownLegacyVM(t *testing.T) {
 func TestPruneLegacyMatchOverreachesForAnUnseenPrincipal(t *testing.T) {
 	r, deleteLog := fakeTart(t, []string{"yoloai-acme-probe"})
 
-	_, err := r.Prune(context.Background(), nil, false, os.Stderr)
+	_, err := r.Prune(context.Background(), nil, false)
 	require.NoError(t, err)
 
 	require.Equal(t, []string{"yoloai-acme-probe"}, deletedNames(t, deleteLog),
@@ -218,7 +247,7 @@ func TestPrunePrincipalScope(t *testing.T) {
 	require.NoError(t, err)
 	r.layout = r.layout.WithPrincipal(p)
 
-	result, err := r.Prune(context.Background(), nil, false, os.Stderr)
+	result, err := r.Prune(context.Background(), nil, false)
 	require.NoError(t, err)
 
 	deleted := deletedNames(t, deleteLog)
@@ -235,7 +264,7 @@ func TestPruneCacheRemovesBaseAndChecksum(t *testing.T) {
 	checksum := r.tartBaseChecksumPath()
 	require.NoError(t, os.WriteFile(checksum, []byte("deadbeef"), 0600))
 
-	_, err := r.PruneCache(context.Background(), true /*includeImages*/, false /*dryRun*/, os.Stderr)
+	_, err := r.PruneCache(context.Background(), true /*includeImages*/, false /*dryRun*/)
 	require.NoError(t, err)
 
 	deleted := deletedNames(t, deleteLog)
@@ -254,7 +283,7 @@ func TestPruneCacheWithoutImagesIsNoOp(t *testing.T) {
 	checksum := r.tartBaseChecksumPath()
 	require.NoError(t, os.WriteFile(checksum, []byte("deadbeef"), 0600))
 
-	_, err := r.PruneCache(context.Background(), false /*includeImages*/, false /*dryRun*/, os.Stderr)
+	_, err := r.PruneCache(context.Background(), false /*includeImages*/, false /*dryRun*/)
 	require.NoError(t, err)
 
 	require.Empty(t, deletedNames(t, deleteLog))
@@ -267,9 +296,28 @@ func TestPruneCacheDryRunKeepsEverything(t *testing.T) {
 	checksum := r.tartBaseChecksumPath()
 	require.NoError(t, os.WriteFile(checksum, []byte("deadbeef"), 0600))
 
-	_, err := r.PruneCache(context.Background(), true /*includeImages*/, true /*dryRun*/, os.Stderr)
+	_, err := r.PruneCache(context.Background(), true /*includeImages*/, true /*dryRun*/)
 	require.NoError(t, err)
 
 	require.Empty(t, deletedNames(t, deleteLog))
 	require.FileExists(t, checksum)
+}
+
+// fakeTartFailingDelete is fakeTartEntries with one difference: `delete` exits
+// non-zero and changes nothing, so the sweep sees a removal it cannot perform.
+func fakeTartFailingDelete(t *testing.T, vms []string) (*Runtime, string) {
+	t.Helper()
+	r, deleteLog := fakeTart(t, vms)
+	// Reuse the inventory the original stub wrote by resolving it the same way.
+	inv := filepath.Join(filepath.Dir(r.tartBin), "inventory")
+	script := fmt.Sprintf(`#!/bin/sh
+INV=%q
+case "$1" in
+  list) awk -F'|' '$1!=""{print $1}' "$INV" ;;
+  delete) echo "tart: cannot delete $2: in use" >&2; exit 1 ;;
+  stop) : ;;
+esac
+`, inv)
+	require.NoError(t, os.WriteFile(r.tartBin, []byte(script), 0700)) //nolint:gosec // test stub must be executable
+	return r, deleteLog
 }

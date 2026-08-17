@@ -6,7 +6,6 @@ package store
 
 import (
 	"errors"
-	"io"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -15,6 +14,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
@@ -355,7 +355,7 @@ func TestSweepStaleLocks_RemovesOrphanedLock(t *testing.T) {
 	require.NoError(t, err)
 	unlock() // releases flock; file remains on disk by design
 
-	removed, err := SweepStaleLocks(layout, false, io.Discard)
+	removed, err := SweepStaleLocks(layout, false, feedback.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ghost"}, removed)
 	assert.NoFileExists(t, layout.SandboxLockPath("ghost"))
@@ -370,7 +370,7 @@ func TestSweepStaleLocks_SkipsHeldLock(t *testing.T) {
 	require.NoError(t, err)
 	defer unlock()
 
-	removed, err := SweepStaleLocks(layout, false, io.Discard)
+	removed, err := SweepStaleLocks(layout, false, feedback.Discard)
 	require.NoError(t, err)
 	assert.NotContains(t, removed, "held")
 	assert.FileExists(t, layout.SandboxLockPath("held"))
@@ -386,7 +386,7 @@ func TestSweepStaleLocks_SkipsLockBesideExistingDir(t *testing.T) {
 	require.NoError(t, err)
 	unlock()
 
-	removed, err := SweepStaleLocks(layout, false, io.Discard)
+	removed, err := SweepStaleLocks(layout, false, feedback.Discard)
 	require.NoError(t, err)
 	assert.NotContains(t, removed, "live")
 	assert.FileExists(t, layout.SandboxLockPath("live"))
@@ -401,7 +401,7 @@ func TestSweepStaleLocks_DryRunKeepsFile(t *testing.T) {
 	require.NoError(t, err)
 	unlock()
 
-	removed, err := SweepStaleLocks(layout, true, io.Discard)
+	removed, err := SweepStaleLocks(layout, true, feedback.Discard)
 	require.NoError(t, err)
 	assert.Equal(t, []string{"ghost"}, removed)
 	assert.FileExists(t, layout.SandboxLockPath("ghost"), "dry-run must not remove the file")
@@ -425,12 +425,16 @@ func TestSweepStaleLocks_WarnsOnUnremovable(t *testing.T) {
 	require.NoError(t, os.Chmod(dir, 0o500))       //nolint:gosec // dir needs exec bit; read-only is the point — it forces removal to fail
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // restore write so t.TempDir cleanup can recurse in
 
-	var warnings strings.Builder
+	var warnings feedback.Collector
 	removed, err := SweepStaleLocks(layout, false, &warnings)
 	require.NoError(t, err)
 
 	assert.NotContains(t, removed, "ghost", "an unremovable lock must not be reported as removed")
-	assert.Contains(t, warnings.String(), "ghost", "an unremovable lock must surface a warning")
+	notices := warnings.Notices()
+	require.Len(t, notices, 1, "an unremovable lock must surface a warning")
+	assert.Equal(t, "lock.stale_remove_failed", notices[0].Event)
+	assert.Equal(t, feedback.LevelWarn, notices[0].Level)
+	assert.Contains(t, notices[0].Fields["path"], "ghost", "the notice must name the lock it could not remove")
 }
 
 // TestQuarantineSandbox_MovesToTrash verifies a sandbox dir is relocated

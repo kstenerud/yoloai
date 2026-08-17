@@ -638,7 +638,7 @@ func (r *Runtime) ExpectedBaseChecksum() string { return dockerrt.BuildInputsChe
 // tart/docker sweep: list, filter to this principal's prefix, skip known, then
 // stop+delete the rest. The base image is an OCI image (not a container), so it
 // never appears in `container list` and needs no special exclusion.
-func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
+func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool) (runtime.PruneResult, error) {
 	out, err := r.runContainer(ctx, "list", "--all", "--format", "json")
 	if err != nil {
 		return runtime.PruneResult{}, fmt.Errorf("list containers: %w", err)
@@ -651,15 +651,17 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 
 	var result runtime.PruneResult
 	for _, name := range orphans {
+		item := runtime.PruneItem{Kind: "container", Name: name, Action: runtime.PruneActionWouldRemove}
 		if !dryRun {
 			// delete --force handles a running container; stop first is best-effort.
 			_, _ = r.runContainer(ctx, "stop", name)
+			item.Action = runtime.PruneActionRemoved
 			if _, derr := r.runContainer(ctx, "delete", "--force", name); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
-				fmt.Fprintf(output, "Warning: failed to delete container %s: %v\n", name, derr) //nolint:errcheck // best-effort output
-				continue
+				item.Action = runtime.PruneActionFailed
+				item.Reason = derr.Error()
 			}
 		}
-		result.Items = append(result.Items, runtime.PruneItem{Kind: "container", Name: name})
+		result.Items = append(result.Items, item)
 	}
 	return result, nil
 }

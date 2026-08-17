@@ -174,7 +174,7 @@ func (f *fakeConfBackend) Setup(_ context.Context, _ config.Layout, _ string, _ 
 	return nil
 }
 func (f *fakeConfBackend) Close() error { return nil }
-func (f *fakeConfBackend) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
+func (f *fakeConfBackend) Prune(_ context.Context, _ []string, _ bool) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, nil
 }
 func (f *fakeConfBackend) Logs(_ context.Context, _ string, _ int) string { return "" }

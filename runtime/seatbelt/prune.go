@@ -7,7 +7,6 @@ package seatbelt
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"slices"
@@ -16,6 +15,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/runtime"
@@ -50,8 +50,9 @@ var killSandboxProc = defaultKillSandboxProc
 // reaps such orphans by enumerating seatbelt host processes directly and diffing
 // against the sandbox registry — the identity-keyed-sweep principle (D114), the
 // same shape as the broker and netns reapers.
-func (r *Runtime) Prune(_ context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
-	return runtime.PruneResult{Items: r.reapOrphanProcs(knownInstances, dryRun, output)}, nil
+func (r *Runtime) Prune(_ context.Context, knownInstances []string, dryRun bool) (runtime.PruneResult, error) {
+	items, notices := r.reapOrphanProcs(knownInstances, dryRun)
+	return runtime.PruneResult{Items: items, Notices: notices}, nil
 }
 
 // reapOrphanProcs enumerates seatbelt host processes and reaps any whose argv
@@ -66,12 +67,18 @@ func (r *Runtime) Prune(_ context.Context, knownInstances []string, dryRun bool,
 // SandboxesDir(), so a process belonging to another data dir sharing the host is
 // left alone — sufficient for the single-data-dir default; precise per-principal
 // scoping is deferred to the D62 multi-principal daemon.
-func (r *Runtime) reapOrphanProcs(knownInstances []string, dryRun bool, output io.Writer) []runtime.PruneItem {
+func (r *Runtime) reapOrphanProcs(knownInstances []string, dryRun bool) ([]runtime.PruneItem, []feedback.Notice) {
 	root := r.layout.SandboxesDir()
 	procs, err := enumerateSandboxProcs(root)
 	if err != nil {
-		fmt.Fprintf(output, "Warning: seatbelt process sweep failed: %v\n", err) //nolint:errcheck // best-effort progress
-		return nil
+		// The sweep itself did not run — that is about the operation, not any
+		// process, so it stays a notice rather than becoming a failed item.
+		return nil, []feedback.Notice{{
+			Event:   "prune.process_sweep_failed",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("seatbelt process sweep failed: %v", err),
+			Fields:  map[string]any{"backend": "seatbelt"},
+		}}
 	}
 
 	// The known set carries principal-prefixed instance names; the argv path
@@ -89,19 +96,25 @@ func (r *Runtime) reapOrphanProcs(knownInstances []string, dryRun bool, output i
 		if proc.pid == self {
 			continue // never reap the running prune itself
 		}
-		if !dryRun {
-			if killErr := killSandboxProc(r.execEnv, proc); killErr != nil {
-				fmt.Fprintf(output, "Warning: reap seatbelt process %s (pid %d): %v\n", proc.name, proc.pid, killErr) //nolint:errcheck // best-effort progress
-				continue
-			}
-		}
 		kind := "process"
 		if proc.socket != "" {
 			kind = "tmux"
 		}
-		items = append(items, runtime.PruneItem{Kind: kind, Name: fmt.Sprintf("%s pid %d", proc.name, proc.pid)})
+		item := runtime.PruneItem{
+			Kind:   kind,
+			Name:   fmt.Sprintf("%s pid %d", proc.name, proc.pid),
+			Action: runtime.PruneActionWouldRemove,
+		}
+		if !dryRun {
+			item.Action = runtime.PruneActionRemoved
+			if killErr := killSandboxProc(r.execEnv, proc); killErr != nil {
+				item.Action = runtime.PruneActionFailed
+				item.Reason = killErr.Error()
+			}
+		}
+		items = append(items, item)
 	}
-	return items
+	return items, nil
 }
 
 // selectOrphanProcs returns the seatbelt host processes whose owning sandbox dir

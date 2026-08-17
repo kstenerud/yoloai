@@ -5,16 +5,20 @@
 package yoloai
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/kstenerud/yoloai/runtime"
+	"github.com/kstenerud/yoloai/store"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -229,6 +233,77 @@ func TestPrune_ExecutesClassifications(t *testing.T) {
 	assert.DirExists(t, c.layout.SandboxDir("dirty"), "data-bearing dir left untouched")
 
 	assert.Equal(t, 1, res.TrashContents.Count, "trash summary reflects the quarantined dir")
+}
+
+// TestPrune_RecordsActionsAndKeepsFailuresOutOfRemovedItems pins the split
+// RemovedItems drives.
+//
+// That list is what the CLI counts in "Remove N resource(s)?" and what a
+// scripted caller reads as "reclaimed", so a resource still on disk must never
+// appear there. Before actions existed the question could not even be asked:
+// a failure was dropped from the result and written to a writer.
+func TestPrune_RecordsActionsAndKeepsFailuresOutOfRemovedItems(t *testing.T) {
+	c := newTestClient(t)
+
+	mkSandboxDir(t, c, "neverinit")
+
+	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: true})
+	require.NoError(t, err)
+
+	require.True(t, findItem(res.RemovedItems, PruneKindSandboxDir, "neverinit"))
+	for _, item := range res.RemovedItems {
+		assert.Truef(t, item.Action == PruneActionRemoved || item.Action == PruneActionWouldRemove,
+			"%s %q is on RemovedItems with action %q; that list means reclaimed",
+			item.Kind, item.Name, item.Action)
+	}
+	for _, item := range res.SkippedItems {
+		assert.Truef(t, item.Action == PruneActionFailed || item.Action == PruneActionSkipped,
+			"%s %q is on SkippedItems with action %q", item.Kind, item.Name, item.Action)
+		assert.NotEmptyf(t, item.Reason, "%s %q was skipped without saying why", item.Kind, item.Name)
+	}
+}
+
+// TestPrune_NoticesReachBothTheResultAndTheWriter covers the fan-out at the
+// aggregation boundary. Backends no longer format their advisories, so if the
+// result were the only destination, every existing caller passing Output would
+// silently go quiet; if the writer were the only one, the conversion would have
+// bought nothing. Both, exactly once each, is the contract (D145).
+func TestPrune_NoticesReachBothTheResultAndTheWriter(t *testing.T) {
+	c := newTestClient(t)
+
+	// A lock file with no sandbox dir and no live holder, made unremovable by
+	// stripping write on its directory — the one advisory this layer can
+	// provoke without a backend.
+	if os.Geteuid() == 0 {
+		t.Skip("root bypasses directory permissions, so the removal cannot be made to fail")
+	}
+	unlock, err := store.AcquireLock(c.layout, "ghost")
+	require.NoError(t, err)
+	unlock()
+
+	dir := c.layout.SandboxesDir()
+	require.NoError(t, os.Chmod(dir, 0o500))       //nolint:gosec // read-only is the point: it forces the removal to fail
+	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // restore so TempDir cleanup can recurse
+
+	var rendered bytes.Buffer
+	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: false, Output: &rendered})
+	require.NoError(t, err)
+
+	// Searched, not indexed: an available backend contributes its own notices
+	// first, and which ones depend on the host.
+	var found bool
+	for _, n := range res.Notices {
+		if n.Event == "lock.stale_remove_failed" {
+			found = true
+			assert.Equal(t, feedback.LevelWarn, n.Level)
+			assert.Contains(t, n.Fields["path"], "ghost")
+		}
+	}
+	assert.True(t, found, "the advisory must reach the caller as data, not only as text")
+	assert.Contains(t, rendered.String(), "ghost",
+		"the advisory must still reach a caller that only gave us a writer")
+	assert.Equal(t, 1, strings.Count(rendered.String(), "could not remove stale lock"),
+		"the tee must deliver once, not once per destination")
 }
 
 // TestEmptyTrash_RemovesAll verifies EmptyTrash deletes all trash entries.

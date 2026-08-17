@@ -263,8 +263,7 @@ func TestApple_PruneSparesForeignPrincipal(t *testing.T) {
 
 	// known is empty, so ownName is an orphan by construction; foreignName is not
 	// ours to reap at all.
-	var out bytes.Buffer
-	res, err := ownRT.Prune(ctx, nil, false, &out)
+	res, err := ownRT.Prune(ctx, nil, false)
 	require.NoError(t, err)
 
 	var pruned []string

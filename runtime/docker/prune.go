@@ -5,7 +5,6 @@ package docker
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -15,6 +14,7 @@ import (
 	"github.com/docker/docker/api/types/filters"
 	"github.com/docker/docker/api/types/image"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -27,7 +27,7 @@ import (
 const managedLabel = "com.yoloai.managed"
 
 // Prune implements runtime.Backend.
-func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
+func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool) (runtime.PruneResult, error) {
 	known := make(map[string]bool, len(knownInstances))
 	for _, name := range knownInstances {
 		known[name] = true
@@ -35,14 +35,15 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 
 	var result runtime.PruneResult
 
-	containerItems, err := r.pruneContainers(ctx, known, dryRun, output)
+	containerItems, err := r.pruneContainers(ctx, known, dryRun)
 	if err != nil {
 		return runtime.PruneResult{}, err
 	}
 	result.Items = append(result.Items, containerItems...)
 
-	imageItems := r.pruneDanglingImages(ctx, dryRun, output)
+	imageItems, imageNotices := r.pruneDanglingImages(ctx, dryRun)
 	result.Items = append(result.Items, imageItems...)
+	result.Notices = append(result.Notices, imageNotices...)
 
 	return result, nil
 }
@@ -53,7 +54,7 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 // name prefix, so a foreign container merely named yoloai-* is never removed and
 // the per-principal scoping (DF19) comes from the principal label. The known set
 // and removal stay keyed on the real container name.
-func (r *Runtime) pruneContainers(ctx context.Context, known map[string]bool, dryRun bool, output io.Writer) ([]runtime.PruneItem, error) {
+func (r *Runtime) pruneContainers(ctx context.Context, known map[string]bool, dryRun bool) ([]runtime.PruneItem, error) {
 	containers, err := r.client.ContainerList(ctx, container.ListOptions{
 		All:     true,
 		Filters: filters.NewArgs(filters.Arg("label", runtime.LabelSandbox)),
@@ -72,57 +73,60 @@ func (r *Runtime) pruneContainers(ctx context.Context, known map[string]bool, dr
 		if known[name] {
 			continue
 		}
-		if !dryRun && !r.removeContainer(ctx, name, output) {
-			continue
-		}
-		items = append(items, runtime.PruneItem{Kind: "container", Name: name})
+		items = append(items, r.removeOrReport(ctx, "container", name, dryRun, func() error {
+			return r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true})
+		}))
 	}
 	return items, nil
 }
 
-// removeContainer removes one container. Returns false if removal failed for a
-// reason other than "already gone" (in which case the caller should skip
-// recording it as pruned). A warning is written to output on real failures.
-func (r *Runtime) removeContainer(ctx context.Context, name string, output io.Writer) bool {
-	err := r.client.ContainerRemove(ctx, name, container.RemoveOptions{Force: true})
-	if err == nil || cerrdefs.IsNotFound(err) {
-		return true
+// removeOrReport performs one removal (or, under dryRun, none) and returns the
+// item describing what became of the resource.
+//
+// A failure used to drop the resource from the result entirely and print a
+// warning past the caller, so a prune that could not remove something reported
+// the same thing as a prune with nothing to remove. Now it comes back as an
+// item the caller can show, count separately, or act on. "Already gone" counts
+// as removed: the caller asked for the resource to not exist, and it does not.
+func (r *Runtime) removeOrReport(ctx context.Context, kind, name string, dryRun bool, remove func() error) runtime.PruneItem {
+	item := runtime.PruneItem{Kind: kind, Name: name, Action: runtime.PruneActionWouldRemove}
+	if dryRun {
+		return item
 	}
-	fmt.Fprintf(output, "Warning: failed to remove container %s: %v\n", name, err) //nolint:errcheck // best-effort output
-	return false
+	if err := remove(); err != nil && !cerrdefs.IsNotFound(err) {
+		item.Action = runtime.PruneActionFailed
+		item.Reason = err.Error()
+		return item
+	}
+	item.Action = runtime.PruneActionRemoved
+	return item
 }
 
 // pruneDanglingImages removes dangling images (stale build layers from rebuilds).
 // Failures during listing or removal are reported as warnings; this is best-effort.
-func (r *Runtime) pruneDanglingImages(ctx context.Context, dryRun bool, output io.Writer) []runtime.PruneItem {
+func (r *Runtime) pruneDanglingImages(ctx context.Context, dryRun bool) ([]runtime.PruneItem, []feedback.Notice) {
 	danglingImages, err := r.client.ImageList(ctx, image.ListOptions{
 		Filters: filters.NewArgs(filters.Arg("dangling", "true")),
 	})
 	if err != nil {
-		fmt.Fprintf(output, "Warning: failed to list dangling images: %v\n", err) //nolint:errcheck // best-effort output
-		return nil
+		// A listing failure is about the operation, not any resource, so it is
+		// the one thing here that stays a notice.
+		return nil, []feedback.Notice{{
+			Event:   "prune.image_list_failed",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("failed to list dangling images: %v", err),
+			Fields:  map[string]any{"backend": r.binaryName},
+		}}
 	}
 
 	var items []runtime.PruneItem
 	for _, img := range danglingImages {
-		shortID := shortImageID(img.ID)
-		if !dryRun && !r.removeImage(ctx, img.ID, shortID, output) {
-			continue
-		}
-		items = append(items, runtime.PruneItem{Kind: "image", Name: shortID})
+		items = append(items, r.removeOrReport(ctx, "image", shortImageID(img.ID), dryRun, func() error {
+			_, rmErr := r.client.ImageRemove(ctx, img.ID, image.RemoveOptions{Force: true, PruneChildren: true})
+			return rmErr
+		}))
 	}
-	return items
-}
-
-// removeImage removes one image. Returns false if removal failed for a reason
-// other than "already gone". A warning is written to output on real failures.
-func (r *Runtime) removeImage(ctx context.Context, id, shortID string, output io.Writer) bool {
-	_, err := r.client.ImageRemove(ctx, id, image.RemoveOptions{Force: true, PruneChildren: true})
-	if err == nil || cerrdefs.IsNotFound(err) {
-		return true
-	}
-	fmt.Fprintf(output, "Warning: failed to remove image %s: %v\n", shortID, err) //nolint:errcheck // best-effort output
-	return false
+	return items, nil
 }
 
 // pruneManagedImages is the scoped `--images` sweep: it removes unused images
@@ -140,36 +144,55 @@ func (r *Runtime) removeImage(ctx context.Context, id, shortID string, output io
 // same shape as pruneDanglingImages. Slightly more round-trips than a
 // server-side prune; accepted for the isolation, and the name half retires
 // with the bridge.
-func (r *Runtime) pruneManagedImages(ctx context.Context, output io.Writer) {
+func (r *Runtime) pruneManagedImages(ctx context.Context) ([]runtime.PruneItem, []feedback.Notice) {
+	listFailed := func(what string, err error) []feedback.Notice {
+		return []feedback.Notice{{
+			Event:   "prune.image_sweep_aborted",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("%s: images prune: list %s failed: %v", r.binaryName, what, err),
+			Fields:  map[string]any{"backend": r.binaryName, "listing": what},
+		}}
+	}
 	imgs, err := r.client.ImageList(ctx, image.ListOptions{})
 	if err != nil {
-		fmt.Fprintf(output, "%s: images prune: list images failed: %v\n", r.binaryName, err) //nolint:errcheck
-		return
+		return nil, listFailed("images", err)
 	}
 	// Without the full container list we cannot know what is in use, and
 	// guessing risks removing a pinned image — so remove nothing.
 	containers, err := r.client.ContainerList(ctx, container.ListOptions{All: true})
 	if err != nil {
-		fmt.Fprintf(output, "%s: images prune: list containers failed: %v\n", r.binaryName, err) //nolint:errcheck
-		return
+		return nil, listFailed("containers", err)
 	}
 	inUse := make(map[string]bool, len(containers))
 	for _, c := range containers {
 		inUse[c.ImageID] = true
 	}
+	var items []runtime.PruneItem
+	var notices []feedback.Notice
 	for _, cand := range managedImageCandidates(imgs, inUse) {
 		if cand.nameOnly {
 			// The discrepancy signal for the bridge's settling period: this
 			// image predates the label. The population should decay to zero as
 			// rebuilds re-stamp; if it doesn't, the labeling machinery has a
-			// bug to find before the bridge retires.
-			fmt.Fprintf(output, "%s: image %s matched by name only (pre-label; rebuilt images carry %s)\n", //nolint:errcheck
-				r.binaryName, cand.display, managedLabel)
+			// bug to find before the bridge retires. A notice rather than an
+			// item field: it says how the image was recognised, not what
+			// became of it, and the item below says that.
+			notices = append(notices, feedback.Notice{
+				Event: "prune.image_matched_by_name_only",
+				Level: feedback.LevelInfo,
+				Message: fmt.Sprintf("%s: image %s matched by name only (pre-label; rebuilt images carry %s)",
+					r.binaryName, cand.display, managedLabel),
+				Fields: map[string]any{"backend": r.binaryName, "image": cand.display},
+			})
 		}
 		for _, ref := range cand.removeRefs {
-			_ = r.removeImage(ctx, ref, cand.display, output)
+			items = append(items, r.removeOrReport(ctx, "image", cand.display, false, func() error {
+				_, rmErr := r.client.ImageRemove(ctx, ref, image.RemoveOptions{Force: true, PruneChildren: true})
+				return rmErr
+			}))
 		}
 	}
+	return items, notices
 }
 
 // managedImageCandidate is one unused yoloai image the scoped sweep will
@@ -285,9 +308,22 @@ func shortImageID(id string) string {
 // the truthful self-attributed reclaim: it counts only what THIS backend freed
 // (no shared host statfs to absorb another backend's freeing) and reconciles
 // with the doctor/disk figures by construction.
-func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error) {
+func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool) (runtime.CachePruneResult, error) {
 	if dryRun {
-		return r.pruneCacheDryRun(ctx, includeImages, output), nil
+		return r.pruneCacheDryRun(ctx, includeImages), nil
+	}
+
+	var result runtime.CachePruneResult
+	// subcommandFailed records a backend sweep that did not run. All four are
+	// the same occurrence — one category of daemon-side prune failed — so they
+	// share an event and name the category in a field.
+	subcommandFailed := func(operation string, err error) {
+		result.Notices = append(result.Notices, feedback.Notice{
+			Event:   "prune.subcommand_failed",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("%s: %s prune failed: %v", r.binaryName, operation, err),
+			Fields:  map[string]any{"backend": r.binaryName, "operation": operation},
+		})
 	}
 
 	before := r.reclaimableBytes(ctx, includeImages)
@@ -298,7 +334,7 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	// a foreign stopped container on a shared daemon untouched — plain prune is
 	// not a daemon-wide `docker container prune` (DF137).
 	if _, err := r.client.ContainersPrune(ctx, filters.NewArgs(filters.Arg("label", runtime.LabelSandbox))); err != nil {
-		fmt.Fprintf(output, "%s: containers prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+		subcommandFailed("containers", err)
 	}
 
 	// BuildKit cache: usually the biggest single category on a heavy-build
@@ -307,7 +343,7 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	// freed by containerd GC. Podman's docker-compat API has no build cache
 	// endpoint and returns 404; that's expected, so swallow Not Found silently.
 	if _, err := r.client.BuildCachePrune(ctx, build.CachePruneOptions{All: true}); err != nil && !cerrdefs.IsNotFound(err) {
-		fmt.Fprintf(output, "%s: build cache prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+		subcommandFailed("build cache", err)
 	}
 
 	// Volumes: only yoloai's own (label-scoped). On Docker, all=true so named
@@ -321,7 +357,7 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 		volFilter.Add("all", "true")
 	}
 	if _, err := r.client.VolumesPrune(ctx, volFilter); err != nil {
-		fmt.Fprintf(output, "%s: volumes prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+		subcommandFailed("volumes", err)
 	}
 
 	// Networks: only yoloai's own (label-scoped, like the volumes above). yoloai
@@ -329,7 +365,7 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	// the managed label keeps it from removing a foreign unused network on a
 	// shared daemon (DF137) and stays correct if yoloai ever creates a labelled one.
 	if _, err := r.client.NetworksPrune(ctx, filters.NewArgs(filters.Arg("label", managedLabel))); err != nil {
-		fmt.Fprintf(output, "%s: networks prune failed: %v\n", r.binaryName, err) //nolint:errcheck
+		subcommandFailed("networks", err)
 	}
 
 	// Images last, and only when asked. This is what forces a rebuild, so it's
@@ -339,15 +375,21 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	// foreign unused image on a shared daemon. That reaping was the DF137-class
 	// defect the earlier unscoped ImagesPrune(dangling=false) carried.
 	if includeImages {
-		r.pruneManagedImages(ctx, output)
+		items, notices := r.pruneManagedImages(ctx)
+		result.Items = append(result.Items, items...)
+		result.Notices = append(result.Notices, notices...)
 	}
 
-	reclaimed := int64(0)
 	if after := r.reclaimableBytes(ctx, includeImages); before >= 0 && after >= 0 && before > after {
-		reclaimed = before - after
+		result.BytesReclaimed = before - after
 	}
-	fmt.Fprintf(output, "%s: reclaimed %s\n", r.binaryName, runtime.FormatBytes(reclaimed)) //nolint:errcheck
-	return reclaimed, nil
+	result.Notices = append(result.Notices, feedback.Notice{
+		Event:   "prune.cache_reclaimed",
+		Level:   feedback.LevelInfo,
+		Message: fmt.Sprintf("%s: reclaimed %s", r.binaryName, runtime.FormatBytes(result.BytesReclaimed)),
+		Fields:  map[string]any{"backend": r.binaryName, "bytes": result.BytesReclaimed},
+	})
+	return result, nil
 }
 
 // reclaimableBytes returns this backend's currently reclaimable footprint as
@@ -370,11 +412,17 @@ func (r *Runtime) reclaimableBytes(ctx context.Context, includeImages bool) int6
 // of the reclaimable bytes (build cache + volumes, plus images when
 // includeImages). The Docker API has no dry-run prune, so this reads current
 // disk usage instead of removing anything.
-func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, output io.Writer) int64 {
+func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool) runtime.CachePruneResult {
+	var result runtime.CachePruneResult
 	du, err := r.client.DiskUsage(ctx, types.DiskUsageOptions{})
 	if err != nil {
-		fmt.Fprintf(output, "%s: could not estimate reclaimable cache: %v\n", r.binaryName, err) //nolint:errcheck
-		return 0
+		result.Notices = append(result.Notices, feedback.Notice{
+			Event:   "prune.estimate_unavailable",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("%s: could not estimate reclaimable cache: %v", r.binaryName, err),
+			Fields:  map[string]any{"backend": r.binaryName},
+		})
+		return result
 	}
 	cached, images := r.splitCacheBytes(du)
 	what := "unused volumes, build cache"
@@ -392,12 +440,18 @@ func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, outp
 	// into. Print the per-backend breakdown only when there's something to
 	// reclaim; the aggregate banner and "Nothing to prune" cover the rest.
 	if estimate > 0 {
-		fmt.Fprintf(output, "%s: would remove %s (~%s)\n", r.binaryName, what, runtime.FormatBytes(estimate)) //nolint:errcheck
+		result.Notices = append(result.Notices, feedback.Notice{
+			Event:   "prune.cache_estimated",
+			Level:   feedback.LevelInfo,
+			Message: fmt.Sprintf("%s: would remove %s (~%s)", r.binaryName, what, runtime.FormatBytes(estimate)),
+			Fields:  map[string]any{"backend": r.binaryName, "categories": what, "bytes": estimate},
+		})
 	}
 	if includeImages {
-		r.warnImageReclaimBlockers(du, output)
+		result.Notices = append(result.Notices, r.imageReclaimBlockedNotices(du)...)
 	}
-	return estimate
+	result.BytesReclaimed = estimate
+	return result
 }
 
 // imageReclaimBlocker is one container that pins image layers against
@@ -448,18 +502,33 @@ func imageReclaimBlockers(du types.DiskUsage) []imageReclaimBlocker {
 	return blockers
 }
 
-// warnImageReclaimBlockers prints a per-backend warning naming the containers
-// that will keep ImagesPrune from freeing the layers the dry-run estimate just
-// promised. No-op when nothing is blocking.
-func (r *Runtime) warnImageReclaimBlockers(du types.DiskUsage, output io.Writer) {
+// imageReclaimBlockedNotices names the containers that will keep ImagesPrune
+// from freeing the layers the dry-run estimate just promised. Empty when
+// nothing is blocking.
+//
+// One notice, not one per blocker: the occurrence is "image reclaim is
+// blocked", and which containers are holding it is the detail. A consumer
+// wanting to act on them reads the field; the message keeps the indented list
+// the terminal has always shown.
+func (r *Runtime) imageReclaimBlockedNotices(du types.DiskUsage) []feedback.Notice {
 	blockers := imageReclaimBlockers(du)
 	if len(blockers) == 0 {
-		return
+		return nil
 	}
-	fmt.Fprintf(output, "%s: image reclaim is blocked by %d active container(s) — stop or destroy them to reclaim image layers:\n", r.binaryName, len(blockers)) //nolint:errcheck
+	var msg strings.Builder
+	fmt.Fprintf(&msg, "%s: image reclaim is blocked by %d active container(s) — stop or destroy them to reclaim image layers:",
+		r.binaryName, len(blockers))
+	names := make([]string, 0, len(blockers))
 	for _, b := range blockers {
-		fmt.Fprintf(output, "%s:   %s (%s) holds %s\n", r.binaryName, b.Name, b.State, b.Image) //nolint:errcheck
+		fmt.Fprintf(&msg, "\n%s:   %s (%s) holds %s", r.binaryName, b.Name, b.State, b.Image)
+		names = append(names, b.Name)
 	}
+	return []feedback.Notice{{
+		Event:   "prune.image_reclaim_blocked",
+		Level:   feedback.LevelWarn,
+		Message: msg.String(),
+		Fields:  map[string]any{"backend": r.binaryName, "blockers": names},
+	}}
 }
 
 // CacheUsage implements runtime.DiskUsageReporter, splitting reclaimable bytes

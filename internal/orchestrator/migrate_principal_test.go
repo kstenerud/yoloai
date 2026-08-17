@@ -134,7 +134,7 @@ func (f *fakeBackend) Exec(context.Context, string, []string, string) (runtime.E
 func (f *fakeBackend) InteractiveExec(context.Context, string, []string, string, string, runtime.IOStreams) error {
 	return nil
 }
-func (f *fakeBackend) Prune(context.Context, []string, bool, io.Writer) (runtime.PruneResult, error) {
+func (f *fakeBackend) Prune(context.Context, []string, bool) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, nil
 }
 func (f *fakeBackend) Close() error           { return nil }

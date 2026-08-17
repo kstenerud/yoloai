@@ -4,7 +4,11 @@
 
 # Feedback routing — one record, four consumers, the caller renders
 
-- **Status:** PLANNED — designed, no code.
+- **Status:** IN-PROGRESS — built: the `feedback` package (emission API, `Sink`, `Collector`, `Tee`,
+  `WriterSink`); `Notice` moved below every layer that emits one; the create/launch advisories; and
+  the prune trio, whose writers are gone and whose lines are now typed `PruneItem`s carrying an
+  `Action` and a `Reason`. Remaining: the rest of `runtime/` (~36 writes, mostly `tart/build.go` and
+  `containerd/image.go`), `internal/envsetup` (4), and steps 4–7 below.
 - **Depends on:** —
 - **Rides:** **breaking.** `SandboxCreateOptions.Output` and `ClientOptions.Output` are public
   `io.Writer` fields (`sandbox_options.go:140`, `client_options.go:60`); an embedder sets them today.

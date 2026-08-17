@@ -192,6 +192,7 @@ func printActualRemoval(output io.Writer, result *yoloai.PruneResult, images, is
 	for _, t := range result.Trashed {
 		fmt.Fprintf(output, "Quarantined broken sandbox %s to trash (%s)\n", t.Name, t.TrashPath) //nolint:errcheck
 	}
+	printSkippedItems(output, result.SkippedItems)
 	if result.FreedBytes > 0 {
 		what := "backend cache"
 		if images {
@@ -372,6 +373,12 @@ func writePruneJSON(cmd *cobra.Command, result *yoloai.PruneResult, dryRun bool)
 		Kind string `json:"kind"`
 		Name string `json:"name"`
 	}
+	type skippedItem struct {
+		Kind   string `json:"kind"`
+		Name   string `json:"name"`
+		Action string `json:"action"`
+		Reason string `json:"reason"`
+	}
 	type refusedItem struct {
 		Name   string `json:"name"`
 		Path   string `json:"path"`
@@ -386,6 +393,16 @@ func writePruneJSON(cmd *cobra.Command, result *yoloai.PruneResult, dryRun bool)
 	for _, item := range result.RemovedItems {
 		items = append(items, pruneItem{Kind: string(item.Kind), Name: item.Name})
 	}
+	// Resources prune found but did not reclaim. Previously these were warning
+	// lines on stderr and absent from --json entirely, so a scripted caller
+	// could not tell a clean prune from one that failed on every container.
+	skipped := make([]skippedItem, 0, len(result.SkippedItems))
+	for _, item := range result.SkippedItems {
+		skipped = append(skipped, skippedItem{
+			Kind: string(item.Kind), Name: item.Name,
+			Action: string(item.Action), Reason: item.Reason,
+		})
+	}
 	refused := make([]refusedItem, 0, len(result.RefusedDataBearing))
 	for _, r := range result.RefusedDataBearing {
 		refused = append(refused, refusedItem{Name: r.Name, Path: r.Path, Detail: r.Detail})
@@ -396,6 +413,7 @@ func writePruneJSON(cmd *cobra.Command, result *yoloai.PruneResult, dryRun bool)
 	}
 	return cliutil.WriteJSON(cmd.OutOrStdout(), map[string]any{
 		"items":       items,
+		"skipped":     skipped,
 		"refused":     refused,
 		"trashed":     trashed,
 		"freed_bytes": result.FreedBytes,
@@ -403,4 +421,20 @@ func writePruneJSON(cmd *cobra.Command, result *yoloai.PruneResult, dryRun bool)
 		"trash_bytes": result.TrashContents.Bytes,
 		"dry_run":     dryRun,
 	})
+}
+
+// printSkippedItems reports the resources prune found but left in place.
+//
+// They go to stderr, and they are printed even though each already produced a
+// backend warning line: the warnings are interleaved with progress from every
+// backend, while this is the summary of what is still there — which is what a
+// user acting on the result needs. No-op when nothing was skipped.
+func printSkippedItems(output io.Writer, items []yoloai.PruneItem) {
+	if len(items) == 0 {
+		return
+	}
+	fmt.Fprintf(output, "%d resource(s) not reclaimed:\n", len(items)) //nolint:errcheck
+	for _, item := range items {
+		fmt.Fprintf(output, "  %s %s (%s): %s\n", item.Kind, item.Name, item.Action, item.Reason) //nolint:errcheck
+	}
 }

@@ -343,7 +343,7 @@ func TestIntegration_Prune(t *testing.T) {
 	defer rt.Close() //nolint:errcheck // best-effort close
 
 	// Prune with an empty known list — should not error.
-	result, err := rt.Prune(ctx, []string{}, true /* dryRun */, os.Stdout)
+	result, err := rt.Prune(ctx, []string{}, true /* dryRun */)
 	require.NoError(t, err)
 	t.Logf("Prune found %d orphaned items", len(result.Items))
 }
