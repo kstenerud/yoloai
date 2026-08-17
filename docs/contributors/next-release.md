@@ -86,6 +86,7 @@ that makes them structural rather than four spot repairs.*
 - [feedback-routing.md](design/plans/feedback-routing.md) — Feedback routing — one record, four consumers, the caller renders
 - [DF219](design/findings-resolved.md) — `state.State.DevcontainerMountWarnings` was written on every create and read by nothing
 - [DF220](design/findings-resolved.md) — a mount-strip test named a branch it never reached, because its assertion matched the path it printed
+- [DF221](design/findings-unresolved.md) — `state.State` has five more write-only fields, and two were already deleted as one-offs
 
 ## Deferred to v0.13.0 — the network release
 

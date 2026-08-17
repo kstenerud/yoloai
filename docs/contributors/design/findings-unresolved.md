@@ -1263,6 +1263,27 @@ earlier signal and records nothing else.
 - **A third option worth naming and probably rejecting:** repointing by hand. That is what happened here, and it only worked because the whole set was recomputed from the current headings in one pass — a hand-edit per link is how a set like this goes half-stale.
 - **Pointer:** `docs/contributors/design/findings-resolved.md` (the newest-first + `(RESOLVED <date>)` conventions, stated in its own preamble); `repo_hygiene_test.go` (`mdHeadingSlug`, `TestRepoHygiene_MarkdownAnchors_Resolve`). Related: [DF214](#df214--shipped-text-disagrees-with-the-code-it-describes-in-ten-places-and-every-one-sits-inside-text-an-existing-gate-already-reads), [DF215](#df215--docscontributorsstandardsclimd-mandates-two-flags-the-cli-does-not-have-and-builds-a-convention-on-them), [DF216](#df216--two-architecture-docs-instruct-a-contributor-to-write-code-the-linter-rejects), [DF217](#df217--the-config-docs-gate-validates-against-a-looser-predicate-than-the-command-it-certifies) — the same review.
 
+### DF221 — `state.State` has five more write-only fields, and two were already deleted as one-offs
+
+- **Discovered:** 2026-08-17, after deleting the second of them ([DF219](findings-resolved.md)) · **Workstream:** feedback routing / D145
+- **Severity:** LOW individually; the pattern is the finding
+- **Disposition:** UNRESOLVED — **to be swept before the v0.12.0 cut** (owner's call, 2026-08-17)
+- **Rides:** **any**.
+- **Description:** `state.State` (`internal/orchestrator/state/state.go`) carries **five fields that are assigned on every create and read by nothing** — no production code, no test, no serialization:
+
+  | Field | Written at |
+  | --- | --- |
+  | `ConfigJSON` | `create/create.go`, `lifecycle/restart.go` |
+  | `Devcontainer` | `create/create.go` |
+  | `DevcontainerMounts` | `create/create.go` |
+  | `DockerdRequired` | `create/create.go` |
+  | `WorkdirMode` | `create/create.go` |
+
+- **Verified, not assumed.** Each was checked by grepping `\.<Field>` across the tree excluding the declaration; all five return nothing outside their own assignment. `State` has **no struct tags and is never marshalled**, so "no Go reader" is the whole story — there is no reflective consumer to miss. Two were then traced further to confirm the *behaviour* is intact and only the copy is dead: the filtered devcontainer mounts reach the sandbox through `mergeDcMounts` into `profileResult.mounts`, and the dockerd auto-start reaches the guest through `runtimeconfig.LifecycleConfig.DockerDRequired` (JSON `dockerd_required`), not through this struct. **Nothing is broken; five values are computed and discarded.**
+- **The pattern, per GEN §18.** With [DF205](findings-resolved.md) (`IsolationExplicit`) and [DF219](findings-resolved.md) (`DevcontainerMountWarnings`) already deleted as separate one-off findings, this is **seven of one shape in one release** — comfortably past the three that says the architecture is generating them rather than that someone was careless. The generator is structural: `State` is a wide struct assembled at one site and consumed at many, so adding a field is free, nothing forces a consumer to appear, and **a field with no reader has no test that can go red**. Deleting them one at a time as they are noticed treats the symptom; the third one found should have been the signal, and was not.
+- **What a sweep should decide, beyond deleting five fields:** whether anything prevents the sixth. Options worth weighing — a `TestArch_` claim that every `State` field has a reader (mechanical, and the only one that would have caught these), narrowing `State` toward per-stage inputs so the assembly site stops being a dumping ground, or accepting the shape and gating it. Deleting without answering that leaves the generator running.
+- **Pointer:** `internal/orchestrator/state/state.go` (the `State` struct); `internal/orchestrator/create/create.go` (the assembly site); `internal/orchestrator/lifecycle/restart.go`. Siblings: [DF205](findings-resolved.md), [DF219](findings-resolved.md).
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).
