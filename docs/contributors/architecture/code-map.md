@@ -25,6 +25,7 @@ sandbox.go               → Sandbox handle: lifecycle + flat readers (Inspect, 
 system.go                → Orchestration spine: System (DiskUsage, Prune, Build, Check)
 runtime_imports_linux.go → Linux-specific backend registration (containerd)
 yoerrors/                → Public typed error sentinels (top-level pkg; re-exported via the yoloai package)
+feedback/                → Public advisory records (Notice) + their destination (Sink); stdlib-only so every layer can emit
 cmd/yoloai/              → Binary entry point
 internal/agent/          → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, idle)
 internal/cli/            → Cobra command tree and CLI plumbing
@@ -476,6 +477,27 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName(principal, name)` — principal-aware runtime handle: `yoloai-<principal>-<name>` (the CLI's principal is `cli`; the empty principal is invalid and panics per D126). `LegacyCLIInstanceName(name)` — the pre-D126 `yoloai-<name>` form, used only by migrations. `Dir()`, `WorkDir()`, `RequireSandboxDir()`. No `:overlay` path helper survives here: the one the flatten migrator still needed moved to `internal/config/pretier`, which freezes the pre-tier layout the migrators read. `ValidateName()` delegates to `config.ParseSandboxName` (containerd-conformant grammar). Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
 | `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.BackendType` records which runtime backend was used; `Environment.Principal` records the owning principal (D62). |
 | `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Environment` which is immutable after creation. |
+
+### `feedback/`
+
+Advisory feedback addressed to whoever called the API — CLI, MCP server, embedder, daemon (D145).
+The line that decides membership is *who is addressed*: a message for the **caller** is feedback and
+must be threaded or returned, because a process global cannot say which caller a line belongs to; a
+message for the **operator** is a diagnostic and stays on the logger, whose handler the entrypoint
+installs. The rule is "no undeclared destination", not "no globals".
+
+`TestArch_FeedbackHasNoYoloaiDependencies` pins that this package imports nothing else in the
+module. That is what lets `runtime/`, `store/` and `copyflow/` emit without importing anything above
+them; the first internal dependency would compile fine and surface later as an import cycle in an
+unrelated change.
+
+Deliberately absent: no universal record type (results are per-API and typed), no error level
+(errors are returned), and no progress (only meaningful live, so it stays an `io.Writer` stream).
+
+| File | Purpose |
+|------|---------|
+| `feedback.go` | `Notice` (semantic dotted `Event`, `Level`, rendered `Message`, optional `Fields`), `LevelInfo`/`LevelWarn`, and the `Infof`/`Warnf` emission helpers. `Event` is what makes a consumer a lookup rather than a match on message text, so it is a required argument, not a field a site may omit. |
+| `sink.go` | `Sink` (one method, `Notice`), `SinkFunc`, `Discard`, `Collector` (mutex-guarded — prune fans out across backends), `Tee`. A `nil` Sink panics naming `Discard`: dropping notices is legitimate, so it is stated rather than caused by a zero-valued field. Not a channel — a channel imposes a drain/close lifecycle, and an unbuffered one nobody reads deadlocks the library mid-operation. |
 
 ### `internal/workspace/`
 
