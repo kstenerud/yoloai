@@ -6,11 +6,12 @@ package create
 import (
 	"context"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
+	"strings"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
 	mountspkg "github.com/kstenerud/yoloai/internal/orchestrator/mounts"
@@ -23,10 +24,10 @@ import (
 // prints transparency output.
 //
 // Returns: (resolved archetype, devcontainer config, safe devcontainer mounts, mount warnings, error).
-func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []string, error) {
+func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []feedback.Notice, error) {
 	workdir := opts.Workdir.Path
 
-	warnIfYoloAIYamlPresent(outputFor(opts.Output), workdir)
+	warnIfYoloAIYamlPresent(noticesFor(opts.Output), workdir)
 
 	arch, signals, source, err := resolveArchetype(opts, workdir)
 	if err != nil {
@@ -34,20 +35,20 @@ func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, 
 	}
 
 	// Step 2: Platform check for apple archetype
-	if err := checkAppleArchetype(outputFor(opts.Output), arch, opts.Archetype); err != nil {
+	if err := checkAppleArchetype(noticesFor(opts.Output), arch, opts.Archetype); err != nil {
 		return "", nil, nil, nil, err
 	}
 
 	// Step 3: Archetype expansion
-	devcontainerCfg, dcMounts, dcMountWarnings, bullets, err := expandArchetype(ctx, d, opts, pr, arch)
+	devcontainerCfg, dcMounts, dcMountNotices, bullets, err := expandArchetype(ctx, d, opts, pr, arch)
 	if err != nil {
 		return "", nil, nil, nil, err
 	}
 
 	// Step 4: Transparency output
-	printArchetypeOutput(outputFor(opts.Output), arch, source, signals, bullets)
+	reportArchetype(noticesFor(opts.Output), arch, source, signals, bullets)
 
-	return arch, devcontainerCfg, dcMounts, dcMountWarnings, nil
+	return arch, devcontainerCfg, dcMounts, dcMountNotices, nil
 }
 
 // warnIfYoloAIYamlPresent warns that a workdir's .yoloai.yaml is no longer read.
@@ -55,11 +56,12 @@ func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, 
 // (most likely for its mounts: key) needs to learn its effect is gone rather than
 // losing host mounts silently. This is an existence check only — the file is never
 // parsed.
-func warnIfYoloAIYamlPresent(output io.Writer, workdir string) {
+func warnIfYoloAIYamlPresent(sink feedback.Sink, workdir string) {
 	if _, err := os.Stat(filepath.Join(workdir, ".yoloai.yaml")); err != nil {
 		return
 	}
-	fmt.Fprintln(output, "Warning: .yoloai.yaml is no longer read and is ignored (archetype/mounts/requires: all removed, D140). Use --archetype and devcontainer.json's mounts instead.") //nolint:errcheck // best-effort warning
+	feedback.Warnf(sink, "config.legacy_file_ignored",
+		".yoloai.yaml is no longer read and is ignored (archetype/mounts/requires: all removed, D140). Use --archetype and devcontainer.json's mounts instead.")
 }
 
 // resolveArchetype determines the archetype from CLI or auto-detection.
@@ -78,7 +80,7 @@ func resolveArchetype(opts *Options, workdir string) (archetype.Archetype, []str
 }
 
 // checkAppleArchetype validates platform requirements for the apple archetype.
-func checkAppleArchetype(output io.Writer, arch archetype.Archetype, cliArchetype string) error {
+func checkAppleArchetype(sink feedback.Sink, arch archetype.Archetype, cliArchetype string) error {
 	if arch != archetype.ArchetypeApple {
 		return nil
 	}
@@ -93,24 +95,25 @@ func checkAppleArchetype(output io.Writer, arch archetype.Archetype, cliArchetyp
 				"use --archetype simple for agent-only work on this project")
 	}
 	// Auto-detected apple on non-macOS → warn but don't fail
-	fmt.Fprintf(output, "Warning: This looks like an Apple platform project. The Tart backend requires Apple Silicon macOS.\n") //nolint:errcheck // best-effort warning
+	feedback.Warnf(sink, "archetype.platform_unavailable",
+		"This looks like an Apple platform project. The Tart backend requires Apple Silicon macOS.")
 	return nil
 }
 
 // expandArchetype applies archetype-specific settings to opts and pr.
-// Returns (devcontainerCfg, dcMounts, dcMountWarnings, bullets, error).
-func expandArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult, arch archetype.Archetype) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
+// Returns (devcontainerCfg, dcMounts, dcMountNotices, bullets, error).
+func expandArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult, arch archetype.Archetype) (*archetype.DevcontainerConfig, []string, []feedback.Notice, []string, error) {
 	var bullets []string
 	var devcontainerCfg *archetype.DevcontainerConfig
 	var dcMounts []string
-	var dcMountWarnings []string
+	var dcMountNotices []feedback.Notice
 
 	switch arch {
 	case archetype.ArchetypeCompose:
 		bullets = applyComposeArchetype(opts, pr)
 	case archetype.ArchetypeDevcontainer:
 		var err error
-		devcontainerCfg, dcMounts, dcMountWarnings, bullets, err = applyDevcontainerArchetype(ctx, d, opts, pr)
+		devcontainerCfg, dcMounts, dcMountNotices, bullets, err = applyDevcontainerArchetype(ctx, d, opts, pr)
 		if err != nil {
 			return nil, nil, nil, nil, err
 		}
@@ -120,7 +123,7 @@ func expandArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profi
 		// no-op
 	}
 
-	return devcontainerCfg, dcMounts, dcMountWarnings, bullets, nil
+	return devcontainerCfg, dcMounts, dcMountNotices, bullets, nil
 }
 
 // applyComposeArchetype applies compose-specific settings to opts and pr.
@@ -139,7 +142,7 @@ func applyComposeArchetype(opts *Options, pr *profileResult) []string {
 }
 
 // applyDevcontainerArchetype loads and applies devcontainer.json settings.
-func applyDevcontainerArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (*archetype.DevcontainerConfig, []string, []string, []string, error) {
+func applyDevcontainerArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (*archetype.DevcontainerConfig, []string, []feedback.Notice, []string, error) {
 	_ = ctx // reserved for future use
 	workdir := opts.Workdir.Path
 	var bullets []string
@@ -160,9 +163,9 @@ func applyDevcontainerArchetype(ctx context.Context, d state.Deps, opts *Options
 				"use a project with devcontainer.json and docker-compose.yaml side by side instead")
 	}
 
-	dc.WarnIgnoredFields(outputFor(opts.Output))
+	dc.WarnIgnoredFields(noticesFor(opts.Output))
 
-	bullets = applyDevcontainerRunArgs(dc, pr, bullets, outputFor(opts.Output))
+	bullets = applyDevcontainerRunArgs(dc, pr, bullets, noticesFor(opts.Output))
 	bullets = applyDevcontainerCompose(dc, opts, pr, bullets)
 	bullets = applyDevcontainerEnv(dc, pr, bullets)
 	bullets = applyDevcontainerPorts(dc, opts, bullets)
@@ -172,14 +175,14 @@ func applyDevcontainerArchetype(ctx context.Context, d state.Deps, opts *Options
 	if workdirMountPath == "" {
 		workdirMountPath = opts.Workdir.Path
 	}
-	dcMounts, dcMountWarnings := dc.FilterMounts(workdirMountPath, d.Layout.HomeDir)
+	dcMounts, dcMountNotices := dc.FilterMounts(workdirMountPath, d.Layout.HomeDir)
 	if len(dcMounts) > 0 {
 		bullets = append(bullets, fmt.Sprintf("%d devcontainer mounts passed through", len(dcMounts)))
 	}
 
 	bullets = appendLifecycleBullets(dc, bullets)
 
-	return dc, dcMounts, dcMountWarnings, bullets, nil
+	return dc, dcMounts, dcMountNotices, bullets, nil
 }
 
 // findDevcontainerPath returns the path to devcontainer.json, or empty string if not found.
@@ -196,10 +199,10 @@ func findDevcontainerPath(workdir string) string {
 }
 
 // applyDevcontainerRunArgs applies runArgs (cpus, memory, capAdd) from devcontainer.json.
-func applyDevcontainerRunArgs(dc *archetype.DevcontainerConfig, pr *profileResult, bullets []string, output io.Writer) []string {
-	cpus, memory, capAdd, unknownWarnings := dc.ParsedRunArgs()
-	for _, w := range unknownWarnings {
-		fmt.Fprintln(output, w) //nolint:errcheck // best-effort warning
+func applyDevcontainerRunArgs(dc *archetype.DevcontainerConfig, pr *profileResult, bullets []string, sink feedback.Sink) []string {
+	cpus, memory, capAdd, notices := dc.ParsedRunArgs()
+	for _, n := range notices {
+		feedback.Emit(sink, n)
 	}
 	if cpus != "" && (pr.resources == nil || pr.resources.CPUs == "") {
 		if pr.resources == nil {
@@ -297,29 +300,52 @@ func appendLifecycleBullets(dc *archetype.DevcontainerConfig, bullets []string) 
 	return bullets
 }
 
-// printArchetypeOutput prints transparency information about the resolved archetype.
-func printArchetypeOutput(output io.Writer, arch archetype.Archetype, source string, signals []string, bullets []string) {
+// reportArchetype emits the transparency report for the resolved archetype:
+// what was detected, what that selected, and what it changed.
+//
+// It is one notice rather than one per line. The lines are a single fact with
+// structure -- this archetype, from these signals, with these effects -- and a
+// consumer that is not a terminal wants the parts, not a transcript it has to
+// reassemble. So the parts are Fields and the rendered block is the Message,
+// which keeps the terminal output byte-identical to the seven Fprintfs this
+// replaces while giving anything else the values directly.
+func reportArchetype(sink feedback.Sink, arch archetype.Archetype, source string, signals []string, bullets []string) {
 	if arch == archetype.ArchetypeSimple && source == "auto-detected" {
 		return
 	}
+	var b strings.Builder
 	switch {
 	case len(signals) > 0:
 		for _, sig := range signals {
-			fmt.Fprintf(output, "→ Detected %s\n", sig) //nolint:errcheck // best-effort output
+			fmt.Fprintf(&b, "→ Detected %s\n", sig)
 		}
 	case source == "--archetype flag":
-		fmt.Fprintf(output, "→ --archetype %s\n", string(arch)) //nolint:errcheck // best-effort output
+		fmt.Fprintf(&b, "→ --archetype %s\n", string(arch))
 	}
 	if arch != archetype.ArchetypeSimple {
-		fmt.Fprintf(output, "  Archetype: %s\n", string(arch)) //nolint:errcheck // best-effort output
+		fmt.Fprintf(&b, "  Archetype: %s\n", string(arch))
 		if len(bullets) > 0 {
-			fmt.Fprintln(output, "  Because of this:") //nolint:errcheck // best-effort output
-			for _, b := range bullets {
-				fmt.Fprintf(output, "    · %s\n", b) //nolint:errcheck // best-effort output
+			fmt.Fprint(&b, "  Because of this:\n")
+			for _, bullet := range bullets {
+				fmt.Fprintf(&b, "    · %s\n", bullet)
 			}
 		}
-		fmt.Fprintf(output, "  To suppress: --archetype simple\n") //nolint:errcheck // best-effort output
+		fmt.Fprint(&b, "  To suppress: --archetype simple\n")
 	}
+	if b.Len() == 0 {
+		return
+	}
+	feedback.Emit(sink, feedback.Notice{
+		Event:   "archetype.resolved",
+		Level:   feedback.LevelInfo,
+		Message: strings.TrimSuffix(b.String(), "\n"),
+		Fields: map[string]any{
+			"archetype": string(arch),
+			"source":    source,
+			"signals":   signals,
+			"effects":   bullets,
+		},
+	})
 }
 
 // validateAndExpandMounts validates and expands config mount paths.

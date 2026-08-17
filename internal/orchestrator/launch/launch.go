@@ -142,10 +142,10 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	if err != nil {
 		return err
 	}
-	ports = filterAvailablePorts(ports, outputOr(st.Output))
+	ports = filterAvailablePorts(ports, noticesOf(st))
 
 	for _, w := range advisoryWarnings(ctx, d.Runtime, st.Isolation) {
-		fmt.Fprintf(outputOr(st.Output), WarningPrefix+"%s\n", w) //nolint:errcheck // best-effort output
+		feedback.Warnf(noticesOf(st), "capability.advisory_check_failed", "%s", w)
 	}
 
 	// Re-ensure the image right before bringing it up, not only at create (DF156).
@@ -1265,8 +1265,13 @@ func createWithImageRecovery(ctx context.Context, rt runtime.Backend, st *state.
 	}
 
 	out := outputOr(st.Output)
-	fmt.Fprintf(out, "Profile image %s is recorded as built but missing from this backend's store; rebuilding it...\n", //nolint:errcheck // best-effort progress
-		instanceCfg.ImageRef)
+	feedback.Emit(noticesOf(st), feedback.Notice{
+		Event: "profile.image_rebuilding",
+		Level: feedback.LevelInfo,
+		Message: fmt.Sprintf("Profile image %s is recorded as built but missing from this backend's store; rebuilding it...",
+			instanceCfg.ImageRef),
+		Fields: map[string]any{"image": instanceCfg.ImageRef, "profile": st.Profile},
+	})
 
 	if buildErr := rebuildProfileImage(ctx, rt, st.Layout, st.Profile,
 		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, slog.Default(), true); buildErr != nil {
@@ -1369,13 +1374,18 @@ func verifyInstanceRunning(ctx context.Context, rt runtime.Backend, st *state.St
 // filterAvailablePorts removes any port mappings where the host port is already
 // in use, printing a warning for each skipped entry. Best-effort: a TOCTOU race
 // is possible but Docker's own error is the fallback for that case.
-func filterAvailablePorts(ports []runtime.PortMapping, output io.Writer) []runtime.PortMapping {
+func filterAvailablePorts(ports []runtime.PortMapping, sink feedback.Sink) []runtime.PortMapping {
 	var available []runtime.PortMapping
 	for _, p := range ports {
 		l, err := net.Listen("tcp", fmt.Sprintf(":%d", p.HostPort))
 		if err != nil {
-			fmt.Fprintf(output, WarningPrefix+"skipping port %d:%d — host port %d is already in use\n", //nolint:errcheck // best-effort output
-				p.HostPort, p.ContainerPort, p.HostPort)
+			feedback.Emit(sink, feedback.Notice{
+				Event: "ports.unavailable",
+				Level: feedback.LevelWarn,
+				Message: fmt.Sprintf("skipping port %d:%d — host port %d is already in use",
+					p.HostPort, p.ContainerPort, p.HostPort),
+				Fields: map[string]any{"host_port": p.HostPort, "container_port": p.ContainerPort},
+			})
 			continue
 		}
 		_ = l.Close()
@@ -1518,6 +1528,18 @@ func parseMemoryString(s string) (int64, error) {
 	return int64(val * float64(multiplier)), nil
 }
 
+// noticesOf resolves where this launch's advisory notices go.
+//
+// It derives the sink from st.Output, which is what keeps the two launch paths
+// byte-identical through the conversion: on create that writer is the progress
+// stream and the notices render onto it exactly as the Fprintfs did, and on
+// restart it is a noticeWriter that classifies them straight back into the
+// result's Notices. The seam goes when State carries a sink of its own and the
+// round-trip through bytes is no longer needed (D145).
+func noticesOf(st *state.State) feedback.Sink {
+	return feedback.WriterSink(outputOr(st.Output))
+}
+
 // outputOr returns o when non-nil, otherwise io.Discard, so leaf writers never
 // see a nil io.Writer. Mirrors the façade Engine.outputFor.
 func outputOr(o io.Writer) io.Writer {
@@ -1540,6 +1562,6 @@ func outputOr(o io.Writer) io.Writer {
 // result's Notices (F8) — both reach a human running the command.
 func discloseInjectedCredentials(st *state.State, spec envsetup.EnvSpec) {
 	if line := envsetup.DescribeInjectedCredentials(spec, st.Layout); line != "" {
-		fmt.Fprintln(outputOr(st.Output), line) //nolint:errcheck // best-effort output
+		feedback.Infof(noticesOf(st), "credentials.injected", "%s", line)
 	}
 }

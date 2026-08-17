@@ -13,6 +13,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
@@ -753,7 +754,11 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 	if err != nil {
 		assert.NotContains(t, err.Error(), "dangerous directory")
 	}
-	assert.Contains(t, buf.String(), "WARNING: mounting dangerous directory")
+	// "Warning: ", not the "WARNING: " this site used to write on its own. The
+	// level is now a field and the prefix is applied once, by whoever renders —
+	// so this line reads the same as every other warning instead of being the
+	// one shape the restart path's classifier would have filed as progress.
+	assert.Contains(t, buf.String(), feedback.WarningPrefix+"mounting dangerous directory")
 }
 
 // Error message tests

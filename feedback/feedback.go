@@ -60,6 +60,11 @@ type Notice struct {
 	// happened, not which function emitted it: two sites reporting the same
 	// occurrence share an ID, and one site reporting two occurrences uses two.
 	//
+	// The form is "<subject>.<what_happened>", underscores within a segment.
+	// The subject is the thing the notice is about — "devcontainer", "ports",
+	// "profile" — not the package it was emitted from, because code moves and
+	// an event should not move with it.
+	//
 	// The name is what a consumer switches on, so it is part of the contract
 	// with that consumer even though this field is not visible in rendered
 	// output. Renaming one is a behaviour change for any non-CLI consumer.
@@ -76,6 +81,16 @@ type Notice struct {
 	// Fields carries the structured values behind Message, or nil. Keys are
 	// scoped to the Event, not global.
 	Fields map[string]any
+}
+
+// Emit sends a fully-formed notice. It is the general form; Infof and Warnf
+// are the conveniences for the common case of a message with no fields.
+//
+// Prefer it over calling s.Notice directly, so that every emission in the
+// codebase goes through the same nil check and a site carrying fields is not
+// the one place that skips it.
+func Emit(s Sink, n Notice) {
+	emit(s, n)
 }
 
 // Infof emits an informational notice with a printf-formatted message.

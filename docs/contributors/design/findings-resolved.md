@@ -23,6 +23,30 @@ into this file skips the merge-conflict collision check that ID-ordering gives t
 a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
 of at rebase. Later, but still before it can ship.
 
+### DF220 — a mount-strip test named a branch it never reached, because its assertion matched the path it printed (RESOLVED 2026-08-17)
+
+- **Discovered:** 2026-08-17, converting `FilterMounts` to structured notices ([D145](../decisions/working-notes.md)) · **Workstream:** feedback routing
+- **Severity:** LOW (a test asserting nothing, in the security-relevant mount filter)
+- **Disposition:** **RESOLVED 2026-08-17.**
+- **Rides:** **any**.
+- **Description:** `TestFilterMounts_WorkdirConflict` (`internal/orchestrator/archetype/devcontainer_test.go`) mounted `/other/path:/workdir/myproject` and asserted the resulting warning contained `"workdir"`. But `/other/path` does not exist, so the mount was stripped by the **source-missing** rule two branches earlier; the target-conflict rule was never evaluated. The assertion passed because `FilterMounts` quotes the offending mount spec back into its message, and that spec contains the string `workdir`. So the test that existed to cover the workdir-conflict strip covered the source-missing strip, and had done since it was written.
+- **Why it survived:** the message is prose containing user data. A substring assertion over that cannot distinguish "the rule I meant fired" from "my fixture happens to contain this word", and nothing about the passing test says which. This is the general hazard D145's records address — the level, the event and the reason were all recoverable only by reading English.
+- **Fixed 2026-08-17** as part of the D145 conversion: `FilterMounts` returns `[]feedback.Notice` instead of `[]string`, each carrying `Fields["reason"]` (`docker_socket` / `credential_dir` / `source_missing` / `workdir_conflict`). The test now uses an existing source directory — `t.TempDir()` — so the target-conflict branch is actually reached, and asserts on the reason rather than on a fragment of the message. The sibling tests moved to the same shape.
+- **Pinned by** `TestFilterMounts_WorkdirConflict`, `TestFilterMounts_DockerSocket`, `TestFilterMounts_CredentialDir`, `TestFilterMounts_MissingSourcePath`, `TestFilterMounts_TypeBindFormat` (`internal/orchestrator/archetype/devcontainer_test.go`). Verified red on revert: restoring the `/other/path` fixture flips the reason to `source_missing` and the test fails, which is the confirmation the old form could not give.
+- **Pointer:** `internal/orchestrator/archetype/devcontainer.go` (`FilterMounts`); `internal/orchestrator/archetype/devcontainer_test.go`.
+
+### DF219 — `state.State.DevcontainerMountWarnings` was written on every create and read by nothing (RESOLVED 2026-08-17)
+
+- **Discovered:** 2026-08-17, tracing where devcontainer mount warnings go for [D145](../decisions/working-notes.md) · **Workstream:** feedback routing
+- **Severity:** LOW
+- **Disposition:** **RESOLVED 2026-08-17.**
+- **Rides:** **any**.
+- **Description:** `state.State` carried `DevcontainerMountWarnings []string`, assigned from the create pipeline (`internal/orchestrator/create/create.go`) and read by no code anywhere — the warnings were already printed at their production site, so the field was a second, dead copy. Deleted.
+- **The forest, per GEN §18:** this is **the second of its shape in one release**. [DF205](#df205--isolationexplicit-is-written-never-read-and-wrong-anyway-resolved-2026-08-15) deleted `IsolationExplicit` from the same struct for the same reason — a field written by the create path and consulted by nobody. Two is not yet three, but the generator is visible: `state.State` is a wide struct assembled in one place and consumed in several, so adding a field is cheap, and nothing fails when the consumer never arrives or later goes away. A field with no reader has no test that can go red. Worth a sweep of the remaining fields for a third; not done here, and named rather than silently left.
+- **Fixed 2026-08-17.** The field is gone from `internal/orchestrator/state/state.go` and its one assignment from `create.go`. The warnings themselves became `[]feedback.Notice` threaded through `resolveAndApplyArchetype` and emitted at the same point in the sequence as before, so the user-visible ordering is unchanged.
+- **Pinned by** the compiler, which is the honest answer for a deletion: no test can go red for a field nobody read, and inventing one would test the deletion rather than any behaviour. The behaviour that *is* pinned — the warnings still reaching the user, in order — is `TestResolveArchetype_DevcontainerFiltersMounts` (`internal/orchestrator/create/archetype_resolution_test.go`).
+- **Pointer:** `internal/orchestrator/state/state.go`; `internal/orchestrator/create/create.go`.
+
 ### DF202 — a file-defined agent's declared credentials were an invisible, persistent grant (RESOLVED 2026-08-16)
 
 - **Discovered:** 2026-08-13, during the config-key trust audit · **Workstream:** config/trust seams

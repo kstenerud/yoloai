@@ -65,13 +65,12 @@ type State struct {
 	Environment       *store.Environment
 	ConfigJSON        []byte
 	// Archetype fields
-	Archetype                 archetype.Archetype
-	DockerdRequired           bool
-	Devcontainer              *archetype.DevcontainerConfig
-	DevcontainerMounts        []string
-	DevcontainerMountWarnings []string
-	WorkdirMode               string        // resolved workdir mode ("copy", "overlay", "rw")
-	Layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
-	HomeDir                   string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
-	Output                    io.Writer     // create-pipeline progress writer (CreateOptions.Output); F8
+	Archetype          archetype.Archetype
+	DockerdRequired    bool
+	Devcontainer       *archetype.DevcontainerConfig
+	DevcontainerMounts []string
+	WorkdirMode        string        // resolved workdir mode ("copy", "overlay", "rw")
+	Layout             config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
+	HomeDir            string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
+	Output             io.Writer     // create-pipeline progress writer (CreateOptions.Output); F8
 }

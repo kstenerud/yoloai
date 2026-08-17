@@ -6,10 +6,11 @@ package archetype
 import (
 	"encoding/json"
 	"fmt"
-	"io"
 	"maps"
 	"os"
 	"strings"
+
+	"github.com/kstenerud/yoloai/feedback"
 )
 
 // LifecycleCmd holds one devcontainer lifecycle command in any of the three
@@ -146,10 +147,22 @@ func (dc *DevcontainerConfig) ExtractPorts() []string {
 }
 
 // FilterMounts evaluates each devcontainer mount entry, strips dangerous mounts,
-// and returns safe mounts plus warning strings for stripped entries.
+// and returns safe mounts plus a notice per stripped entry.
 // workdirMountPath is the target path of the sandbox workdir mount.
 // homeDir is used for ${localEnv:HOME} expansion; callers derive it from layout.HomeDir.
-func (dc *DevcontainerConfig) FilterMounts(workdirMountPath, homeDir string) (mounts []string, warnings []string) {
+//
+// All four strips share one event: what happened is the same each time, and
+// which rule fired is data. A consumer auditing what a repo asked for and did
+// not get wants to filter by reason, which it cannot do against prose.
+func (dc *DevcontainerConfig) FilterMounts(workdirMountPath, homeDir string) (mounts []string, notices []feedback.Notice) {
+	strip := func(mount, reason, why string) {
+		notices = append(notices, feedback.Notice{
+			Event:   "devcontainer.mount_stripped",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("stripped devcontainer mount %q — %s", mount, why),
+			Fields:  map[string]any{"mount": mount, "reason": reason},
+		})
+	}
 
 	for _, m := range dc.Mounts {
 		// Expand ${localEnv:HOME}
@@ -160,26 +173,26 @@ func (dc *DevcontainerConfig) FilterMounts(workdirMountPath, homeDir string) (mo
 
 		// Strip docker socket (complete sandbox escape)
 		if src == "/var/run/docker.sock" || src == "//./pipe/docker_engine" {
-			warnings = append(warnings, fmt.Sprintf("Warning: stripped devcontainer mount %q — docker socket mount is a sandbox escape", m))
+			strip(m, "docker_socket", "docker socket mount is a sandbox escape")
 			continue
 		}
 
 		// Strip agent credential dirs
 		if isCredentialDir(src) {
-			warnings = append(warnings, fmt.Sprintf("Warning: stripped devcontainer mount %q — agent credential directory conflicts with yoloAI secret injection", m))
+			strip(m, "credential_dir", "agent credential directory conflicts with yoloAI secret injection")
 			continue
 		}
 
 		// Strip mounts whose source path does not exist on the host
 		if _, err := os.Stat(src); os.IsNotExist(err) {
-			warnings = append(warnings, fmt.Sprintf("Warning: stripped devcontainer mount %q — source path does not exist on host", m))
+			strip(m, "source_missing", "source path does not exist on host")
 			continue
 		}
 
 		// Strip mounts whose target conflicts with workdir mount path
 		target := extractMountTarget(expanded)
 		if workdirMountPath != "" && target == workdirMountPath {
-			warnings = append(warnings, fmt.Sprintf("Warning: stripped devcontainer mount %q — target conflicts with sandbox workdir mount", m))
+			strip(m, "workdir_conflict", "target conflicts with sandbox workdir mount")
 			continue
 		}
 
@@ -191,7 +204,7 @@ func (dc *DevcontainerConfig) FilterMounts(workdirMountPath, homeDir string) (mo
 		}
 		mounts = append(mounts, normalized)
 	}
-	return mounts, warnings
+	return mounts, notices
 }
 
 // isMountKeyValueFormat returns true if the mount string uses Docker --mount
@@ -327,14 +340,26 @@ func normalizeCapName(c string) string {
 }
 
 // ParsedRunArgs parses --cpus, --memory, --cap-add from runArgs.
-// Unknown flags are collected into unknownWarnings. Privileged-equivalent caps
-// (dangerousRunArgCaps) are rejected with a warning rather than granted, since
-// runArgs come from the untrusted, auto-detected workdir.
-func (dc *DevcontainerConfig) ParsedRunArgs() (cpus string, memory string, capAdd []string, unknownWarnings []string) {
+// Unknown flags and refused capabilities are returned as notices for the caller
+// to emit. Privileged-equivalent caps (dangerousRunArgCaps) are rejected rather
+// than granted, since runArgs come from the untrusted, auto-detected workdir.
+//
+// The notices are returned rather than emitted here because this is a parser:
+// its callers include tests and any future consumer that wants the parse
+// without the commentary. Two distinct things can go wrong and they get two
+// event IDs — a refused capability is a security decision the user may want to
+// act on, an unknown flag is a compatibility gap.
+func (dc *DevcontainerConfig) ParsedRunArgs() (cpus string, memory string, capAdd []string, notices []feedback.Notice) {
 	args := dc.RunArgs
 	addCap := func(c string) {
 		if dangerousRunArgCaps[normalizeCapName(c)] {
-			unknownWarnings = append(unknownWarnings, fmt.Sprintf("Warning: refusing dangerous capability %q from devcontainer.json runArgs (would enable a host escape; add it via yoloAI config if you truly need it)", c))
+			notices = append(notices, feedback.Notice{
+				Event: "devcontainer.capability_refused",
+				Level: feedback.LevelWarn,
+				Message: fmt.Sprintf("refusing dangerous capability %q from devcontainer.json runArgs "+
+					"(would enable a host escape; add it via yoloAI config if you truly need it)", c),
+				Fields: map[string]any{"capability": c},
+			})
 			return
 		}
 		capAdd = append(capAdd, c)
@@ -358,10 +383,15 @@ func (dc *DevcontainerConfig) ParsedRunArgs() (cpus string, memory string, capAd
 		case strings.HasPrefix(arg, "--cap-add="):
 			addCap(strings.TrimPrefix(arg, "--cap-add="))
 		default:
-			unknownWarnings = append(unknownWarnings, fmt.Sprintf("Warning: ignoring unknown runArg %q (not supported by yoloAI)", arg))
+			notices = append(notices, feedback.Notice{
+				Event:   "devcontainer.run_arg_unsupported",
+				Level:   feedback.LevelWarn,
+				Message: fmt.Sprintf("ignoring unknown runArg %q (not supported by yoloAI)", arg),
+				Fields:  map[string]any{"arg": arg},
+			})
 		}
 	}
-	return cpus, memory, capAdd, unknownWarnings
+	return cpus, memory, capAdd, notices
 }
 
 // PostStartCommandUsesCompose returns true if any string form of postStartCommand
@@ -395,28 +425,45 @@ func lifecycleCmdUsesCompose(cmd LifecycleCmd) bool {
 	return false
 }
 
-// WarnIgnoredFields prints warnings for devcontainer.json fields that yoloAI ignores.
-func (dc *DevcontainerConfig) WarnIgnoredFields(w io.Writer) {
-	if len(dc.Features) > 0 {
-		fmt.Fprintln(w, "Warning: devcontainer.json features: are not supported — use a profile Dockerfile to install equivalent packages") //nolint:errcheck // best-effort warning
+// WarnIgnoredFields emits one warning per devcontainer.json field that yoloAI
+// does not act on.
+//
+// All seven share the event ID and carry the field name as data, because the
+// occurrence is the same one seven times over — "the repo asked for something
+// we ignore" — and a consumer wanting the list should not have to parse it out
+// of seven English sentences. Which field it was is the thing that varies, so
+// it is a field, not part of the name.
+func (dc *DevcontainerConfig) WarnIgnoredFields(sink feedback.Sink) {
+	ignored := []struct {
+		field   string
+		present bool
+		message string
+	}{
+		{"features", len(dc.Features) > 0,
+			"devcontainer.json features: are not supported — use a profile Dockerfile to install equivalent packages"},
+		{"initializeCommand", !dc.InitializeCommand.IsZero(),
+			"devcontainer.json initializeCommand is ignored (runs on host before container creation — not supported)"},
+		{"postAttachCommand", !dc.PostAttachCommand.IsZero(),
+			"devcontainer.json postAttachCommand is ignored (no equivalent sandbox lifecycle event)"},
+		{"waitFor", dc.WaitFor != "",
+			"devcontainer.json waitFor is ignored (yoloAI always waits for all setup commands)"},
+		{"hostRequirements", dc.HostRequirements != nil,
+			"devcontainer.json hostRequirements is ignored (Codespaces sizing hints not applicable)"},
+		{"shutdownAction", dc.ShutdownAction != "",
+			"devcontainer.json shutdownAction is ignored (yoloAI manages sandbox lifecycle)"},
+		{"name", dc.Name != "",
+			"devcontainer.json name is ignored (yoloAI uses the sandbox name)"},
 	}
-	if !dc.InitializeCommand.IsZero() {
-		fmt.Fprintln(w, "Warning: devcontainer.json initializeCommand is ignored (runs on host before container creation — not supported)") //nolint:errcheck // best-effort warning
-	}
-	if !dc.PostAttachCommand.IsZero() {
-		fmt.Fprintln(w, "Warning: devcontainer.json postAttachCommand is ignored (no equivalent sandbox lifecycle event)") //nolint:errcheck // best-effort warning
-	}
-	if dc.WaitFor != "" {
-		fmt.Fprintln(w, "Warning: devcontainer.json waitFor is ignored (yoloAI always waits for all setup commands)") //nolint:errcheck // best-effort warning
-	}
-	if dc.HostRequirements != nil {
-		fmt.Fprintln(w, "Warning: devcontainer.json hostRequirements is ignored (Codespaces sizing hints not applicable)") //nolint:errcheck // best-effort warning
-	}
-	if dc.ShutdownAction != "" {
-		fmt.Fprintln(w, "Warning: devcontainer.json shutdownAction is ignored (yoloAI manages sandbox lifecycle)") //nolint:errcheck // best-effort warning
-	}
-	if dc.Name != "" {
-		fmt.Fprintln(w, "Warning: devcontainer.json name is ignored (yoloAI uses the sandbox name)") //nolint:errcheck // best-effort warning
+	for _, f := range ignored {
+		if !f.present {
+			continue
+		}
+		feedback.Emit(sink, feedback.Notice{
+			Event:   "devcontainer.field_ignored",
+			Level:   feedback.LevelWarn,
+			Message: f.message,
+			Fields:  map[string]any{"field": f.field},
+		})
 	}
 }
 

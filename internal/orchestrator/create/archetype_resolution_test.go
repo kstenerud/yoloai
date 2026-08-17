@@ -241,13 +241,14 @@ func TestResolveArchetype_DevcontainerFiltersMounts(t *testing.T) {
 	opts := &Options{Workdir: DirSpec{Path: dir}}
 	pr := &profileResult{}
 
-	_, _, dcMounts, warnings, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
+	_, _, dcMounts, notices, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
 	require.NoError(t, err)
 	// Docker socket filtered out, safe path passes through
 	assert.Len(t, dcMounts, 1)
 	assert.Contains(t, dcMounts[0], safePath)
-	assert.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "docker socket")
+	require.Len(t, notices, 1)
+	assert.Equal(t, "devcontainer.mount_stripped", notices[0].Event)
+	assert.Equal(t, "docker_socket", notices[0].Fields["reason"])
 }
 
 func TestResolveArchetype_DevcontainerPostStartCompose(t *testing.T) {

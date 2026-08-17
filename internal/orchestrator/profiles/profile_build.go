@@ -83,6 +83,13 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 		// change reaches every descendant without comparing file timestamps.
 		want := chainChecksum(profileDir, parentChecksum)
 		if force || !imageMatches(ctx, builder, tag, want) {
+			// Stays a writer write rather than becoming a notice (D145). This
+			// is the header of the build stream that follows it on the same
+			// writer — minutes of BuildKit output — and splitting a header
+			// from its body onto two channels is worse than leaving both as
+			// progress. The launch path's "recorded as built but missing"
+			// line is a notice for the opposite reason: it reports a state
+			// the user did not ask for and wants to know about afterwards.
 			fmt.Fprintf(output, "Building profile image %s...\n", tag) //nolint:errcheck // best-effort output
 			if err := builder.BuildProfileImage(ctx, profileDir, tag, want, secrets, layout, output, logger); err != nil {
 				return fmt.Errorf("build profile image %s: %w", tag, err)

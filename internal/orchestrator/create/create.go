@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
@@ -127,6 +128,17 @@ func outputFor(o io.Writer) io.Writer {
 		return o
 	}
 	return io.Discard
+}
+
+// noticesFor resolves where this call's advisory notices go.
+//
+// It derives the sink from the same writer the progress stream uses, so the
+// conversion to records changes what the create pipeline *produces* without
+// changing a byte of what a caller *receives*. That is the migration seam: it
+// goes when Options.Output does, at which point the sink is supplied by the
+// caller and progress is the only thing left needing a writer (D145).
+func noticesFor(o io.Writer) feedback.Sink {
+	return feedback.WriterSink(outputFor(o))
 }
 
 // Run creates and optionally starts a new sandbox.
@@ -290,7 +302,7 @@ type resolvedCreateInputs struct {
 	archetype       archetype.Archetype
 	devcontainerCfg *archetype.DevcontainerConfig
 	dcMounts        []string
-	dcMountWarnings []string
+	dcMountNotices  []feedback.Notice
 	mergedMounts    []string
 	onCreateDone    bool
 }
@@ -310,14 +322,14 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		return nil, err
 	}
 
-	resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, err := resolveAndApplyArchetype(ctx, d, opts, pr)
+	resolvedArchetype, devcontainerCfg, dcMounts, dcMountNotices, err := resolveAndApplyArchetype(ctx, d, opts, pr)
 	if err != nil {
 		return nil, err
 	}
 
 	mergeDcMounts(pr, dcMounts)
-	for _, w := range dcMountWarnings {
-		fmt.Fprintln(outputFor(opts.Output), w) //nolint:errcheck // best-effort warning
+	for _, n := range dcMountNotices {
+		feedback.Emit(noticesFor(opts.Output), n)
 	}
 
 	mergedMounts, err := validateAndExpandMounts(pr.mounts, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation())
@@ -330,7 +342,7 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		archetype:       resolvedArchetype,
 		devcontainerCfg: devcontainerCfg,
 		dcMounts:        dcMounts,
-		dcMountWarnings: dcMountWarnings,
+		dcMountNotices:  dcMountNotices,
 		mergedMounts:    mergedMounts,
 		onCreateDone:    loadOnCreateDone(d.Layout.SandboxDir(opts.Name)),
 	}, nil
@@ -395,39 +407,38 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, model string, networkMode string, networkAllow []string, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
 	pr := ri.profile
 	return &state.State{
-		Name:                      opts.Name,
-		SandboxDir:                sandboxDir,
-		Workdir:                   workdir,
-		WorkCopyDir:               workCopyDir,
-		AuxDirs:                   auxDirs,
-		Agent:                     agentDef,
-		Model:                     model,
-		Profile:                   pr.name,
-		ImageRef:                  pr.imageRef,
-		Env:                       pr.env,
-		HasPrompt:                 meta.HasPrompt,
-		NetworkMode:               networkMode,
-		NetworkAllow:              networkAllow,
-		Ports:                     opts.Ports,
-		ExtraMounts:               ri.mergedMounts,
-		TmuxConf:                  tmuxConf,
-		Resources:                 pr.resources,
-		CapAdd:                    pr.capAdd,
-		Devices:                   pr.devices,
-		Setup:                     pr.setup,
-		Isolation:                 pr.isolation,
-		VscodeTunnel:              opts.VscodeTunnel,
-		Environment:               meta,
-		ConfigJSON:                configData,
-		Archetype:                 ri.archetype,
-		DockerdRequired:           pr.archetypeDockerDRequired,
-		Devcontainer:              ri.devcontainerCfg,
-		DevcontainerMounts:        ri.dcMounts,
-		DevcontainerMountWarnings: ri.dcMountWarnings,
-		WorkdirMode:               string(workdir.Mode),
-		Layout:                    layout,
-		HomeDir:                   homeDir,
-		Output:                    opts.Output,
+		Name:               opts.Name,
+		SandboxDir:         sandboxDir,
+		Workdir:            workdir,
+		WorkCopyDir:        workCopyDir,
+		AuxDirs:            auxDirs,
+		Agent:              agentDef,
+		Model:              model,
+		Profile:            pr.name,
+		ImageRef:           pr.imageRef,
+		Env:                pr.env,
+		HasPrompt:          meta.HasPrompt,
+		NetworkMode:        networkMode,
+		NetworkAllow:       networkAllow,
+		Ports:              opts.Ports,
+		ExtraMounts:        ri.mergedMounts,
+		TmuxConf:           tmuxConf,
+		Resources:          pr.resources,
+		CapAdd:             pr.capAdd,
+		Devices:            pr.devices,
+		Setup:              pr.setup,
+		Isolation:          pr.isolation,
+		VscodeTunnel:       opts.VscodeTunnel,
+		Environment:        meta,
+		ConfigJSON:         configData,
+		Archetype:          ri.archetype,
+		DockerdRequired:    pr.archetypeDockerDRequired,
+		Devcontainer:       ri.devcontainerCfg,
+		DevcontainerMounts: ri.dcMounts,
+		WorkdirMode:        string(workdir.Mode),
+		Layout:             layout,
+		HomeDir:            homeDir,
+		Output:             opts.Output,
 	}
 }
 
@@ -509,7 +520,7 @@ func resolveRuntimeBase(ctx context.Context, d state.Deps, opts *Options, pr *pr
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(outputFor(opts.Output), "Using runtime base %s\n", imageRef)
+	feedback.Infof(noticesFor(opts.Output), "image.base_selected", "Using runtime base %s", imageRef)
 	pr.imageRef = imageRef
 	return nil
 }
