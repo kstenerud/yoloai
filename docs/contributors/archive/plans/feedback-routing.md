@@ -1,15 +1,21 @@
+> **ARCHIVED — not maintained, not swept, not a live reference.** Everything below was
+> true when written and has not been checked since; the code it describes has moved. It is
+> **not a specification** — do not build from it or cite it as the current answer. Good for
+> archaeology only: see [`../README.md`](../README.md).
+
 > **ABOUTME:** Replace the threaded `io.Writer` feedback channel with structured records emitted
 > through a threaded `*slog.Logger`, so the caller — CLI, MCP server, embedder, daemon — decides
 > where output goes and what it looks like, instead of the library deciding it is text for a human.
 
 # Feedback routing — one record, four consumers, the caller renders
 
-- **Status:** IN-PROGRESS — steps 1–6 built. The `feedback` package (`Notice`, `Progress`, their
-  sinks, `Collector`, `Tee`, the writer adapters); every advisory and every progress line converted;
-  the prune trio returning typed items; every diagnostic destination declared and enforced; the
-  ambient-API ban generalised to a class; and **every public `io.Writer` deleted**. Verified on real
-  Docker end-to-end: create, restart, destroy, build (BuildKit streaming through `ProgressWriter`),
-  and prune across three backends including `--json`. Remaining: step 7, the `fmt.Fprint*` ban.
+- **Status:** IMPLEMENTED. All seven steps built. The `feedback` package (`Notice`, `Progress`,
+  their sinks, `Collector`, `Tee`, the writer adapters); every advisory and every progress line
+  converted; the prune trio returning typed items; every diagnostic destination declared and
+  `forbidigo`-enforced; the ambient-API ban generalised to a class; every public `io.Writer`
+  deleted; and the bypass gated by `TestArch_LibraryTakesNoFeedbackWriter`. Verified on real Docker
+  end-to-end: create, restart, destroy, a forced base rebuild streaming BuildKit through
+  `ProgressWriter`, and prune across three backends including `--json`.
 - **Depends on:** —
 - **Rides:** **breaking.** `SandboxCreateOptions.Output` and `ClientOptions.Output` are public
   `io.Writer` fields (`sandbox_options.go:140`, `client_options.go:60`); an embedder sets them today.
@@ -123,13 +129,13 @@ This is deliberately *not* one global answer — choosing one would fit `Create`
    break).
 6. **Convert progress to records and delete every public `io.Writer`** (2026-08-19 amendment). Not
    "retire or redefine": they go. This is the step that makes 7 expressible.
-7. **Gate the bypass** — **ban `fmt.Fprint*` in library code outright.** The original wording asked
-   for a rule targeting *"`fmt.Fprint*` to a threaded writer"*, which `forbidigo` cannot express: it
-   matches call names, not argument types, so it cannot tell `Fprintf(w, …)` from
-   `Fprintf(&builder, …)`. The absolute ban sidesteps that and is only possible because step 6
-   leaves no legitimate feedback use — the 64 remaining calls all target a `strings.Builder` and
-   become `fmt.Sprintf`/`WriteString`, and the subprocess seam never used `fmt.Fprint*`. Exclusions:
-   `internal/cli/` and `cmd/`, which own rendering.
+7. ~~**Gate the bypass**~~ — **done, but not as a `forbidigo` rule.** The original wording asked for
+   a rule targeting *"`fmt.Fprint*` to a threaded writer"*, which forbidigo cannot express: it
+   matches call names, not argument types. An outright ban on `fmt.Fprint*` would express it at the
+   cost of rewriting ~60 legitimate `strings.Builder` sites and outlawing idiomatic Go.
+   `TestArch_LibraryTakesNoFeedbackWriter` states the actual invariant instead — no library function
+   takes an `io.Writer` for feedback — with a declared allowlist whose entries must each still match
+   a real declaration.
 
 ## Progress is a record too (2026-08-19 amendment)
 

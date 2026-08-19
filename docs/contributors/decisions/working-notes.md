@@ -2222,7 +2222,7 @@ Each describes the CLI reading config as the deliberate, documented shape — no
 
 ## D145 — all feedback is a structured record routed by the caller; a threaded `io.Writer` is not a channel
 
-**Date:** 2026-08-16. **Status:** Active — designed, build scoped to v0.12.0. **Supersedes no decision**, but completes one that was only half-enforced: `forbidigo` already bans direct printing, and this closes the bypass that ban leaves open. **Consumers:** `internal/orchestrator/`, `internal/envsetup/`, `internal/cli/`. **Plan:** [`feedback-routing.md`](../design/plans/feedback-routing.md).
+**Date:** 2026-08-16. **Status:** IMPLEMENTED in v0.12.0 (2026-08-19), including the two amendments below. **Supersedes no decision**, but completes one that was only half-enforced: `forbidigo` already bans direct printing, and this closes the bypass that ban leaves open. **Consumers:** `internal/orchestrator/`, `internal/envsetup/`, `internal/cli/`. **Plan:** [`feedback-routing.md`](../archive/plans/feedback-routing.md) (archived on completion).
 
 **Decision. Library code emits structured records; it never formats text for a human. Exactly one layer — the caller's routing point, which for this repo is the CLI — decides where a record goes and what it looks like.** A `*slog.Logger` threaded as a parameter is the emission channel. A threaded `io.Writer` is not.
 

@@ -83,7 +83,7 @@ that makes them structural rather than four spot repairs.*
 - [DF217](design/findings-unresolved.md) — the config-docs gate validates against a looser predicate than the command it certifies
 - [DF218](design/findings-unresolved.md) — draining a finding renames its anchor, silently breaking every cross-reference to it
 - [D145](decisions/working-notes.md#d145--all-feedback-is-a-structured-record-routed-by-the-caller-a-threaded-iowriter-is-not-a-channel) — All feedback is a structured record routed by the caller; a threaded `io.Writer` is not a channel
-- [feedback-routing.md](design/plans/feedback-routing.md) — Feedback routing — one record, four consumers, the caller renders
+- [feedback-routing.md](archive/plans/feedback-routing.md) — Feedback routing — one record, four consumers, the caller renders
 - [DF219](design/findings-resolved.md) — `state.State.DevcontainerMountWarnings` was written on every create and read by nothing
 - [DF220](design/findings-resolved.md) — a mount-strip test named a branch it never reached, because its assertion matched the path it printed
 - [DF221](design/findings-unresolved.md) — `state.State` has five more write-only fields, and two were already deleted as one-offs

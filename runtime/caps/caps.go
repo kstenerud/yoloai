@@ -5,7 +5,6 @@ package caps
 
 import (
 	"context"
-	"io"
 )
 
 // HostCapability describes one system prerequisite, how to test for it,
@@ -82,6 +81,3 @@ type Environment struct {
 	InContainer bool // /.dockerenv exists, or cgroup shows container runtime
 	KVMGroup    bool // current user is a member of the "kvm" group
 }
-
-// Writer is an alias for io.Writer to avoid importing io in caps users.
-type Writer = io.Writer

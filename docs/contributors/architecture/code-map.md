@@ -489,6 +489,14 @@ must be threaded or returned, because a process global cannot say which caller a
 message for the **operator** is a diagnostic and stays on the logger, whose handler the entrypoint
 installs. The rule is "no undeclared destination", not "no globals".
 
+`TestArch_LibraryTakesNoFeedbackWriter` pins the invariant the whole design rests on: **no library
+function takes an `io.Writer` for feedback.** The surviving writers are declared in that test's
+`licensedWriters`, each with a reason about *bytes* — a terminal, a subprocess, a protocol peer —
+and an entry matching nothing is itself a failure, so the allowlist cannot rot into licensing
+whatever later takes the name. It is a test rather than a `forbidigo` rule because forbidigo matches
+call names and not argument types: it cannot distinguish `Fprintf(w, …)` to a threaded writer from
+`Fprintf(&builder, …)` building a string.
+
 `TestArch_FeedbackHasNoYoloaiDependencies` pins that this package imports nothing else in the
 module. That is what lets `runtime/`, `store/` and `copyflow/` emit without importing anything above
 them; the first internal dependency would compile fine and surface later as an import cycle in an
