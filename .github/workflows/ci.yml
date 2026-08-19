@@ -3,8 +3,15 @@ name: CI
 on:
   pull_request:
     branches: [main]
+  # release-* is here because D131 requires migration-bearing work to land on a
+  # release branch rather than main, and those branches were receiving no CI at
+  # all — release-v0.12.0 reached 63 un-CI'd commits before anyone noticed
+  # (DF226). The pull_request trigger above does not cover it: that matches on
+  # the *base* branch, so it fires when a release branch is merged INTO main,
+  # long after the work landed. The release workflow only fires on a v* tag,
+  # which is after the decision to ship.
   push:
-    branches: [main]
+    branches: [main, 'release-*']
 
 permissions:
   contents: read

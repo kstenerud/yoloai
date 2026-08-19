@@ -23,6 +23,20 @@ into this file skips the merge-conflict collision check that ID-ordering gives t
 a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
 of at rebase. Later, but still before it can ship.
 
+### DF226 — CI never ran on a release branch, so the branch D131 mandates was the least-tested code in the repo (RESOLVED 2026-08-19)
+
+- **Discovered:** 2026-08-19, on pushing `release-v0.12.0` expecting CI to see it · **Workstream:** release engineering
+- **Severity:** MEDIUM — no defect shipped, but the gate a release depends on did not cover the release
+- **Disposition:** **RESOLVED 2026-08-19**, same day, before the v0.12.0 tag.
+- **Rides:** **any**.
+- **Description:** `.github/workflows/ci.yml` triggered on `push` and `pull_request` to `main` only; `release.yml` fires on a `v*` **tag**; `audit.yml` is nightly. So a `release-vX.Y.Z` branch — which [D131](../decisions/working-notes.md) *requires* for migration-bearing work — received **no CI whatsoever**, and the first automated run against that code would have been the release workflow firing on the tag, i.e. after the decision to ship.
+- **The `pull_request` trigger does not cover it**, which is the part that makes the gap easy to miss: `branches:` on a `pull_request` matches the **base**, so it fires when a release branch is merged *into* `main` — long after the work landed, and after the tag under the normal release order.
+- **Scale, measured:** `release-v0.12.0` reached **63 commits ahead of `main`**, all un-CI'd. Twenty-two were pushed on 2026-08-19 in the explicit belief that pushing would trigger CI. Nothing ran. That belief is the natural one, since every other branch in the repo earns CI by being merged toward `main`.
+- **Compounding it:** the last run on `main` (`f4b4c9b6`, 2026-08-12) had been failing for a week. Because release branches ran no CI, that failure was invisible from the release branch even though the commit is one of its ancestors.
+- **Fixed 2026-08-19** by adding `release-*` to `ci.yml`'s push branches. One line; the branch stops being a blind spot from the next push onward. The alternative — requiring a PR into `main` before tagging — was not taken: it would gate *and* review, but it inverts D131's ordering, which deliberately keeps a migration off `main` until it ships.
+- **Pinned by** the workflow file itself plus `actionlint` in `make check`; there is no unit test for a CI trigger, and inventing one would test the YAML rather than the behaviour. The comment in `ci.yml` carries the reasoning so the next person to touch the trigger meets it.
+- **Pointer:** `.github/workflows/ci.yml` (`on.push.branches`); `.github/workflows/release.yml` (`on.push.tags: v*`); `docs/contributors/procedures/pull-requests.md` rule 12.
+
 ### DF221 — `state.State` accumulated write-only fields, and nothing could have noticed (RESOLVED 2026-08-19)
 
 - **Discovered:** 2026-08-17, after deleting the second of them ([DF219](#df219--statestatedevcontainermountwarnings-was-written-on-every-create-and-read-by-nothing-resolved-2026-08-17)) · **Workstream:** feedback routing / D145
