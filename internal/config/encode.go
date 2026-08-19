@@ -61,15 +61,15 @@ func encodeRune(builder *strings.Builder, r rune) {
 	cp := uint32(r) //nolint:gosec // rune values are always valid Unicode codepoints
 	switch {
 	case cp <= 0xFF:
-		fmt.Fprintf(builder, "^%02X", cp)
+		builder.WriteString(fmt.Sprintf("^%02X", cp))
 	case cp <= 0xFFF:
-		fmt.Fprintf(builder, "^w%03X", cp)
+		builder.WriteString(fmt.Sprintf("^w%03X", cp))
 	case cp <= 0xFFFF:
-		fmt.Fprintf(builder, "^x%04X", cp)
+		builder.WriteString(fmt.Sprintf("^x%04X", cp))
 	case cp <= 0xFFFFF:
-		fmt.Fprintf(builder, "^y%05X", cp)
+		builder.WriteString(fmt.Sprintf("^y%05X", cp))
 	default:
-		fmt.Fprintf(builder, "^z%06X", cp)
+		builder.WriteString(fmt.Sprintf("^z%06X", cp))
 	}
 }
 

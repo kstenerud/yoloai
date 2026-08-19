@@ -70,11 +70,24 @@ var licensedWriters = map[string]string{
 // satisfy: that a human is watching text, in order, now. Every conversion this
 // release undid was of exactly that shape.
 //
-// A test rather than a forbidigo rule because forbidigo matches call names, not
-// argument types: it cannot tell `Fprintf(w, …)` to a threaded writer from
-// `Fprintf(&builder, …)` building a string. Banning `fmt.Fprint*` outright
-// would express it, at the price of rewriting ~60 legitimate string-building
-// sites and outlawing idiomatic Go. This states the actual invariant instead.
+// This is one of two gates, and they cover different halves:
+//
+//   - `forbidigo` bans `fmt.Fprint*` in library code — the *point of mistake*.
+//     It fires on the line an agent writes, whatever the destination's type,
+//     and its message names the sink helpers to use instead.
+//   - This fence catches the *declaration*: a writer parameter, interface
+//     method, or struct field, which is how the mechanism spreads before
+//     anyone writes to it. `state.State.Output` never appeared in a parameter
+//     list at all.
+//
+// Neither alone is enough. The ban cannot see a write into an already-licensed
+// writer; the fence cannot see a call. The known residual is a writer-shaped
+// parameter spelled as something other than `io.Writer` — `*os.File`,
+// `*bufio.Writer` — which this fence's AST match would miss. Writing feedback
+// to one still requires either `fmt.Fprint*` (banned) or a bare
+// `Write`/`WriteString` of pre-formatted text, which is not a mistake anyone
+// makes by accident. Closing it properly needs go/types rather than go/ast;
+// noted rather than pretended away.
 func TestArch_LibraryTakesNoFeedbackWriter(t *testing.T) {
 	root := repoRoot(t)
 

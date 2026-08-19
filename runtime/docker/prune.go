@@ -516,11 +516,10 @@ func (r *Runtime) imageReclaimBlockedNotices(du types.DiskUsage) []feedback.Noti
 		return nil
 	}
 	var msg strings.Builder
-	fmt.Fprintf(&msg, "%s: image reclaim is blocked by %d active container(s) — stop or destroy them to reclaim image layers:",
-		r.binaryName, len(blockers))
+	msg.WriteString(fmt.Sprintf("%s: image reclaim is blocked by %d active container(s) — stop or destroy them to reclaim image layers:", r.binaryName, len(blockers)))
 	names := make([]string, 0, len(blockers))
 	for _, b := range blockers {
-		fmt.Fprintf(&msg, "\n%s:   %s (%s) holds %s", r.binaryName, b.Name, b.State, b.Image)
+		msg.WriteString(fmt.Sprintf("\n%s:   %s (%s) holds %s", r.binaryName, b.Name, b.State, b.Image))
 		names = append(names, b.Name)
 	}
 	return []feedback.Notice{{

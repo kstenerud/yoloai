@@ -2320,3 +2320,9 @@ So three public interface methods change, not eight.
 
 **Backwards compatibility is explicitly not a constraint here** (owner, 2026-08-19), which is what allows the public writers to go rather than be redefined.
 
+**Two gates, because one is not enough (owner, 2026-08-19).** The first version of the enforcement was `TestArch_LibraryTakesNoFeedbackWriter` alone, which catches a writer *declaration*. The owner's objection: an agent will reach for `fmt.Fprintf` by reflex, and a gate that fires on the parameter rather than on the line they wrote is a gate they meet late and indirectly. So `forbidigo` **bans `fmt.Fprint*` in library code outright**, which is the only form it can express — it matches call names, not argument types, and cannot distinguish a write to a caller's writer from one to a local builder.
+
+The cost is real and was paid: ~65 legitimate `strings.Builder` sites became `WriteString(fmt.Sprintf(…))`, and **staticcheck's QF1012 recommends precisely the form now banned**, so the two linters genuinely conflict and QF1012 is excluded with that reasoning recorded in `.golangci.yml`. The codebase deliberately prefers the less idiomatic form in exchange for a check at the point of the mistake. Three files keep `fmt.Fprint*`: `feedback/writer.go` (the sanctioned rendering point), `internal/mcpsrv/proxy.go` (protocol frames, not prose), and `internal/testutil/`.
+
+The halves are complementary, not redundant: the ban cannot see a write into an already-licensed writer, and the fence cannot see a call. One residual is named rather than papered over — a writer-shaped parameter spelled as something other than `io.Writer` escapes the fence's AST match, and closing it properly needs go/types.
+

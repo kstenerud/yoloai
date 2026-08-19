@@ -493,9 +493,14 @@ installs. The rule is "no undeclared destination", not "no globals".
 function takes an `io.Writer` for feedback.** The surviving writers are declared in that test's
 `licensedWriters`, each with a reason about *bytes* — a terminal, a subprocess, a protocol peer —
 and an entry matching nothing is itself a failure, so the allowlist cannot rot into licensing
-whatever later takes the name. It is a test rather than a `forbidigo` rule because forbidigo matches
-call names and not argument types: it cannot distinguish `Fprintf(w, …)` to a threaded writer from
-`Fprintf(&builder, …)` building a string.
+whatever later takes the name. It is one of **two** gates. `forbidigo` bans `fmt.Fprint*` in library code — the point-of-mistake
+half, firing on the line rather than the parameter — and this fence catches the declaration, which
+is how the mechanism spreads before anyone writes to it (`state.State.Output` never appeared in a
+parameter list at all). Neither alone suffices: the ban cannot see a write into an already-licensed
+writer, and the fence cannot see a call. The ban is absolute because forbidigo matches call names
+and not argument types, which is also why `strings.Builder` sites use
+`WriteString(fmt.Sprintf(…))` here and why staticcheck's QF1012 — which recommends the opposite —
+is excluded.
 
 `TestArch_FeedbackHasNoYoloaiDependencies` pins that this package imports nothing else in the
 module. That is what lets `runtime/`, `store/` and `copyflow/` emit without importing anything above

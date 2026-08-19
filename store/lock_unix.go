@@ -292,7 +292,7 @@ func writeHolderPID(f *os.File, pid int) error {
 	if err := f.Truncate(0); err != nil {
 		return err
 	}
-	_, err := fmt.Fprintf(f, "%d\n", pid)
+	_, err := f.WriteString(strconv.Itoa(pid) + "\n")
 	return err
 }
 

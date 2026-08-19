@@ -313,6 +313,24 @@ linters:
         # exec.LookPath reads $PATH, and that is the point — it answers "is this
         # backend's binary installed on this host", which is a question about
         # the host and has no non-ambient form. Its ~20 uses are all that.
+        # D145: fmt.Fprint* is how the threaded writer comes back, and it comes
+        # back at the point somebody wants to tell a user something. Library
+        # code has no such writer any more -- feedback is a Notice or a
+        # Progress, on a sink -- so the ban is absolute here rather than
+        # conditional on the destination, which is the only form forbidigo can
+        # express: it matches call names, not argument types, and cannot tell
+        # Fprintf(w, ...) from Fprintf(&builder, ...).
+        #
+        # String building uses fmt.Sprintf into a WriteString, which is what the
+        # ~65 pre-existing builder sites were converted to when this landed.
+        # internal/cli and cmd/ are excluded below: rendering is their job.
+        #
+        # This is the point-of-mistake half. TestArch_LibraryTakesNoFeedbackWriter
+        # is the structural half, catching the parameter rather than the call --
+        # needed because this rule cannot see a write to an already-licensed
+        # writer, and that one cannot see a call that reuses one.
+        - pattern: "^fmt\\.Fprint(f|ln)?$"
+          msg: "library code does not format text for humans — emit a feedback.Notice (Warnf/Infof) or a feedback.Progress (Progressf); to build a string use fmt.Sprintf into a WriteString; §12 / D145"
         - pattern: "^filepath\\.Abs$"
           msg: "resolves against the process working directory (it calls the banned os.Getwd) — resolve at the CLI edge and pass an absolute path down; §12 / DF222"
         - pattern: "^os\\.TempDir$"
@@ -465,7 +483,7 @@ linters:
       - path: "_test\\.go"
         linters:
           - forbidigo
-        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Fprint|Fprintf|Fprintln|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
       # internal/sysexec is THE licensed exec.Command* site — the funnel that
       # sets an explicit env; every other caller routes through it.
       #
@@ -477,7 +495,7 @@ linters:
       - path: "internal/testutil/"
         linters:
           - forbidigo
-        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Fprint|Fprintf|Fprintln|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
       - path: "internal/sysexec/"
         linters:
           - forbidigo
@@ -527,15 +545,41 @@ linters:
       - path: "^(internal/cli/|cmd/)"
         linters:
           - forbidigo
-        text: "fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|slog\\.Default"
+        text: "fmt\\.(Print|Printf|Println|Fprint|Fprintf|Fprintln|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|slog\\.Default"
 
       # The MCP stdio proxy is a transport boundary: it bridges the MCP
       # client's stdin/stdout to the in-sandbox process, so owning the
-      # process streams is precisely its job.
+      # process streams is precisely its job. Its Fprint calls forward
+      # protocol frames verbatim — bytes belonging to the peer, never prose.
       - path: "internal/mcpsrv/proxy\\.go"
         linters:
           - forbidigo
-        text: "os\\.(Stdin|Stdout|Stderr)"
+        text: "os\\.(Stdin|Stdout|Stderr)|fmt\\.Fprint(f|ln)?"
+
+      # QF1012 suggests fmt.Fprintf(&b, …) in place of
+      # b.WriteString(fmt.Sprintf(…)). That is normally right, and here it is
+      # exactly backwards: forbidigo bans fmt.Fprint* in library code so the
+      # threaded writer cannot come back, and that ban has to be absolute
+      # because forbidigo matches call names rather than argument types — it
+      # cannot tell a write to a caller's writer from a write to a local
+      # builder. Following QF1012 would reintroduce the banned call at ~65
+      # sites and make the ban unenforceable.
+      #
+      # The two rules genuinely conflict; this is the deliberate resolution.
+      # The codebase prefers the less idiomatic form in exchange for a
+      # mechanical check at the point of the mistake (D145).
+      - linters:
+          - staticcheck
+        text: "QF1012"
+
+      # feedback/writer.go IS the sanctioned rendering point: WriterSink and
+      # ProgressToWriter exist to turn records into bytes for a caller who
+      # asked for bytes. Confining that to one file is what makes the ban
+      # elsewhere absolute (D145).
+      - path: "^feedback/writer\\.go$"
+        linters:
+          - forbidigo
+        text: "fmt\\.Fprint(f|ln)?"
 
       # W-L10 spine-layering allowlist. The orchestration spine itself
       # (the root yoloai package — client.go, system.go, discovery.go,

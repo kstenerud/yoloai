@@ -317,20 +317,20 @@ func reportArchetype(sink feedback.Sink, arch archetype.Archetype, source string
 	switch {
 	case len(signals) > 0:
 		for _, sig := range signals {
-			fmt.Fprintf(&b, "→ Detected %s\n", sig)
+			b.WriteString(fmt.Sprintf("→ Detected %s\n", sig))
 		}
 	case source == "--archetype flag":
-		fmt.Fprintf(&b, "→ --archetype %s\n", string(arch))
+		b.WriteString(fmt.Sprintf("→ --archetype %s\n", string(arch)))
 	}
 	if arch != archetype.ArchetypeSimple {
-		fmt.Fprintf(&b, "  Archetype: %s\n", string(arch))
+		b.WriteString(fmt.Sprintf("  Archetype: %s\n", string(arch)))
 		if len(bullets) > 0 {
-			fmt.Fprint(&b, "  Because of this:\n")
+			b.WriteString("  Because of this:\n")
 			for _, bullet := range bullets {
-				fmt.Fprintf(&b, "    · %s\n", bullet)
+				b.WriteString(fmt.Sprintf("    · %s\n", bullet))
 			}
 		}
-		fmt.Fprint(&b, "  To suppress: --archetype simple\n")
+		b.WriteString("  To suppress: --archetype simple\n")
 	}
 	if b.Len() == 0 {
 		return
