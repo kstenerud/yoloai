@@ -88,6 +88,9 @@ that makes them structural rather than four spot repairs.*
 - [DF220](design/findings-resolved.md) — a mount-strip test named a branch it never reached, because its assertion matched the path it printed
 - [DF221](design/findings-resolved.md) — `state.State` accumulated write-only fields, and nothing could have noticed (RESOLVED 2026-08-19)
 - [DF222](design/findings-unresolved.md) — `Files.Import` resolves a relative path against the process's working directory, inside the library
+- [DF223](design/findings-unresolved.md) — brokering drops Claude Code out of subscription mode: the context window shrinks 5× and usage reporting goes blank
+- [DF224](design/findings-unresolved.md) — the guest's workdir parents are created root-owned, and an agent that owns a colliding path refuses to start
+- [DF225](design/findings-unresolved.md) — the brokering posture is a tri-state encoded as two booleans, in four layers
 
 ## Deferred to v0.13.0 — the network release
 
