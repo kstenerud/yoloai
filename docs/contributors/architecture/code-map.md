@@ -491,13 +491,21 @@ module. That is what lets `runtime/`, `store/` and `copyflow/` emit without impo
 them; the first internal dependency would compile fine and surface later as an import cycle in an
 unrelated change.
 
-Deliberately absent: no universal record type (results are per-API and typed), no error level
-(errors are returned), and no progress (only meaningful live, so it stays an `io.Writer` stream).
+Deliberately absent: no universal record type (results are per-API and typed) and no error level
+(errors are returned — a notice is for what did *not* fail the call).
+
+**Progress is a record here too**, and the 2026-08-19 D145 amendment records why the first design
+said otherwise: it kept writers for "a stream we do not own", but the foreign seam is
+`cmd.Stdout = w`, a different mechanism from the `fmt.Fprint*` calls in the same functions. Not one
+of the library's writer-bound `fmt.Fprint*` calls carried foreign bytes; every one was a sentence
+we composed. Progress carries the most structure of anything the library emits, so it is the worst
+case for text, not an exception to it.
 
 | File | Purpose |
 |------|---------|
 | `feedback.go` | `Notice` (semantic dotted `Event`, `Level`, rendered `Message`, optional `Fields`), `LevelInfo`/`LevelWarn`, and the `Infof`/`Warnf` emission helpers. `Event` is what makes a consumer a lookup rather than a match on message text, so it is a required argument, not a field a site may omit. |
 | `sink.go` | `Sink` (one method, `Notice`), `SinkFunc`, `Discard`, `Collector` (mutex-guarded — prune fans out across backends), `Tee`. A `nil` Sink panics naming `Discard`: dropping notices is legitimate, so it is stated rather than caused by a zero-valued field. Not a channel — a channel imposes a drain/close lifecycle, and an unbuffered one nobody reads deadlocks the library mid-operation. |
+| `progress.go` | `Progress` (`Event`, `Message`, `Fields` — **no level**), `ProgressSink`, `DiscardProgress`, `Progressf`/`EmitProgress`, and `ProgressWriter`. Separate from `Notice` because progress has no severity and because consumers route it differently: a notice rides home on a result, progress is only meaningful live. `ProgressWriter` is the subprocess seam — `exec.Cmd.Stdout` must be an `io.Writer`, so a backend streaming `docker build` writes there and each line becomes a record. `Flush` exists for the child's unterminated last line, which is disproportionately the error text. |
 | `writer.go` | `WriterSink` and `WarningPrefix` — the adapter for a caller who handed over an `io.Writer`, rendering one line per notice in the bytes yoloAI has always written. It renders and discards, so the event and fields die here; that is the loss records exist to avoid, which is why it is the fallback for the byte-stream contract rather than the shape to build on. `launch.WarningPrefix` aliases the constant for the migration window. |
 
 ### `internal/workspace/`
