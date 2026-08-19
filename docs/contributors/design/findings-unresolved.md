@@ -1312,6 +1312,28 @@ earlier signal and records nothing else.
 - **Two independent fixes, and either alone leaves half the defect.** Create (or `chown`) the recreated parents to the sandbox user, so a colliding path is owned correctly rather than avoided; and surface an agent that dies at launch, with its output, instead of a bare `failed`. The first is guest-side setup, the second is the feedback path.
 - **Pointer:** `internal/orchestrator/mounts/mounts.go:36` (`buildWorkdirMounts` — the guest path is the mount target, `st.Workdir.ResolvedMountPath()`, so its parents are whatever the runtime makes when it creates the mount point); `/yoloai/logs/agent.log` and `sandbox.jsonl` inside any sandbox (the two contradicting events). The ownership itself is the runtime's doing, not code yoloai runs.
 
+### DF225 — the brokering posture is a tri-state encoded as two booleans, in four layers
+
+- **Discovered:** 2026-08-19, on being asked whether `broker`/`noBroker` was the right shape while wiring the flags onto `start`/`restart` · **Workstream:** egress broker ([D106](../decisions/working-notes.md))
+- **Severity:** LOW — nothing is broken today; the invariant holds because every writer maintains it by hand
+- **Disposition:** UNRESOLVED — **deferred to v0.13.0** (owner's call, 2026-08-19), which is migration-bearing already
+- **Rides:** **a migration** for the on-disk half; the public-API half rides **breaking**. Splitting them is possible and probably not worth it — see below.
+- **Description:** The credential-brokering posture has three values — *auto*, *forced on*, *forced off* — and every layer encodes it as two independent booleans:
+
+  | Layer | Encoding |
+  | --- | --- |
+  | CLI flags | `--broker` / `--no-broker` (`internal/cli/lifecycle/{new,start,restart}.go`) |
+  | Public API | `SandboxStartOptions{Broker, NoBroker bool}` (`orchestrator.StartOptions`) |
+  | In-memory | `state.State{BrokerCredentials, BrokerDisabled}` |
+  | On disk | `broker_credentials` / `broker_disabled` in `store.Environment` |
+
+  Four representable states, one meaningless. **The code already knows it is a tri-state and says so in prose**: `launch.go` — *"The posture is tri-state: forced-off … forced-on … otherwise auto"* — and `state.go` — *"At most one of these two is set; both false = auto"*. An invariant stated in a comment is one the type could have stated instead, and comments do not fail a build.
+- **Nothing is wrong today**, which is why this is LOW: the CLI enforces exclusivity with `MarkFlagsMutuallyExclusive`, and `applyBrokerOption` is the single writer, so `(true, true)` never occurs. The cost is that every new call site must re-derive that, and there are now six.
+- **The shape was knowingly widened, not overlooked.** Wiring `--broker`/`--no-broker` onto `start` and `restart` (2026-08-19) added two more sites in the same encoding. The alternative — introducing the correct shape at the CLI edge only — would have left five layers disagreeing about how the posture is represented, which is harder to read than six that agree, and would have hidden the defect behind a conversion rather than fixing it. Both new sites carry an `INTERIM SHAPE` comment pointing here, so the next reader meets the decision rather than inferring endorsement from repetition. That is the trade: a defect that is uniform and labelled, versus one that is partially fixed and silent.
+- **The shape:** one field, three values, *auto* as the zero value — `BrokerAuto` / `BrokerRequired` / `BrokerDisabled`. The zero value carries the right meaning for both struct literals and `omitempty`, so a meta file with neither field set keeps reading as auto exactly as it does now.
+- **Why it isn't a free rename.** Renaming the persisted fields without a compat reader makes an existing brokered sandbox read back as *auto*, and a later `start` on a backend where brokering is optional would deliver the real credential into a box created specifically to keep it out — the precise failure D106's stickiness exists to prevent. So the on-disk half needs a reader for the old names (a deprecation, rule 9) or a migration. That is why it waits for a release that is paying for a migration anyway.
+- **Pointer:** `internal/orchestrator/lifecycle/start.go` (`applyBrokerOption`, the single writer); `internal/orchestrator/launch/launch.go:561`; `internal/orchestrator/state/state.go:62`; `store/environment.go:74`; `internal/cli/lifecycle/{new,start,restart}.go`. Sibling in spirit: [DF221](findings-resolved.md) — a shape that stays correct only because every writer remembers to keep it correct.
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

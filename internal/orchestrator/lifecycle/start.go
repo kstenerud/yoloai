@@ -102,8 +102,9 @@ func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions
 // sandbox is brokered, restart/start re-broker from meta so the real key is never
 // silently re-delivered into the container on a later launch. Unlike the vscode
 // option there is no runtime-config patch — brokering lives entirely in the
-// host-side launch path, not the entrypoint. (Opting back out is the future
-// --no-broker; not wired here.)
+// host-side launch path, not the entrypoint. --no-broker opts back out and is
+// equally sticky, so a sandbox created brokered can be moved to direct delivery
+// and stays there until asked otherwise.
 func applyBrokerOption(d state.Deps, opts StartOptions, sandboxDir string, meta *store.Environment, n *feedback.Collector) error {
 	// Resolve the explicit posture: --broker forces on, --no-broker forces off,
 	// neither leaves the persisted posture untouched (sticky). The two flags are

@@ -850,7 +850,14 @@ yoloai new task ./project --no-broker
 yoloai new task ./project --broker
 ```
 
-The posture is **sticky**: once a sandbox is created with `--broker` / `--no-broker`, restarts keep that choice (so a restart never silently puts the key back in the box). `--broker` and `--no-broker` are mutually exclusive.
+The posture is **sticky**: once a sandbox is created with `--broker` / `--no-broker`, restarts keep that choice, so a restart never silently puts the key back in the box. Changing your mind does not mean recreating the sandbox — both flags are accepted by `start` and `restart` too, and the new posture is persisted the same way:
+
+```bash
+yoloai restart task --no-broker   # from here on, deliver the key directly
+yoloai start task --broker        # from here on, keep it host-side
+```
+
+`--broker` and `--no-broker` are mutually exclusive.
 
 **Caveats:**
 - **Composes with `--network-isolated`.** A brokered, network-isolated sandbox keeps its credential host-side *and* is egress-restricted: the agent's allowlist stays default-deny, but the injector endpoint is allowlisted so the agent reaches the host-side proxy (which reaches the real upstream host-side). The agent's LLM egress collapses to that single endpoint. (`--network-none` has no egress at all, so brokering is skipped there; `--broker` with `--network-none` is rejected. On a backend that needs a dedicated network mode to reach the injector — rootless podman's slirp — `--network-isolated` brokering isn't composed yet and falls back to direct delivery.)

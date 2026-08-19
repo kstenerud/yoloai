@@ -21,6 +21,8 @@ type restartOpts struct {
 	isolation    string
 	vscodeTunnel bool
 	env          []string
+	broker       bool
+	noBroker     bool
 }
 
 func NewRestartCmd() *cobra.Command {
@@ -40,7 +42,14 @@ func NewRestartCmd() *cobra.Command {
 	cmd.Flags().StringVar(&opts.isolation, "isolation", "", "Override isolation mode (e.g. container-privileged for Docker-in-Docker)")
 	cmd.Flags().BoolVar(&opts.vscodeTunnel, "vscode-tunnel", false, "Enable VS Code Remote Tunnel (persisted; tunnel starts with the restarted container)")
 	cmd.Flags().StringArrayVar(&opts.env, "env", nil, "Per-sandbox env var KEY=VAL (not persisted; re-supply on each restart)")
+	// INTERIM SHAPE — see the note on the same pair in start.go, and DF225. Two
+	// booleans for one tri-state, matching `new` deliberately rather than fixing
+	// it here, because the encoding also lives in the persisted meta and cannot
+	// be corrected without a migration.
+	cmd.Flags().BoolVar(&opts.broker, "broker", false, "Require credential brokering from this restart on: keep the agent's API key host-side (persisted)")
+	cmd.Flags().BoolVar(&opts.noBroker, "no-broker", false, "Disable credential brokering from this restart on: deliver the agent's API key into the sandbox directly (persisted)")
 
+	cmd.MarkFlagsMutuallyExclusive("broker", "no-broker")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt-file")
 	cmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
@@ -80,6 +89,8 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 			Isolation:    yoloai.IsolationMode(opts.isolation),
 			VscodeTunnel: opts.vscodeTunnel,
 			Env:          envMap,
+			Broker:       opts.broker,
+			NoBroker:     opts.noBroker,
 		})
 		if res != nil {
 			cliutil.RenderNotices(cmd, res.Notices)
