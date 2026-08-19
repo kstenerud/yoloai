@@ -7,10 +7,10 @@
 - **Status:** IN-PROGRESS — built: the `feedback` package (emission API, `Sink`, `Collector`, `Tee`,
   `WriterSink`); `Notice` moved below every layer that emits one; the create/launch advisories; the
   prune trio, whose writers are gone and whose lines are now typed `PruneItem`s carrying an `Action`
-  and a `Reason`; the `envsetup` OAuth advisory; and step 4 (every diagnostic destination is now
-  declared, enforced by `forbidigo`). Remaining: steps 5–7 below, plus the three advisories named
-  under "The residual the settled shape leaves". The ~30 writes still in `runtime/` are build
-  progress and stay.
+  and a `Reason`; the `envsetup` OAuth advisory; step 4 (every diagnostic destination is declared,
+  enforced by `forbidigo`); and step 5 (the ambient-API ban is a class). Remaining: **progress
+  records** and the removal of the public writers (the 2026-08-19 amendment), then the `fmt.Fprint*`
+  ban.
 - **Depends on:** —
 - **Rides:** **breaking.** `SandboxCreateOptions.Output` and `ClientOptions.Output` are public
   `io.Writer` fields (`sandbox_options.go:140`, `client_options.go:60`); an embedder sets them today.
@@ -122,30 +122,45 @@ This is deliberately *not* one global answer — choosing one would fit `Create`
    `ImportFile` resolves a caller's relative path against the *process's* cwd, which is right only
    because a single-principal CLI makes two values coincide (**DF222**, parked: the fix is a public
    break).
-6. **Retire the public `Output` fields**, or redefine them as "install this handler" — a public API
-   change either way, with its `BREAKING-CHANGES.md` entry.
-7. **Gate the bypass**: a `forbidigo` rule for `fmt.Fprint*` to a threaded writer outside the routing
-   layer. Without it nothing stops mechanism five, and the ban stays decoration.
+6. **Convert progress to records and delete every public `io.Writer`** (2026-08-19 amendment). Not
+   "retire or redefine": they go. This is the step that makes 7 expressible.
+7. **Gate the bypass** — **ban `fmt.Fprint*` in library code outright.** The original wording asked
+   for a rule targeting *"`fmt.Fprint*` to a threaded writer"*, which `forbidigo` cannot express: it
+   matches call names, not argument types, so it cannot tell `Fprintf(w, …)` from
+   `Fprintf(&builder, …)`. The absolute ban sidesteps that and is only possible because step 6
+   leaves no legitimate feedback use — the 64 remaining calls all target a `strings.Builder` and
+   become `fmt.Sprintf`/`WriteString`, and the subprocess seam never used `fmt.Fprint*`. Exclusions:
+   `internal/cli/` and `cmd/`, which own rendering.
 
-## The residual the settled shape leaves
+## Progress is a record too (2026-08-19 amendment)
 
-`Setup` and `BuildProfileImage` keep their `io.Writer` because they carry a build stream we do not
-own — a decision made deliberately, and mostly right: the ~30 lines in `tart/build.go`,
-`containerd/image.go` and `docker/docker.go` are progress, only meaningful live.
+The 2026-08-17 shape kept `io.Writer` on `Setup` and `BuildProfileImage` "because they carry a
+stream we do not own". **That was wrong on the facts**, and the [D145 amendment of
+2026-08-19](../../decisions/working-notes.md) records why: of the 32 `fmt.Fprint*` calls to a
+threaded writer still in library code, **zero carry foreign bytes**. Every one is a sentence we
+compose. The foreign seam is `cmd.Stdout = w`, a different mechanism that was never a `fmt.Fprint*`
+call — the two were conflated.
 
-But **three advisories ride those streams and cannot be converted without changing those
-interfaces**:
+The three advisories this section used to list as an unresolvable residual — apple's
+unsupported-build-secrets warning, containerd's namespace-link fallback, tart's failure dump — are
+not residual at all once progress converts. They stop being "advisories riding a stream we cannot
+change" and become ordinary records on a sink the function already has.
 
-- `runtime/apple/apple.go` — "build secrets are not supported on the apple backend; N secret(s)
-  will not be available to the build". A capability gap the user needs, buried in build output.
-- `runtime/containerd/image.go` — "Fast namespace link unavailable (…); falling back to import."
-- `runtime/tart/build.go` — the `tart run output:` dump, a diagnostic emitted on failure.
+**What changes:**
 
-Each is caller-addressed, and each currently reaches the caller only as text inside a stream. The
-options are a second parameter (a sink alongside the writer), a return value on `Setup`, or leaving
-them — and the choice is not obvious enough to make while converting. **Named rather than silently
-left**, which is the whole point of writing it down: at the end of the conversion, "no library code
-formats an advisory" will be *nearly* true, and these are the three places it is not.
+- A **`Progress` record** — `Event`, `Message`, `Fields`, and no level — plus a `ProgressSink`.
+  Distinct from `Notice` because progress has no severity and because consumers route them
+  differently: a notice attaches to a result, progress only ever streams.
+- **Every public `io.Writer` field goes**: `SandboxCreateOptions.Output`, `ClientOptions.Output`,
+  `SystemPruneOptions.Output`, and the writer parameters on `Setup` / `BuildProfileImage` /
+  `EnsureProfileImage`. Backwards compatibility is explicitly not a constraint (owner, 2026-08-19).
+- The **subprocess seam** adapts a sink to a writer inside the backend — the mirror of `WriterSink`
+  — splitting the child's output into progress records carrying the raw line. Cost, stated: three
+  sites pass the writer straight to the child (`tart/build.go:502-503`, `containerd/image.go:227-228`),
+  where a TTY could today allow an in-place render that line-splitting flattens. Everything
+  substantive already goes through an `io.MultiWriter`, so the child already sees a pipe.
+- **`StdioExec` keeps its streams** and is not part of this. It is a live bidirectional terminal,
+  not progress — the one category that really is a stream.
 
 ## Tests (rule 10)
 
