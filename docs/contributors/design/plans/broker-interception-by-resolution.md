@@ -58,6 +58,34 @@ injector failed**, so whatever revalidates the credential does so out of band, w
 reach it. The environment-variable path is the only one of the two that survives, which is
 fortunate: it is also the one that forges less.
 
+## Remote Control does not survive it — measured, cause not isolated
+
+Interception restores the two features [DF223](../findings-unresolved.md) is about. It does **not**
+restore Remote Control, and the reason is worth writing down because the obvious prediction was
+wrong.
+
+| Configuration | Remote Control |
+| --- | --- |
+| Brokered (base URL override, placeholder token) | refused: *"You must be logged in"* |
+| Intercepted, placeholder in `CLAUDE_CODE_OAUTH_TOKEN` | refused: *"requires a full-scope login token. Long-lived tokens … are limited to inference-only for security reasons"* |
+| Intercepted, real credential file in the box | session created, then `403` on the transport |
+| **Control:** same sandbox, real credential, no interception | **works** — `/rc active`, pairing URL issued |
+
+Two separate walls, and the first is the one that matters architecturally. **A brokered sandbox
+can never reach a full-scope feature**, because the placeholder it holds is an environment token by
+construction, and environment tokens are deliberately inference-only. No amount of interception
+changes that: it is a property of the credential kind, not of the endpoint. Anything requiring
+full-scope login is out of reach for *any* design that keeps the real credential host-side.
+
+The second wall is unexplained. With a real credential in the box and interception on, the flow
+gets further than expected — `POST /v1/code/sessions` succeeds through the proxy and returns a
+session id — and then `POST /v1/code/sessions/<id>/bridge` is rejected with 403. No proxy error and
+no upstream non-200 before it. The suspects are the spike proxy's handling of the bridge (a
+long-lived upgraded connection, where a naive `ReverseProxy` is least trustworthy) and the
+credential substitution on that specific endpoint. Isolating it is a prerequisite for claiming
+interception is transparent — *"it works for inference"* is not the same claim, and this is exactly
+where the difference shows.
+
 ## What has to be decided before any code
 
 - **CA custody and lifetime.** Per-sandbox CA or one per host; how long a leaf lives; what happens
