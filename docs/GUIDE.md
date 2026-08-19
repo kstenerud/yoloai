@@ -213,10 +213,11 @@ yoloai ships with multiple agents. The architecture is agent-agnostic — more a
 You can select a model using shorthand aliases or full model names. Aliases are agent-specific — use `yoloai system agents <name>` to see the full list for each agent.
 
 ```bash
-# Claude model aliases
-yoloai new task ./my-project --model sonnet   # claude-sonnet-4-latest
-yoloai new task ./my-project --model opus     # claude-opus-4-latest
-yoloai new task ./my-project --model haiku    # claude-haiku-4-latest
+# Claude model aliases — passed through to Claude Code, which resolves each
+# to the current model of that name. yoloAI does not pin a version.
+yoloai new task ./my-project --model sonnet
+yoloai new task ./my-project --model opus
+yoloai new task ./my-project --model haiku
 yoloai new task ./my-project --model claude-sonnet-4-20250514  # exact model
 
 # Gemini model aliases

@@ -386,10 +386,17 @@ var agents = map[string]*Definition{
 			WchanApplicable: true,
 		},
 		ModelFlag: "--model",
+		// Pass-through, like aider's: Claude Code resolves these names itself, to
+		// whatever is current. Translating them here pins the generation to
+		// whenever this line was last edited — and it drifted, twice: the table
+		// said 4-6 while the account's current model was 5, and the docs
+		// describing the table said 4-latest. Naming the id also forfeits the 1M
+		// context window, which the vendor CLI only applies to a model it
+		// resolved itself (DF223). See plans/model-alias-tracking-strategy.md.
 		ModelAliases: map[string]string{
-			"sonnet": "claude-sonnet-4-6",
-			"opus":   "claude-opus-4-6",
-			"haiku":  "claude-haiku-4-5-20251001",
+			"sonnet": "sonnet",
+			"opus":   "opus",
+			"haiku":  "haiku",
 		},
 		NetworkAllowlist:  []string{"api.anthropic.com", "claude.ai", "platform.claude.com", "statsig.anthropic.com", "sentry.io"},
 		ContextFile:       "CLAUDE.md",
