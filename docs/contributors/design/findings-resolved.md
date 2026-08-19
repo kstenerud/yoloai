@@ -23,6 +23,20 @@ into this file skips the merge-conflict collision check that ID-ordering gives t
 a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
 of at rebase. Later, but still before it can ship.
 
+### DF221 — `state.State` accumulated write-only fields, and nothing could have noticed (RESOLVED 2026-08-19)
+
+- **Discovered:** 2026-08-17, after deleting the second of them ([DF219](#df219--statestatedevcontainermountwarnings-was-written-on-every-create-and-read-by-nothing-resolved-2026-08-17)) · **Workstream:** feedback routing / D145
+- **Severity:** LOW individually; the pattern was the finding
+- **Disposition:** **RESOLVED 2026-08-19**, swept before the v0.12.0 cut at the owner's direction.
+- **Rides:** **any**.
+- **Description:** `state.State` carried five fields assigned on every create and read by nothing — `ConfigJSON`, `Devcontainer`, `DevcontainerMounts`, `DockerdRequired`, `WorkdirMode`. With [DF205](#df205--isolationexplicit-is-written-never-read-and-wrong-anyway-resolved-2026-08-15) (`IsolationExplicit`) and [DF219](#df219--statestatedevcontainermountwarnings-was-written-on-every-create-and-read-by-nothing-resolved-2026-08-17) (`DevcontainerMountWarnings`) already deleted as one-offs, that made **seven of one shape in a single release**.
+- **The generator, which is the part that mattered:** `State` is wide, assembled at one site, consumed at many. Adding a field is free, nothing forces a consumer to appear, and — the property that makes it invisible rather than merely untidy — **a field with no reader has no test that can go red.** No amount of care finds these; only counting does, and nobody counts until the third one.
+- **Swept 2026-08-19.** The five fields and their assignments are gone from `internal/orchestrator/state/state.go`, `create/create.go` and `lifecycle/restart.go`. Behaviour is unaffected: each was a redundant copy of something reaching the sandbox by another route — devcontainer mounts through `mergeDcMounts` into `profileResult.mounts`, dockerd auto-start through `runtimeconfig.LifecycleConfig.DockerDRequired`.
+- **Two more found by following through**, which is the argument for not stopping at the named list. `buildSandboxStateResult` was left holding a `configData []byte` parameter with no remaining use, and `resolvedCreateInputs` had `dcMounts`/`dcMountNotices` fields stored but only ever read as locals. Deleting a dead field without checking whether its producer died too just moves the defect one level up.
+- **What prevents the eighth** — the question the finding insisted on answering before closing: **`TestArch_EveryStateFieldHasAReader`** (`internal/orchestrator/state/field_readers_test.go`). It parses the struct, scans every other `.go` file in the repo for a `.Field` reference that is not the field's own composite-literal assignment, and fails on any field with none. Verified by planting a dead field: it names it and fails. The reader search is textual and over-approximates deliberately — it errs toward missing a dead field rather than blocking a live one, which is the right direction for a gate nobody should have to argue with. Cited from `architecture/code-map.md`.
+- **The shape is not confined to this struct.** `runtime/caps.Writer` was an exported alias with zero users, deleted the same week. The gate covers `state.State` because that is where the count justified one; a wider "no unread exported field" rule was not attempted, and a future occurrence elsewhere is not fenced.
+- **Pointer:** `internal/orchestrator/state/state.go`; `internal/orchestrator/state/field_readers_test.go`; `internal/orchestrator/create/create.go`; `internal/orchestrator/lifecycle/restart.go`.
+
 ### DF220 — a mount-strip test named a branch it never reached, because its assertion matched the path it printed (RESOLVED 2026-08-17)
 
 - **Discovered:** 2026-08-17, converting `FilterMounts` to structured notices ([D145](../decisions/working-notes.md)) · **Workstream:** feedback routing

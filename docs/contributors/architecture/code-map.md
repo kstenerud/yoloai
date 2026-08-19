@@ -540,6 +540,19 @@ exclude. `WriteString` alone would admit `*os.File` and `*bufio.Writer`, which a
 destinations. `TestArch_BufferExcludesRealDestinations` pins that exclusion, including the positive
 half, so it cannot pass by the interface becoming unsatisfiable.
 
+### `internal/orchestrator/state/`
+
+The shared value types every F5 leaf imports: `DirSpec`, `State`, `Deps`, `IsolationPerms`/`Perms`.
+
+`State` is the per-launch resolved configuration, assembled at one site (`create.Run`) and consumed
+at many. That shape has a failure mode worth knowing about, because it produced seven instances
+before anyone counted (DF221): **adding a field is free, nothing forces a consumer to appear, and a
+field with no reader has no test that can go red** — so it is invisible rather than merely unused.
+`TestArch_EveryStateFieldHasAReader` is what makes the next one fail instead of accumulate.
+
+`Deps.Logger` carries the caller's declared diagnostic destination down to the leaves; use
+`Deps.LoggerOr()` at the few sites that build a partial `Deps` (D145).
+
 ### `internal/workspace/`
 
 | File | Purpose |

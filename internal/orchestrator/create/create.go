@@ -268,7 +268,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, model, networkMode, networkAllow, ri, configData, tmuxConf, d.Layout, d.Layout.HomeDir), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, model, networkMode, networkAllow, ri, tmuxConf, d.Layout, d.Layout.HomeDir), nil
 }
 
 // resolvedCreateInputs carries the Phase-1 resolution outputs (profile, archetype,
@@ -278,8 +278,6 @@ type resolvedCreateInputs struct {
 	profile         *profileResult
 	archetype       archetype.Archetype
 	devcontainerCfg *archetype.DevcontainerConfig
-	dcMounts        []string
-	dcMountNotices  []feedback.Notice
 	mergedMounts    []string
 	onCreateDone    bool
 }
@@ -318,8 +316,6 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		profile:         pr,
 		archetype:       resolvedArchetype,
 		devcontainerCfg: devcontainerCfg,
-		dcMounts:        dcMounts,
-		dcMountNotices:  dcMountNotices,
 		mergedMounts:    mergedMounts,
 		onCreateDone:    loadOnCreateDone(d.Layout.SandboxDir(opts.Name)),
 	}, nil
@@ -381,42 +377,37 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 // buildSandboxStateResult constructs the State from all resolved values.
 // networkMode and networkAllow are passed explicitly because the substrate
 // record (meta) no longer carries them (D90); they live in netpolicy.json.
-func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, model string, networkMode string, networkAllow []string, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
+func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, model string, networkMode string, networkAllow []string, ri *resolvedCreateInputs, tmuxConf string, layout config.Layout, homeDir string) *state.State {
 	pr := ri.profile
 	return &state.State{
-		Name:               opts.Name,
-		SandboxDir:         sandboxDir,
-		Workdir:            workdir,
-		WorkCopyDir:        workCopyDir,
-		AuxDirs:            auxDirs,
-		Agent:              agentDef,
-		Model:              model,
-		Profile:            pr.name,
-		ImageRef:           pr.imageRef,
-		Env:                pr.env,
-		HasPrompt:          meta.HasPrompt,
-		NetworkMode:        networkMode,
-		NetworkAllow:       networkAllow,
-		Ports:              opts.Ports,
-		ExtraMounts:        ri.mergedMounts,
-		TmuxConf:           tmuxConf,
-		Resources:          pr.resources,
-		CapAdd:             pr.capAdd,
-		Devices:            pr.devices,
-		Setup:              pr.setup,
-		Isolation:          pr.isolation,
-		VscodeTunnel:       opts.VscodeTunnel,
-		Environment:        meta,
-		ConfigJSON:         configData,
-		Archetype:          ri.archetype,
-		DockerdRequired:    pr.archetypeDockerDRequired,
-		Devcontainer:       ri.devcontainerCfg,
-		DevcontainerMounts: ri.dcMounts,
-		WorkdirMode:        string(workdir.Mode),
-		Layout:             layout,
-		HomeDir:            homeDir,
-		Notices:            opts.Notices,
-		Progress:           opts.Progress,
+		Name:         opts.Name,
+		SandboxDir:   sandboxDir,
+		Workdir:      workdir,
+		WorkCopyDir:  workCopyDir,
+		AuxDirs:      auxDirs,
+		Agent:        agentDef,
+		Model:        model,
+		Profile:      pr.name,
+		ImageRef:     pr.imageRef,
+		Env:          pr.env,
+		HasPrompt:    meta.HasPrompt,
+		NetworkMode:  networkMode,
+		NetworkAllow: networkAllow,
+		Ports:        opts.Ports,
+		ExtraMounts:  ri.mergedMounts,
+		TmuxConf:     tmuxConf,
+		Resources:    pr.resources,
+		CapAdd:       pr.capAdd,
+		Devices:      pr.devices,
+		Setup:        pr.setup,
+		Isolation:    pr.isolation,
+		VscodeTunnel: opts.VscodeTunnel,
+		Environment:  meta,
+		Archetype:    ri.archetype,
+		Layout:       layout,
+		HomeDir:      homeDir,
+		Notices:      opts.Notices,
+		Progress:     opts.Progress,
 	}
 }
 

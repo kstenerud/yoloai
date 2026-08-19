@@ -248,7 +248,6 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		// reverting a brokered sandbox to direct key delivery (D106).
 		BrokerCredentials: meta.BrokerCredentials,
 		BrokerDisabled:    meta.BrokerDisabled,
-		ConfigJSON:        configData,
 		Layout:            d.Layout,
 		HomeDir:           d.Layout.HomeDir,
 		// Restart has no live stream: it returns a result the CLI prints once

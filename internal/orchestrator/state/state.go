@@ -62,15 +62,9 @@ type State struct {
 	BrokerCredentials bool                  // forced-on: --broker was given (persisted). On a backend that can't host an injector this is an error, not a silent skip (D106)
 	BrokerDisabled    bool                  // forced-off: --no-broker was given (persisted). Suppresses the default-on brokering. At most one of these two is set; both false = auto (broker where supported)
 	Environment       *store.Environment
-	ConfigJSON        []byte
-	// Archetype fields
-	Archetype          archetype.Archetype
-	DockerdRequired    bool
-	Devcontainer       *archetype.DevcontainerConfig
-	DevcontainerMounts []string
-	WorkdirMode        string        // resolved workdir mode ("copy", "overlay", "rw")
-	Layout             config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
-	HomeDir            string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
+	Archetype         archetype.Archetype
+	Layout            config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
+	HomeDir           string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
 	// Notices and Progress are where this launch reports to. Two sinks rather
 	// than one writer: an advisory is a fact about the call that a caller may
 	// want on its result, while progress is only meaningful live — and a
