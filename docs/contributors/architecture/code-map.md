@@ -26,6 +26,7 @@ system.go                → Orchestration spine: System (DiskUsage, Prune, Buil
 runtime_imports_linux.go → Linux-specific backend registration (containerd)
 yoerrors/                → Public typed error sentinels (top-level pkg; re-exported via the yoloai package)
 feedback/                → Public advisory records (Notice) + their destination (Sink); stdlib-only so every layer can emit
+internal/textbuf/        → printf into an in-memory buffer; the shape fmt.Fprintf had, without its io.Writer
 cmd/yoloai/              → Binary entry point
 internal/agent/          → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, idle)
 internal/cli/            → Cobra command tree and CLI plumbing
@@ -498,9 +499,8 @@ half, firing on the line rather than the parameter — and this fence catches th
 is how the mechanism spreads before anyone writes to it (`state.State.Output` never appeared in a
 parameter list at all). Neither alone suffices: the ban cannot see a write into an already-licensed
 writer, and the fence cannot see a call. The ban is absolute because forbidigo matches call names
-and not argument types, which is also why `strings.Builder` sites use
-`WriteString(fmt.Sprintf(…))` here and why staticcheck's QF1012 — which recommends the opposite —
-is excluded.
+and not argument types; string building goes through `internal/textbuf.Printf`, which keeps the
+printf shape but takes a buffer rather than an `io.Writer`.
 
 `TestArch_FeedbackHasNoYoloaiDependencies` pins that this package imports nothing else in the
 module. That is what lets `runtime/`, `store/` and `copyflow/` emit without importing anything above
@@ -523,6 +523,22 @@ case for text, not an exception to it.
 | `sink.go` | `Sink` (one method, `Notice`), `SinkFunc`, `Discard`, `Collector` (mutex-guarded — prune fans out across backends), `Tee`. A `nil` Sink panics naming `Discard`: dropping notices is legitimate, so it is stated rather than caused by a zero-valued field. Not a channel — a channel imposes a drain/close lifecycle, and an unbuffered one nobody reads deadlocks the library mid-operation. |
 | `progress.go` | `Progress` (`Event`, `Message`, `Fields` — **no level**), `ProgressSink`, `DiscardProgress`, `Progressf`/`EmitProgress`, `ProgressAsNotices` (for a caller with no live stream — the restart path folds progress into its result), and `ProgressWriter`. Separate from `Notice` because progress has no severity and because consumers route it differently: a notice rides home on a result, progress is only meaningful live. `ProgressWriter` is the subprocess seam — `exec.Cmd.Stdout` must be an `io.Writer`, so a backend streaming `docker build` writes there and each line becomes a record. `Flush` exists for the child's unterminated last line, which is disproportionately the error text. |
 | `writer.go` | `WriterSink`, `ProgressToWriter` and `WarningPrefix` — the adapter for a caller who handed over an `io.Writer`, rendering one line per notice in the bytes yoloAI has always written. It renders and discards, so the event and fields die here; that is the loss records exist to avoid, which is why it is the fallback for the byte-stream contract rather than the shape to build on. `launch.WarningPrefix` aliases the constant for the migration window. |
+
+### `internal/textbuf/`
+
+`Printf(b Buffer, format string, args ...any)` — printf-style appending to an in-memory text
+buffer. One function, and it exists to resolve a conflict rather than to save typing.
+
+`fmt.Fprint*` is banned in library code (D145), and the ban must be absolute because `forbidigo`
+matches call names rather than argument types — it cannot tell a write to a caller's stream from
+one to a local builder. That also outlaws `fmt.Fprintf(&b, …)`, the normal way to build a string in
+Go. `Printf` restores the shape while making the distinction **structural**: it takes a `Buffer`,
+never an `io.Writer`, so misuse cannot turn it back into the mechanism the ban removes.
+
+`Buffer` requires `String()` as well as `WriteString()` — not because `Printf` calls it, but to
+exclude. `WriteString` alone would admit `*os.File` and `*bufio.Writer`, which are real
+destinations. `TestArch_BufferExcludesRealDestinations` pins that exclusion, including the positive
+half, so it cannot pass by the interface becoming unsatisfiable.
 
 ### `internal/workspace/`
 

@@ -10,6 +10,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"github.com/kstenerud/yoloai/internal/textbuf"
 	"log/slog"
 	"os"
 	"time"
@@ -42,9 +43,9 @@ func captureNetworkDiagnostics(ctx context.Context, r *Runtime, name string, tas
 
 	var buf bytes.Buffer
 	buf.WriteString("yoloai network diagnostic capture (DF9 investigation)\n")
-	buf.WriteString(fmt.Sprintf("captured: %s\n", time.Now().UTC().Format(time.RFC3339Nano)))
-	buf.WriteString(fmt.Sprintf("container: %s\n", name))
-	buf.WriteString(fmt.Sprintf("netns:     %s\n\n", netnsName))
+	textbuf.Printf(&buf, "captured: %s\n", time.Now().UTC().Format(time.RFC3339Nano))
+	textbuf.Printf(&buf, "container: %s\n", name)
+	textbuf.Printf(&buf, "netns:     %s\n\n", netnsName)
 
 	// ---- In-task state (single exec runs the whole script) ----
 	buf.WriteString("============================================================\n")
@@ -53,7 +54,7 @@ func captureNetworkDiagnostics(ctx context.Context, r *Runtime, name string, tas
 	inVMOut, inVMErr := runDiagExec(ctx, task, "diag-invm", inVMDiagScript, 30*time.Second)
 	buf.WriteString(inVMOut)
 	if inVMErr != "" {
-		buf.WriteString(fmt.Sprintf("\n[exec stderr/error: %s]\n", inVMErr))
+		textbuf.Printf(&buf, "\n[exec stderr/error: %s]\n", inVMErr)
 	}
 
 	// ---- Host-side state ----
@@ -62,9 +63,9 @@ func captureNetworkDiagnostics(ctx context.Context, r *Runtime, name string, tas
 	buf.WriteString("============================================================\n")
 
 	statePath := cniStatePath(sandboxDir)
-	buf.WriteString(fmt.Sprintf("\n== cni-state.json (%s) ==\n", statePath))
+	textbuf.Printf(&buf, "\n== cni-state.json (%s) ==\n", statePath)
 	if cniState, err := os.ReadFile(statePath); err != nil { //nolint:gosec // G304: internal path under user's home, fixed layout
-		buf.WriteString(fmt.Sprintf("ERROR: %v\n", err))
+		textbuf.Printf(&buf, "ERROR: %v\n", err)
 	} else {
 		buf.Write(cniState)
 		buf.WriteString("\n")
@@ -201,13 +202,13 @@ func runDiagExec(ctx context.Context, task client.Task, label, script string, ti
 // diag capture if one command hangs.
 // env is the explicit subprocess env (DEV §12); pass r.execEnv.
 func appendHostCmd(ctx context.Context, env []string, buf *bytes.Buffer, label string, args ...string) {
-	buf.WriteString(fmt.Sprintf("\n== %s ==\n", label))
+	textbuf.Printf(buf, "\n== %s ==\n", label)
 	cmdCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	cmd := sysexec.CommandContext(cmdCtx, env, args[0], args[1:]...)
 	out, err := cmd.CombinedOutput()
 	if err != nil {
-		buf.WriteString(fmt.Sprintf("ERROR: %v\n", err))
+		textbuf.Printf(buf, "ERROR: %v\n", err)
 	}
 	buf.Write(out)
 	if len(out) > 0 && out[len(out)-1] != '\n' {

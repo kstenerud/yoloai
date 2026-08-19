@@ -321,8 +321,10 @@ linters:
         # express: it matches call names, not argument types, and cannot tell
         # Fprintf(w, ...) from Fprintf(&builder, ...).
         #
-        # String building uses fmt.Sprintf into a WriteString, which is what the
-        # ~65 pre-existing builder sites were converted to when this landed.
+        # String building uses internal/textbuf.Printf, which keeps the printf
+        # shape but takes a Buffer (an in-memory accumulator) rather than an
+        # io.Writer — so the distinction forbidigo cannot make lexically is made
+        # structurally instead, and cannot be circumvented by misuse.
         # internal/cli and cmd/ are excluded below: rendering is their job.
         #
         # This is the point-of-mistake half. TestArch_LibraryTakesNoFeedbackWriter
@@ -330,7 +332,7 @@ linters:
         # needed because this rule cannot see a write to an already-licensed
         # writer, and that one cannot see a call that reuses one.
         - pattern: "^fmt\\.Fprint(f|ln)?$"
-          msg: "library code does not format text for humans — emit a feedback.Notice (Warnf/Infof) or a feedback.Progress (Progressf); to build a string use fmt.Sprintf into a WriteString; §12 / D145"
+          msg: "library code does not format text for humans — emit a feedback.Notice (Warnf/Infof) or a feedback.Progress (Progressf); to build a string use textbuf.Printf, which takes a buffer and cannot be aimed at a caller's stream; §12 / D145"
         - pattern: "^filepath\\.Abs$"
           msg: "resolves against the process working directory (it calls the banned os.Getwd) — resolve at the CLI edge and pass an absolute path down; §12 / DF222"
         - pattern: "^os\\.TempDir$"
@@ -555,22 +557,6 @@ linters:
         linters:
           - forbidigo
         text: "os\\.(Stdin|Stdout|Stderr)|fmt\\.Fprint(f|ln)?"
-
-      # QF1012 suggests fmt.Fprintf(&b, …) in place of
-      # b.WriteString(fmt.Sprintf(…)). That is normally right, and here it is
-      # exactly backwards: forbidigo bans fmt.Fprint* in library code so the
-      # threaded writer cannot come back, and that ban has to be absolute
-      # because forbidigo matches call names rather than argument types — it
-      # cannot tell a write to a caller's writer from a write to a local
-      # builder. Following QF1012 would reintroduce the banned call at ~65
-      # sites and make the ban unenforceable.
-      #
-      # The two rules genuinely conflict; this is the deliberate resolution.
-      # The codebase prefers the less idiomatic form in exchange for a
-      # mechanical check at the point of the mistake (D145).
-      - linters:
-          - staticcheck
-        text: "QF1012"
 
       # feedback/writer.go IS the sanctioned rendering point: WriterSink and
       # ProgressToWriter exist to turn records into bytes for a caller who

@@ -16,6 +16,7 @@ package yoerrors
 import (
 	"errors"
 	"fmt"
+	"github.com/kstenerud/yoloai/internal/textbuf"
 	"strings"
 	"syscall"
 )
@@ -116,7 +117,7 @@ func (e *DirtyWorkdirError) Error() string {
 	var b strings.Builder
 	b.WriteString("uncommitted changes in:")
 	for _, d := range e.Dirs {
-		b.WriteString(fmt.Sprintf("\n  %s (%s)", d.Path, d.Status))
+		textbuf.Printf(&b, "\n  %s (%s)", d.Path, d.Status)
 	}
 	return b.String()
 }

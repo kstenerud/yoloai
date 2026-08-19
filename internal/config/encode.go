@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"github.com/kstenerud/yoloai/internal/textbuf"
 	"strings"
 	"unicode/utf8"
 )
@@ -61,15 +62,15 @@ func encodeRune(builder *strings.Builder, r rune) {
 	cp := uint32(r) //nolint:gosec // rune values are always valid Unicode codepoints
 	switch {
 	case cp <= 0xFF:
-		builder.WriteString(fmt.Sprintf("^%02X", cp))
+		textbuf.Printf(builder, "^%02X", cp)
 	case cp <= 0xFFF:
-		builder.WriteString(fmt.Sprintf("^w%03X", cp))
+		textbuf.Printf(builder, "^w%03X", cp)
 	case cp <= 0xFFFF:
-		builder.WriteString(fmt.Sprintf("^x%04X", cp))
+		textbuf.Printf(builder, "^x%04X", cp)
 	case cp <= 0xFFFFF:
-		builder.WriteString(fmt.Sprintf("^y%05X", cp))
+		textbuf.Printf(builder, "^y%05X", cp)
 	default:
-		builder.WriteString(fmt.Sprintf("^z%06X", cp))
+		textbuf.Printf(builder, "^z%06X", cp)
 	}
 }
 

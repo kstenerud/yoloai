@@ -5,6 +5,7 @@ package docker
 import (
 	"context"
 	"fmt"
+	"github.com/kstenerud/yoloai/internal/textbuf"
 	"strings"
 
 	cerrdefs "github.com/containerd/errdefs"
@@ -516,10 +517,10 @@ func (r *Runtime) imageReclaimBlockedNotices(du types.DiskUsage) []feedback.Noti
 		return nil
 	}
 	var msg strings.Builder
-	msg.WriteString(fmt.Sprintf("%s: image reclaim is blocked by %d active container(s) — stop or destroy them to reclaim image layers:", r.binaryName, len(blockers)))
+	textbuf.Printf(&msg, "%s: image reclaim is blocked by %d active container(s) — stop or destroy them to reclaim image layers:", r.binaryName, len(blockers))
 	names := make([]string, 0, len(blockers))
 	for _, b := range blockers {
-		msg.WriteString(fmt.Sprintf("\n%s:   %s (%s) holds %s", r.binaryName, b.Name, b.State, b.Image))
+		textbuf.Printf(&msg, "\n%s:   %s (%s) holds %s", r.binaryName, b.Name, b.State, b.Image)
 		names = append(names, b.Name)
 	}
 	return []feedback.Notice{{

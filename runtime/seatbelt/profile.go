@@ -3,7 +3,7 @@ package seatbelt
 // ABOUTME: Generates macOS sandbox-exec SBPL profiles from runtime config.
 
 import (
-	"fmt"
+	"github.com/kstenerud/yoloai/internal/textbuf"
 	"os/exec"
 	"path/filepath"
 	"slices"
@@ -96,9 +96,9 @@ func writeProfileTrailingRules(b *strings.Builder, sandboxDir string, mounts []r
 	b.WriteString("; Trailing rules — last-match-wins, most specific last\n")
 	for _, r := range rules {
 		if r.allow {
-			b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", r.path))
+			textbuf.Printf(b, "(allow file-read* file-write* (subpath %q))\n", r.path)
 		} else {
-			b.WriteString(fmt.Sprintf("(deny file-write* (subpath %q))\n", r.path))
+			textbuf.Printf(b, "(deny file-write* (subpath %q))\n", r.path)
 		}
 	}
 
@@ -126,11 +126,11 @@ func writeProfileTrailingRules(b *strings.Builder, sandboxDir string, mounts []r
 	// dir under the data directory at once.
 	b.WriteString("; Host-only tier: never readable or writable from inside (DF136)\n")
 	for _, p := range resolvePathVariants(sandboxDir) {
-		b.WriteString(fmt.Sprintf("(deny file-read* file-write* (subpath %q))\n", filepath.Join(p, config.HostTierName)))
+		textbuf.Printf(b, "(deny file-read* file-write* (subpath %q))\n", filepath.Join(p, config.HostTierName))
 	}
 	b.WriteString("; Read-only tier: readable, never writable from inside (DF148)\n")
 	for _, p := range resolvePathVariants(sandboxDir) {
-		b.WriteString(fmt.Sprintf("(deny file-write* (subpath %q))\n", filepath.Join(p, config.ReadOnlyTierName)))
+		textbuf.Printf(b, "(deny file-write* (subpath %q))\n", filepath.Join(p, config.ReadOnlyTierName))
 	}
 	b.WriteString("\n")
 }
@@ -172,7 +172,7 @@ func GenerateGitProfile(workCopyPath, homeDir, toolchainExecDir string) string {
 	b.WriteString("(allow process-fork)\n")
 	b.WriteString("(allow process-exec\n")
 	for _, p := range gitExecPaths(toolchainExecDir) {
-		b.WriteString(fmt.Sprintf("    (subpath %q)\n", p))
+		textbuf.Printf(&b, "    (subpath %q)\n", p)
 	}
 	b.WriteString(")\n\n")
 
@@ -187,19 +187,19 @@ func GenerateGitProfile(workCopyPath, homeDir, toolchainExecDir string) string {
 	b.WriteString("; System libraries, frameworks, toolchain, and git config (read-only)\n")
 	for _, path := range systemReadPaths() {
 		for _, p := range resolvePathVariants(path) {
-			b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", p))
+			textbuf.Printf(&b, "(allow file-read* (subpath %q))\n", p)
 		}
 	}
 	if toolchainExecDir != "" {
 		for _, p := range resolvePathVariants(toolchainExecDir) {
-			b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", p))
+			textbuf.Printf(&b, "(allow file-read* (subpath %q))\n", p)
 		}
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".gitconfig")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* (literal %q))\n", p))
+		textbuf.Printf(&b, "(allow file-read* (literal %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".config", "git")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", p))
+		textbuf.Printf(&b, "(allow file-read* (subpath %q))\n", p)
 	}
 	b.WriteString("\n")
 
@@ -208,7 +208,7 @@ func GenerateGitProfile(workCopyPath, homeDir, toolchainExecDir string) string {
 	// but nowhere else on the host.
 	b.WriteString("; The work copy (+ its .git) — the ONLY writable host location\n")
 	for _, p := range resolvePathVariants(workCopyPath) {
-		b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", p))
+		textbuf.Printf(&b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	b.WriteString("\n")
 
@@ -269,7 +269,7 @@ func writeProfileSystemPaths(b *strings.Builder) {
 		// resolved /private/var/db, so e.g. claude's ICU timezone load from
 		// /private/var/db/timezone/... is denied and the process aborts (SIGTRAP).
 		for _, p := range resolvePathVariants(path) {
-			b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", p))
+			textbuf.Printf(b, "(allow file-read* (subpath %q))\n", p)
 		}
 	}
 	b.WriteString("\n")
@@ -279,7 +279,7 @@ func writeProfileSystemPaths(b *strings.Builder) {
 		b.WriteString("; Detected toolchain installation prefixes\n")
 		for _, path := range toolchainPaths {
 			for _, p := range resolvePathVariants(path) {
-				b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", p))
+				textbuf.Printf(b, "(allow file-read* (subpath %q))\n", p)
 			}
 		}
 		b.WriteString("\n")
@@ -287,7 +287,7 @@ func writeProfileSystemPaths(b *strings.Builder) {
 
 	b.WriteString("; Temporary directories\n")
 	for _, path := range tempPaths() {
-		b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", path))
+		textbuf.Printf(b, "(allow file-read* file-write* (subpath %q))\n", path)
 	}
 	b.WriteString("\n")
 }
@@ -307,8 +307,8 @@ func writeProfileSystemPaths(b *strings.Builder) {
 func writeProfileSandboxDir(b *strings.Builder, sandboxDir string) {
 	b.WriteString("; Sandbox directory, per guest-access tier (host/ gets nothing)\n")
 	for _, p := range resolvePathVariants(sandboxDir) {
-		b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", filepath.Join(p, config.ReadWriteTierName)))
-		b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", filepath.Join(p, config.ReadOnlyTierName)))
+		textbuf.Printf(b, "(allow file-read* file-write* (subpath %q))\n", filepath.Join(p, config.ReadWriteTierName))
+		textbuf.Printf(b, "(allow file-read* (subpath %q))\n", filepath.Join(p, config.ReadOnlyTierName))
 	}
 	b.WriteString("\n")
 }
@@ -322,9 +322,9 @@ func writeProfileMountRules(b *strings.Builder, mounts []runtime.MountSpec) {
 		}
 		for _, src := range resolvePathVariants(m.HostPath) {
 			if m.ReadOnly {
-				b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", src))
+				textbuf.Printf(b, "(allow file-read* (subpath %q))\n", src)
 			} else {
-				b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", src))
+				textbuf.Printf(b, "(allow file-read* file-write* (subpath %q))\n", src)
 			}
 		}
 	}
@@ -335,28 +335,28 @@ func writeProfileMountRules(b *strings.Builder, mounts []runtime.MountSpec) {
 func writeProfileHomeDir(b *strings.Builder, homeDir string) {
 	b.WriteString("; Home directory (agent binaries and git config only)\n")
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".local")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", p))
+		textbuf.Printf(b, "(allow file-read* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".gitconfig")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* (literal %q))\n", p))
+		textbuf.Printf(b, "(allow file-read* (literal %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".config", "git")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* (subpath %q))\n", p))
+		textbuf.Printf(b, "(allow file-read* (subpath %q))\n", p)
 	}
 	b.WriteString("\n")
 
 	b.WriteString("; iOS/Xcode development (SwiftPM caches and Xcode metadata)\n")
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Caches", "org.swift.swiftpm")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", p))
+		textbuf.Printf(b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Developer", "Xcode")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", p))
+		textbuf.Printf(b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "Caches", "swift-build")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", p))
+		textbuf.Printf(b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, "Library", "org.swift.swiftpm")) {
-		b.WriteString(fmt.Sprintf("(allow file-read* file-write* (subpath %q))\n", p))
+		textbuf.Printf(b, "(allow file-read* file-write* (subpath %q))\n", p)
 	}
 	b.WriteString("\n")
 }

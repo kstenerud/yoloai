@@ -5,6 +5,7 @@ package envsetup
 
 import (
 	"fmt"
+	"github.com/kstenerud/yoloai/internal/textbuf"
 	"os"
 	"strings"
 
@@ -64,13 +65,13 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 		filesPath = store.FilesDir(sandboxDir) + "/"
 		cachePath = store.CacheDir(sandboxDir) + "/"
 	}
-	b.WriteString(fmt.Sprintf("The **shared files directory** is at `%s`.\n", filesPath))
+	textbuf.Printf(&b, "The **shared files directory** is at `%s`.\n", filesPath)
 	b.WriteString("Files shared via `yoloai files put` appear here, and anything you write here can be retrieved by the user with `yoloai files get`.\n")
 	b.WriteString("Use this for artifacts the user needs to see — generated reports, exported files, etc.\n")
 
 	// Cache section
 	b.WriteString("\n## Cache\n\n")
-	b.WriteString(fmt.Sprintf("The **cache directory** is at `%s`.\n", cachePath))
+	textbuf.Printf(&b, "The **cache directory** is at `%s`.\n", cachePath)
 	b.WriteString("Use this for anything that speeds up your work but the user doesn't need to see:\n\n")
 	b.WriteString("- **HTTP responses.** Cache fetched web pages/API responses here so you don't re-fetch the same URL. Check the cache before every fetch.\n")
 	b.WriteString("- **Git repos.** When you need to search a remote codebase, `git clone --depth 1` into the cache directory and search locally instead of fetching files over HTTPS.\n")
@@ -79,8 +80,8 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 	// Terminology
 	b.WriteString("\n## Terminology\n\n")
 	b.WriteString("When the user says:\n\n")
-	b.WriteString(fmt.Sprintf("- \"the cache\" — they mean the cache directory (`%s`)\n", cachePath))
-	b.WriteString(fmt.Sprintf("- \"the files dir\" or \"shared files\" — they mean the shared files directory (`%s`)\n", filesPath))
+	textbuf.Printf(&b, "- \"the cache\" — they mean the cache directory (`%s`)\n", cachePath)
+	textbuf.Printf(&b, "- \"the files dir\" or \"shared files\" — they mean the shared files directory (`%s`)\n", filesPath)
 
 	// Resources section (only when resources are set)
 	if meta.Resources != nil {
@@ -114,12 +115,12 @@ func GenerateContext(sandboxDir string, meta *store.Environment) string {
 	// Debug section (only when --debug is enabled)
 	if meta.Debug {
 		b.WriteString("\n## Idle Detection Debugging\n\n")
-		b.WriteString(fmt.Sprintf("This sandbox has `--debug` enabled. The idle detection monitor writes detailed logs to `%s/logs/monitor.jsonl`.\n\n", rtDir))
+		textbuf.Printf(&b, "This sandbox has `--debug` enabled. The idle detection monitor writes detailed logs to `%s/logs/monitor.jsonl`.\n\n", rtDir)
 		b.WriteString("If the user asks you to help debug idle detection (e.g. status stuck on active/idle), check these files:\n\n")
-		b.WriteString(fmt.Sprintf("- `%s/logs/monitor.jsonl` — per-cycle trace: each detector's result, stability counters, final decision\n", rtDir))
-		b.WriteString(fmt.Sprintf("- `%s/%s` — current status written by the monitor\n", rtDir, store.AgentStatusFile))
-		b.WriteString(fmt.Sprintf("- `%s/%s` — sandbox config including detector stack (`detectors` field) and idle settings\n", rtDir, store.RuntimeConfigFile))
-		b.WriteString(fmt.Sprintf("\nYou can also run `%s/%s/diagnose-idle.sh` for a point-in-time snapshot of all idle detection state.\n", rtDir, store.BinDir))
+		textbuf.Printf(&b, "- `%s/logs/monitor.jsonl` — per-cycle trace: each detector's result, stability counters, final decision\n", rtDir)
+		textbuf.Printf(&b, "- `%s/%s` — current status written by the monitor\n", rtDir, store.AgentStatusFile)
+		textbuf.Printf(&b, "- `%s/%s` — sandbox config including detector stack (`detectors` field) and idle settings\n", rtDir, store.RuntimeConfigFile)
+		textbuf.Printf(&b, "\nYou can also run `%s/%s/diagnose-idle.sh` for a point-in-time snapshot of all idle detection state.\n", rtDir, store.BinDir)
 	}
 
 	return b.String()
@@ -152,7 +153,7 @@ func writeDir(b *strings.Builder, mountPath, hostPath string, mode store.DirMode
 	b.WriteString(mountPath)
 
 	if mountPath != hostPath {
-		b.WriteString(fmt.Sprintf(" → %s", hostPath))
+		textbuf.Printf(b, " → %s", hostPath)
 	}
 
 	b.WriteString(" (")

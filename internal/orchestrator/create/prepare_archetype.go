@@ -6,6 +6,7 @@ package create
 import (
 	"context"
 	"fmt"
+	"github.com/kstenerud/yoloai/internal/textbuf"
 	"os"
 	"path/filepath"
 	goruntime "runtime"
@@ -317,17 +318,17 @@ func reportArchetype(sink feedback.Sink, arch archetype.Archetype, source string
 	switch {
 	case len(signals) > 0:
 		for _, sig := range signals {
-			b.WriteString(fmt.Sprintf("→ Detected %s\n", sig))
+			textbuf.Printf(&b, "→ Detected %s\n", sig)
 		}
 	case source == "--archetype flag":
-		b.WriteString(fmt.Sprintf("→ --archetype %s\n", string(arch)))
+		textbuf.Printf(&b, "→ --archetype %s\n", string(arch))
 	}
 	if arch != archetype.ArchetypeSimple {
-		b.WriteString(fmt.Sprintf("  Archetype: %s\n", string(arch)))
+		textbuf.Printf(&b, "  Archetype: %s\n", string(arch))
 		if len(bullets) > 0 {
 			b.WriteString("  Because of this:\n")
 			for _, bullet := range bullets {
-				b.WriteString(fmt.Sprintf("    · %s\n", bullet))
+				textbuf.Printf(&b, "    · %s\n", bullet)
 			}
 		}
 		b.WriteString("  To suppress: --archetype simple\n")
