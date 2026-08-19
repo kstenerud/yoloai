@@ -33,6 +33,53 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+### Every public `io.Writer` is replaced by feedback sinks
+
+**Previous behavior:** `ClientCreateOptions.Output`, `SandboxCreateOptions.Output`,
+`SystemPruneOptions.Output` and `BuildImageOptions.Output` were `io.Writer`s that received the
+library's human-readable output as formatted text. `TartBaseAdmin.Add` took an `io.Writer`, and
+`Backend.Setup` / `ProfileImageBuilder.BuildProfileImage` / `Engine.EnsureSetup` did too.
+
+**New behavior:** there is no `io.Writer` in the public API. Two sinks replace it:
+
+- `feedback.Sink` receives `Notice`s — advisories addressed to the caller.
+- `feedback.ProgressSink` receives `Progress` records — what a long-running operation is doing
+  right now, carrying the step counters and byte totals a display needs.
+
+Field-by-field: `ClientCreateOptions.Output` → `Notices` + `Progress`;
+`SandboxCreateOptions.Output` → `Notices` + `Progress`; `SystemPruneOptions.Output` → `Notices`;
+`BuildImageOptions.Output` → `Notices` + `Progress`;
+`TartBaseAdmin.Add(ctx, plan, io.Writer)` → `(ctx, plan, feedback.ProgressSink)`;
+`Backend.Setup` and `BuildProfileImage` take `(progress feedback.ProgressSink, notices feedback.Sink)`
+in place of their writer. `runtime.Backend` implementors will not compile until updated.
+
+An embedder that just wants lines can wrap a writer: `feedback.WriterSink(w)` and
+`feedback.ProgressToWriter(w)` render one line per record, exactly as before.
+
+**A nil sink is now a programming error, not a default.** The option structs still accept nil and
+resolve it at construction (to `feedback.Discard` / `feedback.DiscardProgress`), so a caller who
+declares nothing still works. Below that edge, emitting to a nil sink panics — absorbing one would
+make "the caller wanted silence" and "the wiring is broken" the same observable.
+
+**Why it changed:** D145's 2026-08-19 amendment. The earlier design kept writers for progress on
+the grounds that it "carries a stream we do not own". That was wrong on the facts: none of the
+library's writer-bound `fmt.Fprint*` calls carried foreign bytes — every one was a sentence the
+library composed. Progress carries the most structure of anything emitted (`step 3/7`, `~30 GB`,
+`ios 18.2`), so text is the worst representation for it, not an exception. The subprocess streams
+that genuinely need a writer now get one inside the backend, where `exec.Cmd` requires it.
+
+### `yoloai system prune`'s informational lines move from stderr to stdout
+
+**Previous behavior:** per-backend prune commentary ("docker: would remove …", the containerd
+devmapper caveat) went to the `Output` writer, which the CLI pointed at stderr.
+
+**New behavior:** those are informational notices, and the CLI renders info to stdout and warnings
+to stderr — the same split `RenderNotices` has always applied to notices arriving on a result.
+Under `--json` they are suppressed rather than printed, so the document on stdout stays clean.
+
+**Why it changed:** D145. There were two rendering policies for the same kind of message depending
+on which API surface produced it; now there is one.
+
 ### A `Client` with no `Logger` now discards diagnostics instead of using `slog.Default()`
 
 **Previous behavior:** `ClientCreateOptions.Logger` defaulted to `slog.Default()`, so an embedder

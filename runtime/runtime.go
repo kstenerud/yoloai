@@ -5,7 +5,6 @@ package runtime
 import (
 	"context"
 	"errors"
-	"io"
 	"io/fs"
 	"log/slog"
 	"strings"
@@ -529,7 +528,12 @@ type Backend interface {
 	// layout is the active config.Layout — backends use it to derive
 	// host paths (e.g. base-image build lock locations). Q-W.5 threads
 	// it through the interface so backends never read ambient HOME.
-	Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error
+	// Setup makes the backend's base image current, reporting what it is doing
+	// to progress. It takes a ProgressSink rather than an io.Writer: nothing it
+	// emits is foreign bytes — the subprocess streams it pipes are adapted to
+	// records inside the backend, at the one seam where exec.Cmd forces a
+	// writer (D145).
+	Setup(ctx context.Context, layout config.Layout, sourceDir string, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger, force bool) error
 
 	// IsReady returns true if the backend is ready to launch agents (image
 	// built, prerequisites present, etc.). Each backend determines readiness

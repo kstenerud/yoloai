@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/testutil"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -82,4 +83,24 @@ func newClientForLoggerTest(t *testing.T, logger *slog.Logger) *Client {
 	})
 	require.NoError(t, err)
 	return c
+}
+
+// TestNewClient_WithoutSinksDiscards is the edge guarantee that lets the leaves
+// panic on a nil sink.
+//
+// Leaf code refuses a nil destination on purpose: absorbing one makes "the
+// caller wanted silence" and "the wiring is broken" indistinguishable. That is
+// only safe if the edge always supplies something, so a library caller who
+// declares nothing gets working discards rather than a crash somewhere deep in
+// a create.
+func TestNewClient_WithoutSinksDiscards(t *testing.T) {
+	c := newClientForLoggerTest(t, nil)
+
+	require.NotNil(t, c.notices, "a nil notices sink would panic at the first advisory")
+	require.NotNil(t, c.progress, "a nil progress sink would panic at the first build line")
+
+	assert.NotPanics(t, func() {
+		feedback.Infof(c.notices, "test.event", "discarded")
+		feedback.Progressf(c.progress, "test.event", "discarded")
+	})
 }

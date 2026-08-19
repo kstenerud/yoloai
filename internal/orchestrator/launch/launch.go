@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -43,26 +42,6 @@ import (
 // enough to cover a cold Kata VM boot + virtio-fs propagation; on
 // timeout the caller removes the secrets dir anyway (we never leak it).
 const secretsConsumedTimeout = 30 * time.Second
-
-// WarningPrefix marks a line written to state.State.Output as a warning rather
-// than progress. That stream carries both — port-availability warnings from
-// filterAvailablePorts alongside a streamed image build from ensureImageLineage —
-// so a line's level can only be read from the line.
-//
-// On the create path Output is a terminal and the prefix simply prints. On the
-// restart path it is a noticeWriter, which classifies on this exact constant and
-// strips it, so the level survives into a structured Notice instead of the whole
-// stream being labelled one way. It is exported for that consumer: sharing the
-// literal is what stops the producer and the classifier from drifting apart,
-// which is how every line of build progress came to be reported as a warning
-// (DF157).
-//
-// The literal now lives in feedback/, which is where a rendering decision
-// belongs and which the record-based renderer also reads. This alias is the
-// migration seam: it exists only while sites still write the prefix into text
-// by hand instead of emitting a level, and goes when the last of them does
-// (D145).
-const WarningPrefix = feedback.WarningPrefix
 
 // LaunchContainer creates a sandbox instance from State, starts it,
 // and cleans up credential temp files. Used by both initial creation and
@@ -142,10 +121,10 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	if err != nil {
 		return err
 	}
-	ports = filterAvailablePorts(ports, noticesOf(st))
+	ports = filterAvailablePorts(ports, st.Notices)
 
 	for _, w := range advisoryWarnings(ctx, d.Runtime, st.Isolation) {
-		feedback.Warnf(noticesOf(st), "capability.advisory_check_failed", "%s", w)
+		feedback.Warnf(st.Notices, "capability.advisory_check_failed", "%s", w)
 	}
 
 	// Re-ensure the image right before bringing it up, not only at create (DF156).
@@ -200,7 +179,7 @@ func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) (str
 	if !ok {
 		return "", nil
 	}
-	out, logger := outputOr(st.Output), d.LoggerOr()
+	logger := d.LoggerOr()
 
 	// No profile means the sandbox runs yoloai-base itself, and Setup is the
 	// check for that image. EnsureProfileImage cannot be used here: it resolves a
@@ -209,11 +188,11 @@ func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) (str
 	// reached, which is why the guard has to be explicit rather than implied.
 	if st.Profile == "" {
 		baseProfileDir := filepath.Join(st.Layout.ProfilesDir(), "base")
-		if err := d.Runtime.Setup(ctx, st.Layout, baseProfileDir, out, logger, false); err != nil {
+		if err := d.Runtime.Setup(ctx, st.Layout, baseProfileDir, st.Progress, st.Notices, logger, false); err != nil {
 			return "", fmt.Errorf("ensure base image is current: %w", err)
 		}
 	} else if err := rebuildProfileImage(ctx, d.Runtime, st.Layout, st.Profile,
-		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, logger, false); err != nil {
+		profiles.AutoBuildSecrets(st.Layout.HomeDir), st.Progress, st.Notices, logger, false); err != nil {
 		return "", fmt.Errorf("ensure image is current: %w", err)
 	}
 
@@ -1264,8 +1243,7 @@ func createWithImageRecovery(ctx context.Context, rt runtime.Backend, logger *sl
 		return missingImageHint(instanceCfg.ImageRef, st.Profile, err)
 	}
 
-	out := outputOr(st.Output)
-	feedback.Emit(noticesOf(st), feedback.Notice{
+	feedback.Emit(st.Notices, feedback.Notice{
 		Event: "profile.image_rebuilding",
 		Level: feedback.LevelInfo,
 		Message: fmt.Sprintf("Profile image %s is recorded as built but missing from this backend's store; rebuilding it...",
@@ -1274,7 +1252,7 @@ func createWithImageRecovery(ctx context.Context, rt runtime.Backend, logger *sl
 	})
 
 	if buildErr := rebuildProfileImage(ctx, rt, st.Layout, st.Profile,
-		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, logger, true); buildErr != nil {
+		profiles.AutoBuildSecrets(st.Layout.HomeDir), st.Progress, st.Notices, logger, true); buildErr != nil {
 		return fmt.Errorf("%w\n\nThis was an automatic rebuild of %q, triggered because creating "+
 			"the instance failed with: %v", buildErr, instanceCfg.ImageRef, err)
 	}
@@ -1528,27 +1506,6 @@ func parseMemoryString(s string) (int64, error) {
 	return int64(val * float64(multiplier)), nil
 }
 
-// noticesOf resolves where this launch's advisory notices go.
-//
-// It derives the sink from st.Output, which is what keeps the two launch paths
-// byte-identical through the conversion: on create that writer is the progress
-// stream and the notices render onto it exactly as the Fprintfs did, and on
-// restart it is a noticeWriter that classifies them straight back into the
-// result's Notices. The seam goes when State carries a sink of its own and the
-// round-trip through bytes is no longer needed (D145).
-func noticesOf(st *state.State) feedback.Sink {
-	return feedback.WriterSink(outputOr(st.Output))
-}
-
-// outputOr returns o when non-nil, otherwise io.Discard, so leaf writers never
-// see a nil io.Writer. Mirrors the façade Engine.outputFor.
-func outputOr(o io.Writer) io.Writer {
-	if o != nil {
-		return o
-	}
-	return io.Discard
-}
-
 // discloseInjectedCredentials writes the D144 line-2 disclosure to st.Output,
 // naming the credential env vars actually resolved from the host-env snapshot
 // for spec's declaring agent — a grant selection may not make silently
@@ -1562,6 +1519,6 @@ func outputOr(o io.Writer) io.Writer {
 // result's Notices (F8) — both reach a human running the command.
 func discloseInjectedCredentials(st *state.State, spec envsetup.EnvSpec) {
 	if line := envsetup.DescribeInjectedCredentials(spec, st.Layout); line != "" {
-		feedback.Infof(noticesOf(st), "credentials.injected", "%s", line)
+		feedback.Infof(st.Notices, "credentials.injected", "%s", line)
 	}
 }

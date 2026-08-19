@@ -17,6 +17,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 	"github.com/kstenerud/yoloai/internal/orchestrator/create"
@@ -124,7 +125,7 @@ func warmDockerBase(ctx context.Context) error {
 		mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
 		var out bytes.Buffer
 		step("ensuring base image is ready", func() {
-			if err := mgr.EnsureSetup(ctx, &out); err != nil {
+			if err := mgr.EnsureSetup(ctx, feedback.ProgressToWriter(&out), feedback.WriterSink(&out)); err != nil {
 				dockerWarmErr = fmt.Errorf("warm docker base image: %w\n--- build output ---\n%s", err, out.String())
 			}
 		})
@@ -165,7 +166,7 @@ func integrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
+	require.NoError(t, mgr.EnsureSetup(ctx, feedback.ProgressToWriter(testutil.LogWriter(t)), feedback.WriterSink(testutil.LogWriter(t))))
 
 	return mgr, ctx
 }
@@ -205,7 +206,7 @@ func legacyDockerIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.C
 	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(&legacyDockerRuntime{Runtime: rt}, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
+	require.NoError(t, mgr.EnsureSetup(ctx, feedback.ProgressToWriter(testutil.LogWriter(t)), feedback.WriterSink(testutil.LogWriter(t))))
 
 	return mgr, ctx
 }
@@ -250,7 +251,7 @@ func podmanIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
+	require.NoError(t, mgr.EnsureSetup(ctx, feedback.ProgressToWriter(testutil.LogWriter(t)), feedback.WriterSink(testutil.LogWriter(t))))
 
 	return mgr, ctx
 }

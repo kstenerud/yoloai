@@ -286,7 +286,7 @@ func TestPrune_NoticesReachBothTheResultAndTheWriter(t *testing.T) {
 	t.Cleanup(func() { _ = os.Chmod(dir, 0o700) }) //nolint:gosec // restore so TempDir cleanup can recurse
 
 	var rendered bytes.Buffer
-	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: false, Output: &rendered})
+	res, err := c.Prune(context.Background(), SystemPruneOptions{DryRun: false, Notices: feedback.WriterSink(&rendered)})
 	require.NoError(t, err)
 
 	// Searched, not indexed: an available backend contributes its own notices

@@ -113,14 +113,12 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 
 // newCreateClient builds the Client used by the create-family verbs (new, run).
 // Its one quirk vs other Client-using commands: in JSON mode the Engine's
-// progress output is suppressed (io.Discard) so it doesn't pollute the JSON
-// document on stdout — WithClient hardcodes cmd.ErrOrStderr, so the create
-// verbs construct the Client by hand to override Output.
+// progress and informational notices are suppressed so they don't pollute the
+// JSON document on stdout. Warnings still reach stderr, which is a change from
+// the old hand-rolled io.Discard: a warning vanishing because the caller asked
+// for JSON was never intentional, and RenderNotices already kept them.
 func newCreateClient(cmd *cobra.Command, version string) (*yoloai.Client, error) {
-	mgrOutput := cmd.ErrOrStderr()
-	if cliutil.JSONEnabled(cmd) {
-		mgrOutput = io.Discard
-	}
+	notices, progress := cliutil.Feedback(cmd)
 	l := cliutil.Layout()
 	c, err := yoloai.NewClient(cmd.Context(), yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
@@ -128,7 +126,8 @@ func newCreateClient(cmd *cobra.Command, version string) (*yoloai.Client, error)
 		Principal:   string(l.Principal),
 		BackendType: yoloai.BackendType(cliutil.ResolveBackend(cmd)),
 		Input:       cmd.InOrStdin(),
-		Output:      mgrOutput,
+		Notices:     notices,
+		Progress:    progress,
 		Version:     version,
 		Env:         cliutil.BackendEnv(cmd),
 	})

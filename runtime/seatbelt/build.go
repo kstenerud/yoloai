@@ -5,10 +5,10 @@ package seatbelt
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os/exec"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 )
 
@@ -23,13 +23,13 @@ var requiredBinaries = []string{
 // build — seatbelt runs the host's native tools. The sourceDir and layout
 // parameters are unused; they are accepted to satisfy the runtime.Backend
 // interface (Q-W.5).
-func (r *Runtime) Setup(_ context.Context, _ config.Layout, _ string, output io.Writer, _ *slog.Logger, _ bool) error {
+func (r *Runtime) Setup(_ context.Context, _ config.Layout, _ string, progress feedback.ProgressSink, notices feedback.Sink, _ *slog.Logger, _ bool) error {
 	for _, bin := range requiredBinaries {
 		if _, err := exec.LookPath(bin); err != nil {
 			return fmt.Errorf("%s not found in PATH: install it before using the seatbelt backend", bin)
 		}
 	}
-	fmt.Fprintln(output, "Seatbelt prerequisites verified (sandbox-exec, tmux, jq).") //nolint:errcheck // best-effort
+	feedback.Progressf(progress, "prerequisites.verified", "Seatbelt prerequisites verified (sandbox-exec, tmux, jq).")
 	return nil
 }
 

@@ -167,6 +167,7 @@ func ResolveBackendForSandbox(name string) yoloai.BackendType {
 func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx context.Context, c *yoloai.Client) error) error {
 	ctx := cmd.Context()
 	l := Layout()
+	notices, progress := Feedback(cmd)
 	c, err := yoloai.NewClient(ctx, yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
@@ -174,7 +175,8 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx cont
 		BackendType: backend,
 		Logger:      slog.Default(),
 		Input:       cmd.InOrStdin(),
-		Output:      cmd.ErrOrStderr(),
+		Notices:     notices,
+		Progress:    progress,
 		Env:         EdgeEnv(),
 	})
 	if err != nil {
@@ -244,13 +246,15 @@ func WithTrackedDir(cmd *cobra.Command, name, hostPath string, fn func(ctx conte
 // The caller is responsible for Close() (a no-op on a backend-less Client).
 func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 	l := Layout()
+	notices, progress := Feedback(cmd)
 	return yoloai.NewClient(cmd.Context(), yoloai.ClientCreateOptions{
 		DataDir:   l.DataDir,
 		HomeDir:   l.HomeDir,
 		Principal: string(l.Principal),
 		Logger:    slog.Default(),
 		Input:     cmd.InOrStdin(),
-		Output:    cmd.ErrOrStderr(),
+		Notices:   notices,
+		Progress:  progress,
 		Env:       EdgeEnv(),
 	})
 }

@@ -5,8 +5,7 @@
 package state
 
 import (
-	"io"
-
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
@@ -72,5 +71,10 @@ type State struct {
 	WorkdirMode        string        // resolved workdir mode ("copy", "overlay", "rw")
 	Layout             config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
 	HomeDir            string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
-	Output             io.Writer     // create-pipeline progress writer (CreateOptions.Output); F8
+	// Notices and Progress are where this launch reports to. Two sinks rather
+	// than one writer: an advisory is a fact about the call that a caller may
+	// want on its result, while progress is only meaningful live — and a
+	// consumer routes them differently (D145).
+	Notices  feedback.Sink
+	Progress feedback.ProgressSink
 }

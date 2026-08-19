@@ -5,6 +5,7 @@
 package yoloai
 
 import (
+	"github.com/kstenerud/yoloai/feedback"
 	"io"
 	"log/slog"
 )
@@ -62,8 +63,18 @@ type ClientCreateOptions struct {
 	// slog.Default() explicitly if that is what you want; the CLI does.
 	Logger *slog.Logger
 
-	// Output receives human-readable progress messages. Default: io.Discard.
-	Output io.Writer
+	// Notices receives advisories addressed to this caller — a port that could
+	// not be opened, a credential that expires soon. Default: feedback.Discard.
+	Notices feedback.Sink
+
+	// Progress receives what a long-running operation is doing right now:
+	// image pulls, build output, provisioning steps. Only meaningful live and
+	// never accumulated into a result. Default: feedback.DiscardProgress.
+	//
+	// Two sinks rather than one writer because a consumer routes them
+	// differently, and because a formatted line has already discarded the
+	// step counters and byte totals a progress display needs (D145).
+	Progress feedback.ProgressSink
 
 	// Input provides interactive input. Default: an empty reader (immediate
 	// EOF) — the library never reads the embedding process's os.Stdin (§12: no

@@ -52,9 +52,9 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
@@ -104,7 +104,10 @@ type Client struct {
 	layout  config.Layout        // Q-W: DataDir-rooted path resolver; also reached by Sandbox/System handles for host-only path reads
 	engine  *orchestrator.Engine // the one Engine; owns the lazy backend connection (D74)
 	version string               // yoloAI version stamped into created sandboxes' environment.json
-	output  io.Writer            // ClientCreateOptions.Output (defaulted to io.Discard); seeds per-call progress writers (F8)
+	// notices and progress are the destinations this Client was given. They
+	// seed every per-call sink, so an operation never has to invent one (D145).
+	notices  feedback.Sink
+	progress feedback.ProgressSink
 }
 
 // NewClient creates a Client with explicit options.
@@ -134,9 +137,13 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 		// library diagnostics says so the same way.
 		logger = slog.New(slog.DiscardHandler)
 	}
-	output := opts.Output
-	if output == nil {
-		output = io.Discard
+	notices := opts.Notices
+	if notices == nil {
+		notices = feedback.Discard
+	}
+	progress := opts.Progress
+	if progress == nil {
+		progress = feedback.DiscardProgress
 	}
 	input := opts.Input
 	if input == nil {
@@ -158,10 +165,11 @@ func NewClient(ctx context.Context, opts ClientCreateOptions) (*Client, error) {
 	// first use or return ErrBackendRequired when BackendType is "" (D74).
 	engine := orchestrator.NewEngine(opts.BackendType, logger, input, orchestrator.WithLayout(layout))
 	return &Client{
-		layout:  layout,
-		engine:  engine,
-		version: opts.Version,
-		output:  output,
+		layout:   layout,
+		engine:   engine,
+		version:  opts.Version,
+		notices:  notices,
+		progress: progress,
 	}, nil
 }
 
@@ -234,10 +242,13 @@ func (c *Client) ListSandboxes(ctx context.Context) ([]*SandboxInfo, error) {
 func (c *Client) CreateSandbox(ctx context.Context, opts SandboxCreateOptions) (*Sandbox, error) {
 	internal := opts.toInternal()
 	internal.Version = c.version
-	if internal.Output == nil {
-		internal.Output = c.output // seed the per-call progress writer from the Client's Output (F8)
+	if internal.Notices == nil {
+		internal.Notices = c.notices // seed the per-call sinks from the Client's (D145)
 	}
-	if err := c.engine.EnsureSetup(ctx, c.output); err != nil {
+	if internal.Progress == nil {
+		internal.Progress = c.progress
+	}
+	if err := c.engine.EnsureSetup(ctx, c.progress, c.notices); err != nil {
 		return nil, err
 	}
 	if _, err := c.engine.Create(ctx, internal); err != nil {
@@ -265,7 +276,7 @@ type TermSize = runtime.TermSize
 // (default backend/agent, tmux mode) is a separate concern handled by writing
 // config via System.Config().Set — the library has no setup-wizard verb.
 func (c *Client) EnsureSetup(ctx context.Context) error {
-	return c.engine.EnsureSetup(ctx, c.output)
+	return c.engine.EnsureSetup(ctx, c.progress, c.notices)
 }
 
 // --- private helpers ---

@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
@@ -149,7 +150,7 @@ func mergeLaunchEnv(layout config.Layout, meta *store.Environment, extraEnv map[
 // return their output as a *Result's Notices (F8). noticeWriter classifies each
 // line's level from the line itself, so the mixed stream lands correctly without
 // this call site having to know which helpers write what (DF157).
-func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *notices) error {
+func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *feedback.Collector) error {
 	agentDef, acfg, err := requireAgent(d, name)
 	if err != nil {
 		return err
@@ -250,7 +251,12 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		ConfigJSON:        configData,
 		Layout:            d.Layout,
 		HomeDir:           d.Layout.HomeDir,
-		Output:            &noticeWriter{notices: n},
+		// Restart has no live stream: it returns a result the CLI prints once
+		// the call is over. So progress folds into the same collector as an
+		// info notice — otherwise the minutes of image-build output that
+		// explain a slow start would simply vanish (DF157's subject).
+		Notices:  n,
+		Progress: feedback.ProgressAsNotices(n),
 	}
 
 	if resume {

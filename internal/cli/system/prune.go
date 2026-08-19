@@ -73,6 +73,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, images, staleBases, trash bool) 
 	// suppresses the confirmation prompt, it never authorizes the wider scope.
 	skipPruneConfirm := cliutil.EffectiveYes(cmd)
 
+	notices, _ := cliutil.Feedback(cmd)
 	sys, err := cliutil.System()
 	if err != nil {
 		return err
@@ -83,7 +84,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, images, staleBases, trash bool) 
 		DryRun:            true,
 		IncludeBaseImage:  images,
 		IncludeStaleBases: staleBases,
-		Output:            output,
+		Notices:           notices,
 	})
 	if err != nil {
 		return err
@@ -108,7 +109,7 @@ func runSystemPrune(cmd *cobra.Command, dryRun, images, staleBases, trash bool) 
 		DryRun:            false,
 		IncludeBaseImage:  images,
 		IncludeStaleBases: staleBases,
-		Output:            output,
+		Notices:           notices,
 	})
 	if err != nil {
 		return err

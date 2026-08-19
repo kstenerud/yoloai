@@ -52,3 +52,23 @@ func WriterSink(w io.Writer) Sink {
 		fmt.Fprintf(w, "%s%s\n", prefix, n.Message) //nolint:errcheck // best-effort: advisory output
 	})
 }
+
+// ProgressToWriter returns a ProgressSink that writes each record's message as
+// one line on w.
+//
+// It is the progress mirror of WriterSink, and exists for a consumer that
+// genuinely just wants lines — a package that renders nothing else, or one
+// barred from importing the CLI's renderer. Like WriterSink it renders and
+// discards: the event and fields do not survive, which is why it is a
+// convenience for byte-stream consumers rather than the shape to build on.
+//
+// A nil w yields DiscardProgress, matching the documented-optional progress
+// fields on the public option structs.
+func ProgressToWriter(w io.Writer) ProgressSink {
+	if w == nil {
+		return DiscardProgress
+	}
+	return ProgressSinkFunc(func(p Progress) {
+		fmt.Fprintln(w, p.Message) //nolint:errcheck // best-effort: advisory output
+	})
+}

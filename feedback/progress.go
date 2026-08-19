@@ -101,12 +101,13 @@ func emitProgress(s ProgressSink, p Progress) {
 // writer the caller had to supply. The line is passed through unparsed: it is
 // the child's text, and inventing structure for it would be guessing.
 //
-// Line-splitting is lossless for every stream that matters, because os/exec
-// hands the child a pipe whenever the writer is not an *os.File — which it is
-// not here — so the child already emits line-oriented output rather than
-// redrawing in place. The exception is a site that passes an *os.File straight
-// through to a TTY; those are named in the D145 amendment and are not worth
-// the public writer they would cost.
+// Splitting costs little in practice: os/exec hands the child a pipe whenever
+// the writer is not an *os.File — which it is not here — so most tools already
+// emit line-oriented output rather than redrawing. The two shapes that do
+// redraw are handled rather than lost: a \r-updating tool is split on \r too
+// (see Write), and the three sites that used to pass an *os.File straight
+// through to a TTY are named in the D145 amendment, where flattening them was
+// weighed against keeping a public writer and judged the better trade.
 type ProgressWriter struct {
 	sink  ProgressSink
 	event string
@@ -118,13 +119,20 @@ func NewProgressWriter(sink ProgressSink, event string) *ProgressWriter {
 	return &ProgressWriter{sink: sink, event: event}
 }
 
-// Write splits p on newlines and emits each complete, non-blank line. A
-// trailing partial line is held until the next Write completes it, or until
-// Flush.
+// Write splits p on either newline or carriage return and emits each complete,
+// non-blank segment. A trailing partial segment is held until the next Write
+// completes it, or until Flush.
+//
+// Splitting on \r as well as \n is what keeps a redrawing tool legible.
+// xcodebuild reports download progress as repeated \r-terminated updates with
+// no newline until the very end; splitting on \n alone would buffer the entire
+// download into one enormous record delivered after it finished. Each update
+// becomes its own record instead, which a terminal consumer can render in place
+// and a log consumer can sample or drop.
 func (w *ProgressWriter) Write(p []byte) (int, error) {
 	w.buf = append(w.buf, p...)
 	for {
-		i := bytes.IndexByte(w.buf, '\n')
+		i := bytes.IndexAny(w.buf, "\n\r")
 		if i < 0 {
 			break
 		}
@@ -146,12 +154,35 @@ func (w *ProgressWriter) Flush() {
 	w.emitLine(line)
 }
 
-// emitLine emits one line, skipping blanks so a stream's spacing does not
-// become a run of empty records.
+// emitLine emits one segment, skipping blanks so a stream's spacing — and the
+// empty segment a \r\n pair leaves behind — does not become a run of empty
+// records.
 func (w *ProgressWriter) emitLine(line string) {
-	trimmed := strings.TrimRight(line, "\r")
-	if strings.TrimSpace(trimmed) == "" {
+	if strings.TrimSpace(line) == "" {
 		return
 	}
-	emitProgress(w.sink, Progress{Event: w.event, Message: trimmed})
+	emitProgress(w.sink, Progress{Event: w.event, Message: line})
+}
+
+// ProgressAsNotices returns a ProgressSink that forwards each record to sink as
+// an informational Notice.
+//
+// It exists for a caller with no live stream to render to. The restart path is
+// the case: it returns a result the CLI prints once the call is over, so a
+// progress record with nowhere to go live would simply vanish — and the thing
+// that vanishes is the several minutes of image-build output that explain why
+// `start` took so long. Folding progress into the result keeps it visible.
+//
+// Info, not warn: DF157 is the record of what happens when build progress is
+// filed as a warning — it goes to stderr and survives --json, which is exactly
+// backwards for a transient line.
+func ProgressAsNotices(sink Sink) ProgressSink {
+	return ProgressSinkFunc(func(p Progress) {
+		Emit(sink, Notice{
+			Event:   p.Event,
+			Level:   LevelInfo,
+			Message: p.Message,
+			Fields:  p.Fields,
+		})
+	})
 }

@@ -10,6 +10,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
@@ -49,7 +50,7 @@ func TestResolveProfileConfig_PersonalDefaultsDoNotLeakIntoProfile(t *testing.T)
 		Ports:     []string{"9999:9999"},
 	}
 	gcfg := &config.GlobalConfig{}
-	opts := &Options{Name: "sb1", Profile: "leaktest", Agent: "claude"}
+	opts := &Options{Name: "sb1", Profile: "leaktest", Agent: "claude", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	agentDef := agent.GetAgent("claude")
 
 	pr, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
@@ -107,12 +108,13 @@ func TestArch_ProfileIgnoresPersonalDefaults(t *testing.T) {
 	gcfg := &config.GlobalConfig{}
 	// As the CLI would build them: --agent/--isolation/--model were NOT passed,
 	// so each already carries the personal config's value (flag-else-config).
-	opts := &Options{
-		Name:      "sb-claim-a",
+	opts := &Options{Name: "sb-claim-a",
 		Profile:   "leaktest",
 		Agent:     "claude",
 		Isolation: "vm",
 		Model:     "personal-model",
+		Notices:   feedback.Discard,
+		Progress:  feedback.DiscardProgress,
 	}
 	agentDef := agent.GetAgent("claude")
 
@@ -161,7 +163,7 @@ env:
 
 	ycfg := &config.YoloaiConfig{} // no personal defaults set
 	gcfg := &config.GlobalConfig{}
-	opts := &Options{Name: "sb2", Profile: "selfcontained", Agent: "claude"}
+	opts := &Options{Name: "sb2", Profile: "selfcontained", Agent: "claude", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	agentDef := agent.GetAgent("claude")
 
 	pr, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
@@ -195,12 +197,13 @@ network:
 	// Simulate what the CLI does for --network-allow cli.example.com: promote
 	// the mode to isolated and seed opts.NetworkAllow, before the create
 	// pipeline (and this function) ever runs.
-	opts := &Options{
-		Name:         "sb-netmerge",
+	opts := &Options{Name: "sb-netmerge",
 		Profile:      "netmerge",
 		Agent:        "claude",
 		Network:      NetworkModeIsolated,
 		NetworkAllow: []string{"cli.example.com"},
+		Notices:      feedback.Discard,
+		Progress:     feedback.DiscardProgress,
 	}
 	agentDef := agent.GetAgent("claude")
 
@@ -226,7 +229,7 @@ func TestResolveProfileConfig_NoProfileSeedsFromUserConfig(t *testing.T) {
 		AutoCommitInterval: 42,
 	}
 	gcfg := &config.GlobalConfig{}
-	opts := &Options{Name: "sb3", Agent: "claude"} // Profile == ""
+	opts := &Options{Name: "sb3", Agent: "claude", Notices: feedback.Discard, Progress: feedback.DiscardProgress} // Profile == ""
 	agentDef := agent.GetAgent("claude")
 
 	pr, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
@@ -258,7 +261,7 @@ func TestResolveProfileConfig_AgentPrecedence(t *testing.T) {
 
 		ycfg := &config.YoloaiConfig{} // fresh install: nothing set
 		gcfg := &config.GlobalConfig{}
-		opts := &Options{Name: "sb4", Profile: "agentprofile", Agent: "claude"}
+		opts := &Options{Name: "sb4", Profile: "agentprofile", Agent: "claude", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 		agentDef := agent.GetAgent("claude")
 
 		_, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
@@ -274,7 +277,7 @@ func TestResolveProfileConfig_AgentPrecedence(t *testing.T) {
 		ycfg := &config.YoloaiConfig{Agent: "gemini"}
 		gcfg := &config.GlobalConfig{}
 		// The CLI resolved opts.Agent from that same personal default.
-		opts := &Options{Name: "sb5", Profile: "agentprofile2", Agent: "gemini"}
+		opts := &Options{Name: "sb5", Profile: "agentprofile2", Agent: "gemini", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 		agentDef := agent.GetAgent("gemini")
 
 		_, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)
@@ -290,7 +293,7 @@ func TestResolveProfileConfig_AgentPrecedence(t *testing.T) {
 		ycfg := &config.YoloaiConfig{}
 		gcfg := &config.GlobalConfig{}
 		// An explicit --agent codex: opts.Agent differs from the resolved default.
-		opts := &Options{Name: "sb6", Profile: "agentprofile3", Agent: "codex"}
+		opts := &Options{Name: "sb6", Profile: "agentprofile3", Agent: "codex", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 		agentDef := agent.GetAgent("codex")
 
 		_, err := resolveProfileConfig(context.Background(), d, opts, &agentDef, ycfg, gcfg)

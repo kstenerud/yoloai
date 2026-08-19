@@ -558,7 +558,7 @@ const (
 type ProfileImageBuilder interface {
 	// BuildProfileImage builds sourceDir's Dockerfile as tag, stamping checksum
 	// as ProfileChecksumLabel.
-	BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error
+	BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger) error
 
 	// ImageLabels returns tag's labels as they exist in this backend's store.
 	//

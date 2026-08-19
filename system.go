@@ -7,7 +7,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -404,9 +403,10 @@ type BuildImageOptions struct {
 	// Secrets are pre-validated --secret entries
 	// (`id=<name>,src=<path>` form) to pass through to the build.
 	Secrets []string
-	// Output receives the raw build stream (docker / buildx output).
+	// Progress receives the build stream, one record per line.
 	// nil = io.Discard.
-	Output io.Writer
+	Progress feedback.ProgressSink
+	Notices  feedback.Sink
 }
 
 // BuildImage builds the base image (Profile == "") or a profile image
@@ -428,31 +428,34 @@ func (s *System) BuildImage(ctx context.Context, opts BuildImageOptions) error {
 		return yoerrors.NewUsageError("Secrets is only supported with a non-empty Profile")
 	}
 
-	out := opts.Output
-	if out == nil {
-		out = io.Discard
+	progress, notices := opts.Progress, opts.Notices
+	if progress == nil {
+		progress = feedback.DiscardProgress
+	}
+	if notices == nil {
+		notices = feedback.Discard
 	}
 
 	switch opts.BackendType {
 	case "":
 		return yoerrors.NewUsageError("BuildImageOptions.BackendType is required; pass a backend, BackendDefault, or BackendsAll")
 	case BackendsAll:
-		return s.buildAllBackends(ctx, opts, out)
+		return s.buildAllBackends(ctx, opts, progress, notices)
 	case BackendDefault:
 		// Build targets the container slot — no isolation/OS routing.
-		return s.buildOne(ctx, resolveBackendFromConfig(ctx, s.layout), opts, out)
+		return s.buildOne(ctx, resolveBackendFromConfig(ctx, s.layout), opts, progress, notices)
 	default:
-		return s.buildOne(ctx, opts.BackendType, opts, out)
+		return s.buildOne(ctx, opts.BackendType, opts, progress, notices)
 	}
 }
 
 // buildAllBackends builds for every registered backend, stopping on the first
 // failure (matches the CLI's existing behavior). A more permissive best-effort
 // policy can be added if users want it.
-func (s *System) buildAllBackends(ctx context.Context, opts BuildImageOptions, out io.Writer) error {
+func (s *System) buildAllBackends(ctx context.Context, opts BuildImageOptions, progress feedback.ProgressSink, notices feedback.Sink) error {
 	var built int
 	for _, desc := range runtime.Descriptors() {
-		if err := s.buildOne(ctx, desc.Type, opts, out); err != nil {
+		if err := s.buildOne(ctx, desc.Type, opts, progress, notices); err != nil {
 			return fmt.Errorf("build %s: %w", desc.Type, err)
 		}
 		built++
@@ -465,16 +468,16 @@ func (s *System) buildAllBackends(ctx context.Context, opts BuildImageOptions, o
 
 // buildOne runs one backend's build (base or profile) using a freshly
 // constructed runtime that's closed before return.
-func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildImageOptions, out io.Writer) error {
+func (s *System) buildOne(ctx context.Context, backend BackendType, opts BuildImageOptions, progress feedback.ProgressSink, notices feedback.Sink) error {
 	rt, err := runtime.New(ctx, backend, s.layout)
 	if err != nil {
 		return err
 	}
 	defer rt.Close() //nolint:errcheck // best-effort
 	if opts.Profile != "" {
-		return orchestrator.EnsureProfileImage(ctx, rt, s.layout, opts.Profile, opts.Secrets, out, s.loggerOr(), opts.Rebuild)
+		return orchestrator.EnsureProfileImage(ctx, rt, s.layout, opts.Profile, opts.Secrets, progress, notices, s.loggerOr(), opts.Rebuild)
 	}
-	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), out, s.loggerOr(), opts.Rebuild)
+	return rt.Setup(ctx, s.layout, s.layout.ProfileDir("base"), progress, notices, s.loggerOr(), opts.Rebuild)
 }
 
 // CheckPrerequisitesOptions configures System.Check.
@@ -639,10 +642,11 @@ type SystemPruneOptions struct {
 	// does NOT touch the current base, so it forces no rebuild. Opt-in because
 	// the superseded base is multi-GB and a user may want to switch back to it.
 	IncludeStaleBases bool
-	// Output receives line-oriented progress from underlying tools.
-	// nil = io.Discard. Backend prune commands can be chatty; route
-	// to stderr in interactive CLI usage.
-	Output io.Writer
+	// Notices receives the advisories prune produces that are not about any
+	// one resource — a backend subcommand that failed, a caveat about how the
+	// host frees space. They also come back on the result; this is for a caller
+	// that wants them as they happen. nil = feedback.Discard.
+	Notices feedback.Sink
 }
 
 // PruneResult is what System.Prune returns.
@@ -677,8 +681,8 @@ type PruneResult struct {
 	// Notices are the advisories that are not about any one resource — a
 	// backend subcommand that failed, an estimate that could not be taken, a
 	// caveat about how the host actually frees the space. They are also
-	// rendered to Output as they were before, so a caller reading text sees no
-	// change; a caller wanting to route or filter them now can (D145).
+	// delivered to SystemPruneOptions.Notices as they happen, for a caller that
+	// wants them live rather than at the end (D145).
 	Notices []Notice
 }
 
@@ -767,17 +771,18 @@ const staleTempFileAge = 1 * time.Hour
 // base/profile images (forces yoloai-base to rebuild). DryRun reports what
 // would be removed without removing.
 func (s *System) Prune(ctx context.Context, opts SystemPruneOptions) (*PruneResult, error) {
-	out := opts.Output
-	if out == nil {
-		out = io.Discard
-	}
 	known, broken := s.classifySandboxes(ctx)
 	result := &PruneResult{}
-	// Notices reach the caller on the result AND, unchanged, the Output writer:
-	// this is the boundary where a record becomes the text it always was. The
-	// backends stopped formatting; the aggregation point renders (D145).
+	// Notices reach the caller twice over, and both matter: on the result, so a
+	// scripted caller can inspect them after the fact, and on the live sink as
+	// they happen, so a human watching a multi-minute prune is not staring at
+	// nothing. The backends produce records; this is where they fan out.
 	collected := &feedback.Collector{}
-	sink := feedback.Tee(collected, feedback.WriterSink(out))
+	live := opts.Notices
+	if live == nil {
+		live = feedback.Discard
+	}
+	sink := feedback.Tee(collected, live)
 
 	for _, desc := range runtime.Descriptors() {
 		s.pruneBackend(ctx, desc.Type, known, opts, sink, result)
@@ -872,7 +877,7 @@ func (s *System) applyBrokenClassifications(broken []classifiedSandbox, dryRun b
 // reclaim. Returns the items removed (or, under DryRun, that would be removed)
 // and the bytes reclaimed by the cache prune. Cache pruning always runs: plain
 // prune reclaims the build cache (no rebuild forced), and IncludeBaseImage also
-// drops the base images. Per-backend failures are logged to opts.Output rather
+// drops the base images. Per-backend failures become notices rather
 // than aborting the whole prune.
 func (s *System) pruneBackend(ctx context.Context, backend BackendType, known []string, opts SystemPruneOptions, sink feedback.Sink, result *PruneResult) {
 	rt, err := runtime.New(ctx, backend, s.layout)
@@ -951,7 +956,7 @@ func (s *System) recordItems(result *PruneResult, backend BackendType, items []r
 }
 
 // recordNotices forwards a backend's notices to the caller's sink, which both
-// renders them to Output and collects them for the result.
+// delivers them live and collects them for the result.
 func (s *System) recordNotices(sink feedback.Sink, _ *PruneResult, notices []Notice) {
 	for _, n := range notices {
 		feedback.Emit(sink, n)

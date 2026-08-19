@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
@@ -50,9 +51,10 @@ func TestResolveArchetype_CLIFlagOverridesAll(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{
-		Workdir:   DirSpec{Path: dir},
+	opts := &Options{Workdir: DirSpec{Path: dir},
 		Archetype: "simple", // CLI overrides
+		Notices:   feedback.Discard,
+		Progress:  feedback.DiscardProgress,
 	}
 	pr := &profileResult{}
 
@@ -75,8 +77,9 @@ func TestResolveArchetype_YamlArchetypeIgnored(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dcDir, "devcontainer.json"), []byte(`{"name": "test"}`), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{
-		Workdir: DirSpec{Path: dir},
+	opts := &Options{Workdir: DirSpec{Path: dir},
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	}
 	pr := &profileResult{}
 
@@ -88,7 +91,7 @@ func TestResolveArchetype_YamlArchetypeIgnored(t *testing.T) {
 func TestResolveArchetype_AutoDetectSimple(t *testing.T) {
 	dir := makeWorkdir(t)
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	arch, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -101,7 +104,7 @@ func TestResolveArchetype_AutoDetectCompose(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "docker-compose.yaml"), []byte("services: {}"), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	arch, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -119,7 +122,7 @@ func TestResolveArchetype_ComposeExplicitPrivilegedEnablesDockerd(t *testing.T) 
 
 	d := newTestDeps(t)
 	// User explicitly opted into container-privileged → DinD is set up.
-	opts := &Options{Workdir: DirSpec{Path: dir}, Isolation: runtime.IsolationModeContainerPrivileged}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Isolation: runtime.IsolationModeContainerPrivileged, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -138,7 +141,7 @@ func TestResolveArchetype_AutoDetectDevcontainer(t *testing.T) {
 	}`), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	arch, dc, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -161,8 +164,9 @@ func TestResolveArchetype_DevcontainerMergesEnv(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{
-		Workdir: DirSpec{Path: dir},
+	opts := &Options{Workdir: DirSpec{Path: dir},
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	}
 	pr := &profileResult{env: map[string]string{"EXISTING": "user-set"}}
 
@@ -180,7 +184,7 @@ func TestResolveArchetype_DevcontainerWorkspaceFolder(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -194,7 +198,7 @@ func TestResolveArchetype_DevcontainerDockerComposeFileErrors(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -214,7 +218,7 @@ func TestResolveProfileAndArchetype_DevcontainerMountsStillWork(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	var agentDef *agent.Definition
 	ycfg := &config.YoloaiConfig{}
 	gcfg := &config.GlobalConfig{}
@@ -238,7 +242,7 @@ func TestResolveArchetype_DevcontainerFiltersMounts(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	_, _, dcMounts, notices, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -257,7 +261,7 @@ func TestResolveArchetype_DevcontainerPostStartCompose(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -274,7 +278,7 @@ func TestResolveArchetype_TransparencyOutput_Simple(t *testing.T) {
 	dir := makeWorkdir(t)
 	var buf bytes.Buffer
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}, Output: &buf}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.WriterSink(&buf), Progress: feedback.ProgressToWriter(&buf)}
 	pr := &profileResult{}
 
 	arch, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -291,7 +295,8 @@ func TestResolveArchetype_TransparencyOutput_CLIFlag(t *testing.T) {
 	opts := &Options{
 		Workdir:   DirSpec{Path: dir},
 		Archetype: "simple",
-		Output:    &buf,
+		Notices:   feedback.WriterSink(&buf),
+		Progress:  feedback.ProgressToWriter(&buf),
 	}
 	pr := &profileResult{}
 
@@ -307,7 +312,7 @@ func TestResolveArchetype_TransparencyOutput_Compose(t *testing.T) {
 
 	var buf bytes.Buffer
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}, Output: &buf}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.WriterSink(&buf), Progress: feedback.ProgressToWriter(&buf)}
 	pr := &profileResult{}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -332,7 +337,7 @@ func TestResolveArchetype_YamlMountsNotAdded(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, ".yoloai.yaml"), []byte(content), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -350,7 +355,7 @@ func TestResolveArchetype_YamlPresenceWarns(t *testing.T) {
 
 	var buf bytes.Buffer
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}, Output: &buf}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.WriterSink(&buf), Progress: feedback.ProgressToWriter(&buf)}
 	pr := &profileResult{}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -366,7 +371,7 @@ func TestResolveArchetype_DevcontainerRunArgs_CPUMemory(t *testing.T) {
 	require.NoError(t, os.WriteFile(filepath.Join(dir, "devcontainer.json"), []byte(dcContent), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	pr := &profileResult{}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, pr)
@@ -387,7 +392,7 @@ func TestCreateOutput_PerCallWriterReceivesAdvisories(t *testing.T) {
 
 	var callBuf bytes.Buffer
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}, Output: &callBuf}
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.WriterSink(&callBuf), Progress: feedback.ProgressToWriter(&callBuf)}
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, &profileResult{})
 	require.NoError(t, err)
@@ -405,7 +410,7 @@ func TestCreateOutput_NilWriterIsDiscarded(t *testing.T) {
 		[]byte("archetype: simple\n"), 0600))
 
 	d := newTestDeps(t)
-	opts := &Options{Workdir: DirSpec{Path: dir}} // Output left nil → io.Discard
+	opts := &Options{Workdir: DirSpec{Path: dir}, Notices: feedback.Discard, Progress: feedback.DiscardProgress} // Output left nil → io.Discard
 
 	_, _, _, _, err := resolveAndApplyArchetype(context.Background(), d, opts, &profileResult{})
 	require.NoError(t, err)

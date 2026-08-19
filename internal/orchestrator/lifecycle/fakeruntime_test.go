@@ -5,9 +5,9 @@ package lifecycle
 
 import (
 	"context"
-	"io"
 	"log/slog"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -80,7 +80,7 @@ func (m *lifecycleMockRuntime) Exec(ctx context.Context, name string, cmd []stri
 	return runtime.ExecResult{}, errMockNotImplemented
 }
 
-func (m *lifecycleMockRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
+func (m *lifecycleMockRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ feedback.ProgressSink, _ feedback.Sink, _ *slog.Logger, _ bool) error {
 	return nil
 }
 func (m *lifecycleMockRuntime) IsReady(_ context.Context) (bool, error) { return false, nil }

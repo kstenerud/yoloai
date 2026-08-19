@@ -6,7 +6,6 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -69,21 +68,21 @@ func TestCheckUnappliedWork_AbsentEnvironmentIsNil(t *testing.T) {
 
 func TestBuildNetworkConfig_Default(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	mode, allow := buildNetworkConfig(Options{}, agentDef)
+	mode, allow := buildNetworkConfig(Options{Notices: feedback.Discard, Progress: feedback.DiscardProgress}, agentDef)
 	assert.Equal(t, "", mode)
 	assert.Nil(t, allow)
 }
 
 func TestBuildNetworkConfig_None(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	mode, allow := buildNetworkConfig(Options{Network: NetworkModeNone}, agentDef)
+	mode, allow := buildNetworkConfig(Options{Network: NetworkModeNone, Notices: feedback.Discard, Progress: feedback.DiscardProgress}, agentDef)
 	assert.Equal(t, "none", mode)
 	assert.Nil(t, allow)
 }
 
 func TestBuildNetworkConfig_Isolated(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	mode, allow := buildNetworkConfig(Options{Network: NetworkModeIsolated}, agentDef)
+	mode, allow := buildNetworkConfig(Options{Network: NetworkModeIsolated, Notices: feedback.Discard, Progress: feedback.DiscardProgress}, agentDef)
 	assert.Equal(t, "isolated", mode)
 	// Should include agent's allowlist
 	assert.NotEmpty(t, allow)
@@ -92,9 +91,10 @@ func TestBuildNetworkConfig_Isolated(t *testing.T) {
 
 func TestBuildNetworkConfig_IsolatedWithUserAllow(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	opts := Options{
-		Network:      NetworkModeIsolated,
+	opts := Options{Network: NetworkModeIsolated,
 		NetworkAllow: []string{"example.com"},
+		Notices:      feedback.Discard,
+		Progress:     feedback.DiscardProgress,
 	}
 	mode, allow := buildNetworkConfig(opts, agentDef)
 	assert.Equal(t, "isolated", mode)
@@ -105,9 +105,10 @@ func TestBuildNetworkConfig_IsolatedWithUserAllow(t *testing.T) {
 
 func TestBuildNetworkConfig_NoneTakesPriority(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	opts := Options{
-		Network:      NetworkModeNone,
+	opts := Options{Network: NetworkModeNone,
 		NetworkAllow: []string{"example.com"},
+		Notices:      feedback.Discard,
+		Progress:     feedback.DiscardProgress,
 	}
 	mode, allow := buildNetworkConfig(opts, agentDef)
 	assert.Equal(t, "none", mode)
@@ -279,7 +280,7 @@ func TestValidateAndExpandMounts_Empty(t *testing.T) {
 // --- applyConfigDefaults ---
 
 func TestApplyConfigDefaults_ResourcesFromConfig(t *testing.T) {
-	opts := &Options{}
+	opts := &Options{Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{
 		Resources: &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
@@ -292,7 +293,7 @@ func TestApplyConfigDefaults_ResourcesFromConfig(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_ProfileResourcesTakePriority(t *testing.T) {
-	opts := &Options{}
+	opts := &Options{Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{
 		Resources: &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
@@ -307,7 +308,7 @@ func TestApplyConfigDefaults_ProfileResourcesTakePriority(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_CLIOverridesResources(t *testing.T) {
-	opts := &Options{CPUs: "8", Memory: "16g"}
+	opts := &Options{CPUs: "8", Memory: "16g", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{
 		Resources: &config.ResourceLimits{CPUs: "4", Memory: "8g"},
 	}
@@ -320,7 +321,7 @@ func TestApplyConfigDefaults_CLIOverridesResources(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_CLIOverridesProfileResources(t *testing.T) {
-	opts := &Options{CPUs: "8"}
+	opts := &Options{CPUs: "8", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{}
 	pr := &profileResult{
 		resources: &config.ResourceLimits{CPUs: "2", Memory: "4g"},
@@ -332,7 +333,7 @@ func TestApplyConfigDefaults_CLIOverridesProfileResources(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_DirectoriesFromConfigWhenNoProfile(t *testing.T) {
-	opts := &Options{} // no profile
+	opts := &Options{Notices: feedback.Discard, Progress: feedback.DiscardProgress} // no profile
 	ycfg := &config.YoloaiConfig{
 		Directories: []config.ProfileDir{
 			{Path: "~/shared-lib", Mode: "rw", Mount: "/usr/local/lib/shared"},
@@ -348,7 +349,7 @@ func TestApplyConfigDefaults_DirectoriesFromConfigWhenNoProfile(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_DirectoriesSkippedWithProfile(t *testing.T) {
-	opts := &Options{Profile: "dev"}
+	opts := &Options{Profile: "dev", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{
 		Directories: []config.ProfileDir{{Path: "/a"}},
 	}
@@ -360,7 +361,7 @@ func TestApplyConfigDefaults_DirectoriesSkippedWithProfile(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_PortsFromConfigWhenNoProfile(t *testing.T) {
-	opts := &Options{Ports: []string{"9090:9090"}}
+	opts := &Options{Ports: []string{"9090:9090"}, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{
 		Ports: []string{"8080:8080"},
 	}
@@ -372,7 +373,7 @@ func TestApplyConfigDefaults_PortsFromConfigWhenNoProfile(t *testing.T) {
 }
 
 func TestApplyConfigDefaults_NetworkFromConfigWhenNoProfile(t *testing.T) {
-	opts := &Options{}
+	opts := &Options{Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{
 		Network: &config.NetworkConfig{
 			Isolated: true,
@@ -399,7 +400,7 @@ func TestApplyConfigDefaults_NetworkFromConfigWhenNoProfile(t *testing.T) {
 // NetworkModeNone precisely to keep that boundary visible: the allowlist is
 // assembled here and discarded one layer down, not tidied away at this site.
 func TestApplyConfigDefaults_NetworkAllowMergesWhenCLIOverridesMode(t *testing.T) {
-	opts := &Options{Network: NetworkModeNone}
+	opts := &Options{Network: NetworkModeNone, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{
 		Network: &config.NetworkConfig{
 			Isolated: true,
@@ -416,7 +417,7 @@ func TestApplyConfigDefaults_NetworkAllowMergesWhenCLIOverridesMode(t *testing.T
 }
 
 func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {
-	opts := &Options{}
+	opts := &Options{Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	ycfg := &config.YoloaiConfig{
 		CapAdd:  []string{"SYS_ADMIN"},
 		Devices: []string{"/dev/fuse"},
@@ -435,7 +436,7 @@ func TestApplyConfigDefaults_RecipesFromConfigWhenNoProfile(t *testing.T) {
 // mockDockerRuntime implements runtime.Backend without WorkDirSetup (Docker-like behavior).
 type mockDockerRuntime struct{}
 
-func (m *mockDockerRuntime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (m *mockDockerRuntime) Setup(ctx context.Context, layout config.Layout, sourceDir string, _ feedback.ProgressSink, _ feedback.Sink, logger *slog.Logger, force bool) error {
 	return nil
 }
 func (m *mockDockerRuntime) IsReady(ctx context.Context) (bool, error) { return true, nil }
@@ -605,10 +606,11 @@ func TestPrepareSandboxState_MissingName(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "",
-		Workdir: DirSpec{Path: tmpDir},
-		Agent:   "test",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "",
+		Workdir:  DirSpec{Path: tmpDir},
+		Agent:    "test",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "name is required")
@@ -623,10 +625,11 @@ func TestPrepareSandboxState_UnknownAgent(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "test",
-		Workdir: DirSpec{Path: tmpDir},
-		Agent:   "nonexistent-agent",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
+		Workdir:  DirSpec{Path: tmpDir},
+		Agent:    "nonexistent-agent",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "unknown agent")
@@ -641,10 +644,11 @@ func TestPrepareSandboxState_WorkdirMissing(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "test",
-		Workdir: DirSpec{Path: "/nonexistent/path"},
-		Agent:   "test",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
+		Workdir:  DirSpec{Path: "/nonexistent/path"},
+		Agent:    "test",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "workdir does not exist")
@@ -664,10 +668,11 @@ func TestPrepareSandboxState_SandboxExists(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "existing",
-		Workdir: DirSpec{Path: tmpDir},
-		Agent:   "test",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "existing",
+		Workdir:  DirSpec{Path: tmpDir},
+		Agent:    "test",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrSandboxExists)
@@ -682,12 +687,13 @@ func TestPrepareSandboxState_ConflictingPromptFlags(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:       "test",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
 		Workdir:    DirSpec{Path: tmpDir},
 		Agent:      "test",
 		Prompt:     "hello",
 		PromptFile: "/some/file",
+		Notices:    feedback.Discard,
+		Progress:   feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "mutually exclusive")
@@ -704,10 +710,11 @@ func TestPrepareSandboxState_MissingAPIKey(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "test",
-		Workdir: DirSpec{Path: tmpDir},
-		Agent:   "claude",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
+		Workdir:  DirSpec{Path: tmpDir},
+		Agent:    "claude",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
@@ -723,10 +730,11 @@ func TestPrepareSandboxState_DangerousDir(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "test",
-		Workdir: DirSpec{Path: "/"},
-		Agent:   "claude",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
+		Workdir:  DirSpec{Path: "/"},
+		Agent:    "claude",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "dangerous directory")
@@ -745,10 +753,11 @@ func TestPrepareSandboxState_DangerousDirForce(t *testing.T) {
 	}
 
 	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "test",
-		Workdir: DirSpec{Path: tmpDir, Mode: DirModeRW, AllowDangerousPath: true},
-		Agent:   "claude",
-		Output:  &buf,
+		Name:     "test",
+		Workdir:  DirSpec{Path: tmpDir, Mode: DirModeRW, AllowDangerousPath: true},
+		Agent:    "claude",
+		Notices:  feedback.WriterSink(&buf),
+		Progress: feedback.ProgressToWriter(&buf),
 	})
 	// Should NOT fail on "dangerous directory" — :force bypasses it.
 	if err != nil {
@@ -782,10 +791,11 @@ func TestPrepareSandboxState_MissingAPIKeyErrorNoEmptyParens(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "test",
-		Workdir: DirSpec{Path: tmpDir},
-		Agent:   "aider",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
+		Workdir:  DirSpec{Path: tmpDir},
+		Agent:    "aider",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
@@ -813,10 +823,11 @@ func TestPrepareSandboxState_MissingAPIKeyErrorWithAuthFiles(t *testing.T) {
 		Input:   strings.NewReader(""),
 	}
 
-	_, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "test",
-		Workdir: DirSpec{Path: tmpDir},
-		Agent:   "claude",
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
+		Workdir:  DirSpec{Path: tmpDir},
+		Agent:    "claude",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.Error(t, err)
 	assert.ErrorIs(t, err, ErrMissingAPIKey)
@@ -839,12 +850,13 @@ func TestPrepareSandboxState_NetworkIsolatedSetsAllowlist(t *testing.T) {
 		Input:   strings.NewReader("y\n"),
 	}
 
-	st, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:    "test",
-		Workdir: DirSpec{Path: workDir},
-		Agent:   "claude",
-		Network: NetworkModeIsolated,
-		Version: "test",
+	st, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
+		Workdir:  DirSpec{Path: workDir},
+		Agent:    "claude",
+		Network:  NetworkModeIsolated,
+		Version:  "test",
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, st)
@@ -891,13 +903,14 @@ func TestPrepareSandboxState_NetworkAllowAddsExtraDomains(t *testing.T) {
 		Input:   strings.NewReader("y\n"),
 	}
 
-	st, err := prepareSandboxState(context.TODO(), d, Options{
-		Name:         "test",
+	st, err := prepareSandboxState(context.TODO(), d, Options{Name: "test",
 		Workdir:      DirSpec{Path: workDir},
 		Agent:        "claude",
 		Network:      NetworkModeIsolated,
 		NetworkAllow: []string{"api.example.com"},
 		Version:      "test",
+		Notices:      feedback.Discard,
+		Progress:     feedback.DiscardProgress,
 	})
 	require.NoError(t, err)
 	require.NotNil(t, st)
@@ -926,7 +939,7 @@ func TestPrepareSandboxState_UnreadableMetadataRefusesAndPreserves(t *testing.T)
 	require.NoError(t, os.WriteFile(workMarker, []byte("unapplied"), 0600))
 
 	d := state.Deps{Runtime: &fakeRuntime{}, Layout: layoutForTmpDir(tmpDir), Input: strings.NewReader("")}
-	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "old", Workdir: DirSpec{Path: tmpDir}, Agent: "test"})
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "old", Workdir: DirSpec{Path: tmpDir}, Agent: "test", Notices: feedback.Discard, Progress: feedback.DiscardProgress})
 
 	require.Error(t, err)
 	assert.NotErrorIs(t, err, ErrSandboxExists, "this is the unreadable-metadata refusal, not the ordinary exists error")
@@ -945,7 +958,7 @@ func TestPrepareSandboxState_AbsentMetadataIsNotRefused(t *testing.T) {
 	require.NoError(t, os.MkdirAll(sandboxDir, 0750)) // dir present, no environment.json
 
 	d := state.Deps{Runtime: &fakeRuntime{}, Layout: layoutForTmpDir(tmpDir), Input: strings.NewReader("")}
-	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "half", Workdir: DirSpec{Path: tmpDir}, Agent: "test"})
+	_, err := prepareSandboxState(context.TODO(), d, Options{Name: "half", Workdir: DirSpec{Path: tmpDir}, Agent: "test", Notices: feedback.Discard, Progress: feedback.DiscardProgress})
 
 	// It may fail later on the fake runtime, but it must get PAST the metadata
 	// guard rather than refuse with the unreadable-metadata error.

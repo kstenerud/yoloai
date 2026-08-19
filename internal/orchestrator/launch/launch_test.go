@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -422,14 +422,14 @@ func TestCreateWithImageRecovery(t *testing.T) {
 		t.Helper()
 		prev := rebuildProfileImage
 		rebuildProfileImage = func(_ context.Context, _ runtime.Backend, _ config.Layout, profile string,
-			_ []string, _ io.Writer, _ *slog.Logger, force bool) error {
+			_ []string, _ feedback.ProgressSink, _ feedback.Sink, _ *slog.Logger, force bool) error {
 			*calls = append(*calls, rebuildCall{profile, force})
 			return result
 		}
 		t.Cleanup(func() { rebuildProfileImage = prev })
 	}
 	st := func() *state.State {
-		return &state.State{Profile: "dev", Output: io.Discard}
+		return &state.State{Profile: "dev", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	}
 
 	t.Run("rebuilds and retries once", func(t *testing.T) {
@@ -487,7 +487,7 @@ func TestCreateWithImageRecovery(t *testing.T) {
 		var calls []rebuildCall
 		install(t, nil, &calls)
 		rt := &recoveryRuntime{errs: []error{missing}}
-		bare := &state.State{Output: io.Discard}
+		bare := &state.State{Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 
 		err := createWithImageRecovery(context.Background(), rt, testLogger(), bare, cfg)
 		require.Error(t, err)

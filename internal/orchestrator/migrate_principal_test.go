@@ -5,12 +5,12 @@ package orchestrator
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/migrate"
 	"github.com/kstenerud/yoloai/internal/orchestrator/status"
@@ -111,7 +111,7 @@ type fakeBackend struct {
 	removeCalls []string
 }
 
-func (f *fakeBackend) Setup(context.Context, config.Layout, string, io.Writer, *slog.Logger, bool) error {
+func (f *fakeBackend) Setup(context.Context, config.Layout, string, feedback.ProgressSink, feedback.Sink, *slog.Logger, bool) error {
 	return nil
 }
 func (f *fakeBackend) IsReady(context.Context) (bool, error)                { return true, nil }

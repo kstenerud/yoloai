@@ -27,7 +27,7 @@ import (
 func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, pr *profileResult) (archetype.Archetype, *archetype.DevcontainerConfig, []string, []feedback.Notice, error) {
 	workdir := opts.Workdir.Path
 
-	warnIfYoloAIYamlPresent(noticesFor(opts.Output), workdir)
+	warnIfYoloAIYamlPresent(opts.Notices, workdir)
 
 	arch, signals, source, err := resolveArchetype(opts, workdir)
 	if err != nil {
@@ -35,7 +35,7 @@ func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, 
 	}
 
 	// Step 2: Platform check for apple archetype
-	if err := checkAppleArchetype(noticesFor(opts.Output), arch, opts.Archetype); err != nil {
+	if err := checkAppleArchetype(opts.Notices, arch, opts.Archetype); err != nil {
 		return "", nil, nil, nil, err
 	}
 
@@ -46,7 +46,7 @@ func resolveAndApplyArchetype(ctx context.Context, d state.Deps, opts *Options, 
 	}
 
 	// Step 4: Transparency output
-	reportArchetype(noticesFor(opts.Output), arch, source, signals, bullets)
+	reportArchetype(opts.Notices, arch, source, signals, bullets)
 
 	return arch, devcontainerCfg, dcMounts, dcMountNotices, nil
 }
@@ -163,9 +163,9 @@ func applyDevcontainerArchetype(ctx context.Context, d state.Deps, opts *Options
 				"use a project with devcontainer.json and docker-compose.yaml side by side instead")
 	}
 
-	dc.WarnIgnoredFields(noticesFor(opts.Output))
+	dc.WarnIgnoredFields(opts.Notices)
 
-	bullets = applyDevcontainerRunArgs(dc, pr, bullets, noticesFor(opts.Output))
+	bullets = applyDevcontainerRunArgs(dc, pr, bullets, opts.Notices)
 	bullets = applyDevcontainerCompose(dc, opts, pr, bullets)
 	bullets = applyDevcontainerEnv(dc, pr, bullets)
 	bullets = applyDevcontainerPorts(dc, opts, bullets)

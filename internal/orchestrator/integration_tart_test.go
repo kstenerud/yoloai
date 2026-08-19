@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/copyflow"
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
@@ -95,7 +96,7 @@ func tartIntegrationSetup(t *testing.T) (*orchestrator.Engine, context.Context) 
 	// that reports a base-image pull ("This is a one-time download (~30 GB)"),
 	// and discarding it is what hid DF19 here for as long as it did: the suite
 	// looked like it was hanging when it was actually downloading.
-	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
+	require.NoError(t, mgr.EnsureSetup(ctx, feedback.ProgressToWriter(testutil.LogWriter(t)), feedback.WriterSink(testutil.LogWriter(t))))
 
 	return mgr, ctx
 }

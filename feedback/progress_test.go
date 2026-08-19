@@ -143,11 +143,31 @@ func TestProgressWriter_FlushIsIdempotent(t *testing.T) {
 	}
 }
 
-// TestProgressWriter_SkipsBlankLinesAndStripsCR keeps a stream's spacing from
-// becoming a run of empty records, and handles the CRLF a Windows-built tool
-// emits — otherwise every message would carry a trailing \r into whatever
-// renders it.
-func TestProgressWriter_SkipsBlankLinesAndStripsCR(t *testing.T) {
+// TestProgressWriter_SplitsOnCarriageReturn is the case that decides whether a
+// redrawing tool is legible. xcodebuild reports download progress as repeated
+// \r-terminated updates with no newline until the end; splitting on \n alone
+// would buffer an entire multi-minute download into one record delivered after
+// it finished.
+func TestProgressWriter_SplitsOnCarriageReturn(t *testing.T) {
+	var got progressCollector
+	w := feedback.NewProgressWriter(&got, "runtime.download")
+
+	if _, err := w.Write([]byte("Downloading 10%\rDownloading 55%\rDownloading 100%\n")); err != nil {
+		t.Fatalf("Write: %v", err)
+	}
+
+	if len(got.list) != 3 {
+		t.Fatalf("emitted %d records, want 3 — a \\r-redrawing tool must not buffer: %v", len(got.list), got.list)
+	}
+	if got.list[0].Message != "Downloading 10%" || got.list[2].Message != "Downloading 100%" {
+		t.Errorf("records = %v", got.list)
+	}
+}
+
+// TestProgressWriter_SkipsBlankSegments keeps a stream's spacing — and the
+// empty segment a CRLF pair leaves behind — from becoming a run of empty
+// records.
+func TestProgressWriter_SkipsBlankSegments(t *testing.T) {
 	var got progressCollector
 	w := feedback.NewProgressWriter(&got, "build.output")
 
@@ -159,7 +179,7 @@ func TestProgressWriter_SkipsBlankLinesAndStripsCR(t *testing.T) {
 		t.Fatalf("emitted %d records, want 2: %v", len(got.list), got.list)
 	}
 	if got.list[0].Message != "first" {
-		t.Errorf("record 0 = %q, want the CR stripped", got.list[0].Message)
+		t.Errorf("record 0 = %q", got.list[0].Message)
 	}
 	if got.list[1].Message != "second" {
 		t.Errorf("record 1 = %q", got.list[1].Message)

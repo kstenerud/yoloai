@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -237,18 +238,15 @@ func (e *Engine) Layout() config.Layout { return e.layout }
 // UX lives in the app layer (the CLI's `yoloai system setup`), which
 // records its own "wizard has run" bookkeeping — none of the library's
 // business.
-func (e *Engine) EnsureSetup(ctx context.Context, out io.Writer) error {
+func (e *Engine) EnsureSetup(ctx context.Context, progress feedback.ProgressSink, notices feedback.Sink) error {
 	if err := e.ensure(ctx); err != nil {
 		return err
-	}
-	if out == nil {
-		out = io.Discard
 	}
 	if err := e.ensureLayoutScaffold(); err != nil {
 		return err
 	}
 	baseProfileDir := e.layout.ProfileDir("base")
-	return e.runtime.Setup(ctx, e.layout, baseProfileDir, out, e.logger, false)
+	return e.runtime.Setup(ctx, e.layout, baseProfileDir, progress, notices, e.logger, false)
 }
 
 // ensureDefaultsDir creates DataDir/defaults/ and materializes the

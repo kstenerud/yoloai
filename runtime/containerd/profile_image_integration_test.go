@@ -10,6 +10,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"github.com/kstenerud/yoloai/feedback"
 	"io"
 	"log/slog"
 	"math/rand"
@@ -98,7 +99,7 @@ func TestIntegration_BuildProfileImage_LandsInContainerdNamespace(t *testing.T) 
 	})
 
 	var out strings.Builder
-	err = rt.BuildProfileImage(ctx, profileDir, tag, "", nil, layout, &out, slog.New(slog.DiscardHandler))
+	err = rt.BuildProfileImage(ctx, profileDir, tag, "", nil, layout, feedback.ProgressToWriter(&out), feedback.WriterSink(&out), slog.New(slog.DiscardHandler))
 	// Logged unconditionally: which import path ran (zero-copy namespace link vs
 	// `docker save | ctr import`) is invisible from the result and is the thing a
 	// maintainer wants when this gets slow.
@@ -167,7 +168,7 @@ func TestIntegration_DockerBuildLabel_SurvivesImportIntoContainerd(t *testing.T)
 	require.NoError(t, err, "docker build:\n%s", out)
 
 	var importOut strings.Builder
-	require.NoError(t, rt.importFromDocker(ctx, dockerBin, tag, &importOut, slog.New(slog.DiscardHandler)),
+	require.NoError(t, rt.importFromDocker(ctx, dockerBin, tag, feedback.ProgressToWriter(&importOut), slog.New(slog.DiscardHandler)),
 		"import output:\n%s", importOut.String())
 	t.Logf("import path taken:\n%s", importOut.String())
 

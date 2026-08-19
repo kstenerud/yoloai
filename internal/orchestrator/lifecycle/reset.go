@@ -9,6 +9,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
@@ -68,7 +69,7 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 		}
 	}
 
-	var n notices
+	var n feedback.Collector
 
 	// Auto-upgrade to restart: --state implies restart (can't wipe state while agent is running)
 	if opts.ClearState {
@@ -86,18 +87,18 @@ func Reset(ctx context.Context, d state.Deps, opts ResetOptions) (*ResetResult, 
 	if !opts.Restart {
 		st, err := status.DetectStatus(ctx, d.Runtime, store.InstanceName(d.Layout.Principal, opts.Name), sandboxDir)
 		if err != nil || (st != status.StatusActive && st != status.StatusIdle) {
-			n.infof("Container is not running, upgrading to restart")
+			feedback.Infof(&n, "sandbox.reset_upgraded_to_restart", "Container is not running, upgrading to restart")
 			opts.Restart = true
 		}
 	}
 
 	if !opts.Restart {
 		err := resetInPlace(ctx, d, opts, meta, sandboxDir)
-		return &ResetResult{Notices: n.list}, err
+		return &ResetResult{Notices: n.Notices()}, err
 	}
 
 	err = prepareResetRestart(ctx, d, opts, sandboxDir, meta, &n)
-	return &ResetResult{Notices: n.list}, err
+	return &ResetResult{Notices: n.Notices()}, err
 }
 
 // NeedsConfirmation checks if a sandbox requires confirmation before
@@ -293,7 +294,7 @@ func applyPostResetOptions(d state.Deps, opts ResetOptions, sandboxDir string, p
 
 // prepareResetRestart performs the full stop → wipe → recopy → start flow for
 // reset --restart. Extracted from Reset to reduce its cyclomatic complexity.
-func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, sandboxDir string, meta *store.Environment, n *notices) error {
+func prepareResetRestart(ctx context.Context, d state.Deps, opts ResetOptions, sandboxDir string, meta *store.Environment, n *feedback.Collector) error {
 	// Destroy the container so start() sees StatusRemoved and does a clean
 	// recreate. Using Remove (not Stop) avoids suspending a VM we're about
 	// to rebuild — the suspend state would be stale after the host workdir

@@ -52,7 +52,7 @@ func parseAndValidateDirs(ctx context.Context, d state.Deps, opts Options, agent
 
 	defaultDirModes(workdir, auxDirs)
 
-	if err := checkDirSafety(workdir, auxDirs, noticesFor(opts.Output), d.Layout.HomeDir); err != nil {
+	if err := checkDirSafety(workdir, auxDirs, opts.Notices, d.Layout.HomeDir); err != nil {
 		return nil, nil, err
 	}
 
@@ -89,7 +89,7 @@ func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
 	auth := envsetup.ResolveAuthPresence(envspec.BuildEnvSpec(agentDef), mergedEnv, d.Layout)
-	if err := checkAgentAuth(agentDef, auth, noticesFor(opts.Output)); err != nil {
+	if err := checkAgentAuth(agentDef, auth, opts.Notices); err != nil {
 		return err
 	}
 

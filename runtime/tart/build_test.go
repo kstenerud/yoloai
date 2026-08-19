@@ -6,7 +6,7 @@ package tart
 
 import (
 	"context"
-	"io"
+	"github.com/kstenerud/yoloai/feedback"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -24,7 +24,7 @@ func TestPullImage_ErrorCarriesStderrTail(t *testing.T) {
 	const cause = `Error: AuthFailed(why: "received unexpected HTTP status code 403")`
 	r := fakeTartRuntime(t, cause)
 
-	err := r.pullImage(context.Background(), "ghcr.io/nonexistent/image:latest", io.Discard)
+	err := r.pullImage(context.Background(), "ghcr.io/nonexistent/image:latest", feedback.DiscardProgress)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "pull ghcr.io/nonexistent/image:latest",
 		"the error names the operation")
@@ -36,7 +36,7 @@ func TestVerifyTools_ErrorCarriesStderrTail(t *testing.T) {
 	const cause = "MISSING: gh"
 	r := fakeTartRuntime(t, cause)
 
-	err := r.verifyTools(context.Background(), "yoloai-test-vm", io.Discard)
+	err := r.verifyTools(context.Background(), "yoloai-test-vm", feedback.DiscardProgress)
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), cause,
 		"the missing-tool name rides on the error, not only the stream (DF145)")

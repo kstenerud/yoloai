@@ -116,7 +116,7 @@ func resolveProfileConfig(ctx context.Context, d state.Deps, opts *Options, agen
 
 	// Build profile image if needed (Docker only)
 	logger := d.LoggerOr()
-	if err := profiles.EnsureProfileImage(ctx, d.Runtime, d.Layout, opts.Profile, profiles.AutoBuildSecrets(d.Layout.HomeDir), outputFor(opts.Output), logger, false); err != nil {
+	if err := profiles.EnsureProfileImage(ctx, d.Runtime, d.Layout, opts.Profile, profiles.AutoBuildSecrets(d.Layout.HomeDir), opts.Progress, opts.Notices, logger, false); err != nil {
 		return nil, fmt.Errorf("build profile image: %w", err)
 	}
 

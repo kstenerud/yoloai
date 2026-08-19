@@ -6,8 +6,8 @@ package launch
 import (
 	"context"
 	"encoding/json"
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/testutil"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -71,7 +71,7 @@ func (r *rerouteBaseRuntime) GitExec(_ context.Context, _ string, _ string, _ st
 func (r *rerouteBaseRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
 	return nil
 }
-func (r *rerouteBaseRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
+func (r *rerouteBaseRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ feedback.ProgressSink, _ feedback.Sink, _ *slog.Logger, _ bool) error {
 	return nil
 }
 func (r *rerouteBaseRuntime) IsReady(_ context.Context) (bool, error) { return true, nil }

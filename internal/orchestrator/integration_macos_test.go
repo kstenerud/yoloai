@@ -17,6 +17,7 @@ import (
 	"time"
 
 	"github.com/kstenerud/yoloai/copyflow"
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
@@ -80,7 +81,7 @@ func seatbeltMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context
 	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
+	require.NoError(t, mgr.EnsureSetup(ctx, feedback.ProgressToWriter(testutil.LogWriter(t)), feedback.WriterSink(testutil.LogWriter(t))))
 	return mgr, ctx
 }
 
@@ -107,7 +108,7 @@ func appleMaliciousSetup(t *testing.T) (*orchestrator.Engine, context.Context) {
 	t.Cleanup(func() { _ = rt.Close() })
 
 	mgr := orchestrator.NewEngineWithRuntime(rt, slog.New(slog.DiscardHandler), strings.NewReader(""), orchestrator.WithLayout(layout))
-	require.NoError(t, mgr.EnsureSetup(ctx, testutil.LogWriter(t)))
+	require.NoError(t, mgr.EnsureSetup(ctx, feedback.ProgressToWriter(testutil.LogWriter(t)), feedback.WriterSink(testutil.LogWriter(t))))
 	return mgr, ctx
 }
 

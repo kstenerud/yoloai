@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"os"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/launch"
@@ -70,11 +71,11 @@ func destroy(ctx context.Context, d state.Deps, name string) (*DestroyResult, er
 	if err != nil {
 		return nil, err
 	}
-	var n notices
+	var n feedback.Collector
 	for _, w := range warnings {
-		n.warnf("%s", w)
+		feedback.Warnf(&n, "sandbox.destroy_incomplete", "%s", w)
 	}
-	return &DestroyResult{Notices: n.list}, nil
+	return &DestroyResult{Notices: n.Notices()}, nil
 }
 
 // syncLifecycleMarker checks for the Python on-create-done marker file and

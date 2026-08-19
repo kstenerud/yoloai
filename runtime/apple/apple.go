@@ -17,6 +17,7 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/runtime"
@@ -456,7 +457,7 @@ func normalizeCap(c string) string {
 // Setup starts the apiserver and the builder, then builds yoloai-base from the
 // shared base-image build context when it is missing or its inputs changed.
 // Idempotent.
-func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger, force bool) error {
 	// Start the apiserver and the (separate) builder VM on demand (AC3).
 	if _, err := r.runContainer(ctx, "system", "start"); err != nil {
 		return fmt.Errorf("start container system: %w", err)
@@ -468,13 +469,14 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	exists := r.imageExists(ctx, baseImage)
 	if force || !exists {
 		if !exists {
-			fmt.Fprintln(output, "Building base image (first run only, this may take a few minutes)...") //nolint:errcheck // best-effort progress
+			feedback.Progressf(progress, "image.base_building",
+				"Building base image (first run only, this may take a few minutes)...")
 		}
-		return r.buildBaseImage(ctx, layout, output, logger)
+		return r.buildBaseImage(ctx, layout, progress, logger)
 	}
 	if dockerrt.NeedsBuild(layout, "apple") {
-		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort progress
-		return r.buildBaseImage(ctx, layout, output, logger)
+		feedback.Progressf(progress, "image.base_rebuilding", "Base image resources updated, rebuilding...")
+		return r.buildBaseImage(ctx, layout, progress, logger)
 	}
 	return nil
 }
@@ -495,7 +497,7 @@ func (r *Runtime) imageExists(ctx context.Context, ref string) bool {
 // relative `.` silently transfers an empty context and every COPY fails (AC1).
 // Build inputs are the same embedded resources the docker backend uses, so
 // staleness rides on the shared checksum marker.
-func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, progress feedback.ProgressSink, logger *slog.Logger) error {
 	dir, err := layout.MkdirTemp("yoloai-apple-build-")
 	if err != nil {
 		return fmt.Errorf("create build dir: %w", err)
@@ -520,7 +522,9 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	// actionable cause rides on the error itself, not only the (maybe discarded)
 	// stream — same value on both so os/exec keeps its single-pipe path (DF145).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "image.build_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -545,9 +549,19 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 // backend's BuildKit invocation), so any auto-detected build secrets (e.g. an
 // ~/.npmrc) are reported and dropped rather than silently ignored or failing
 // the build outright.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger) error {
 	if len(secrets) > 0 {
-		fmt.Fprintf(output, "Warning: build secrets are not supported on the apple backend; %d secret(s) will not be available to the build\n", len(secrets)) //nolint:errcheck // best-effort progress
+		// A notice, not progress: this is a capability the backend does not
+		// have, and the build proceeding without it is something the user may
+		// need to act on. It reached the caller only as a line inside a build
+		// log until Setup and BuildProfileImage gained a notices sink.
+		feedback.Emit(notices, feedback.Notice{
+			Event: "build.secrets_unsupported",
+			Level: feedback.LevelWarn,
+			Message: fmt.Sprintf("build secrets are not supported on the apple backend; %d secret(s) will not be available to the build",
+				len(secrets)),
+			Fields: map[string]any{"backend": "apple", "count": len(secrets)},
+		})
 	}
 
 	dir, err := buildEnv.MkdirTemp("yoloai-apple-profile-build-")
@@ -573,7 +587,9 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 	// actionable cause rides on the error itself, not only the (maybe discarded)
 	// stream — same value on both so os/exec keeps its single-pipe path (DF145).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "image.build_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {

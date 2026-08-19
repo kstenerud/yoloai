@@ -18,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/sysexec"
@@ -276,7 +277,7 @@ func AttestationOptOutFlags(binaryName string) []string {
 // backend-idiosyncrasies.md). BuildKit keeps step results in the build cache
 // instead, so no dangling intermediate images are produced. The embedded
 // context tar is piped to stdin, so no temp dir is needed.
-func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, progress feedback.ProgressSink, logger *slog.Logger) error {
 	buildCtx, err := createBuildContext()
 	if err != nil {
 		return fmt.Errorf("create build context: %w", err)
@@ -296,11 +297,14 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	args = append(args, "-t", "yoloai-base", "-")
 	cmd := sysexec.CommandContext(ctx, layout.Env().EnvForDockerBuild(), r.binaryName, args...)
 	cmd.Stdin = buildCtx
-	// Stream to output as before, but also tee into a tail buffer so a failure's
-	// actionable cause rides on the error itself, not only the (maybe discarded)
-	// stream — same value on both so os/exec keeps its single-pipe path (DF144).
+	// The child's output becomes one progress record per line, and is also teed
+	// into a tail buffer so a failure's actionable cause rides on the error
+	// itself rather than only on the (maybe discarded) stream — same value on
+	// both so os/exec keeps its single-pipe path (DF144).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "image.build_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 
@@ -411,7 +415,7 @@ func createBuildContext() (io.Reader, error) {
 // image per Dockerfile step and makes `system prune` churn forever (see
 // backend-idiosyncrasies.md). BuildKit also supplies the `--secret` plumbing
 // for profiles that need build secrets.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger) error {
 	buildCtx, err := createProfileBuildContext(sourceDir)
 	if err != nil {
 		return fmt.Errorf("create profile build context: %w", err)
@@ -435,7 +439,9 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForDockerBuild(), r.binaryName, args...)
 	cmd.Stdin = buildCtx
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "image.build_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 

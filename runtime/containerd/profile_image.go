@@ -18,6 +18,7 @@ import (
 	"github.com/containerd/containerd/v2/core/content"
 	ocispec "github.com/opencontainers/image-spec/specs-go/v1"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/runtime"
@@ -47,7 +48,7 @@ var _ runtime.RuntimeScriptProvider = (*Runtime)(nil)
 //
 // Unlike apple, containerd gets BuildKit `--secret` support for free, since the
 // build is a real `docker build`.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger) error {
 	dockerBin, err := exec.LookPath("docker")
 	if err != nil {
 		return fmt.Errorf("docker is required to build profile images for the containerd backend\n" +
@@ -64,7 +65,11 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 		return fmt.Errorf("write profile build context: %w", err)
 	}
 
-	fmt.Fprintf(output, "Building profile image %s with Docker...\n", tag) //nolint:errcheck // best-effort progress
+	feedback.EmitProgress(progress, feedback.Progress{
+		Event:   "profile.image_building",
+		Message: fmt.Sprintf("Building profile image %s with Docker...", tag),
+		Fields:  map[string]any{"tag": tag},
+	})
 	logger.Info("building profile image via docker for containerd", "tag", tag, "sourceDir", sourceDir, "context", dir)
 
 	// buildEnv is the env the build subprocess draws from, never r.execEnv
@@ -101,14 +106,16 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 	// Tee into a tail buffer so a failure's cause rides on the error and not only
 	// on a stream the caller may discard (DF144/DF145).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "image.build_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	buildCmd.Stdout = w
 	buildCmd.Stderr = w
 	if err := buildCmd.Run(); err != nil {
 		return fmt.Errorf("docker build: %w%s", err, tail.ErrorSuffix())
 	}
 
-	return r.importFromDocker(ctx, dockerBin, tag, output, logger)
+	return r.importFromDocker(ctx, dockerBin, tag, progress, logger)
 }
 
 // importFromDocker makes a docker-built tag available in the yoloai containerd
@@ -116,12 +123,12 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 // `docker save | ctr import`. Shared with Setup's base-image path — the two must
 // not drift, since a profile image that is present for docker and absent for
 // containerd fails at run with a pull of a local-only tag (DF154).
-func (r *Runtime) importFromDocker(ctx context.Context, dockerBin string, tag string, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) importFromDocker(ctx context.Context, dockerBin string, tag string, progress feedback.ProgressSink, logger *slog.Logger) error {
 	nsCtx := r.withNamespace(ctx)
-	if r.tryLink(nsCtx, tag, output, logger) {
+	if r.tryLink(nsCtx, tag, progress, logger) {
 		return nil
 	}
-	return r.slowPathImport(nsCtx, dockerBin, tag, output)
+	return r.slowPathImport(nsCtx, dockerBin, tag, progress)
 }
 
 // ImageLabels reads tag's labels out of the OCI image config in containerd's

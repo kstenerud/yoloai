@@ -111,34 +111,11 @@ type Options struct {
 	VscodeTunnel         bool                  // --vscode-tunnel flag
 	Archetype            string                // --archetype flag (empty = auto-detect)
 
-	// Output receives the create pipeline's human-readable progress (profile
-	// image build stream, advisory warnings). Per-call so concurrent Creates on
-	// the same Engine don't interleave on a shared writer. Nil falls back to
-	// the Engine's output writer (the Client's Options.Output). F8.
-	Output io.Writer
-}
-
-// outputFor resolves a create-pipeline progress writer: the per-call
-// Options.Output when set, otherwise io.Discard. Never returns nil, so
-// leaf writers can't panic on a nil io.Writer regardless of which create helper
-// a caller enters through. The yoloai.Client seeds Options.Output from its
-// Options.Output, so a nil here means a direct library caller opted out. F8.
-func outputFor(o io.Writer) io.Writer {
-	if o != nil {
-		return o
-	}
-	return io.Discard
-}
-
-// noticesFor resolves where this call's advisory notices go.
-//
-// It derives the sink from the same writer the progress stream uses, so the
-// conversion to records changes what the create pipeline *produces* without
-// changing a byte of what a caller *receives*. That is the migration seam: it
-// goes when Options.Output does, at which point the sink is supplied by the
-// caller and progress is the only thing left needing a writer (D145).
-func noticesFor(o io.Writer) feedback.Sink {
-	return feedback.WriterSink(outputFor(o))
+	// Notices and Progress are where this create reports to. Per-call, so
+	// concurrent Creates never interleave; both are required, with
+	// feedback.Discard / feedback.DiscardProgress as the way to say "nothing".
+	Notices  feedback.Sink
+	Progress feedback.ProgressSink
 }
 
 // Run creates and optionally starts a new sandbox.
@@ -262,7 +239,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 
 	// Phase 2: Create directory structure and seed sandbox.
 	perms := store.Perms()
-	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, agentDirMountPaths(workdir, auxDirs), noticesFor(opts.Output))
+	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, agentDirMountPaths(workdir, auxDirs), opts.Notices)
 	if err != nil {
 		return nil, err
 	}
@@ -329,7 +306,7 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 
 	mergeDcMounts(pr, dcMounts)
 	for _, n := range dcMountNotices {
-		feedback.Emit(noticesFor(opts.Output), n)
+		feedback.Emit(opts.Notices, n)
 	}
 
 	mergedMounts, err := validateAndExpandMounts(pr.mounts, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation())
@@ -438,7 +415,8 @@ func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, 
 		WorkdirMode:        string(workdir.Mode),
 		Layout:             layout,
 		HomeDir:            homeDir,
-		Output:             opts.Output,
+		Notices:            opts.Notices,
+		Progress:           opts.Progress,
 	}
 }
 
@@ -520,7 +498,7 @@ func resolveRuntimeBase(ctx context.Context, d state.Deps, opts *Options, pr *pr
 	if err != nil {
 		return err
 	}
-	feedback.Infof(noticesFor(opts.Output), "image.base_selected", "Using runtime base %s", imageRef)
+	feedback.Infof(opts.Notices, "image.base_selected", "Using runtime base %s", imageRef)
 	pr.imageRef = imageRef
 	return nil
 }

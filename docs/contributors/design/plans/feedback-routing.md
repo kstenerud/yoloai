@@ -4,13 +4,12 @@
 
 # Feedback routing — one record, four consumers, the caller renders
 
-- **Status:** IN-PROGRESS — built: the `feedback` package (emission API, `Sink`, `Collector`, `Tee`,
-  `WriterSink`); `Notice` moved below every layer that emits one; the create/launch advisories; the
-  prune trio, whose writers are gone and whose lines are now typed `PruneItem`s carrying an `Action`
-  and a `Reason`; the `envsetup` OAuth advisory; step 4 (every diagnostic destination is declared,
-  enforced by `forbidigo`); and step 5 (the ambient-API ban is a class). Remaining: **progress
-  records** and the removal of the public writers (the 2026-08-19 amendment), then the `fmt.Fprint*`
-  ban.
+- **Status:** IN-PROGRESS — steps 1–6 built. The `feedback` package (`Notice`, `Progress`, their
+  sinks, `Collector`, `Tee`, the writer adapters); every advisory and every progress line converted;
+  the prune trio returning typed items; every diagnostic destination declared and enforced; the
+  ambient-API ban generalised to a class; and **every public `io.Writer` deleted**. Verified on real
+  Docker end-to-end: create, restart, destroy, build (BuildKit streaming through `ProgressWriter`),
+  and prune across three backends including `--json`. Remaining: step 7, the `fmt.Fprint*` ban.
 - **Depends on:** —
 - **Rides:** **breaking.** `SandboxCreateOptions.Output` and `ClientOptions.Output` are public
   `io.Writer` fields (`sandbox_options.go:140`, `client_options.go:60`); an embedder sets them today.
