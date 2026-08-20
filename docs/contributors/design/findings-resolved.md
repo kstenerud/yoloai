@@ -56,6 +56,20 @@ of at rebase. Later, but still before it can ship.
 - **Pinned by** `TestBuildBaseImage_RefusesContextOutsideHome`, `TestBuildProfileImage_RefusesContextOutsideHome` (the two call sites draw `HOME` from different places — `execEnv` and `buildEnv` — so neither test can fail on the other's behalf), and `TestBuildBaseImage_AcceptsContextUnderHome`, which roots the layout at `$HOME`'s symlink-resolved form and so goes red if the comparison is made lexical. All three verified red on revert of the half each pins.
 - **Pointer:** `runtime/apple/apple.go` (`verifyBuildContextReachable`, `buildBaseImage`, `BuildProfileImage`); `runtime/apple/build_test.go`; `runtime/apple/integration_test.go` (`TestApple_SetupBuildsBase`); `backend-idiosyncrasies.md`.
 
+### DF231 — the required-tooling list omitted three tools the gates hard-require (RESOLVED 2026-08-20)
+
+- **Discovered:** 2026-08-20, when CI's podman tier failed on a missing `slirp4netns` · **Workstream:** release engineering
+- **Severity:** LOW–MEDIUM — the policy works; the list that tells you how to satisfy it did not
+- **Disposition:** **RESOLVED 2026-08-20.**
+- **Rides:** **any**.
+- **Description:** D112's policy is that **absent tooling fails, it does not skip**, and `docs/contributors/procedures/pull-requests.md` carries the table that says what to install. That table listed `uv`, `hadolint`, `actionlint` and Docker. It omitted **`slirp4netns`**, **`shellcheck`** and **`podman`** — all three hard-required by gates that run in `make check` or the integration tiers.
+- **`slirp4netns` is the one that bit.** yoloai deliberately asks rootless podman for `slirp4netns:allow_host_loopback=true` so a brokered sandbox can reach the host-side injector at slirp's fixed `10.0.2.2` alias (`runtime/podman/reach.go`, D106). Podman 5 defaults to `pasta` and `ubuntu-24.04` does not ship `slirp4netns`, so `TestIntegration_CredentialBroker_Podman` failed with `could not find slirp4netns, the network namespace can't be configured`.
+- **Why no developer hit it:** every machine here has `slirp4netns` because some earlier podman install pulled it in. An omission from a list of things to install is invisible on any host that already has them — the list is only ever tested by a machine that lacks the tool, and until 2026-08-20 no such machine ran these tiers.
+- **It surfaced only through a chain of two other fixes.** [DF226](#df226--ci-never-ran-on-a-release-branch-so-the-branch-d131-mandates-was-the-least-tested-code-in-the-repo-resolved-2026-08-19) gave the release branch CI at all; the podman job carries `needs: check`, so it stayed *skipped* until [DF230](#df230--three-revert-red-tests-depended-on-the-developers-global-git-identity-and-had-been-failing-in-ci-for-eight-days-resolved-2026-08-20) unblocked `check`. Three latent failures, stacked, each hidden by the one above it.
+- **Fixed 2026-08-20:** `ci.yml`'s `integration-podman` job installs `slirp4netns` explicitly — the same "incidental property, not a contract" reasoning (GEN §14) already applied to hadolint and shellcheck in the `check` job — and the tooling table gains all three entries with what each is for.
+- **The gate itself behaved correctly** and is not changed: it failed loudly on missing tooling, which is exactly D112. Nothing here argues for a skip.
+- **Pointer:** `.github/workflows/ci.yml` (`integration-podman`); `docs/contributors/procedures/pull-requests.md` (Required tooling); `runtime/podman/reach.go` (`InjectorReach`, why the mode is required); `internal/orchestrator/broker_integration_test.go`.
+
 ### DF230 — three revert-red tests depended on the developer's global git identity, and had been failing in CI for eight days (RESOLVED 2026-08-20)
 
 - **Discovered:** 2026-08-20, from the first CI run ever performed on a release branch · **Workstream:** release engineering

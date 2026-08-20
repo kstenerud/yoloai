@@ -221,6 +221,19 @@ jobs:
         with:
           go-version-file: go.mod
 
+      # yoloai asks rootless podman for slirp4netns:allow_host_loopback=true so a
+      # brokered sandbox can reach the host-side injector at slirp's fixed
+      # 10.0.2.2 alias (runtime/podman/reach.go). Podman 5 defaults to pasta and
+      # ubuntu-24.04 does not ship slirp4netns, so it has to be installed rather
+      # than assumed — the same "incidental property, not a contract" reasoning
+      # (GEN §14) that made hadolint and shellcheck explicit above. Absent
+      # tooling fails rather than skips (D112), which is how this surfaced.
+      - name: Install slirp4netns
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends slirp4netns
+          slirp4netns --version
+
       - name: Verify Podman installation
         run: |
           podman version

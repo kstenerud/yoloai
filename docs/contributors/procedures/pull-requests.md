@@ -196,8 +196,11 @@ Absent tooling **fails**; it does not skip (D112). Install all of it:
 | --- | --- |
 | `uv` | the Python surface (`python-test`, `python-typecheck`) |
 | `hadolint` | Dockerfile lint |
+| `shellcheck` | shell lint (`make check`); falls back to a pinned container when Docker is running |
 | `actionlint` | workflow lint |
 | Docker | integration tiers |
+| `podman` | the rootless podman tier (`integration-podman`) |
+| `slirp4netns` | rootless podman **brokering** — the sandbox reaches the host injector via slirp's `10.0.2.2` alias. Podman 5 defaults to `pasta` and does not pull this in |
 
 The one carve-out is `YOLOAI_TEST_UNCONTROLLED_BACKENDS`, a comma-separated list of backends
 to exclude when the host genuinely cannot run them. CI uses it for containerd (GitHub runners
