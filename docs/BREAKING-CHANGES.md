@@ -33,6 +33,8 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+## v0.12.0
+
 ### Every public `io.Writer` is replaced by feedback sinks
 
 **Previous behavior:** `ClientCreateOptions.Output`, `SandboxCreateOptions.Output`,
