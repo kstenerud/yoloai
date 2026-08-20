@@ -69,36 +69,15 @@ func TestDockerfile_AgentInstallsCarryAQuotedFloor(t *testing.T) {
 	})
 }
 
-// TestDockerfile_FitsAppleBuilderLimit gates the one build constraint no build on
-// this platform can discover.
-//
-// Apple's `container build` refuses a Dockerfile over 16384 bytes outright
-// (apple/container#735, open as of 2026-07-30) — `invalidArgument: "Dockerfile
-// size (N bytes) exceeds the maximum allowed size"`. docker, podman and
-// containerd have no such limit, so a green Linux `make check` AND a green full
-// Linux smoke run both coexist with a completely broken apple backend. It shows
-// up only on a Mac, which is exactly the class of defect that deserves a cheap
-// portable assertion instead.
-//
-// It is easy to trip because comments are the majority of this file: it sat at
-// 14012 bytes, and a comment block plus a version bump plus a header took it to
-// 17645 — with the version bump alone landing 33 bytes under the cap unnoticed.
-// So this asserts real headroom rather than the bare limit, and when it fires the
-// fix is to relocate prose (standards/dockerfile.md, the cited finding, a
-// docstring), not to shave words until it passes.
-func TestDockerfile_FitsAppleBuilderLimit(t *testing.T) {
-	const appleMax = 16384
-	// Enough slack that an ordinary comment edit cannot silently consume the last
-	// of it, and small enough to leave the file usable.
-	const wantHeadroom = 1024
-
-	size := len(BaseDockerfile())
-	assert.LessOrEqual(t, size, appleMax-wantHeadroom,
-		"the embedded Dockerfile is %d bytes; apple/container rejects anything over %d, and this "+
-			"keeps %d bytes of headroom so the next comment edit is not the one that breaks the "+
-			"apple backend on a machine you cannot test. Relocate prose rather than trimming to fit.",
-		size, appleMax, wantHeadroom)
-}
+// The apple builder's Dockerfile size gate used to live here as
+// TestDockerfile_FitsAppleBuilderLimit, asserting the raw file against
+// apple/container#735's documented 16384-byte cap. It is gone because both
+// halves of it were wrong (DF229): the operative ceiling is lower than 16384 and
+// depends on the file's content, and the apple backend now blanks prose comments
+// out of the Dockerfile it hands the builder, so the raw size is no longer the
+// number that reaches it. The live gate is `TestBaseDockerfile_FitsTheAppleBuilder`
+// in runtime/apple, which measures the stripped bytes and runs on every platform
+// for the same reason this one did.
 
 // TestReferenceDockerfile_HeaderIsNotChargedToTheBuild pins the split. The
 // "editing this does nothing" header belongs on the generated copy only: it is
