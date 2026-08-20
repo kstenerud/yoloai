@@ -1347,28 +1347,6 @@ earlier signal and records nothing else.
 - **What would actually close it:** typecheck the research corpus for a fixed platform rather than the host's (mypy's `--platform`), so both hosts agree — or accept that the corpus is Linux-only and exclude it from the macOS run. Either makes the gate say the same thing on both machines, which is the property it currently lacks.
 - **Pointer:** `docs/contributors/design/research/mac-channel/c1_guest_initiate.py`; `docs/contributors/design/research/mac-channel/c1_guest_vsock.py` (the convention); `Makefile` (`python-typecheck`).
 
-### DF234 — the smoke harness throttles VM backends and leaves container backends unthrottled, and the container side is now the flakier one
-
-- **Discovered:** 2026-08-20, after two consecutive `releasetest` runs failed the v0.12.0 cut on it · **Workstream:** release engineering
-- **Severity:** MEDIUM — no product defect, but it fails the release ritual's first step non-deterministically, and each failure costs a real diagnosis before it can be dismissed
-- **Disposition:** UNRESOLVED — filed, not fixed. A workaround exists today (`--jobs 1`).
-- **Rides:** **any** — harness only, ships nothing.
-- **Description:** `smoke_test.py` runs matrix backends concurrently, capping only the VM-backed ones. Under that concurrency the container backends intermittently **stall** — never fail with a wrong answer, always time out. Measured on the same commit, same binary, same machine, on 2026-08-20:
-
-  | test | in the full matrix | run alone |
-  | --- | --- | --- |
-  | `dind/docker-priv` | FAIL — `yoloai start` timed out at 60 s, guest never reached `entrypoint.start` | PASS |
-  | `isolation_check/docker` | FAIL — `yoloai exec` timed out at 30 s | PASS |
-  | `isolation_check/podman` | FAIL — `yoloai exec` timed out at 30 s | PASS |
-
-- **The asymmetry is deliberate and documented, and it is on the wrong side now.** `smoke_test.py:260` states it outright: *"VM specs share a semaphore while container specs run unthrottled"*, because Tart enforces a 2-VM macOS limit and concurrent QEMU VMs raise peak disk. The container backends were never given the same treatment because nothing had forced the question. Two release runs now have.
-- **This was already known and did not prompt action**, which is the part worth fixing about the process rather than the code. [`backend-idiosyncrasies.md`](../backend-idiosyncrasies.md) records container backends failing under concurrent create/destroy churn, and explicitly notes that *"the smoke harness already serializes VM-backed `isolation_check` for an analogous reason; the container backends were not serialized."* The observation, the precedent and the remedy were all on the page, in the same paragraph, and the gap stayed open — because an idiosyncrasy entry describes the world and nothing turns one into work.
-- **Always a stall, never a wrong answer**, which is what distinguishes this from a real isolation defect: no `isolation_check` has ever reported that a sandbox *could* reach the network. Two of the four failures passed on the harness's own retry. That signature — timeout, not disagreement — is the cheapest way to recognise it next time.
-- **It costs more than a re-run.** Both failures arrived mid-release with other variables in flight (a dependency bump, an apple-backend fix), and clearing those took a dedicated discriminator run. A non-deterministic gate does not merely fail; it makes every unrelated change look suspect on the day it lands.
-- **The fix is close to free, which is the argument for just doing it.** Wall-clock for the matrix is dominated by **tart**: VM boots are the long pole, and they already run capped at 2. Container backends are comparatively cheap, so throttling *them* barely moves the total — the concurrency that costs the flakiness is not the concurrency that buys the speed. A container-concurrency cap analogous to `vm_concurrency` (`--container-concurrency`, or one per-class limit covering both) makes the default matrix reproducible for almost no time.
-- **`--jobs 1` is the wrong interim**, despite being the only lever that exists today: it is global, so it serializes tart as well and gives up exactly the parallelism that matters while fixing a problem tart does not have. It will produce a green run, but it is the expensive way to get one.
-- **Pointer:** `scripts/smoke_test.py:260-266` (the `vm_concurrency` semaphore and its comment), `:3172` (`--jobs`), `:3182` (`--vm-concurrency`, *"Container backends are unaffected"*); [`backend-idiosyncrasies.md`](../backend-idiosyncrasies.md) — the entry on concurrent-churn failures that already named this.
-
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

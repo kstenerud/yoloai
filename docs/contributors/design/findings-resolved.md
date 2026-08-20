@@ -23,6 +23,30 @@ into this file skips the merge-conflict collision check that ID-ordering gives t
 a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
 of at rebase. Later, but still before it can ship.
 
+### DF234 — the smoke harness throttled VM backends and left container backends unthrottled, and the container side was the flakier one (RESOLVED 2026-08-20)
+
+- **Discovered:** 2026-08-20, after two consecutive `releasetest` runs failed the v0.12.0 cut on it · **Workstream:** release engineering
+- **Severity:** MEDIUM — no product defect, but it failed the release ritual's first step non-deterministically, and each failure cost a real diagnosis before it could be dismissed
+- **Disposition:** **RESOLVED 2026-08-20**, same day. Filed as unresolved first, on the reasoning that a harness change should not ride the lower half of a release cut; the owner's call was that the fix is cheap enough to take now, and it is.
+- **Rides:** **any** — harness only, ships nothing in the binary.
+- **Description:** `smoke_test.py` ran matrix backends concurrently, capping only the VM-backed ones. Under that concurrency the container backends intermittently **stalled** — never failed with a wrong answer, always timed out. Measured on the same commit, same binary, same machine:
+
+  | test | in the full matrix | run alone |
+  | --- | --- | --- |
+  | `dind/docker-priv` | FAIL — `yoloai start` timed out at 60 s, guest never reached `entrypoint.start` | PASS |
+  | `isolation_check/docker` | FAIL — `yoloai exec` timed out at 30 s | PASS |
+  | `isolation_check/podman` | FAIL — `yoloai exec` timed out at 30 s | PASS |
+
+- **The asymmetry was deliberate and documented, and was on the wrong side.** `smoke_test.py` said it outright: *"VM specs share a semaphore while container specs run unthrottled"*, because Tart enforces a 2-VM macOS limit and concurrent QEMU VMs raise peak disk. Container backends were never given the same treatment because nothing had forced the question. Two release runs did.
+- **It was already known and did not prompt action**, which is the part worth fixing about the process rather than the code. [`backend-idiosyncrasies.md`](../backend-idiosyncrasies.md) recorded container backends failing under concurrent create/destroy churn *and* noted in the same paragraph that the VM ones are serialized while the container ones are not. Observation, precedent and remedy were all on the page, and the gap stayed open — because an idiosyncrasy entry describes the world, and nothing turns one into work.
+- **Always a stall, never a wrong answer**, which is what distinguishes this from a real isolation defect: no `isolation_check` ever reported that a sandbox *could* reach the network, and two of the four failures passed on the harness's own retry. That signature is the cheapest way to recognise it next time.
+- **The unit of contention is the daemon, not the isolation tier**, which is what the fix keys on: `docker` and `docker-priv` are two specs against one Docker daemon, and that pair is exactly what raced. So the cap is per `BackendSpec.check_backend`.
+- **Fixed 2026-08-20** with a per-backend-type concurrency table (`BACKEND_CONCURRENCY`), overridable by `--backend-concurrency name=N`, defaulting to 1 everywhere except tart's 2. Per *type*, so two different daemons still overlap — docker and podman run concurrently, only each against itself.
+- **The host-wide VM cap is kept, and a VM spec now takes both gates.** This is the trap in "just give every type a number": three VM backends each capped at 2 would allow six VMs at once, loosening the very constraint `vm_concurrency` exists for. A per-type limit cannot express a limit *across* types. Acquisition is always type-then-VM, so nothing holds the VM semaphore while waiting on a type semaphore and there is no cycle.
+- **It cost almost nothing, which was the argument for doing it now.** Wall-clock is dominated by tart's VM boots, already capped at 2 and untouched. The `isolation_check` phase — four container backends, previously 2 of 4 then 4 of 4 failing — now passes in 53 s; `dind` passes in 53 s.
+- **What the tests do and do not prove.** The unit tests cover the table, the override parser and the "unknown backend gets a defined limit rather than unbounded" rule, but they are pure-function tests and cannot show the runner *uses* the table. The evidence for that is the two previously-failing phases passing, which is why they were run rather than reasoned about.
+- **Pointer:** `scripts/smoke_test.py` (`BACKEND_CONCURRENCY`, `parse_backend_concurrency`, `backend_concurrency_for`, the two-gate `ExitStack` in `_run_backend_test`); `scripts/tests/test_smoke_backend_concurrency.py`; [`backend-idiosyncrasies.md`](../backend-idiosyncrasies.md) — the entry that already named this.
+
 ### DF229 — the apple builder's real Dockerfile ceiling is lower than the documented one, depends on the file's content, and fails with no diagnostic (RESOLVED 2026-08-19)
 
 - **Discovered:** 2026-08-19, behind [DF228](#df228--apples-builder-reads-nothing-from-a-build-context-outside-home-and-nothing-said-so-resolved-2026-08-19)'s fix, when the release test still failed · **Workstream:** release engineering / apple backend
