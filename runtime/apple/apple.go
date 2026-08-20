@@ -573,6 +573,9 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, prog
 	if err := dockerrt.WriteBuildContextDir(dir); err != nil {
 		return fmt.Errorf("write build context: %w", err)
 	}
+	if err := prepareDockerfile(dir); err != nil {
+		return err
+	}
 	logger.Debug("building yoloai-base via container build", "context", dir)
 
 	// Same as containerd: apple's own base staleness uses the host-side marker,
@@ -642,6 +645,9 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 	}
 	if err := dockerrt.WriteProfileBuildContextDir(sourceDir, dir); err != nil {
 		return fmt.Errorf("write profile build context: %w", err)
+	}
+	if err := prepareDockerfile(dir); err != nil {
+		return err
 	}
 	logger.Debug("building profile image via container build", "tag", tag, "sourceDir", sourceDir, "context", dir)
 
