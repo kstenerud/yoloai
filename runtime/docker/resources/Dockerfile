@@ -1,8 +1,10 @@
-# Apple's `container build` rejects a Dockerfile over 16 KiB (apple/container
-# #735, still open 2026-07-30), so this file has a hard size budget that nothing
-# in the build itself enforces. TestDockerfile_FitsAppleBuilderLimit guards it.
-# Comments are ~58% of the bytes here: keep the rationale that a reader needs in
-# order to act correctly, and put the archaeology in the finding it cites.
+# Apple's `container build` rejects a Dockerfile past an effective size ceiling,
+# lower than the 16 KiB apple/container#735 documents and dependent on what is in
+# the file (DF229). The apple backend blanks these comments out before building,
+# so prose here is free and INSTRUCTIONS are the budget;
+# TestBaseDockerfile_FitsTheAppleBuilder guards the stripped size. Keep the
+# rationale a reader needs in order to act correctly, and put the archaeology in
+# the finding it cites — that is an editing standard, no longer a size one.
 FROM debian:trixie-slim
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]

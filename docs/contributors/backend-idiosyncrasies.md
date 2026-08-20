@@ -42,6 +42,7 @@ inclusion test first, then add a row to the index.
 | Symptom / error message | Section |
 |---|---|
 | `container build` fails: `Dockerfile size (N bytes) exceeds the maximum allowed size of 16384`; or on older versions `Transport became inactive`. Linux backends unaffected | [Apple: `container build` rejects a Dockerfile over 16 KiB](#apple-container-build-rejects-a-dockerfile-over-16-kib) |
+| Apple: `container build` exits 1 in ~0.02s printing only `Error: unavailable: "Stream unexpectedly closed."`, on a Dockerfile **under** 16 KiB | [Apple: a Dockerfile under 16 KiB is still refused, silently](#apple-a-dockerfile-under-16-kib-is-still-refused-silently-past-an-effective-ceiling) |
 | Apple sandbox: TUI loses left gutter / leading chars orphan onto row above, only on tmux scroll; `^b r` heals it; Docker clean; both emulators affected | [Apple: exec -t forces ONLCR, corrupting column tracking](#apple-container-exec--t-forces-onlcr-on-the-host-local-bridge-pty-corrupting-the-apps-column-tracking-on-scroll) |
 | Brokered agent on podman-macOS hangs on first API call; one-shot curl to the injector works | [Podman Machine: gvproxy stalls streaming](#podman-machine-macos-gvproxy-host-forward-passes-a-one-shot-curl-but-stalls-the-agents-streaming-connection) |
 | A healthy apple/tart guest suddenly resolves nothing (`UNRESOLVED` for every name) with no change to the guest; the host resolves fine; someone just flushed DNS or ran `killall -HUP mDNSResponder` | [macOS: restarting mDNSResponder takes guest DNS down through the vmnet gateway](#macos-restarting-the-hosts-mdnsresponder-takes-guest-dns-down-through-the-vmnet-gateway) |
@@ -162,6 +163,7 @@ inclusion test first, then add a row to the index.
 | `system disk` shows seatbelt `IMAGES: ?` / `CACHE: 0 B` — is it a gap? | [Seatbelt has no backend image/cache store](#seatbelt-has-no-backend-imagecache-store--cacheusageprunecache-are-correctly-absent) |
 | Apple `container create … --mount …` fails: `path '…' is not a directory` | [Apple: `--mount type=virtiofs` rejects file sources; use `-v`](#apple---mount-typevirtiofs-rejects-a-file-source-use--v-for-file-mounts) |
 | Apple: `container build .` builds nothing / `COPY` fails (`"/x": not found`) | [Apple: `container build` drops a relative context](#apple-container-build--silently-drops-a-relative--context-pass-an-absolute-dir) |
+| Apple: same empty context (`transferring context: 2B`) but the path **is** absolute; or `container build` fails with only `Error: unavailable: "Stream unexpectedly closed."` | [Apple: the build context must be under `$HOME`](#apple-the-build-context-must-live-under-home-an-absolute-path-is-not-enough) |
 | After a reboot every apple sandbox reads `removed`; `container ls` fails with `XPC connection error: Connection invalid`; `yoloai destroy` says Destroyed but the container is still there afterwards (DF180) | [Apple: the `container` service does not survive a reboot](#apple-the-container-service-does-not-survive-a-reboot-and-every-yoloai-sandbox-reads-removed-until-it-is-restarted) |
 | `podman build` → `Error: unknown flag: --provenance` / exit 125 | [Podman: build rejects docker BuildKit attestation flags](#podman-build-rejects-the-docker-buildkit-attestation-flags) |
 | `idle` agent / keep-alive exits 1 with `usage: sleep number[unit]` on a macOS/Tart guest | [macOS guest BSD sleep rejects sleep infinity](#macos-guest-bsd-sleep-rejects-sleep-infinity-gnu-only) |
@@ -2882,12 +2884,79 @@ with a completely broken apple backend, so this is only ever discovered on a Mac
 — and it was, by three commits that each looked harmless (14012 → 15525 → 16351
 → 17645 bytes; the middle one landed 33 bytes under the cap unnoticed).
 
-**Fix:** `TestDockerfile_FitsAppleBuilderLimit` (`runtime/docker/`) asserts the
-embedded Dockerfile stays 1 KiB under the cap, so the failure is now a red test
-on any platform. The user-facing "do not edit this copy" header is prepended at
-materialisation (`ReferenceDockerfile`) rather than stored in the built file, so
-it costs no budget. When the gate fires, relocate prose to
-`standards/dockerfile.md` or to the finding it cites; do not shave words to fit.
+**16384 is not the limit that bites first — see the next entry.** Everything
+above is true and is the *upper* bound; the ceiling that actually rejects a file
+is lower, content-dependent, and reports nothing. A gate built on the number in
+this entry passed a file the builder refused (DF229).
+
+**Fix:** the apple backend blanks prose comments out of the Dockerfile before
+building and refuses anything still oversize (`runtime/apple/dockerfile.go`), so
+comments no longer count against either bound. `TestBaseDockerfile_FitsTheAppleBuilder`
+(`runtime/apple/`) gates the stripped size on any platform. The user-facing "do
+not edit this copy" header is prepended at materialisation
+(`ReferenceDockerfile`) rather than stored in the built file.
+
+### Apple: a Dockerfile under 16 KiB is still refused, silently, past an effective ceiling
+
+**Symptom:** `container build` exits 1 in ~0.02 s having printed
+`Error: unavailable: "Stream unexpectedly closed."` and **nothing else** — no
+step list, no line number, no file name. The Dockerfile is comfortably under the
+16384-byte cap the previous entry describes, so that entry's clean
+`invalidArgument` error never appears. Seen as `TestApple_SetupBuildsBase`
+failing at 15346 bytes.
+
+**Explanation:** the documented 16384-byte cap is the *upper* bound and is
+checked cleanly. Below it lies an effective ceiling past which the transfer dies
+without a diagnostic. It is content-dependent, measured on container CLI 1.0.0
+across a ~1 KB band:
+
+| file | ceiling |
+| --- | --- |
+| shipped base Dockerfile (21 instructions, 16 non-ASCII) | ~15070 |
+| same instructions, em-dash padding | ~15238 |
+| same instructions, all-ASCII padding | ~15967 |
+| synthetic ASCII, 20 / 60 / 120 instructions | 15016 / 15102 / 15330 |
+
+So instruction count barely moves it, non-ASCII characters lower it — they cost
+several times their bytes — and nothing simple predicts where in the band a given
+file lands. Prose is where the multi-byte characters live, so comments were
+consuming budget at a multiple of their size.
+
+**`Stream unexpectedly closed` is not diagnostic of anything.** It means "the
+build session ended", and nothing more. Three unrelated causes produce it
+verbatim, and the only way to tell them apart is *when* it appears:
+
+| when | cause |
+| --- | --- |
+| ~0.02 s, no output at all | Dockerfile past the effective ceiling (this entry) |
+| after `transferring context: 2B`, at the first `COPY` | build context outside `$HOME` (entry above) |
+| mid-build, after real step output | a build step died — apple reports it this way where docker retries and says why |
+
+The third was observed on 2026-08-19: an `apt-get install nodejs` whose 37 MB
+package download was failing upstream ended as `Stream unexpectedly closed` on
+apple, while the docker backend on the same machine, same step, same package,
+looped visibly on `Ign:1`/`Get:1`. **So a stream error mid-build is not evidence
+of a backend defect at all** — check whether another backend reaches the same
+step before diagnosing this one.
+
+**Two more traps.** The **build cache** makes a broken input look like it works —
+vary the content between probes. And **concurrent builds corrupt the evidence**:
+two at once produce `failed to create container … exists` and spurious stream
+errors, so probe strictly sequentially. Cheap bisection trick: the rejection is
+client-side, so substituting `FROM alpine` for the real base reproduces it in
+0.02 s with none of the build cost.
+
+**Fix:** `runtime/apple/dockerfile.go` blanks prose comment lines out of the
+materialized Dockerfile (15346 → 8352 bytes for the base, all non-ASCII gone) and
+refuses anything still over `maxDockerfileBytes` with an error naming this
+symptom. Comments are **blanked, not deleted**, so BuildKit's line numbers still
+match the repo's Dockerfile; directives (`# syntax=`, `# hadolint`, …) are kept;
+and a `#` line inside a `\` continuation or heredoc body is shell, not a comment,
+and is left alone. Apple-scoped — the other backends have no such limit, and this
+whole file is what gets deleted if apple/container fixes it.
+
+**Code:** `runtime/apple/dockerfile.go`; `runtime/apple/apple.go`
+(`buildBaseImage`, `BuildProfileImage`).
 
 ### Apple: `--mount type=virtiofs` rejects a file source; use `-v` for file mounts
 
@@ -2922,7 +2991,48 @@ for a relative `.` path. An **absolute** context dir works
 its **absolute** path (`container build -t yoloai-base <abs-dir>`). The builder
 VM must also be started first (`container builder start`).
 
+**Not sufficient on its own** — an absolute path outside `$HOME` transfers an
+empty context too. See the next entry.
+
 **Code:** `runtime/apple/apple.go` (`buildBaseImage`).
+
+---
+
+### Apple: the build context must live under `$HOME`; an absolute path is not enough
+
+**Symptom:** the same empty context as the entry above — `transferring context:
+2B`, then `failed to compute cache key: "/entrypoint.sh": not found` for a file
+that is sitting right there — except the context path *is* absolute, so the AC1
+remedy has already been applied. With a `COPY`-heavy Dockerfile (the base image
+has thirteen) the build session dies before reaching any of that and the entire
+output is `Error: unavailable: "Stream unexpectedly closed."`, which names
+nothing.
+
+**Explanation:** `container build` reads nothing from a context directory
+outside the `$HOME` its own process runs with. Measured on container CLI 1.0.0:
+contexts under `/Users/…` transfer real bytes and build; `/private/tmp`,
+`/private/var/tmp` and `$TMPDIR` transfer 2 B and every `COPY` fails. It is
+`$HOME` specifically, not a `/private` quirk — a `/var/folders/…` context that
+fails under the real `$HOME` **builds** when `HOME` is pointed at its parent,
+same path and same builder. Nothing warns; the transfer reports success.
+
+**Two traps when diagnosing this.** The build cache hides it: a context that
+"worked" may have matched a cache entry from an earlier build and never been
+read at all, so vary the content between probes. And `Stream unexpectedly
+closed` is not a builder-health problem — restarting or deleting the builder
+changes nothing, which sends you looking in the wrong place.
+
+**Fix:** yoloAI's data dir defaults to `$HOME/.yoloai` and every build context
+descends from it, so the default install satisfies this by construction. Because
+that is an accident rather than a guarantee — `--data-dir` points anywhere —
+both build paths check the materialized context against the `HOME` their
+subprocess will run with and refuse one outside it, naming the constraint and
+the flag (DF228). The check resolves symlinks: `/tmp`, `/var` and `$TMPDIR` all
+resolve through `/private` on macOS, so an unresolved `$HOME` and a resolved
+context can name one tree and share no prefix.
+
+**Code:** `runtime/apple/apple.go` (`verifyBuildContextReachable`,
+`buildBaseImage`, `BuildProfileImage`).
 
 ### Apple: `container exec -t` forces ONLCR on the host-local bridge PTY, corrupting the app's column tracking on scroll
 

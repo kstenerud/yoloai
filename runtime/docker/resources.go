@@ -59,9 +59,11 @@ var embeddedAgentRun = monitor.AgentRunScript()
 var embeddedYoloaiResume = monitor.YoloaiResumeScript()
 
 // BaseDockerfile returns the embedded base-image Dockerfile — exactly the bytes
-// handed to the builder. Apple's `container build` caps this at 16 KiB
-// (apple/container#735), so nothing decorative may be added to it; see
-// TestDockerfile_FitsAppleBuilderLimit and standards/dockerfile.md.
+// handed to the builder, except on the apple backend, which blanks the prose
+// comments out of its materialized copy first because its builder rejects a
+// Dockerfile past an effective size ceiling with no diagnostic at all (DF229).
+// Instructions are what the budget buys; see `TestBaseDockerfile_FitsTheAppleBuilder`
+// (runtime/apple) and standards/dockerfile.md.
 func BaseDockerfile() []byte { return embeddedDockerfile }
 
 // referenceHeader is prepended by ReferenceDockerfile. It is deliberately NOT in
@@ -69,8 +71,10 @@ func BaseDockerfile() []byte { return embeddedDockerfile }
 //
 // It would be false there: in the repo, editing that file is precisely how the
 // image changes, so a "no effect" warning is only true of the generated copy.
-// And it would be charged against the 16 KiB budget the builder enforces — a
-// user-facing warning has no business consuming build-context bytes.
+// And a user-facing warning has no business sitting in the build context at all.
+// (It would no longer be charged against apple's size budget — the apple backend
+// blanks prose before building, DF229 — but that is a recent accident of the
+// remedy, not the reason.)
 const referenceHeader = `# ============================================================================
 # yoloAI base image — REFERENCE COPY. EDITING THIS FILE HAS NO EFFECT.
 #
