@@ -93,6 +93,8 @@ that makes them structural rather than four spot repairs.*
 - [DF225](design/findings-unresolved.md) — the brokering posture is a tri-state encoded as two booleans, in four layers
 - [DF226](design/findings-resolved.md) — CI never ran on a release branch, so the branch D131 mandates was the least-tested code in the repo (RESOLVED 2026-08-19)
 - [DF227](design/findings-unresolved.md) — the Python typecheck gate is platform-sensitive, and only a macOS host can fail it
+- [DF228](design/findings-resolved.md) — Apple's builder reads nothing from a build context outside `$HOME`, and nothing said so (RESOLVED 2026-08-19)
+- [DF229](design/findings-resolved.md) — the apple builder's real Dockerfile ceiling is lower than the documented one, depends on the file's content, and fails with no diagnostic (RESOLVED 2026-08-19)
 
 ## Deferred to v0.13.0 — the network release
 
