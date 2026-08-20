@@ -4,7 +4,7 @@
 
 # Next release
 
-**Next release version: `v0.12.1`**
+**Next release version: `v0.12.0`**
 
 ## How this works
 
@@ -60,7 +60,46 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
-*Nothing yet.*
+*v0.12.0 is the **configuration** release: the config/trust fixes already landed, plus the layering
+that makes them structural rather than four spot repairs.*
+
+- [DF195](design/findings-resolved.md) — `--env` comma-splits its value on `new`/`run` but not on `start`/`restart`/`reset`, so an ordinary value cannot be passed on the path that creates the sandbox (RESOLVED 2026-08-15)
+- [D140](decisions/working-notes.md#d140--yoloaiyaml-project-config-is-removed-entirely) — `.yoloai.yaml` project config is removed entirely
+- [D142](decisions/working-notes.md#d142--the-mounts-configprofile-key-is-retired-directories-is-its-strict-superset) — The `mounts:` config/profile key is retired; `directories:` is its strict superset
+- [DF209](design/findings-resolved.md) — `isolation` and `model` still carry from personal defaults into a profile, by a second route DF207/DF208 did not close
+- [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) — Configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
+- [DF210](design/findings-resolved.md) — a profile's `os:` is parsed, merged, and never read (RESOLVED 2026-08-15)
+- [DF211](design/findings-resolved.md) — `--no-profile` cannot change any outcome, and its help text describes a feature that does not exist (RESOLVED 2026-08-15)
+- [DF201](design/findings-resolved.md) — `agent_files` list form copies credentials the string form strips (RESOLVED 2026-08-15)
+- [DF202](design/findings-resolved.md) — a file-defined agent's declared credentials were an invisible, persistent grant (RESOLVED 2026-08-16)
+- [DF206](design/findings-resolved.md) — config and profile `network.allow` entries are silently discarded whenever the mode is set explicitly (RESOLVED 2026-08-15)
+- [DF207](design/findings-resolved.md) — personal defaults leak into profiles, contradicting a bold documented guarantee (RESOLVED 2026-08-13)
+- [DF208](design/findings-resolved.md) — the DF207 leak's sibling: restart/relaunch resolved `agent_args`, `agent_files`, and `env` for a profile-attached sandbox from personal defaults, not baked-in defaults (RESOLVED 2026-08-13)
+- [DF212](design/findings-unresolved.md) — a running sandbox's config is not fully sourced from `state.State`; three sites re-read config files live
+- [DF213](design/findings-resolved.md) — a profile's `agent:` key is silently ignored on a default install
+- [DF214](design/findings-unresolved.md) — shipped text disagrees with the code it describes, in ten places, and every one sits inside text an existing gate already reads
+- [DF215](design/findings-unresolved.md) — `docs/contributors/standards/cli.md` mandates two flags the CLI does not have, and builds a convention on them
+- [DF216](design/findings-unresolved.md) — two architecture docs instruct a contributor to write code the linter rejects
+- [DF217](design/findings-unresolved.md) — the config-docs gate validates against a looser predicate than the command it certifies
+- [DF218](design/findings-unresolved.md) — draining a finding renames its anchor, silently breaking every cross-reference to it
+- [D145](decisions/working-notes.md#d145--all-feedback-is-a-structured-record-routed-by-the-caller-a-threaded-iowriter-is-not-a-channel) — All feedback is a structured record routed by the caller; a threaded `io.Writer` is not a channel
+- [feedback-routing.md](archive/plans/feedback-routing.md) — Feedback routing — one record, four consumers, the caller renders
+- [DF219](design/findings-resolved.md) — `state.State.DevcontainerMountWarnings` was written on every create and read by nothing
+- [DF220](design/findings-resolved.md) — a mount-strip test named a branch it never reached, because its assertion matched the path it printed
+- [DF221](design/findings-resolved.md) — `state.State` accumulated write-only fields, and nothing could have noticed (RESOLVED 2026-08-19)
+- [DF222](design/findings-unresolved.md) — `Files.Import` resolves a relative path against the process's working directory, inside the library
+- [DF223](design/findings-unresolved.md) — brokering drops Claude Code out of subscription mode: the context window shrinks 5× and usage reporting goes blank
+- [DF224](design/findings-unresolved.md) — the guest's workdir parents are created root-owned, and an agent that owns a colliding path refuses to start
+- [DF225](design/findings-unresolved.md) — the brokering posture is a tri-state encoded as two booleans, in four layers
+- [DF233](design/findings-resolved.md) — revert-red reported a comment-only change as an uncovered behaviour change (RESOLVED 2026-08-20)
+- [DF232](design/findings-resolved.md) — three CI gates in turn skipped every push, each on the same wrong reason, and nothing could see it (RESOLVED 2026-08-20)
+- [DF231](design/findings-resolved.md) — the required-tooling list omitted three tools the gates hard-require (RESOLVED 2026-08-20)
+- [DF230](design/findings-resolved.md) — three revert-red tests depended on the developer's global git identity, and had been failing in CI for eight days (RESOLVED 2026-08-20)
+- [DF226](design/findings-resolved.md) — CI never ran on a release branch, so the branch D131 mandates was the least-tested code in the repo (RESOLVED 2026-08-19)
+- [DF227](design/findings-unresolved.md) — the Python typecheck gate is platform-sensitive, and only a macOS host can fail it
+- [DF228](design/findings-resolved.md) — Apple's builder reads nothing from a build context outside `$HOME`, and nothing said so (RESOLVED 2026-08-19)
+- [DF229](design/findings-resolved.md) — the apple builder's real Dockerfile ceiling is lower than the documented one, depends on the file's content, and fails with no diagnostic (RESOLVED 2026-08-19)
+- [DF234](design/findings-resolved.md) — the smoke harness throttled VM backends and left container backends unthrottled, and the container side was the flakier one (RESOLVED 2026-08-20)
 
 ## Deferred to v0.13.0 — the network release
 
@@ -136,16 +175,43 @@ landed — verified-stale doc claims not to "finish". Scoped to one release cycl
      be written before the tag exists.
    - Glance at [deprecations.md](deprecations.md) — anything past its due date is a retire-or-extend
      call. *(Nothing due until 2026-09-12.)*
-   - **Reset this file** to the initial state below, with the version field assuming the point
-     release after the one just cut.
 5. Commit, push, **wait for CI to go green on that pushed head**, then tag and release. The drain
    commit is a change like any other, so the head you verified in step 2 is not the head you are
    tagging until CI has passed on it too.
+6. **Once the tag exists**, reset this file to the initial state below, with the version field
+   assuming the point release after the one just cut.
+
+### The tag is the only irreversible boundary
+
+**Resetting this file happens after the tag, not before it (step 6, not step 4).** Its job is to
+stage the *next* release, and there is no next release until this one is a fact — the same reasoning
+`LibrarySchemaReleases` already carries one bullet up. The two drains are not alike and are
+deliberately split: `BREAKING-CHANGES.md` **must** drain before the tag, because `release.yml`
+asserts an empty `## Unreleased` at the tag and the tagged tree has to carry the `## vX.Y.Z`
+heading. This file is gated by nothing, so it has no reason to be reset on a prediction.
+
+**When the cut slips — and it does — put the version field back and keep filing.** v0.12.0 was
+drained on 2026-08-20 at ritual step 4, and then five more commits landed for it: two apple-backend
+fixes without which the release test could not pass, a dependency bump, and two harness fixes. For
+that window the page said `v0.12.1` and *"Nothing yet"* while the branch was accumulating v0.12.0.
+Restoring it meant reading the drain commit's diff to recover a list the page was supposed to be
+holding.
+
+So: **before the tag, both staging files are still live.** Anything that lands goes in them, and a
+`## vX.Y.Z` heading in BREAKING-CHANGES is editable right up until the tag — rule 1 freezes it *once
+tagged*, which is a different moment than *once written*. Nothing about a drain is a commitment;
+only a tag is.
+
+**Why this went wrong is worth keeping.** The drain was not a mistake in execution — it was step 4,
+performed correctly, in order. The defect is that step 4 asks you to record "this release is done"
+while steps 1 and 2 can still send you back. A step that encodes optimism will be wrong exactly as
+often as releases slip, which is not rarely.
 
 ## Initial state
 
 What "reset" means — restore exactly this, keeping everything above `## In scope` and below
-`## The release ritual`:
+`## The release ritual`. **Done at ritual step 6, once the tag exists** — see "The tag is the only
+irreversible boundary":
 
 - **Version field:** the next point release after the one just cut (`0.y.z+1`; post-beta
   `x.y.z+1`), with no escalation note. It escalates again on its own, when something breaking lands.
