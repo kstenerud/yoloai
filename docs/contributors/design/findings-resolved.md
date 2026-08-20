@@ -23,6 +23,36 @@ into this file skips the merge-conflict collision check that ID-ordering gives t
 a same-number clash between two PRs surfaces at `make check` (`NoDuplicateFindingHeadings`) instead
 of at rebase. Later, but still before it can ship.
 
+### DF235 — `integration-apple`'s timeout was smaller than the build it runs, and a routine prune guarantees the slow case (RESOLVED 2026-08-20)
+
+- **Discovered:** 2026-08-20, when `make releasetest` died with a Go test panic and no error of its own · **Workstream:** release engineering
+- **Severity:** MEDIUM — failed the release gate outright, and the panic named a function rather than a cause
+- **Disposition:** **RESOLVED 2026-08-20**. Timeout raised to 45m on the invocation that can build.
+- **Rides:** **any** — build tooling, ships nothing.
+- **Description:** `TestApple_SetupBuildsBase` was still building at **14m18s** against `-timeout=15m`. The test was not stuck; it was doing exactly what it exists to do, and the budget was smaller than the work. What surfaced was `panic: test timed out` with a stack pointing at `buildBaseImage`, which reads like a hang and is not one.
+- **A cold build is the routine state, not an exotic one**, which is the part that makes a 15m budget wrong rather than merely tight. Two things compound:
+  - The test rebuilds **by construction**: its layout is fresh, so there is no staleness marker, `NeedsBuild` is true, and `Setup` always rebuilds. That is correct — building the base is the thing under test.
+  - Apple has **no way to prune build cache except deleting the builder** (`runtime/apple/prune.go`: *"the only lever is deleting the builder"*), so **any** `yoloai system prune` empties it entirely.
+- **And the harness runs that prune itself.** The smoke run immediately preceding the failing releasetest reported `3 destroy(s) timed out — running 'yoloai system prune' as a backend-level fallback` and then `prune: apple: reclaimed 486.1 MB`. So the ordinary sequence *smoketest, then releasetest* reliably hands the apple test a cold builder. Nothing about that is a misuse.
+- **What cold costs:** the Debian package set, the Go toolchain, node plus four npm agent CLIs, uv/aider, hadolint, golangci-lint and the vscode CLI, in a 2-CPU builder VM. A partially-warm rebuild measured 3m with the heaviest layers already cached, so 15m was never a realistic ceiling for the cold case.
+- **Fixed 2026-08-20** by budgeting the first invocation at 45m. Only that one moves: the orchestrator invocation runs after the base image exists, rebuilds against a warm cache, and keeps the tighter budget, because a timeout is a hang detector and widening one that never needed it costs information.
+- **Related, and not a substitute:** [DF234](#df234--the-smoke-harness-throttled-vm-backends-and-left-container-backends-unthrottled-and-the-container-side-was-the-flakier-one-resolved-2026-08-20)'s teardown fix removes destroy timeouts, so the fallback prune stops firing and cold builds become rare. But a user running `yoloai system prune` by hand gets the same cold build, so the budget still has to cover it.
+- **Pointer:** `Makefile` (`integration-apple`); `runtime/apple/prune.go` (`PruneCache`); `runtime/apple/integration_test.go` (`TestApple_SetupBuildsBase`).
+
+### DF236 — the autopsy could not recognise "the agent had no network", though the harness had already measured it (RESOLVED 2026-08-20)
+
+- **Discovered:** 2026-08-20, after two podman smoke failures were investigated as a product defect for hours · **Workstream:** release engineering / smoke diagnostics
+- **Severity:** LOW mechanically, MEDIUM in what it costs — it mislabels an environmental fault as a yoloai one, at exactly the moment someone is deciding whether to ship
+- **Disposition:** **RESOLVED 2026-08-20**.
+- **Rides:** **any** — harness only.
+- **Description:** `stop_start/podman` and `stop_start/podman-priv` failed with `sentinel 'done' not seen in 90s`, and the autopsy headlined the generic fingerprint *"harness timeout (sentinel not seen / command timed out)"* whose own note reads *"nothing fatal found in artifacts — the guest stalled rather than crashed"*. The guest had not stalled. `agent.log` showed the prompt delivered, no tool execution, and a spinner counting up to 50s; the failure line itself carried `network: unreachable (no probe output)`, measured by the harness's own probe.
+- **The knowledge existed and was in the wrong place.** `Test.diagnose_sentinel_timeout`'s docstring already states the mapping — *"network unreachable → DF8's Kata netns warm-up race; **not an agent stall**"* — one function away from the fingerprint table that should have carried it. Prose in a docstring is not something the autopsy can consult.
+- **Why the existing DF8 fingerprint did not fire:** it matched `agent idle for \d+s|request timed out|api unreachable`, all agent-emitted prose. Claude Code now shows a randomised spinner word instead (`Dilly-dallying… (16s)`), which matches none of them. A fingerprint keyed on another program's wording decays silently when that program changes its wording, and nothing fails when it does.
+- **Fixed 2026-08-20** by keying it on `network: unreachable` — the harness's **own** probe output, which does not drift because we emit it — and giving it a hint that says to check egress before suspecting yoloai, and that the fault can be transient.
+- **Transience is the part worth recording**, because it is what made the original diagnosis hard: in the very same run, `tag_transfer/podman` **passed**, and it gates on a sentinel too, so podman's egress demonstrably worked minutes later. `stop_start/podman` then passed three times in a row on re-run. A backend passing a later agent-driven test in the same run is proof the network recovered, and is the cheapest disproof of "this backend is broken".
+- **Pinned by** two tests, both arms: the unreachable case must outrank the generic timeout, and a stalled guest with working egress must still be a plain timeout — without the second, the fingerprint is shown to fire rather than to discriminate, and mislabelling every sentinel timeout as a network fault is the same defect pointing the other way.
+- **Pointer:** `scripts/smoke_test.py` (`FINGERPRINTS`, the DF8 entry; `Test.diagnose_sentinel_timeout`); `scripts/tests/test_smoke_autopsy.py`.
+
 ### DF234 — the smoke harness throttled VM backends and left container backends unthrottled, and the container side was the flakier one (RESOLVED 2026-08-20)
 
 - **Discovered:** 2026-08-20, after two consecutive `releasetest` runs failed the v0.12.0 cut on it · **Workstream:** release engineering

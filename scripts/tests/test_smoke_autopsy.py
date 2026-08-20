@@ -294,3 +294,41 @@ def test_testcache_root_honors_env_override(
 ) -> None:
     monkeypatch.setenv("YOLOAI_SMOKE_CACHE", str(tmp_path / "elsewhere"))
     assert smoke_test._testcache_root() == tmp_path / "elsewhere"
+
+
+def test_network_unreachable_outranks_the_timeout_catchall(tmp_path: Path) -> None:
+    """The 2026-08-20 specimen: two podman cells failed, the guest's own probe said
+    the network was unreachable, and the autopsy still headlined a generic harness
+    timeout -- so it read like a product defect for hours while agent.log showed a
+    delivered prompt, no tool execution, and a spinner counting up.
+
+    The probe text is the harness's own, which is why the fingerprint keys on it.
+    The agent-emitted alternatives cannot be relied on: Claude Code picks a random
+    spinner word ("Dilly-dallying...") that matches none of them.
+    """
+    attempt = _make_attempt(tmp_path, setup_log="setup completed\n")
+    reason = (
+        "sentinel 'done' not seen in 90s\n"
+        "      exchange dir: empty; host /: 61% used, 356G free; "
+        "network: unreachable (no probe output)"
+    )
+    hits = smoke_test.scan_fingerprints(attempt, reason)
+    labels = [h.fp.label for h in hits]
+
+    net = next(i for i, lbl in enumerate(labels) if "API unreachable" in lbl)
+    timeout = next(i for i, lbl in enumerate(labels) if lbl.startswith("harness timeout"))
+    assert net < timeout, "a guest with no egress must outrank 'the guest stalled'"
+
+
+def test_a_stalled_guest_with_working_egress_is_still_a_plain_timeout(tmp_path: Path) -> None:
+    """The other arm. Without this, the fingerprint is shown to fire, not to
+    discriminate -- and mislabelling every sentinel timeout as a network fault
+    would be the same defect pointing the other way."""
+    attempt = _make_attempt(tmp_path, setup_log="setup completed\n")
+    reason = (
+        "sentinel 'done' not seen in 90s\n"
+        "      exchange dir: empty; host /: 61% used, 356G free; network: ok"
+    )
+    labels = [h.fp.label for h in smoke_test.scan_fingerprints(attempt, reason)]
+    assert not any("API unreachable" in lbl for lbl in labels), labels
+    assert any(lbl.startswith("harness timeout") for lbl in labels)

@@ -1387,8 +1387,21 @@ FINGERPRINTS: list[Fingerprint] = [
     ),
     Fingerprint(
         "agent idle / API unreachable (DF8)",
-        r"agent idle for \d+s|request timed out|api unreachable",
+        # `network: unreachable` is the harness's OWN probe, and it is the reliable
+        # half of this pattern. The others are agent-emitted prose: Claude Code now
+        # shows a randomised spinner ("Dilly-dallying… (16s)") while it waits, which
+        # matches none of them, so two podman failures on 2026-08-20 fell through to
+        # the generic "harness timeout" and read like a product defect for hours --
+        # while agent.log plainly showed a delivered prompt, no tool execution, and
+        # a spinner counting up. The mapping already existed in prose, in
+        # Test.diagnose_sentinel_timeout's docstring ("network unreachable -> ... not
+        # an agent stall"); it simply had never been written where the autopsy looks.
+        r"network: unreachable|agent idle for \d+s|request timed out|api unreachable",
         "request-timed-out-in-claude-code--api-unreachable-not-dns-failure",
+        "the guest could not reach the network, so the agent was waiting on a "
+        "response that never came -- check egress for this backend before suspecting "
+        "yoloai, and note it can be transient: the same backend passing a later "
+        "agent-driven test in the same run proves egress recovered",
     ),
     Fingerprint(
         "agent's sentinel command failed; agent stalled (tool error in pane)",

@@ -100,6 +100,8 @@ that makes them structural rather than four spot repairs.*
 - [DF228](design/findings-resolved.md) — Apple's builder reads nothing from a build context outside `$HOME`, and nothing said so (RESOLVED 2026-08-19)
 - [DF229](design/findings-resolved.md) — the apple builder's real Dockerfile ceiling is lower than the documented one, depends on the file's content, and fails with no diagnostic (RESOLVED 2026-08-19)
 - [DF234](design/findings-resolved.md) — the smoke harness throttled VM backends and left container backends unthrottled, and the container side was the flakier one (RESOLVED 2026-08-20)
+- [DF235](design/findings-resolved.md) — `integration-apple`'s timeout was smaller than the build it runs, and a routine prune guarantees the slow case (RESOLVED 2026-08-20)
+- [DF236](design/findings-resolved.md) — the autopsy could not recognise "the agent had no network", though the harness had already measured it (RESOLVED 2026-08-20)
 
 ## Deferred to v0.13.0 — the network release
 
