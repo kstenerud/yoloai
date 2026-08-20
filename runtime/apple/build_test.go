@@ -1,6 +1,7 @@
-// ABOUTME: Unit test for buildBaseImage's DF145 error forwarding: a failed
-// ABOUTME: `container build` must carry the tail of its own output on the
-// ABOUTME: returned error (the DF144 remedy, mirrored from the docker backend).
+// ABOUTME: Unit tests for the apple backend's two build paths, against a fake
+// ABOUTME: `container` binary: DF145 error forwarding (a failed build carries
+// ABOUTME: the tail of its own output), the argv and environment each build
+// ABOUTME: draws from, and the DF228 build-context-under-$HOME precondition.
 
 package apple
 
@@ -152,4 +153,58 @@ func TestBuildProfileImage_NoWarningWithoutSecrets(t *testing.T) {
 	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-cli-dev", "", nil, r.layout, feedback.ProgressToWriter(&output), feedback.WriterSink(&output), slog.New(slog.DiscardHandler))
 	require.NoError(t, err)
 	assert.Empty(t, output.String(), "no secrets means no warning noise")
+}
+
+// TestBuildBaseImage_RefusesContextOutsideHome pins DF228 on the base path. The
+// fake binary exits 0, so the build would "succeed" without the precondition —
+// which is exactly the shape of the real defect: `container build` also exits
+// having transferred nothing, and only the COPY steps far downstream say so.
+func TestBuildBaseImage_RefusesContextOutsideHome(t *testing.T) {
+	r := newFakeContainerRuntime(t, "#!/bin/sh\nexit 0\n")
+	// A HOME unrelated to the layout root — what `--data-dir /somewhere/else`
+	// produces. t.TempDir() hands out a fresh directory per call, so these two
+	// are siblings, never nested.
+	r.execEnv = []string{"PATH=/usr/bin:/bin", "HOME=" + t.TempDir()}
+
+	err := r.buildBaseImage(context.Background(), r.layout, feedback.DiscardProgress, slog.New(slog.DiscardHandler))
+	require.Error(t, err, "a build context outside $HOME must be refused, not handed to a builder that reads nothing from it")
+	assert.Contains(t, err.Error(), "outside $HOME",
+		"the error names the constraint, not just the failure")
+	assert.Contains(t, err.Error(), "--data-dir",
+		"and the lever that resolves it — the BuildKit error it replaces names neither")
+}
+
+// TestBuildBaseImage_AcceptsContextUnderHome is the other half: the precondition
+// must not reject production's own shape. It deliberately roots the layout at
+// HOME's **symlink-resolved** form, because that is what macOS hands you — $HOME
+// under /var/folders in a test, /private/var/folders once resolved. A lexical
+// prefix check passes the test above and fails this one.
+func TestBuildBaseImage_AcceptsContextUnderHome(t *testing.T) {
+	home := t.TempDir()
+	resolvedHome, err := filepath.EvalSymlinks(home)
+	require.NoError(t, err)
+
+	r := newFakeContainerRuntime(t, "#!/bin/sh\nexit 0\n")
+	r.layout = config.NewLayout(filepath.Join(resolvedHome, ".yoloai")).WithPrincipal(config.CLIPrincipal)
+	r.execEnv = []string{"PATH=/usr/bin:/bin", "HOME=" + home}
+
+	require.NoError(t, r.buildBaseImage(context.Background(), r.layout, feedback.DiscardProgress, slog.New(slog.DiscardHandler)),
+		"a data dir under $HOME is the default install; the precondition must let it through")
+}
+
+// TestBuildProfileImage_RefusesContextOutsideHome is DF228 on the sibling path.
+// It is a separate test because it is a separate call site drawing its HOME from
+// a different place — buildEnv, not the Runtime's captured execEnv — so the base
+// path's test cannot fail on this one's behalf.
+func TestBuildProfileImage_RefusesContextOutsideHome(t *testing.T) {
+	r := newFakeContainerRuntime(t, "#!/bin/sh\nexit 0\n")
+	sourceDir := newFakeProfileDir(t)
+	buildEnv := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai")).
+		WithPrincipal(config.CLIPrincipal).
+		WithEnv(map[string]string{"PATH": "/usr/bin:/bin", "HOME": t.TempDir()})
+
+	var output strings.Builder
+	err := r.BuildProfileImage(context.Background(), sourceDir, "yoloai-cli-dev", "", nil, buildEnv, feedback.ProgressToWriter(&output), feedback.WriterSink(&output), slog.New(slog.DiscardHandler))
+	require.Error(t, err, "a profile build context outside $HOME must be refused too")
+	assert.Contains(t, err.Error(), "outside $HOME")
 }

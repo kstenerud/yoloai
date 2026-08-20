@@ -12,6 +12,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	goruntime "runtime"
 	"strconv"
 	"strings"
@@ -454,6 +455,68 @@ func normalizeCap(c string) string {
 	return "CAP_" + c
 }
 
+// verifyBuildContextReachable refuses a build context directory that Apple's
+// `container build` cannot read. The builder transfers an **empty** context
+// (`transferring context: 2B`) for any context outside the HOME the CLI runs
+// with, and the build then fails deep inside BuildKit — `failed to calculate
+// checksum ... "/entrypoint.sh": not found`, naming a file that is sitting right
+// there in the context. This is the same silent-empty-context symptom as the
+// relative-`.` case (AC1), by a second cause, so the same remedy of "pass an
+// absolute path" does not cover it.
+//
+// Nothing enforced this before DF228: the data dir defaults to $HOME/.yoloai and
+// every build context descends from it, so production satisfied the constraint
+// by accident. `--data-dir` points anywhere, and a value outside $HOME turned
+// every image build on this backend into that unreadable BuildKit error.
+//
+// An absent HOME is not a violation — it means there is nothing to measure
+// against, and inventing a failure there would be worse than letting the build
+// speak for itself.
+func verifyBuildContextReachable(dir string, env []string) error {
+	home := envValue(env, "HOME")
+	if home == "" || isUnder(dir, home) {
+		return nil
+	}
+	return fmt.Errorf("build context %s is outside $HOME (%s): Apple's `container build` transfers an empty context from there and every COPY in the image fails; "+
+		"point the yoloai data directory back under your home directory (--data-dir, default $HOME/.yoloai)", dir, home)
+}
+
+// envValue reads one variable out of an exec-style KEY=VALUE environment. Last
+// assignment wins, matching what exec(3) hands the child.
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	value := ""
+	for _, kv := range env {
+		if after, ok := strings.CutPrefix(kv, prefix); ok {
+			value = after
+		}
+	}
+	return value
+}
+
+// isUnder reports whether path is dir or lives beneath it, comparing
+// symlink-resolved forms. A lexical comparison answers wrongly for half the
+// paths involved on macOS: /tmp, /var and the per-user $TMPDIR all resolve
+// through /private, so an unresolved HOME and a resolved context directory can
+// name the same tree and still share no prefix.
+func isUnder(path, dir string) bool {
+	rel, err := filepath.Rel(resolvePath(dir), resolvePath(path))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolvePath resolves symlinks, falling back to the merely-cleaned path when it
+// cannot (a path that does not exist yet resolves to nothing, and that is not a
+// reason to answer the caller's question wrongly).
+func resolvePath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return filepath.Clean(p)
+}
+
 // Setup starts the apiserver and the builder, then builds yoloai-base from the
 // shared base-image build context when it is missing or its inputs changed.
 // Idempotent.
@@ -504,6 +567,9 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, prog
 	}
 	defer os.RemoveAll(dir) //nolint:errcheck // best-effort temp cleanup
 
+	if err := verifyBuildContextReachable(dir, r.execEnv); err != nil {
+		return err
+	}
 	if err := dockerrt.WriteBuildContextDir(dir); err != nil {
 		return fmt.Errorf("write build context: %w", err)
 	}
@@ -570,6 +636,10 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 	}
 	defer os.RemoveAll(dir) //nolint:errcheck // best-effort temp cleanup
 
+	buildCmdEnv := buildEnv.Env().EnvForAppleContainer()
+	if err := verifyBuildContextReachable(dir, buildCmdEnv); err != nil {
+		return err
+	}
 	if err := dockerrt.WriteProfileBuildContextDir(sourceDir, dir); err != nil {
 		return fmt.Errorf("write profile build context: %w", err)
 	}
@@ -582,7 +652,7 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 		args = append(args, "--label", runtime.ProfileChecksumLabel+"="+checksum)
 	}
 	args = append(args, "-t", tag, dir)
-	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForAppleContainer(), r.containerBin, args...)
+	cmd := sysexec.CommandContext(ctx, buildCmdEnv, r.containerBin, args...)
 	// Stream to output as before, but also tee into a tail buffer so a failure's
 	// actionable cause rides on the error itself, not only the (maybe discarded)
 	// stream — same value on both so os/exec keeps its single-pipe path (DF145).

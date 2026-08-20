@@ -30,12 +30,46 @@ const itestImage = "yoloai-apple-itest:latest"
 
 func appleSetup(t *testing.T) (*Runtime, context.Context) {
 	t.Helper()
-	home := testutil.IsolatedHome(t)
+	layout := appleTestLayout(t)
 	ctx := context.Background()
-	rt, err := New(ctx, config.NewLayout(filepath.Join(home, ".yoloai")).WithPrincipal(config.CLIPrincipal))
+	rt, err := New(ctx, layout)
 	require.NoError(t, err, "apple backend must be available (macOS 26 + Apple Silicon + container CLI)")
 	_, _ = rt.runContainer(ctx, "system", "start") // idempotent
 	return rt, ctx
+}
+
+// appleTestLayout builds the layout an apple integration test must run with:
+// a per-test data directory under the **real** user home, carrying that home in
+// its env snapshot. Deliberately not the `t.TempDir()` home the other backends'
+// tests use, because the `container` CLI depends on the real one twice over:
+//
+//   - It resolves its plugin registry through `~/Library/Application Support/
+//     com.apple.container`, so under a synthetic HOME every `image` subcommand
+//     fails with `Plugin 'container-images' not found` — which is `IsReady`,
+//     `imageExists` and the whole staleness path.
+//   - It transfers an EMPTY build context for any context directory outside
+//     that HOME (DF228), so every `COPY` in an image build fails.
+//
+// The process HOME stays isolated (testutil.IsolatedHome) so nothing else
+// wanders into the real one; only the layout handed to the backend, and thus
+// the env its subprocesses draw from, names the real home. That is production's
+// shape — the data dir defaults to `$HOME/.yoloai` — which is the point: a
+// layout rooted anywhere else is not the thing under test.
+func appleTestLayout(t *testing.T) config.Layout {
+	t.Helper()
+	realHome, err := os.UserHomeDir() // before IsolatedHome overwrites $HOME
+	require.NoError(t, err)
+	dataDir, err := os.MkdirTemp(realHome, ".yoloai-test-")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(dataDir) })
+	testutil.IsolatedHome(t)
+
+	return config.NewLayout(dataDir).WithPrincipal(config.CLIPrincipal).
+		WithEnv(map[string]string{
+			"HOME":   realHome,
+			"PATH":   os.Getenv("PATH"),
+			"TMPDIR": os.Getenv("TMPDIR"),
+		})
 }
 
 var (
@@ -184,9 +218,11 @@ func TestApple_SetupBuildsBase(t *testing.T) {
 	}
 	rt, ctx := appleSetup(t)
 
-	// A real CacheDir so the staleness marker persists (production has one;
-	// os.WriteFile won't mkdir).
-	layout := config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)
+	// The runtime's own layout, NOT a fresh config.NewLayout(t.TempDir()): only
+	// appleTestLayout's is rooted where `container build` can actually read a
+	// build context from (DF228). A real CacheDir so the staleness marker
+	// persists (production has one; os.WriteFile won't mkdir).
+	layout := rt.layout
 	require.NoError(t, os.MkdirAll(layout.CacheDir(), 0o755)) //nolint:gosec // G301: test dir under t.TempDir(), no sudo chown concern
 
 	var buf bytes.Buffer
