@@ -14,6 +14,7 @@ sys.path.insert(0, str(_REPO / "scripts"))
 
 from check_revert_red import (  # noqa: E402
     Change,
+    is_test_file,
     Outcome,
     changed_sources,
     claims_behavior_change,
@@ -372,3 +373,63 @@ def test_the_real_repo_can_be_read(tmp_path: Path) -> None:
     changes = changed_sources("HEAD~1", "HEAD")
     for c in changes:
         assert isinstance(types_touching("HEAD~1", "HEAD", c.path), set)
+
+
+# --- what counts as a test file ----------------------------------------------
+
+
+def test_python_tests_are_identified_by_directory_not_filename() -> None:
+    """The specimen this rule was rebuilt from: scripts/smoke_test.py.
+
+    It is the only `*_test.py` path in the repo and it is a 4000-line harness, not
+    a test, so matching Python tests by filename exempted it permanently -- every
+    `fix` to it went unchecked. The mirror-image error came with it: conftest.py
+    matches neither name pattern and was therefore treated as behavioural source
+    that must go red. Both directions are pinned, because fixing one and
+    reintroducing the other would look identical in the gate's output.
+    """
+    assert not is_test_file("scripts/smoke_test.py")
+    assert is_test_file("scripts/tests/conftest.py")
+    assert is_test_file("scripts/tests/test_smoke_matrix.py")
+    assert is_test_file("runtime/monitor/tests/test_setup_helpers.py")
+
+
+def test_go_still_uses_the_suffix_its_compiler_enforces() -> None:
+    """The location rule is Python's alone. Go's suffix is not a convention, it is
+    the build system, so a Go file is still judged by its name."""
+    assert is_test_file("runtime/apple/apple_test.go")
+    assert not is_test_file("runtime/apple/apple.go")
+    assert not is_test_file("runtime/runtimetest/conformance.go")
+
+
+def test_the_smoke_harness_is_in_scope_for_the_gate() -> None:
+    """The consequence of the above, stated in the gate's own terms: the harness
+    must now be a file the gate can actually run tests for."""
+    assert scope_for("scripts/smoke_test.py") is not None
+
+
+def _unscopeable_repo(tmp_path: Path) -> Path:
+    """A behavioural commit touching only a file this gate cannot scope or run."""
+    repo = tmp_path / "unscopeable"
+    repo.mkdir(parents=True)
+    _run(["git", "init", "-q", "-b", "main"], repo)
+    (repo / "README.md").write_text("x\n")
+    _commit(repo, "chore: baseline")
+    (repo / "helper.rb").write_text("puts 1\n")
+    _commit(repo, "fix(x): change something unscopeable")
+    return repo
+
+
+def test_a_behavioural_commit_that_checks_nothing_names_what_it_skipped(tmp_path: Path) -> None:
+    """Silence is what let the harness go unchecked: the gate printed "no
+    behavioral source changes" over a `fix` that rewrote scheduling logic. True of
+    what the gate could see, false about the commit. A run that checks nothing must
+    now name the files and say why each was skipped."""
+    repo = _unscopeable_repo(tmp_path)
+    done = _run(
+        [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
+    )
+    assert done.returncode == 0, "a warning, not a hard failure -- a noisy gate gets disabled"
+    assert "Nothing was checked" in done.stdout, done.stdout
+    assert "helper.rb" in done.stdout, "the blind spot must be named, not counted"
+    assert "blind spot, not a pass" in done.stdout

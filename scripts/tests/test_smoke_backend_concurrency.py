@@ -68,6 +68,17 @@ def test_bad_overrides_raise_rather_than_being_ignored(bad: list[str]) -> None:
         parse_backend_concurrency(bad)
 
 
+def test_the_flag_reaches_the_parser(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A table nothing can set is a constant. This pins the CLI half — the flag
+    parses and arrives as a list for parse_backend_concurrency to merge."""
+    import sys
+
+    from smoke_test import parse_args
+
+    monkeypatch.setattr(sys, "argv", ["smoke_test.py", "--backend-concurrency", "docker=2"])
+    assert parse_args().backend_concurrency == ["docker=2"]
+
+
 def test_every_matrix_backend_type_has_an_explicit_default() -> None:
     """The table is the tuning surface, so every type the matrix can schedule
     should appear in it by name rather than falling through to the catch-all."""
