@@ -282,6 +282,22 @@ ensure-python-venv:
 	@uv pip sync --quiet --python $(VENV)/bin/python $(PY_REQ_LOCK)
 
 ## python-test: run pytest from the uv-managed venv (uv required; see D112)
+##
+## HERMETIC_GIT strips the ambient git configuration for the duration of the run.
+## Several of these tests build throwaway repositories and commit to them, and a
+## developer machine silently supplies `user.email`/`user.name` from ~/.gitconfig
+## while a CI runner supplies nothing. That difference makes a missing identity a
+## defect visible ONLY in CI: DF230 sat red on main for eight days because the
+## suite that was supposed to catch it passed on every machine that ran it by
+## hand. Unsetting the config here makes the local run the stricter of the two,
+## which is the only ordering that catches this class before it is pushed.
+## Set as target-scoped exports rather than a command prefix because
+## check_gate_coverage.py reads the pytest roots off the `$(PYTEST) <dir>` lines
+## below, and anything in front of `$(PYTEST)` stops it finding them — it caught
+## exactly that on the first attempt at this.
+python-test: export GIT_CONFIG_GLOBAL := /dev/null
+python-test: export GIT_CONFIG_SYSTEM := /dev/null
+python-test: export GIT_CONFIG_NOSYSTEM := 1
 python-test: python-typecheck
 	$(PYTEST) runtime/monitor/tests/ -v
 	$(PYTEST) runtime/docker/resources/tests/ -v
