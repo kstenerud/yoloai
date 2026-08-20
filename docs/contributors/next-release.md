@@ -71,6 +71,12 @@ tell a typed port from an inherited one — so building either first means build
 in two places, and then owning both. **The migration rides with `network-mode-reshape.md`, so v0.12.0
 carries none** and rule 12's constraint applies to v0.13.0's branch rather than this one.*
 
+*The Apple Container DNS work joined this section on 2026-08-20, on the same rule and not on its
+merits: it moves `LibrarySchemaVersion` to 7 and carries a v6→v7 migrator, and v0.12.0 was cut as a
+release that carries no migration. It is an outside contribution and it targets `release-v0.12.0`,
+so **it needs retargeting at `release-v0.13.0` rather than at `main`** — D131 is the whole reason
+that branch exists.*
+
 - [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [enforcement-build.md](design/plans/enforcement-build.md) — Host-side enforcement — build brief
 - [DF188](design/findings-unresolved.md) — `resolve_domains` accepts whatever a resolver returns, so a sinkholed allowlist domain installs a rule that matches nothing and says nothing
@@ -86,6 +92,7 @@ carries none** and rule 12's constraint applies to v0.13.0's branch rather than 
 - [DF200](design/findings-unresolved.md) — the `NetworkNone` conformance case cannot fail, and does not run on any backend that has the defect
 - [D141](decisions/working-notes.md#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed) — A repo may not widen the sandbox boundary; requests that would are refused and listed
 - [repo-request-trust.md](design/plans/repo-request-trust.md) — Repo-request trust — balk and list, never filter and proceed
+- [PR #50](https://github.com/kstenerud/yoloai/pull/50) — Configurable DNS for Apple Container sandboxes
 
 ## Candidates — undecided
 
