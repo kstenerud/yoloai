@@ -28,6 +28,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import shutil
 import subprocess
 import sys
@@ -302,6 +303,9 @@ class RunContext:
     # Guards mutation of the shared sandboxes/results lists, the name counter,
     # and the single JUnit file handle; print_lock serializes each test's output
     # block so concurrent backends don't interleave their PASS/FAIL lines.
+    # cleanup() runs from atexit AND from the signal handler; whichever fires
+    # first wins, and the second must not re-destroy or re-print.
+    cleaned_up: bool = False
     state_lock: threading.Lock = field(default_factory=threading.Lock)
     print_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -2978,6 +2982,36 @@ def _warm_up_vm_backends(
 # Cleanup
 # ---------------------------------------------------------------------------
 
+def _install_teardown_signals(ctx: RunContext) -> None:
+    """Tear down this run's sandboxes on a signal, not just on a normal exit.
+
+    atexit covers a clean exit and a KeyboardInterrupt, but NOT SIGTERM: the
+    default disposition terminates the process without unwinding, so every
+    sandbox the run created stays alive. That is not hypothetical. An
+    interrupted provider pass left four sandboxes running for over an hour --
+    its summary file stops mid-test and no rollup was ever written -- and
+    nothing reclaims them until some *later* run happens to sweep. In between,
+    they are load that every other thing on the host pays for.
+
+    Re-raises the signal with the default handler afterwards, so the exit status
+    still says the process was signalled rather than reporting a tidy failure it
+    did not have.
+    """
+    def _teardown(signum: int, _frame: Any) -> None:
+        print(f"\nreceived signal {signum}; tearing down this run's sandboxes before exiting...")
+        with contextlib.suppress(Exception):
+            cleanup(ctx)
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        # Only the main thread may install handlers, and a non-main-thread call
+        # raises rather than silently doing nothing -- tolerated so an embedder
+        # importing this module is not broken by it.
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(sig, _teardown)
+
+
 def cleanup(ctx: RunContext) -> None:
     """Destroy all tracked sandboxes and remove the scratch tmpdir.
 
@@ -2996,6 +3030,9 @@ def cleanup(ctx: RunContext) -> None:
     are never deleted here — they persist until the user cleans them up
     manually.
     """
+    if ctx.cleaned_up:
+        return
+    ctx.cleaned_up = True
     if ctx.sandboxes:
         print(f"\nCleaning up {len(ctx.sandboxes)} sandbox(es)...")
         timed_out: list[str] = []
@@ -3678,6 +3715,7 @@ def main() -> int:
     _install_stdout_tee(log_dir / "summary.txt")
 
     atexit.register(cleanup, ctx)
+    _install_teardown_signals(ctx)
 
     is_linux = sys.platform.startswith("linux")
     host_os = "linux" if is_linux else "mac"
@@ -3948,16 +3986,28 @@ def main() -> int:
                     result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=attempt)
                     if result.passed:
                         break
-            # VM backends hold a scarce host slot (the macOS 2-VM cap). Free it
-            # as soon as the test ends — pass OR fail — instead of waiting for
-            # the end-of-run cleanup, so a later VM test (or a coexisting foreign
-            # VM) isn't blocked and the harness's own peak stays within the
-            # concurrency cap. On failure run_test has already preserved forensic
-            # state under <log>/sandboxes/<test>/attempt<N>/. Destroy inside the
-            # gate so the slot is released before the semaphore admits the next
-            # waiter.
-            if spec.is_vm:
-                _destroy_named_sandboxes(ctx, result.sandboxes)
+            # Free the sandbox as soon as the test ends — pass OR fail — instead
+            # of waiting for the end-of-run cleanup. This began as a VM-only rule
+            # because a VM holds a scarce, countable slot (the macOS 2-VM cap),
+            # but container sandboxes hold host resources just as real and merely
+            # harder to count: each one keeps a guest alive with tmux and an agent
+            # in it, inside a Docker or Podman VM with a fixed memory ceiling.
+            #
+            # Keeping them was quietly making the matrix fail. Every passing test
+            # left its sandbox running, so the run's load only ever grew: 19 alive
+            # at the end of a full macOS matrix, with `dind` — the heaviest test,
+            # a nested Docker daemon in a privileged container — scheduled last,
+            # against a host carrying all of them. Podman's VM hit a 15-minute
+            # load average of 29 on 5 CPUs with no swap; its guests stalled with
+            # nothing in the logs, and even `destroy` began timing out. The same
+            # dind cells pass in 53s on a clean host.
+            #
+            # On failure run_test has already preserved forensic state under
+            # <log>/sandboxes/<test>/attempt<N>/, so nothing diagnostic is lost by
+            # tearing down here — that was true for VMs and is true here.
+            # Destroyed inside the gate so the resources are released before the
+            # semaphore admits the next waiter.
+            _destroy_named_sandboxes(ctx, result.sandboxes)
         _record_result(ctx, result)
 
     def run_matrix_test(
@@ -4016,7 +4066,11 @@ def main() -> int:
 
     if should_run_test("clone"):
         if "clone" not in QUICK_EXCLUDED_TESTS or not ctx.quick:
-            _record_result(ctx, run_test(ctx, "clone", lambda t: test_clone(t, DEFAULT_BACKEND)))
+            # Torn down as soon as it ends, for the reason the matrix path gives:
+            # a sandbox held to the end of the run is load every later test pays.
+            clone_result = run_test(ctx, "clone", lambda t: test_clone(t, DEFAULT_BACKEND))
+            _destroy_named_sandboxes(ctx, clone_result.sandboxes)
+            _record_result(ctx, clone_result)
         else:
             skip_test(ctx, "clone", "not in the --quick tier")
 
