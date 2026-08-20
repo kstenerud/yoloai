@@ -489,8 +489,18 @@ integration-containerd:
 ## DF99 — that test had never run, because it was gated on YOLOAI_TEST_APPLE,
 ## which nothing set. Still gated: it boots a VM and takes ~5 minutes, so a bare
 ## `go test ./internal/orchestrator/` should not pay for it by surprise.
+##
+## The 45m budget on the first invocation is for a COLD base-image build, which
+## is a routine state rather than an exotic one. TestApple_SetupBuildsBase builds
+## yoloai-base by construction (a fresh layout has no staleness marker, so Setup
+## always rebuilds), and apple has no way to prune build cache except deleting
+## the builder outright — so any `yoloai system prune` empties it, including the
+## one the smoke harness runs as its own fallback. A cold build installs Debian
+## packages, the Go toolchain, node + four npm agent CLIs, uv/aider, hadolint,
+## golangci-lint and the vscode CLI in a 2-CPU builder VM. At 15m this failed
+## mid-build, with the panic pointing at buildBaseImage and no error of its own.
 integration-apple:
-	go test -tags=integration -v -count=1 -timeout=15m ./runtime/apple/
+	go test -tags=integration -v -count=1 -timeout=45m ./runtime/apple/
 	YOLOAI_TEST_APPLE=1 go test -tags=integration -v -count=1 -timeout=15m -run '_Apple$$' ./internal/orchestrator/
 
 ## integration-seatbelt: run Seatbelt integration tests (requires macOS with sandbox-exec)
