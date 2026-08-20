@@ -1,0 +1,59 @@
+name: Resolve the commit range to examine
+description: >-
+  Emit the base..head range a range-scoped gate should judge, for either a
+  pull_request or a push.
+
+# Why this is an action rather than three copies of a shell block.
+#
+# Every gate that judges a *range* rather than a tree needs this, and each one
+# that got it wrong got it wrong the same way: guarded with
+# `if: github.event_name == 'pull_request'`, on the reasoning that the range
+# only exists for a PR. It does exist for a push — `github.event.before`..`sha`
+# — and this repo pushes directly to `main` for small fixes and to `release-*`
+# for everything a release branch carries (D131, rule 12). A gate skipped there
+# is a gate that never sees the code it was written for.
+#
+# The failure is silent in both directions, which is why it kept recurring:
+# skipped jobs report as green on the summary page, and the naive fix — leaving
+# `--base origin/${{ github.base_ref }}` in place on a push, where `base_ref` is
+# empty — resolves to `origin/` and exits 0, because git writes the unresolvable
+# ref to stderr and returns an empty diff that reads exactly like a clean branch.
+#
+# So the range lives in one place with one set of edge cases, and the fence in
+# repo_hygiene_test.go requires every range-scoped job to use it.
+
+outputs:
+  base:
+    description: The commit to treat as the starting point, exclusive.
+    value: ${{ steps.range.outputs.base }}
+  head:
+    description: The commit to treat as the end point, inclusive.
+    value: ${{ steps.range.outputs.head }}
+
+runs:
+  using: composite
+  steps:
+    - id: range
+      shell: bash
+      run: |
+        set -euo pipefail
+        if [ "${{ github.event_name }}" = "pull_request" ]; then
+          base="origin/${{ github.base_ref }}"
+          head="${{ github.event.pull_request.head.sha }}"
+        else
+          base="${{ github.event.before }}"
+          head="${{ github.sha }}"
+          # A branch's first push, and a force-push whose old tip was garbage
+          # collected, both leave `before` unresolvable. Fall back to the parent
+          # rather than to something that silently diffs nothing.
+          if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
+            base="$head~1"
+          fi
+        fi
+        # An unresolvable base is the failure mode this action exists to prevent,
+        # so refuse it here rather than handing a gate a range that reads clean.
+        git rev-parse --verify --quiet "$base^{commit}" >/dev/null \
+          || { echo "::error::base '$base' does not resolve; refusing to report a clean range"; exit 1; }
+        echo "base=$base" >> "$GITHUB_OUTPUT"
+        echo "head=$head" >> "$GITHUB_OUTPUT"
+        echo "examining $base..$head"

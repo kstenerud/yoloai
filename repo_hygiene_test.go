@@ -12,6 +12,7 @@ import (
 	"go/build/constraint"
 	"go/parser"
 	"go/token"
+	"maps"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/internal/testutil"
+	"gopkg.in/yaml.v3"
 )
 
 // This file enforces the standing claims that nothing else in the build checks.
@@ -2938,4 +2940,151 @@ func TestMarkdownLinkRefs_SplitsFragments(t *testing.T) {
 	if !slices.Equal(got, want) {
 		t.Errorf("mdLinkRefs = %+v, want %+v", got, want)
 	}
+}
+
+// ciWorkflow is as much of .github/workflows/ci.yml as this file needs: the
+// event triggers, and each job's condition and steps.
+type ciWorkflow struct {
+	On struct {
+		Push struct {
+			Branches []string `yaml:"branches"`
+		} `yaml:"push"`
+		PullRequest struct {
+			Branches []string `yaml:"branches"`
+		} `yaml:"pull_request"`
+	} `yaml:"on"`
+	Jobs map[string]struct {
+		If    string `yaml:"if"`
+		Steps []struct {
+			Uses string `yaml:"uses"`
+			Run  string `yaml:"run"`
+		} `yaml:"steps"`
+	} `yaml:"jobs"`
+}
+
+// prOnlyJobsWithAReason lists jobs allowed to skip a push, each with the reason.
+//
+// It is empty, and an entry is meant to be hard to write: the only honest one
+// would be a job that literally cannot exist outside a pull request, and no
+// gate in this repo is that. Every historical entry was instead a job whose
+// author reasoned "the range only exists for a PR" — which is false, and is the
+// single mistake this fence exists to stop repeating.
+var prOnlyJobsWithAReason = map[string]string{}
+
+// TestRepoHygiene_CIGates_AreNotPullRequestOnly requires every CI job to run on
+// a push as well as on a pull request.
+//
+// The same defect has now landed three times, each time in a different job, and
+// each time it was found by a human noticing an absence rather than by anything
+// failing:
+//
+//   - `content-gates`' two checks inherited a `pull_request` guard and never
+//     examined a file pushed straight to main (the specimen is a research
+//     results file that no gate ever read).
+//   - The whole workflow ran only on `push: [main]`, so `release-*` branches —
+//     where D131 *requires* migration-bearing work to land — got no CI at all.
+//     release-v0.12.0 reached 63 un-CI'd commits (DF226).
+//   - `commits` and `revert-red` kept the guard after `content-gates` shed it,
+//     so the release branch carrying 19 behavioral commits was linted by
+//     neither. Reverting them locally found a comment-only false positive in
+//     the gate itself, which nothing had ever exercised at branch scale.
+//
+// What makes it recur is that the failure is silent in the direction of green:
+// a skipped job renders on the summary page as a job that did not object. There
+// is no diff, no log, and no red. Counting the jobs is the only way to see it,
+// which is what this does.
+//
+// This is a hygiene fence rather than a `TestArch_` claim on purpose — it
+// asserts a fact about CI configuration, not about how the product is built,
+// and rule 13 scopes that prefix to architectural documents.
+func TestRepoHygiene_CIGates_AreNotPullRequestOnly(t *testing.T) {
+	root := repoRoot(t)
+	wf := parseCIWorkflow(t, filepath.Join(root, ".github", "workflows", "ci.yml"))
+
+	if len(wf.Jobs) < 4 {
+		t.Fatalf("parsed %d jobs from ci.yml — the parse failed, so this fence checks nothing", len(wf.Jobs))
+	}
+	if !slices.Contains(wf.On.Push.Branches, "main") {
+		t.Errorf("ci.yml does not run on a push to main; every gate below is then moot")
+	}
+	if !slices.Contains(wf.On.Push.Branches, "release-*") {
+		t.Errorf("ci.yml does not run on a push to release-*, where D131 requires " +
+			"migration-bearing work to land (DF226)")
+	}
+
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		cond := wf.Jobs[name].If
+		if !strings.Contains(cond, "pull_request") {
+			continue
+		}
+		if reason, ok := prOnlyJobsWithAReason[name]; ok {
+			t.Logf("job %q is pull-request-only by declaration: %s", name, reason)
+			continue
+		}
+		t.Errorf("CI job %q is gated %q, so it never examines a push — including to "+
+			"release-* branches, which is where D131 sends the work most likely to need "+
+			"it. Resolve the range with .github/actions/resolve-range instead; if the job "+
+			"genuinely cannot run on a push, say why in prOnlyJobsWithAReason.", name, cond)
+	}
+	t.Logf("CI gate reachability: %d jobs, triggers push=%v pull_request=%v",
+		len(wf.Jobs), wf.On.Push.Branches, wf.On.PullRequest.Branches)
+}
+
+// TestRepoHygiene_CIRangeGates_UseTheSharedResolver requires any job that hands
+// a `--base`/`--head` pair to a script to get that pair from the shared action.
+//
+// Three copies of the range logic is how the guard drifted apart in the first
+// place: each copy has to independently remember that `github.base_ref` is empty
+// on a push, and that git answers an unresolvable ref with an empty diff and
+// exit 0 — a range that reads exactly like a clean branch. One copy, one set of
+// edge cases, and this test to keep it that way.
+func TestRepoHygiene_CIRangeGates_UseTheSharedResolver(t *testing.T) {
+	root := repoRoot(t)
+	const resolver = "./.github/actions/resolve-range"
+
+	if _, err := os.Stat(filepath.Join(root, ".github", "actions", "resolve-range", "action.yml")); err != nil {
+		t.Fatalf("the shared range action is missing: %v", err)
+	}
+
+	wf := parseCIWorkflow(t, filepath.Join(root, ".github", "workflows", "ci.yml"))
+	checked := 0
+	for _, name := range slices.Sorted(maps.Keys(wf.Jobs)) {
+		job := wf.Jobs[name]
+		usesRange, usesResolver := false, false
+		for _, s := range job.Steps {
+			if strings.Contains(s.Run, "--base") || strings.Contains(s.Run, "--head") {
+				usesRange = true
+			}
+			if strings.TrimSpace(s.Uses) == resolver {
+				usesResolver = true
+			}
+		}
+		if !usesRange {
+			continue
+		}
+		checked++
+		if !usesResolver {
+			t.Errorf("CI job %q passes a --base/--head range but does not use %s. A second "+
+				"copy of that logic has to rediscover that github.base_ref is empty on a push "+
+				"and that git reports an unresolvable ref as a clean diff with exit 0.", name, resolver)
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no CI job was found passing a --base/--head range — the parse failed, " +
+			"so this fence checks nothing")
+	}
+	t.Logf("range-scoped CI jobs using the shared resolver: %d", checked)
+}
+
+func parseCIWorkflow(t *testing.T, path string) ciWorkflow {
+	t.Helper()
+	data, err := os.ReadFile(path) //nolint:gosec // G304: fixed repo-root-relative path, not attacker input
+	if err != nil {
+		t.Fatalf("read %s: %v", path, err)
+	}
+	var wf ciWorkflow
+	if err := yaml.Unmarshal(data, &wf); err != nil {
+		t.Fatalf("parse %s: %v", path, err)
+	}
+	return wf
 }

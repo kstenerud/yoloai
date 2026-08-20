@@ -82,18 +82,20 @@ jobs:
   # convention. `make lint-commits` is the local half; this is the half that covers
   # an outside contribution, whose fork PR never runs .claude/hooks.
   commits:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # need the base commit to diff against
 
+      - uses: ./.github/actions/resolve-range
+        id: range
+
       - name: Lint commit messages
         run: |
           python3 scripts/lint_commits.py \
-            --base "origin/${{ github.base_ref }}" \
-            --head "${{ github.event.pull_request.head.sha }}"
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}"
 
   # These two judge FILES, so they must see every path a file reaches main by —
   # and this repo sends small fixes straight there. They previously lived in the
@@ -113,26 +115,8 @@ jobs:
         with:
           fetch-depth: 0 # need the base commit to diff against
 
-      - name: Resolve the range to examine
+      - uses: ./.github/actions/resolve-range
         id: range
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" = "pull_request" ]; then
-            base="origin/${{ github.base_ref }}"
-            head="${{ github.event.pull_request.head.sha }}"
-          else
-            base="${{ github.event.before }}"
-            head="${{ github.sha }}"
-            # A branch's first push, and a force-push whose old tip was garbage
-            # collected, both leave `before` unresolvable. Fall back to the parent
-            # rather than to something that silently diffs nothing.
-            if ! git rev-parse --verify --quiet "$base^{commit}" >/dev/null; then
-              base="$head~1"
-            fi
-          fi
-          echo "base=$base" >> "$GITHUB_OUTPUT"
-          echo "head=$head" >> "$GITHUB_OUTPUT"
-          echo "examining $base..$head"
 
       # Rule 1, at the end where the entry is owed. The release workflow's
       # BREAKING-CHANGES check runs on a tag and asserts `## Unreleased` is EMPTY
@@ -156,14 +140,26 @@ jobs:
             --head "${{ steps.range.outputs.head }}"
 
   # Rule 10, run rather than remembered: revert each changed file and require some
-  # test to go red. PR-only and in its own job, because it builds and tests once per
-  # changed file and is far too slow for `make check`.
+  # test to go red. Its own job, because it builds and tests once per changed file
+  # and is far too slow for `make check`.
   #
-  # Validated against five merged commits before being switched on: zero false
-  # positives, and four real rule-10 violations, three of them the shape the rule
-  # itself warns about — the same change made in several places and tested in one.
+  # Validated against five merged commits before being switched on: four real rule-10
+  # violations, three of them the shape the rule itself warns about — the same change
+  # made in several places and tested in one.
+  #
+  # That validation also claimed zero false positives, and the claim did not survive
+  # first contact with a whole branch: a `feat` commit that adjusts a doc comment
+  # alongside its real work got the comment's file reported as an uncovered behaviour
+  # change (`9124d487`). `is_cosmetic` now classifies those separately. Worth knowing
+  # when reading a report, because a gate is only as useful as its false-positive
+  # rate — and this one is the last thing standing between rule 10 and being a rule
+  # nobody runs.
+  #
+  # The range comes from the shared action for the reason `content-gates` gives
+  # above: the `pull_request` guard this job used to carry meant it never examined a
+  # release branch, and release branches are where D131 sends the work most likely
+  # to need it.
   revert-red:
-    if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -178,11 +174,14 @@ jobs:
         with:
           python-version: '3.11'
 
+      - uses: ./.github/actions/resolve-range
+        id: range
+
       - name: Require a test that goes red when each change is reverted
         run: |
           python3 scripts/check_revert_red.py \
-            --base "origin/${{ github.base_ref }}" \
-            --head "${{ github.event.pull_request.head.sha }}"
+            --base "${{ steps.range.outputs.base }}" \
+            --head "${{ steps.range.outputs.head }}"
 
   integration:
     runs-on: ubuntu-latest
