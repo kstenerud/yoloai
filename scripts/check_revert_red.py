@@ -51,6 +51,7 @@ work one interrupted run away from being lost.
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import shutil
 import subprocess
@@ -85,7 +86,7 @@ class Change:
 @dataclass(frozen=True)
 class Outcome:
     path: str
-    verdict: str  # RED_TEST | RED_BUILD | GREEN | CLAIMED | UNCHECKED
+    verdict: str  # RED_TEST | RED_BUILD | GREEN | CLAIMED | COSMETIC | UNCHECKED
     detail: str = ""
 
     @property
@@ -132,6 +133,67 @@ def changed_sources(base: str, head: str) -> list[Change]:
         if GO_SOURCE.search(path) or PY_SOURCE.search(path):
             changes.append(Change(path=path, status=status))
     return changes
+
+
+def changed_lines(base: str, head: str, path: str, cwd: str | None = None) -> list[str]:
+    """The added and removed content lines for one path, without their +/- marker.
+
+    `-U0` so context lines are not mistaken for changes, and `--ignore-all-space`
+    so a reindent is not either.
+    """
+    out = _git(
+        "diff", "-U0", "--ignore-all-space", f"{base}...{head}", "--", path, cwd=cwd
+    ).stdout
+    lines = []
+    for line in out.splitlines():
+        if line.startswith(("+++", "---", "@@", "diff ", "index ", "new file", "deleted file")):
+            continue
+        if line.startswith(("+", "-")):
+            lines.append(line[1:])
+    return lines
+
+
+def is_cosmetic(tree: str, base: str, head: str, path: str) -> bool:
+    """Whether the change to `path` cannot affect behaviour, so no test could notice.
+
+    A `feat` commit that adjusts a doc comment alongside its real work leaves this
+    gate reporting the comment's file as an uncovered behaviour change, because
+    reverting a comment of course breaks nothing. That is a false positive, and this
+    gate's whole claim on a contributor's attention is that it does not produce them
+    — `9124d487` is the specimen: a two-line doc-comment edit on `applyBrokerOption`,
+    reported identically to a real missing test.
+
+    Both tests below are *exact within their guard* and decline to classify whenever
+    they cannot be sure. Declining means the file is probed as before, so the worst
+    case is the behaviour we already had.
+
+    * **Go**: every changed line is a `//` comment or blank, and neither version of
+      the file contains `/*` anywhere. Without that second condition a changed line
+      inside a block comment is indistinguishable from code by inspection, and a
+      guard that reads `*p = 0` as a comment would suppress a real finding.
+    * **Python**: the two versions parse to the same AST. That covers `#` comments
+      and formatting together. A docstring edit is *not* covered — docstrings are
+      AST nodes — so it still reports as it does today.
+    """
+    if GO_SOURCE.search(path):
+        before = _git("show", f"{base}:{path}", cwd=tree).stdout
+        after = _git("show", f"{head}:{path}", cwd=tree).stdout
+        if "/*" in before or "/*" in after:
+            return False  # cannot tell a block-comment line from code
+        changed = changed_lines(base, head, path, cwd=tree)
+        return bool(changed) and all(
+            not line.strip() or line.strip().startswith("//") for line in changed
+        )
+
+    if PY_SOURCE.search(path):
+        try:
+            before = ast.dump(ast.parse(_git("show", f"{base}:{path}", cwd=tree).stdout))
+            after = ast.dump(ast.parse(_git("show", f"{head}:{path}", cwd=tree).stdout))
+        except SyntaxError:
+            return False  # unparseable on either side; let the probe speak
+        return before == after
+
+    return False
 
 
 def types_touching(base: str, head: str, path: str) -> set[str | None]:
@@ -199,6 +261,8 @@ def probe(tree: str, base: str, head: str, change: Change, timeout: int) -> Outc
     claim = verified_out_of_suite(base, head, change.path)
     if claim:
         return Outcome(change.path, "CLAIMED", f"Verified-By: {claim}")
+    if change.status == "M" and is_cosmetic(tree, base, head, change.path):
+        return Outcome(change.path, "COSMETIC", "comment or formatting only; no behaviour to cover")
     scope = scope_for(change.path)
     if scope is None:
         return Outcome(change.path, "UNCHECKED", "no test scope covers this path")
@@ -239,6 +303,7 @@ def report(outcomes: list[Outcome]) -> str:
         ("RED_BUILD", "Load-bearing, but only at compile time"),
         ("RED_TEST", "Covered — a test fails when these are reverted"),
         ("CLAIMED", "Verified outside the suite, on the author's word — review this"),
+        ("COSMETIC", "No behaviour changed, so nothing could cover it"),
         ("UNCHECKED", "Not checked by this gate"),
     ):
         rows = [o for o in outcomes if o.verdict == verdict]

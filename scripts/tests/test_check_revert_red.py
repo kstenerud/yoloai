@@ -19,6 +19,7 @@ from check_revert_red import (  # noqa: E402
     claims_behavior_change,
     commit_type,
     is_build_failure,
+    is_cosmetic,
     probe,
     scope_for,
     types_touching,
@@ -243,6 +244,101 @@ def test_a_deleted_file_is_reported_unchecked_rather_than_passed(tmp_path: Path)
     out = probe(str(repo), "HEAD~1", "HEAD", Change("calc/calc.go", "D"), timeout=60)
     assert out == Outcome("calc/calc.go", "UNCHECKED", "deleted; reverting would re-add it")
     assert out.is_failure is False
+
+
+# --- a change that could not be covered because it changes nothing ------------
+
+
+def _edit_repo(tmp_path: Path, name: str, *, before: str, after: str, path: str) -> Path:
+    """A repo whose tip commit is one `fix` rewriting `path` from `before` to `after`."""
+    repo = tmp_path / name
+    (repo / Path(path).parent).mkdir(parents=True, exist_ok=True)
+    _run(["git", "init", "-q", "-b", "main"], repo)
+    (repo / path).write_text(before)
+    _commit(repo, "chore: baseline")
+    (repo / path).write_text(after)
+    _commit(repo, "fix(x): change it")
+    return repo
+
+
+def test_a_go_comment_only_change_is_cosmetic(tmp_path: Path) -> None:
+    """The false positive this exists to remove: `9124d487` edited a doc comment in a
+    `feat` commit, and got reported exactly like a behaviour change with no test."""
+    repo = _edit_repo(
+        tmp_path, "gocomment", path="calc/calc.go",
+        before="package calc\n\n// Double doubles.\nfunc Double(n int) int { return n * 2 }\n",
+        after="package calc\n\n// Double returns twice n.\nfunc Double(n int) int { return n * 2 }\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "calc/calc.go") is True
+
+
+def test_a_go_code_change_beside_a_comment_change_is_not_cosmetic(tmp_path: Path) -> None:
+    """Without this arm the guard is shown to fire, not to discriminate — and a
+    suppression that also swallows the real change would be far worse than the noise
+    it removes."""
+    repo = _edit_repo(
+        tmp_path, "gocode", path="calc/calc.go",
+        before="package calc\n\n// Double doubles.\nfunc Double(n int) int { return n * 2 }\n",
+        after="package calc\n\n// Double returns twice n.\nfunc Double(n int) int { return n * 3 }\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "calc/calc.go") is False
+
+
+def test_a_go_file_containing_a_block_comment_declines_to_classify(tmp_path: Path) -> None:
+    """A changed line inside `/* */` is indistinguishable from code by inspection, and
+    a guard loose enough to call `*p = 0` a comment would suppress a real finding. So
+    the presence of `/*` anywhere in the file falls back to probing it."""
+    repo = _edit_repo(
+        tmp_path, "goblock", path="calc/calc.go",
+        before="package calc\n\n/* Double doubles. */\nfunc Double(n int) int { return n * 2 }\n",
+        after="package calc\n\n/* Double returns twice n. */\nfunc Double(n int) int { return n * 2 }\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "calc/calc.go") is False
+
+
+def test_a_python_comment_only_change_is_cosmetic(tmp_path: Path) -> None:
+    repo = _edit_repo(
+        tmp_path, "pycomment", path="pkg/thing.py",
+        before="# doubles\ndef double(n):\n    return n * 2\n",
+        after="# returns twice n\ndef double(n):\n    return n * 2\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "pkg/thing.py") is True
+
+
+def test_a_python_code_change_is_not_cosmetic(tmp_path: Path) -> None:
+    repo = _edit_repo(
+        tmp_path, "pycode", path="pkg/thing.py",
+        before="# doubles\ndef double(n):\n    return n * 2\n",
+        after="# doubles\ndef double(n):\n    return n * 3\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "pkg/thing.py") is False
+
+
+def test_unparseable_python_declines_to_classify(tmp_path: Path) -> None:
+    """Reading a syntax error as "no AST difference" would exempt the file outright."""
+    repo = _edit_repo(
+        tmp_path, "pybroken", path="pkg/thing.py",
+        before="def double(n):\n    return n * 2\n",
+        after="def double(n)\n    return n * 2\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "pkg/thing.py") is False
+
+
+def test_the_gate_passes_a_commit_whose_only_change_is_a_comment(tmp_path: Path) -> None:
+    """End to end: the whole point is that this exits 0 rather than demanding a test
+    for a comment."""
+    repo = _edit_repo(
+        tmp_path, "e2ecomment", path="calc/calc.go",
+        before="package calc\n\n// Double doubles.\nfunc Double(n int) int { return n * 2 }\n",
+        after="package calc\n\n// Double returns twice n.\nfunc Double(n int) int { return n * 2 }\n",
+    )
+    (repo / "go.mod").write_text("module example.com/m\n\ngo 1.21\n")
+    _commit(repo, "chore: add the module file")
+    done = _run(
+        [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~2"], repo
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "comment or formatting only" in done.stdout
 
 
 # --- reading the range -------------------------------------------------------
