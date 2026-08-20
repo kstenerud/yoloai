@@ -91,6 +91,7 @@ that makes them structural rather than four spot repairs.*
 - [DF223](design/findings-unresolved.md) — brokering drops Claude Code out of subscription mode: the context window shrinks 5× and usage reporting goes blank
 - [DF224](design/findings-unresolved.md) — the guest's workdir parents are created root-owned, and an agent that owns a colliding path refuses to start
 - [DF225](design/findings-unresolved.md) — the brokering posture is a tri-state encoded as two booleans, in four layers
+- [DF230](design/findings-resolved.md) — three revert-red tests depended on the developer's global git identity, and had been failing in CI for eight days (RESOLVED 2026-08-20)
 - [DF226](design/findings-resolved.md) — CI never ran on a release branch, so the branch D131 mandates was the least-tested code in the repo (RESOLVED 2026-08-19)
 - [DF227](design/findings-unresolved.md) — the Python typecheck gate is platform-sensitive, and only a macOS host can fail it
 - [DF228](design/findings-resolved.md) — Apple's builder reads nothing from a build context outside `$HOME`, and nothing said so (RESOLVED 2026-08-19)

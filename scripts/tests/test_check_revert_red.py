@@ -117,9 +117,29 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
 
 
+# git refuses to commit without a committer identity, and a developer machine
+# supplies one from ~/.gitconfig while CI does not. Every commit here therefore
+# passes the identity inline — an omission is invisible locally and fails only
+# in CI, which is what these two helpers exist to prevent.
+_IDENTITY = ["-c", "user.email=t@t", "-c", "user.name=t"]
+
+
 def _commit(repo: Path, subject: str) -> None:
     _run(["git", "add", "-A"], repo)
-    _run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", subject], repo)
+    _run(["git", *_IDENTITY, "commit", "-m", subject], repo)
+
+
+def _amend(repo: Path, message: str) -> None:
+    """Rewrite the tip commit's message.
+
+    Checked, unlike _run: a silent failure here leaves the ORIGINAL message in
+    place, so the test goes on to assert against a commit it did not create and
+    fails somewhere else entirely. That is precisely how this went unnoticed —
+    the amend failed in CI for want of an identity, and the error surfaced as
+    check_revert_red.py declining to exempt a commit type nobody had set.
+    """
+    done = _run(["git", *_IDENTITY, "commit", "--amend", "-m", message], repo)
+    assert done.returncode == 0, f"git commit --amend failed: {done.stdout}{done.stderr}"
 
 
 def _go_repo(tmp_path: Path, *, covered: bool) -> Path:
@@ -172,7 +192,7 @@ def test_it_stays_quiet_when_a_test_does_go_red(tmp_path: Path) -> None:
 def test_the_commit_type_exempts_the_same_uncovered_change(tmp_path: Path) -> None:
     """The escape hatch, proven to work on input the gate otherwise rejects."""
     repo = _go_repo(tmp_path, covered=False)
-    _run(["git", "commit", "--amend", "-m", "refactor(calc): correct the multiplier"], repo)
+    _amend(repo, "refactor(calc): correct the multiplier")
     done = _run(
         [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
     )
@@ -188,11 +208,7 @@ def test_a_verified_by_trailer_records_rather_than_bypasses(tmp_path: Path) -> N
     claim must appear in the output — an exemption nobody sees is a bypass.
     """
     repo = _go_repo(tmp_path, covered=False)
-    _run(
-        ["git", "commit", "--amend", "-m",
-         "fix(calc): correct the multiplier\n\nVerified-By: make smoketest, podman tier"],
-        repo,
-    )
+    _amend(repo, "fix(calc): correct the multiplier\n\nVerified-By: make smoketest, podman tier")
     done = _run(
         [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
     )
@@ -204,10 +220,7 @@ def test_a_verified_by_trailer_records_rather_than_bypasses(tmp_path: Path) -> N
 def test_an_empty_verified_by_trailer_does_not_exempt(tmp_path: Path) -> None:
     """`Verified-By:` with nothing after it is not a claim, and must not read as one."""
     repo = _go_repo(tmp_path, covered=False)
-    _run(
-        ["git", "commit", "--amend", "-m", "fix(calc): correct the multiplier\n\nVerified-By:"],
-        repo,
-    )
+    _amend(repo, "fix(calc): correct the multiplier\n\nVerified-By:")
     done = _run(
         [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
     )
