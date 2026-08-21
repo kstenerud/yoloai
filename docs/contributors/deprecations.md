@@ -248,6 +248,54 @@ installs did not actually work, which is evidence about how much it was exercise
 - **Pointer:** `runtime/docker/prune.go` (`pruneManagedImages`, `yoloaiImageName`);
   `runtime/docker/resources/Dockerfile` (`LABEL com.yoloai.managed`); DF137.
 
+### `.yoloai.yaml` existence-check warning
+
+- **Incurred:** 2026-08-13 · **Shipped:** (pending) · **Due:** 2027-02-13 (heuristic with a self-firing trigger, 6mo)
+- **What:** `warnIfYoloAIYamlPresent` (`internal/orchestrator/create/prepare_archetype.go`) stats
+  `<workdir>/.yoloai.yaml` and prints a warning that the file is no longer read — an existence
+  check only, never a parse. D140 removed the file's `archetype:`/`mounts:`/`requires:` keys
+  entirely; this warning exists so a repo relying on `mounts:` learns its host mounts are gone
+  instead of losing them silently.
+- **Retire by:** deleting `warnIfYoloAIYamlPresent` and its call site. The trigger is the warning
+  itself going quiet — once no repo in active use still carries a `.yoloai.yaml`, the check fires
+  never, which is the signal that the population it warns has moved on. This date is the backstop
+  for if the trigger never fires.
+- **Pointer:** `internal/orchestrator/create/prepare_archetype.go` (`warnIfYoloAIYamlPresent`)
+
+### `mounts:` rejecting reader for the base config and profiles
+
+- **Incurred:** 2026-08-13 · **Shipped:** (pending) · **Due:** 2027-08-13 (user-facing, 12mo)
+- **What:** `checkMountsKeyRemoved` (`internal/config/config.go`) scans a base config or profile
+  document for a top-level `mounts:` key and, if present, fails to load with an error naming
+  `directories:` and showing the conversion, rather than silently dropping the key — D142 retired
+  `mounts:` because `directories:` is a strict superset (same expressiveness plus tiers plus every
+  aux-dir safety guard), but a config file written before this decision still has `mounts:` in it,
+  and dropping it silently would remove host access the user still expects (the degradation D138
+  retired). This is a **user-facing** grace period, not internal: it waits on people editing
+  config files they wrote once and may not touch again for a long time, and they only learn at the
+  next `yoloai new`/`run`/`build`, which may be rare.
+- **Retire by:** deleting `checkMountsKeyRemoved`, its call sites in `parseYAMLRoot` and
+  `LoadProfile`, and `errMountsKeyRemoved` — the key becomes a plain unknown field, caught by the
+  existing "unknown config field(s)" validation instead of a dedicated message.
+- **Pointer:** `internal/config/config.go` (`checkMountsKeyRemoved`, `errMountsKeyRemoved`);
+  `internal/config/profile.go` (`LoadProfile`); D142.
+
+### `os:` rejecting reader for profiles
+
+- **Incurred:** 2026-08-15 · **Shipped:** (pending) · **Due:** 2027-08-15 (user-facing, 12mo)
+- **What:** `checkOSKeyRejectedInProfile` (`internal/config/profile.go`) scans a profile document
+  for a top-level `os:` key and, if present, fails to load rather than silently discarding it.
+  `os:` was accepted, parsed, and merged into `MergedConfig.OS` on every prior release, but nothing
+  ever read that field — the effective guest OS is resolved at the CLI, before backend selection
+  and before any profile is loaded, so a profile's `os:` never took effect (DF210). **User-facing**
+  grace period: a profile written on an earlier release may still carry `os:`, and its owner only
+  learns at the next `yoloai new --profile <name>`, which may be rare.
+- **Retire by:** deleting `checkOSKeyRejectedInProfile` and `errOSKeyNotAppliedFromProfile` — the
+  key becomes a plain unknown field, caught by the same house-pattern validation `mounts:` retires
+  to above, rather than a dedicated message.
+- **Pointer:** `internal/config/profile.go` (`checkOSKeyRejectedInProfile`,
+  `errOSKeyNotAppliedFromProfile`, `LoadProfile`); DF210.
+
 ## Not deprecations
 
 Recorded so they are not re-filed. Each looks like a compatibility shim and is not:

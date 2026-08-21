@@ -170,7 +170,6 @@ func runProfileInfoCmd(cmd *cobra.Command, name string, diffMode bool) error {
 			Directories: info.Merged.Directories,
 			Resources:   info.Merged.Resources,
 			Network:     info.Merged.Network,
-			Mounts:      info.Merged.Mounts,
 		})
 	}
 
@@ -211,7 +210,6 @@ type profileInfoJSON struct {
 	Directories []yoloai.ProfileAuxDir   `json:"directories,omitempty"`
 	Resources   *yoloai.ProfileResources `json:"resources,omitempty"`
 	Network     *yoloai.ProfileNetwork   `json:"network,omitempty"`
-	Mounts      []string                 `json:"mounts,omitempty"`
 }
 
 // profileDiffJSON is the JSON output structure for `profile info --diff`.
@@ -267,7 +265,7 @@ func printProfileInfoScalars(out io.Writer, merged *yoloai.ResolvedProfileConfig
 	}
 }
 
-// printProfileInfoMaps prints map and list fields (env, agent args, ports, mounts).
+// printProfileInfoMaps prints map and list fields (env, agent args, ports).
 func printProfileInfoMaps(out io.Writer, merged *yoloai.ResolvedProfileConfig) {
 	if len(merged.Env) > 0 {
 		fmt.Fprintln(out, "Env:") //nolint:errcheck
@@ -283,12 +281,6 @@ func printProfileInfoMaps(out io.Writer, merged *yoloai.ResolvedProfileConfig) {
 	}
 	if len(merged.Ports) > 0 {
 		fmt.Fprintf(out, "Ports:       %s\n", strings.Join(merged.Ports, ", ")) //nolint:errcheck
-	}
-	if len(merged.Mounts) > 0 {
-		fmt.Fprintln(out, "Mounts:") //nolint:errcheck
-		for _, m := range merged.Mounts {
-			fmt.Fprintf(out, "  %s\n", m) //nolint:errcheck
-		}
 	}
 }
 
@@ -362,7 +354,6 @@ func printProfileDiff(cmd *cobra.Command, name, extends string, chain []string, 
 		printMapDiff(out, "Env", parent.Env, merged.Env),
 		printMapDiff(out, "Agent args", parent.AgentArgs, merged.AgentArgs),
 		printListAdditions(out, "Ports", parent.Ports, merged.Ports),
-		printListAdditions(out, "Mounts", parent.Mounts, merged.Mounts),
 		printWorkdirDiff(out, parent.Workdir, merged.Workdir),
 		printDirAdditions(out, parent.Directories, merged.Directories),
 		printResourcesDiff(out, parent.Resources, merged.Resources),

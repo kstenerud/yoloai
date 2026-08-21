@@ -7,12 +7,12 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
@@ -32,7 +32,7 @@ type ProfileImageBuilder = runtime.ProfileImageBuilder
 // layout is the DataDir-rooted Layout used to locate the base profile
 // directory and for any host-path needs Setup may have (Q-W.5 threads
 // it through runtime.Backend.Setup).
-func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.Layout, profileName string, secrets []string, output io.Writer, logger *slog.Logger, force bool) error {
+func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.Layout, profileName string, secrets []string, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger, force bool) error {
 	if !rt.Descriptor().Capabilities.CapAdd {
 		return nil
 	}
@@ -49,7 +49,7 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 
 	// Ensure base image first
 	baseProfileDir := filepath.Join(layout.ProfilesDir(), "base")
-	if err := rt.Setup(ctx, layout, baseProfileDir, output, logger, force); err != nil {
+	if err := rt.Setup(ctx, layout, baseProfileDir, progress, notices, logger, force); err != nil {
 		return fmt.Errorf("ensure base image: %w", err)
 	}
 
@@ -83,8 +83,17 @@ func EnsureProfileImage(ctx context.Context, rt runtime.Backend, layout config.L
 		// change reaches every descendant without comparing file timestamps.
 		want := chainChecksum(profileDir, parentChecksum)
 		if force || !imageMatches(ctx, builder, tag, want) {
-			fmt.Fprintf(output, "Building profile image %s...\n", tag) //nolint:errcheck // best-effort output
-			if err := builder.BuildProfileImage(ctx, profileDir, tag, want, secrets, layout, output, logger); err != nil {
+			// Progress, not a notice: this heads the build stream that follows
+			// it, and the two belong on the same channel. The launch path's
+			// "recorded as built but missing" line is a notice for the opposite
+			// reason — it reports a state the user did not ask for and will
+			// want to know about after the fact.
+			feedback.EmitProgress(progress, feedback.Progress{
+				Event:   "profile.image_building",
+				Message: fmt.Sprintf("Building profile image %s...", tag),
+				Fields:  map[string]any{"tag": tag, "profile": name},
+			})
+			if err := builder.BuildProfileImage(ctx, profileDir, tag, want, secrets, layout, progress, notices, logger); err != nil {
 				return fmt.Errorf("build profile image %s: %w", tag, err)
 			}
 		}

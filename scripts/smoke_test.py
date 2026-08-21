@@ -28,6 +28,7 @@ import json
 import os
 import re
 import secrets
+import signal
 import shutil
 import subprocess
 import sys
@@ -43,9 +44,36 @@ from typing import Any, Callable, Iterable, Optional
 # Constants
 # ---------------------------------------------------------------------------
 
-# A reusable no-op gate for container backends (no host-wide VM cap to honor).
-# nullcontext does nothing on enter/exit, so it is safe to share across threads.
+# A reusable no-op gate. nullcontext does nothing on enter/exit, so it is safe to
+# share across threads.
 _NULL_GATE = contextlib.nullcontext()
+
+# How many backends of each *type* may run at once, keyed by BackendSpec.
+# check_backend — the daemon, which is the thing that actually contends. `docker`
+# and `docker-priv` are two specs against one Docker daemon, and that pair is
+# exactly what raced (DF234): the matrix stalled `yoloai exec` and `yoloai start`
+# on both docker and podman, and all three failing tests passed when run alone.
+#
+# 1 is the default because the concurrency that causes the flakiness is not the
+# concurrency that buys the speed. Wall-clock is dominated by tart's VM boots, so
+# serializing the cheap backends against themselves barely moves the total, while
+# racing them costs a non-deterministic release gate. Tart keeps 2 because that is
+# what it has always had and what macOS allows.
+#
+# Per *type*, not global: two different daemons are not contending with each other,
+# so docker and podman still overlap. Tune with --backend-concurrency.
+BACKEND_CONCURRENCY: dict[str, int] = {
+    "docker": 1,
+    "podman": 1,
+    "seatbelt": 1,
+    "containerd": 1,
+    "apple": 1,
+    "tart": 2,
+}
+
+# Applied to any check_backend not named above, so a new backend gets a defined
+# limit rather than silently inheriting "unbounded" the way container backends did.
+DEFAULT_BACKEND_CONCURRENCY = 1
 
 SENTINEL = "done"  # touched in the exchange dir when the agent finishes its prompt
 DEFAULT_TIMEOUT = 90    # seconds: container + agent startup for non-VM backends
@@ -264,6 +292,10 @@ class RunContext:
     # container specs run unthrottled.
     jobs: int = 0
     vm_concurrency: int = 2
+    # Per-backend-type caps, keyed by BackendSpec.check_backend (DF234). Separate
+    # from vm_concurrency, which stays a host-wide cap ACROSS the VM types; a VM
+    # spec is bounded by both.
+    backend_concurrency: dict[str, int] = field(default_factory=lambda: dict(BACKEND_CONCURRENCY))
     # Monotonic sandbox-name counter (allocated under state_lock). Appended to
     # every sandbox name so no two are string prefixes of one another — see
     # Test.sandbox() for why the containerd-vm (Kata) backend requires this.
@@ -271,6 +303,9 @@ class RunContext:
     # Guards mutation of the shared sandboxes/results lists, the name counter,
     # and the single JUnit file handle; print_lock serializes each test's output
     # block so concurrent backends don't interleave their PASS/FAIL lines.
+    # cleanup() runs from atexit AND from the signal handler; whichever fires
+    # first wins, and the second must not re-destroy or re-print.
+    cleaned_up: bool = False
     state_lock: threading.Lock = field(default_factory=threading.Lock)
     print_lock: threading.Lock = field(default_factory=threading.Lock)
 
@@ -1352,8 +1387,21 @@ FINGERPRINTS: list[Fingerprint] = [
     ),
     Fingerprint(
         "agent idle / API unreachable (DF8)",
-        r"agent idle for \d+s|request timed out|api unreachable",
+        # `network: unreachable` is the harness's OWN probe, and it is the reliable
+        # half of this pattern. The others are agent-emitted prose: Claude Code now
+        # shows a randomised spinner ("Dilly-dallying… (16s)") while it waits, which
+        # matches none of them, so two podman failures on 2026-08-20 fell through to
+        # the generic "harness timeout" and read like a product defect for hours --
+        # while agent.log plainly showed a delivered prompt, no tool execution, and
+        # a spinner counting up. The mapping already existed in prose, in
+        # Test.diagnose_sentinel_timeout's docstring ("network unreachable -> ... not
+        # an agent stall"); it simply had never been written where the autopsy looks.
+        r"network: unreachable|agent idle for \d+s|request timed out|api unreachable",
         "request-timed-out-in-claude-code--api-unreachable-not-dns-failure",
+        "the guest could not reach the network, so the agent was waiting on a "
+        "response that never came -- check egress for this backend before suspecting "
+        "yoloai, and note it can be transient: the same backend passing a later "
+        "agent-driven test in the same run proves egress recovered",
     ),
     Fingerprint(
         "agent's sentinel command failed; agent stalled (tool error in pane)",
@@ -2067,6 +2115,39 @@ def parse_info_net_health(info_json: dict[str, Any]) -> Optional[tuple[str, str]
         return None
     detail = info_json.get("net_health_detail")
     return state, (detail if isinstance(detail, str) else "")
+
+
+def parse_backend_concurrency(overrides: Optional[list[str]]) -> dict[str, int]:
+    """Merge `--backend-concurrency name=N` overrides onto BACKEND_CONCURRENCY.
+
+    Returns a fresh table so callers cannot mutate the module default. A bad pair
+    raises ValueError rather than being ignored: a silently dropped override reads
+    exactly like one that was applied, and the whole point of the flag is to be
+    able to trust that you changed the thing you meant to change.
+    """
+    table = dict(BACKEND_CONCURRENCY)
+    for raw in overrides or []:
+        for pair in raw.split(","):
+            pair = pair.strip()
+            if not pair:
+                continue
+            name, sep, value = pair.partition("=")
+            name, value = name.strip(), value.strip()
+            if not sep or not name:
+                raise ValueError(f"--backend-concurrency expects name=N, got {pair!r}")
+            try:
+                limit = int(value)
+            except ValueError:
+                raise ValueError(f"--backend-concurrency {name}: {value!r} is not an integer") from None
+            if limit < 1:
+                raise ValueError(f"--backend-concurrency {name}: must be >= 1, got {limit}")
+            table[name] = limit
+    return table
+
+
+def backend_concurrency_for(check_backend: str, table: dict[str, int]) -> int:
+    """Concurrency limit for one backend type, defaulting rather than unbounding."""
+    return max(1, table.get(check_backend, DEFAULT_BACKEND_CONCURRENCY))
 
 
 def plan_tart_slots(free: int, requested_concurrency: int) -> int:
@@ -2914,6 +2995,36 @@ def _warm_up_vm_backends(
 # Cleanup
 # ---------------------------------------------------------------------------
 
+def _install_teardown_signals(ctx: RunContext) -> None:
+    """Tear down this run's sandboxes on a signal, not just on a normal exit.
+
+    atexit covers a clean exit and a KeyboardInterrupt, but NOT SIGTERM: the
+    default disposition terminates the process without unwinding, so every
+    sandbox the run created stays alive. That is not hypothetical. An
+    interrupted provider pass left four sandboxes running for over an hour --
+    its summary file stops mid-test and no rollup was ever written -- and
+    nothing reclaims them until some *later* run happens to sweep. In between,
+    they are load that every other thing on the host pays for.
+
+    Re-raises the signal with the default handler afterwards, so the exit status
+    still says the process was signalled rather than reporting a tidy failure it
+    did not have.
+    """
+    def _teardown(signum: int, _frame: Any) -> None:
+        print(f"\nreceived signal {signum}; tearing down this run's sandboxes before exiting...")
+        with contextlib.suppress(Exception):
+            cleanup(ctx)
+        signal.signal(signum, signal.SIG_DFL)
+        os.kill(os.getpid(), signum)
+
+    for sig in (signal.SIGTERM, signal.SIGINT):
+        # Only the main thread may install handlers, and a non-main-thread call
+        # raises rather than silently doing nothing -- tolerated so an embedder
+        # importing this module is not broken by it.
+        with contextlib.suppress(ValueError, OSError):
+            signal.signal(sig, _teardown)
+
+
 def cleanup(ctx: RunContext) -> None:
     """Destroy all tracked sandboxes and remove the scratch tmpdir.
 
@@ -2932,6 +3043,9 @@ def cleanup(ctx: RunContext) -> None:
     are never deleted here — they persist until the user cleans them up
     manually.
     """
+    if ctx.cleaned_up:
+        return
+    ctx.cleaned_up = True
     if ctx.sandboxes:
         print(f"\nCleaning up {len(ctx.sandboxes)} sandbox(es)...")
         timed_out: list[str] = []
@@ -3177,6 +3291,18 @@ def parse_args() -> argparse.Namespace:
             "Max backends to run concurrently within a matrix phase. "
             "0 (default) = auto (all backends at once). 1 = strictly serial "
             "(reproduces the historical one-backend-at-a-time behavior)."
+        ),
+    )
+    parser.add_argument(
+        "--backend-concurrency",
+        action="append",
+        metavar="NAME=N",
+        help=(
+            "Max backends of one type to run at once, keyed by daemon name "
+            "(docker, podman, seatbelt, containerd, apple, tart). Repeatable, or "
+            "comma-separated: --backend-concurrency docker=2,tart=1. Defaults: "
+            + ", ".join(f"{k}={v}" for k, v in sorted(BACKEND_CONCURRENCY.items()))
+            + ". VM backends are additionally bounded by --vm-concurrency."
         ),
     )
     parser.add_argument(
@@ -3587,6 +3713,7 @@ def main() -> int:
         backend_filter=args.backend,
         jobs=args.jobs,
         vm_concurrency=args.vm_concurrency,
+        backend_concurrency=parse_backend_concurrency(args.backend_concurrency),
     )
     if args.junit:
         ctx.junit = JUnitWriter(args.junit)
@@ -3601,6 +3728,7 @@ def main() -> int:
     _install_stdout_tee(log_dir / "summary.txt")
 
     atexit.register(cleanup, ctx)
+    _install_teardown_signals(ctx)
 
     is_linux = sys.platform.startswith("linux")
     host_os = "linux" if is_linux else "mac"
@@ -3799,12 +3927,14 @@ def main() -> int:
         spec: BackendSpec,
         test_fn: Callable[[Test, BackendSpec], None],
         vm_sema: "threading.Semaphore",
+        type_semas: dict[str, "threading.Semaphore"],
     ) -> None:
         """Run one backend's slot of a matrix test, with prereq/skip + retries.
 
         Self-contained per backend so it can run on its own thread: it filters
         (should_run/backend_filter), skips unavailable backends, then runs the
-        test under a VM-concurrency gate. Each attempt destroys exactly the
+        test under its backend-type gate and, for VMs, the host-wide VM gate.
+        Each attempt destroys exactly the
         sandboxes its own attempt created (result.sandboxes) — never a slice of
         the shared ctx.sandboxes, which sibling backends mutate concurrently.
         Only the terminal result is recorded, via _record_result.
@@ -3833,11 +3963,19 @@ def main() -> int:
                 ))
             return
 
-        # VM backends share a host-wide concurrency cap (macOS allows 2 Tart VMs;
-        # concurrent containerd QEMU VMs raise peak disk). Container backends run
-        # unthrottled. Hold the slot for the test's full lifetime incl. retries.
-        gate = vm_sema if spec.is_vm else _NULL_GATE
-        with gate:
+        # Two gates, and a VM spec takes both. The per-type semaphore bounds one
+        # daemon's own churn (DF234: docker and docker-priv are two specs against
+        # one Docker daemon). The host-wide VM cap bounds VMs *across* types, which
+        # a per-type limit cannot express -- three VM backends each capped at 2
+        # would allow six VMs at once, loosening the very constraint that cap
+        # exists for (macOS allows 2 Tart VMs; concurrent QEMU VMs raise peak disk).
+        #
+        # Always type-then-VM, never the reverse: nothing holds the VM semaphore
+        # while waiting on a type semaphore, so a consistent order leaves no cycle.
+        # Both are held for the test's full lifetime including retries.
+        with contextlib.ExitStack() as gates:
+            gates.enter_context(type_semas.get(spec.check_backend, _NULL_GATE))
+            gates.enter_context(vm_sema if spec.is_vm else _NULL_GATE)
             result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=1)
             # A tart vmnet wedge (DF86) is a host-side condition that persists
             # unchanged across attempts — retrying just burns another sentinel
@@ -3861,16 +3999,28 @@ def main() -> int:
                     result = run_test(ctx, test_name, lambda t: test_fn(t, spec), attempt=attempt)
                     if result.passed:
                         break
-            # VM backends hold a scarce host slot (the macOS 2-VM cap). Free it
-            # as soon as the test ends — pass OR fail — instead of waiting for
-            # the end-of-run cleanup, so a later VM test (or a coexisting foreign
-            # VM) isn't blocked and the harness's own peak stays within the
-            # concurrency cap. On failure run_test has already preserved forensic
-            # state under <log>/sandboxes/<test>/attempt<N>/. Destroy inside the
-            # gate so the slot is released before the semaphore admits the next
-            # waiter.
-            if spec.is_vm:
-                _destroy_named_sandboxes(ctx, result.sandboxes)
+            # Free the sandbox as soon as the test ends — pass OR fail — instead
+            # of waiting for the end-of-run cleanup. This began as a VM-only rule
+            # because a VM holds a scarce, countable slot (the macOS 2-VM cap),
+            # but container sandboxes hold host resources just as real and merely
+            # harder to count: each one keeps a guest alive with tmux and an agent
+            # in it, inside a Docker or Podman VM with a fixed memory ceiling.
+            #
+            # Keeping them was quietly making the matrix fail. Every passing test
+            # left its sandbox running, so the run's load only ever grew: 19 alive
+            # at the end of a full macOS matrix, with `dind` — the heaviest test,
+            # a nested Docker daemon in a privileged container — scheduled last,
+            # against a host carrying all of them. Podman's VM hit a 15-minute
+            # load average of 29 on 5 CPUs with no swap; its guests stalled with
+            # nothing in the logs, and even `destroy` began timing out. The same
+            # dind cells pass in 53s on a clean host.
+            #
+            # On failure run_test has already preserved forensic state under
+            # <log>/sandboxes/<test>/attempt<N>/, so nothing diagnostic is lost by
+            # tearing down here — that was true for VMs and is true here.
+            # Destroyed inside the gate so the resources are released before the
+            # semaphore admits the next waiter.
+            _destroy_named_sandboxes(ctx, result.sandboxes)
         _record_result(ctx, result)
 
     def run_matrix_test(
@@ -3888,8 +4038,9 @@ def main() -> int:
         misleading per-backend SKIP. Host-prereq absence is handled downstream as a
         FAILURE (D112), not a skip, unless the backend is carved out.
 
-        Backends fan out concurrently (bounded by --jobs and, for VM backends, by
-        --vm-concurrency); the phase joins before the caller moves on. --jobs 1
+        Backends fan out concurrently, bounded by --jobs, by each backend type's
+        --backend-concurrency limit, and for VM backends additionally by the
+        host-wide --vm-concurrency cap; the phase joins before the caller moves on. --jobs 1
         reproduces the historical strictly-serial behavior exactly. vm_serial pins
         the VM cap to 1 for this phase regardless of --vm-concurrency: used by
         isolation_check, where concurrent guest-rule setup under VM load was racing
@@ -3903,14 +4054,20 @@ def main() -> int:
                 print(f"  ({len(excluded)} {exclude_reason}, not scheduled: {labels})")
         vm_cap = 1 if vm_serial else max(1, ctx.vm_concurrency)
         vm_sema = threading.Semaphore(vm_cap)
+        # One semaphore per backend *type* present in this phase, fresh each phase
+        # so a cap never leaks across phases.
+        type_semas = {
+            name: threading.Semaphore(backend_concurrency_for(name, ctx.backend_concurrency))
+            for name in {s.check_backend for s in specs}
+        }
         workers = ctx.jobs if ctx.jobs > 0 else max(1, len(specs))
         if workers <= 1:
             for spec in specs:
-                _run_backend_test(test_label, spec, test_fn, vm_sema)
+                _run_backend_test(test_label, spec, test_fn, vm_sema, type_semas)
             return
         with ThreadPoolExecutor(max_workers=workers) as pool:
             futures = [
-                pool.submit(_run_backend_test, test_label, spec, test_fn, vm_sema)
+                pool.submit(_run_backend_test, test_label, spec, test_fn, vm_sema, type_semas)
                 for spec in specs
             ]
             for f in futures:
@@ -3922,7 +4079,11 @@ def main() -> int:
 
     if should_run_test("clone"):
         if "clone" not in QUICK_EXCLUDED_TESTS or not ctx.quick:
-            _record_result(ctx, run_test(ctx, "clone", lambda t: test_clone(t, DEFAULT_BACKEND)))
+            # Torn down as soon as it ends, for the reason the matrix path gives:
+            # a sandbox held to the end of the run is load every later test pays.
+            clone_result = run_test(ctx, "clone", lambda t: test_clone(t, DEFAULT_BACKEND))
+            _destroy_named_sandboxes(ctx, clone_result.sandboxes)
+            _record_result(ctx, clone_result)
         else:
             skip_test(ctx, "clone", "not in the --quick tier")
 

@@ -260,7 +260,15 @@ crosscheck:
 gate-coverage:
 	python3 scripts/check_gate_coverage.py
 
-check: lint lint-cross lint-speculative-api gate-coverage vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
+## claim-citations: a `TestArch_` claim citation in a gated doc (config.md,
+## architecture/, principles/, decisions/working-notes.md) must name a real
+## test, and every TestArch_ test must be cited by one of them — see
+## scripts/check_claim_citations.py and AGENTS.md "Preparing a PR".
+.PHONY: claim-citations
+claim-citations:
+	python3 scripts/check_claim_citations.py
+
+check: lint lint-cross lint-speculative-api gate-coverage claim-citations vet-tagged crosscheck tidy-check hadolint shellcheck actionlint test python-test
 
 ## ensure-python-venv: provision the uv-managed venv on demand (idempotent).
 ## The Python surface is part of the app (contributors can modify it), so it is
@@ -274,6 +282,22 @@ ensure-python-venv:
 	@uv pip sync --quiet --python $(VENV)/bin/python $(PY_REQ_LOCK)
 
 ## python-test: run pytest from the uv-managed venv (uv required; see D112)
+##
+## HERMETIC_GIT strips the ambient git configuration for the duration of the run.
+## Several of these tests build throwaway repositories and commit to them, and a
+## developer machine silently supplies `user.email`/`user.name` from ~/.gitconfig
+## while a CI runner supplies nothing. That difference makes a missing identity a
+## defect visible ONLY in CI: DF230 sat red on main for eight days because the
+## suite that was supposed to catch it passed on every machine that ran it by
+## hand. Unsetting the config here makes the local run the stricter of the two,
+## which is the only ordering that catches this class before it is pushed.
+## Set as target-scoped exports rather than a command prefix because
+## check_gate_coverage.py reads the pytest roots off the `$(PYTEST) <dir>` lines
+## below, and anything in front of `$(PYTEST)` stops it finding them — it caught
+## exactly that on the first attempt at this.
+python-test: export GIT_CONFIG_GLOBAL := /dev/null
+python-test: export GIT_CONFIG_SYSTEM := /dev/null
+python-test: export GIT_CONFIG_NOSYSTEM := 1
 python-test: python-typecheck
 	$(PYTEST) runtime/monitor/tests/ -v
 	$(PYTEST) runtime/docker/resources/tests/ -v
@@ -465,8 +489,18 @@ integration-containerd:
 ## DF99 — that test had never run, because it was gated on YOLOAI_TEST_APPLE,
 ## which nothing set. Still gated: it boots a VM and takes ~5 minutes, so a bare
 ## `go test ./internal/orchestrator/` should not pay for it by surprise.
+##
+## The 45m budget on the first invocation is for a COLD base-image build, which
+## is a routine state rather than an exotic one. TestApple_SetupBuildsBase builds
+## yoloai-base by construction (a fresh layout has no staleness marker, so Setup
+## always rebuilds), and apple has no way to prune build cache except deleting
+## the builder outright — so any `yoloai system prune` empties it, including the
+## one the smoke harness runs as its own fallback. A cold build installs Debian
+## packages, the Go toolchain, node + four npm agent CLIs, uv/aider, hadolint,
+## golangci-lint and the vscode CLI in a 2-CPU builder VM. At 15m this failed
+## mid-build, with the panic pointing at buildBaseImage and no error of its own.
 integration-apple:
-	go test -tags=integration -v -count=1 -timeout=15m ./runtime/apple/
+	go test -tags=integration -v -count=1 -timeout=45m ./runtime/apple/
 	YOLOAI_TEST_APPLE=1 go test -tags=integration -v -count=1 -timeout=15m -run '_Apple$$' ./internal/orchestrator/
 
 ## integration-seatbelt: run Seatbelt integration tests (requires macOS with sandbox-exec)

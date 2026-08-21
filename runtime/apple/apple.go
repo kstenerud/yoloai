@@ -12,11 +12,13 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	goruntime "runtime"
 	"strconv"
 	"strings"
 	"sync"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/runtime"
@@ -453,10 +455,72 @@ func normalizeCap(c string) string {
 	return "CAP_" + c
 }
 
+// verifyBuildContextReachable refuses a build context directory that Apple's
+// `container build` cannot read. The builder transfers an **empty** context
+// (`transferring context: 2B`) for any context outside the HOME the CLI runs
+// with, and the build then fails deep inside BuildKit — `failed to calculate
+// checksum ... "/entrypoint.sh": not found`, naming a file that is sitting right
+// there in the context. This is the same silent-empty-context symptom as the
+// relative-`.` case (AC1), by a second cause, so the same remedy of "pass an
+// absolute path" does not cover it.
+//
+// Nothing enforced this before DF228: the data dir defaults to $HOME/.yoloai and
+// every build context descends from it, so production satisfied the constraint
+// by accident. `--data-dir` points anywhere, and a value outside $HOME turned
+// every image build on this backend into that unreadable BuildKit error.
+//
+// An absent HOME is not a violation — it means there is nothing to measure
+// against, and inventing a failure there would be worse than letting the build
+// speak for itself.
+func verifyBuildContextReachable(dir string, env []string) error {
+	home := envValue(env, "HOME")
+	if home == "" || isUnder(dir, home) {
+		return nil
+	}
+	return fmt.Errorf("build context %s is outside $HOME (%s): Apple's `container build` transfers an empty context from there and every COPY in the image fails; "+
+		"point the yoloai data directory back under your home directory (--data-dir, default $HOME/.yoloai)", dir, home)
+}
+
+// envValue reads one variable out of an exec-style KEY=VALUE environment. Last
+// assignment wins, matching what exec(3) hands the child.
+func envValue(env []string, key string) string {
+	prefix := key + "="
+	value := ""
+	for _, kv := range env {
+		if after, ok := strings.CutPrefix(kv, prefix); ok {
+			value = after
+		}
+	}
+	return value
+}
+
+// isUnder reports whether path is dir or lives beneath it, comparing
+// symlink-resolved forms. A lexical comparison answers wrongly for half the
+// paths involved on macOS: /tmp, /var and the per-user $TMPDIR all resolve
+// through /private, so an unresolved HOME and a resolved context directory can
+// name the same tree and still share no prefix.
+func isUnder(path, dir string) bool {
+	rel, err := filepath.Rel(resolvePath(dir), resolvePath(path))
+	if err != nil {
+		return false
+	}
+	return rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator))
+}
+
+// resolvePath resolves symlinks, falling back to the merely-cleaned path when it
+// cannot (a path that does not exist yet resolves to nothing, and that is not a
+// reason to answer the caller's question wrongly).
+func resolvePath(p string) string {
+	if resolved, err := filepath.EvalSymlinks(p); err == nil {
+		return resolved
+	}
+	return filepath.Clean(p)
+}
+
 // Setup starts the apiserver and the builder, then builds yoloai-base from the
 // shared base-image build context when it is missing or its inputs changed.
 // Idempotent.
-func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger, force bool) error {
 	// Start the apiserver and the (separate) builder VM on demand (AC3).
 	if _, err := r.runContainer(ctx, "system", "start"); err != nil {
 		return fmt.Errorf("start container system: %w", err)
@@ -468,13 +532,14 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	exists := r.imageExists(ctx, baseImage)
 	if force || !exists {
 		if !exists {
-			fmt.Fprintln(output, "Building base image (first run only, this may take a few minutes)...") //nolint:errcheck // best-effort progress
+			feedback.Progressf(progress, "image.base_building",
+				"Building base image (first run only, this may take a few minutes)...")
 		}
-		return r.buildBaseImage(ctx, layout, output, logger)
+		return r.buildBaseImage(ctx, layout, progress, logger)
 	}
 	if dockerrt.NeedsBuild(layout, "apple") {
-		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort progress
-		return r.buildBaseImage(ctx, layout, output, logger)
+		feedback.Progressf(progress, "image.base_rebuilding", "Base image resources updated, rebuilding...")
+		return r.buildBaseImage(ctx, layout, progress, logger)
 	}
 	return nil
 }
@@ -495,15 +560,21 @@ func (r *Runtime) imageExists(ctx context.Context, ref string) bool {
 // relative `.` silently transfers an empty context and every COPY fails (AC1).
 // Build inputs are the same embedded resources the docker backend uses, so
 // staleness rides on the shared checksum marker.
-func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, progress feedback.ProgressSink, logger *slog.Logger) error {
 	dir, err := layout.MkdirTemp("yoloai-apple-build-")
 	if err != nil {
 		return fmt.Errorf("create build dir: %w", err)
 	}
 	defer os.RemoveAll(dir) //nolint:errcheck // best-effort temp cleanup
 
+	if err := verifyBuildContextReachable(dir, r.execEnv); err != nil {
+		return err
+	}
 	if err := dockerrt.WriteBuildContextDir(dir); err != nil {
 		return fmt.Errorf("write build context: %w", err)
+	}
+	if err := prepareDockerfile(dir); err != nil {
+		return err
 	}
 	logger.Debug("building yoloai-base via container build", "context", dir)
 
@@ -520,7 +591,9 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 	// actionable cause rides on the error itself, not only the (maybe discarded)
 	// stream — same value on both so os/exec keeps its single-pipe path (DF145).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "image.build_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -545,9 +618,19 @@ func (r *Runtime) buildBaseImage(ctx context.Context, layout config.Layout, outp
 // backend's BuildKit invocation), so any auto-detected build secrets (e.g. an
 // ~/.npmrc) are reported and dropped rather than silently ignored or failing
 // the build outright.
-func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksum string, secrets []string, buildEnv config.Layout, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger) error {
 	if len(secrets) > 0 {
-		fmt.Fprintf(output, "Warning: build secrets are not supported on the apple backend; %d secret(s) will not be available to the build\n", len(secrets)) //nolint:errcheck // best-effort progress
+		// A notice, not progress: this is a capability the backend does not
+		// have, and the build proceeding without it is something the user may
+		// need to act on. It reached the caller only as a line inside a build
+		// log until Setup and BuildProfileImage gained a notices sink.
+		feedback.Emit(notices, feedback.Notice{
+			Event: "build.secrets_unsupported",
+			Level: feedback.LevelWarn,
+			Message: fmt.Sprintf("build secrets are not supported on the apple backend; %d secret(s) will not be available to the build",
+				len(secrets)),
+			Fields: map[string]any{"backend": "apple", "count": len(secrets)},
+		})
 	}
 
 	dir, err := buildEnv.MkdirTemp("yoloai-apple-profile-build-")
@@ -556,8 +639,15 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 	}
 	defer os.RemoveAll(dir) //nolint:errcheck // best-effort temp cleanup
 
+	buildCmdEnv := buildEnv.Env().EnvForAppleContainer()
+	if err := verifyBuildContextReachable(dir, buildCmdEnv); err != nil {
+		return err
+	}
 	if err := dockerrt.WriteProfileBuildContextDir(sourceDir, dir); err != nil {
 		return fmt.Errorf("write profile build context: %w", err)
+	}
+	if err := prepareDockerfile(dir); err != nil {
+		return err
 	}
 	logger.Debug("building profile image via container build", "tag", tag, "sourceDir", sourceDir, "context", dir)
 
@@ -568,12 +658,14 @@ func (r *Runtime) BuildProfileImage(ctx context.Context, sourceDir, tag, checksu
 		args = append(args, "--label", runtime.ProfileChecksumLabel+"="+checksum)
 	}
 	args = append(args, "-t", tag, dir)
-	cmd := sysexec.CommandContext(ctx, buildEnv.Env().EnvForAppleContainer(), r.containerBin, args...)
+	cmd := sysexec.CommandContext(ctx, buildCmdEnv, r.containerBin, args...)
 	// Stream to output as before, but also tee into a tail buffer so a failure's
 	// actionable cause rides on the error itself, not only the (maybe discarded)
 	// stream — same value on both so os/exec keeps its single-pipe path (DF145).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "image.build_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -638,7 +730,7 @@ func (r *Runtime) ExpectedBaseChecksum() string { return dockerrt.BuildInputsChe
 // tart/docker sweep: list, filter to this principal's prefix, skip known, then
 // stop+delete the rest. The base image is an OCI image (not a container), so it
 // never appears in `container list` and needs no special exclusion.
-func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
+func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool) (runtime.PruneResult, error) {
 	out, err := r.runContainer(ctx, "list", "--all", "--format", "json")
 	if err != nil {
 		return runtime.PruneResult{}, fmt.Errorf("list containers: %w", err)
@@ -651,15 +743,17 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 
 	var result runtime.PruneResult
 	for _, name := range orphans {
+		item := runtime.PruneItem{Kind: "container", Name: name, Action: runtime.PruneActionWouldRemove}
 		if !dryRun {
 			// delete --force handles a running container; stop first is best-effort.
 			_, _ = r.runContainer(ctx, "stop", name)
+			item.Action = runtime.PruneActionRemoved
 			if _, derr := r.runContainer(ctx, "delete", "--force", name); derr != nil && !errors.Is(derr, runtime.ErrNotFound) {
-				fmt.Fprintf(output, "Warning: failed to delete container %s: %v\n", name, derr) //nolint:errcheck // best-effort output
-				continue
+				item.Action = runtime.PruneActionFailed
+				item.Reason = derr.Error()
 			}
 		}
-		result.Items = append(result.Items, runtime.PruneItem{Kind: "container", Name: name})
+		result.Items = append(result.Items, item)
 	}
 	return result, nil
 }

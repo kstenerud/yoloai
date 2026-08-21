@@ -4,6 +4,7 @@ package config
 // ABOUTME: global (~/.yoloai/config.yaml) configs. Provides dotted-path get/set.
 
 import (
+	"errors"
 	"fmt"
 	"maps"
 	"os"
@@ -37,7 +38,7 @@ type YoloaiConfig struct {
 	Env                map[string]string `yaml:"env"`                  // env — environment variables passed to container
 	Resources          *ResourceLimits   `yaml:"resources"`            // resources — container resource limits
 	Network            *NetworkConfig    `yaml:"network"`              // network — network isolation settings
-	Mounts             []string          `yaml:"mounts"`               // mounts — extra bind mounts (host:container[:ro])
+	Directories        []ProfileDir      `yaml:"-"`                    // directories — auxiliary directories (path/mode/mount); same shape and guards as a profile's directories:
 	Ports              []string          `yaml:"ports"`                // ports — default port mappings (host:container)
 	AgentArgs          map[string]string `yaml:"agent_args"`           // agent_args — per-agent default CLI args
 	AgentFiles         *AgentFilesConfig `yaml:"-"`                    // agent_files — extra files to seed into agent-state
@@ -111,7 +112,6 @@ type knownCollectionSetting struct {
 var knownCollectionSettings = []knownCollectionSetting{
 	{"agent_args", yaml.MappingNode},
 	{"env", yaml.MappingNode},
-	{"mounts", yaml.SequenceNode},
 	{"ports", yaml.SequenceNode},
 	{"network.allow", yaml.SequenceNode},
 	{"cap_add", yaml.SequenceNode},
@@ -136,7 +136,7 @@ var globalKnownCollectionSettings = []knownCollectionSetting{
 var knownDefaultsKeys = map[string]bool{
 	"os": true, "agent": true, "model": true, "container_backend": true,
 	"isolation": true, "tart": true, "network": true, "agent_files": true,
-	"mounts": true, "ports": true, "resources": true, "agent_args": true,
+	"directories": true, "ports": true, "resources": true, "agent_args": true,
 	"env": true, "auto_commit_interval": true, "cap_add": true,
 	"devices": true, "setup": true,
 }
@@ -150,7 +150,6 @@ var yoloaiConfigHandlers = map[string]yoloaiConfigHandler{
 	"model":                yoloaiScalarHandler(func(c *YoloaiConfig) *string { return &c.Model }),
 	"os":                   yoloaiScalarHandler(func(c *YoloaiConfig) *string { return &c.OS }),
 	"container_backend":    yoloaiScalarHandler(func(c *YoloaiConfig) *string { return &c.ContainerBackend }),
-	"mounts":               yoloaiExpandedSeqHandler(func(c *YoloaiConfig) *[]string { return &c.Mounts }, "mounts[]"),
 	"ports":                yoloaiRawSeqHandler(func(c *YoloaiConfig) *[]string { return &c.Ports }),
 	"cap_add":              yoloaiExpandedSeqHandler(func(c *YoloaiConfig) *[]string { return &c.CapAdd }, "cap_add[]"),
 	"devices":              yoloaiExpandedSeqHandler(func(c *YoloaiConfig) *[]string { return &c.Devices }, "devices[]"),
@@ -333,6 +332,19 @@ func parseConfigYAML(data []byte, source string, knownKeys map[string]bool, env 
 	for i := 0; i < len(root.Content)-1; i += 2 {
 		key := root.Content[i].Value
 		val := root.Content[i+1]
+		// "directories" is deliberately not in the shared yoloaiConfigHandlers
+		// map: LoadProfile consults that same map first for every key, and a
+		// shared handler would shadow ProfileConfig's own Directories field
+		// (IC2 fold) instead of ever reaching profileOnlyHandlers. Handling it
+		// here, only on the base/defaults-config path, avoids that collision.
+		if key == "directories" {
+			dirs, err := parseDirectoriesNode(val, env)
+			if err != nil {
+				return nil, fmt.Errorf("%s: %s: %w", source, key, err)
+			}
+			cfg.Directories = append(cfg.Directories, dirs...)
+			continue
+		}
 		handler, ok := yoloaiConfigHandlers[key]
 		if !ok {
 			continue
@@ -359,12 +371,79 @@ func parseYAMLRoot(data []byte, source string, knownKeys map[string]bool) (*yaml
 	if root.Kind != yaml.MappingNode {
 		return nil, nil
 	}
+	// parseYAMLRoot is only ever used for the base/defaults config family
+	// (LoadBakedInDefaults, LoadDefaultsConfig, LoadConfig) — never for a
+	// profile, which parses its own document in LoadProfile and calls
+	// checkMountsKeyRemoved(root) there too.
+	if err := checkMountsKeyRemoved(root); err != nil {
+		return nil, fmt.Errorf("%s: %w", source, err)
+	}
 	if knownKeys != nil {
 		if err := validateKnownKeys(root, source, knownKeys); err != nil {
 			return nil, err
 		}
 	}
 	return root, nil
+}
+
+// checkMountsKeyRemoved scans a parsed config document's top-level keys for
+// the retired "mounts" key (D142) and, if present, returns a rejection error
+// naming the "directories:" replacement and showing the conversion. mounts:
+// must never be silently dropped — that would remove host access the user
+// still expects, which is the degradation D138 retired. Both the base config
+// and a profile now carry directories:, so the message is the same either way.
+func checkMountsKeyRemoved(root *yaml.Node) error {
+	for i := 0; i < len(root.Content)-1; i += 2 {
+		if root.Content[i].Value == "mounts" {
+			return errMountsKeyRemoved()
+		}
+	}
+	return nil
+}
+
+// errMountsKeyRemoved builds the D142 rejection message. directories: is a
+// strict superset of what mounts: could do — the same host-path expressiveness
+// plus mount-mode tiers plus every aux-dir safety guard (dangerous-path
+// refusal, overlap detection, duplicate-container-path detection, the dirty-repo
+// gate) — so the fix is "use directories:", not an automatic rewrite.
+func errMountsKeyRemoved() error {
+	return errors.New("\"mounts:\" is no longer supported (D142); use \"directories:\" instead:\n" +
+		"  mounts: [\"/opt/tc:/opt/tc:ro\"]   -> directories: [{path: /opt/tc, mode: ro}]\n" +
+		"  mounts: [\"/data:/mnt/data\"]      -> directories: [{path: /data, mount: /mnt/data}]")
+}
+
+// parseDirectoriesNode parses a directories: sequence node into []ProfileDir.
+// Shared by the base config (config.go's parseConfigYAML) and a profile
+// (profile.go's handleProfileDirectories) — same shape, same guards, wherever
+// it is set.
+func parseDirectoriesNode(val *yaml.Node, env map[string]string) ([]ProfileDir, error) {
+	if val.Kind != yaml.SequenceNode {
+		return nil, nil
+	}
+	var dirs []ProfileDir
+	for _, item := range val.Content {
+		if item.Kind != yaml.MappingNode {
+			continue
+		}
+		d := ProfileDir{}
+		for k := 0; k < len(item.Content)-1; k += 2 {
+			dKey := item.Content[k].Value
+			expanded, err := expandEnvBraced(item.Content[k+1].Value, env)
+			if err != nil {
+				return nil, fmt.Errorf("directories[].%s: %w", dKey, err)
+			}
+			switch dKey {
+			case "path":
+				d.Path = expanded
+			case "mode":
+				d.Mode = expanded
+			case "mount":
+				d.Mount = expanded
+			}
+		}
+		dirs = append(dirs, d)
+	}
+	return dirs, nil
 }
 
 // validateKnownKeys checks that all top-level keys in root are present in knownKeys.
@@ -443,6 +522,15 @@ func mergeSlices(base, override []string) []string {
 	return append(append([]string{}, base...), override...)
 }
 
+// mergeDirectories concatenates base and override directories: entries,
+// additive like every other list field here. Returns nil if both are empty.
+func mergeDirectories(base, override []ProfileDir) []ProfileDir {
+	if len(base) == 0 && len(override) == 0 {
+		return nil
+	}
+	return append(append([]ProfileDir{}, base...), override...)
+}
+
 // mergeResources merges two ResourceLimits: per-field, non-empty override wins.
 // Returns nil if both are nil.
 func mergeResources(base, override *ResourceLimits) *ResourceLimits {
@@ -486,7 +574,7 @@ func mergeNetwork(base, override *NetworkConfig) *NetworkConfig {
 // Merge semantics:
 //   - Scalars (OS, Agent, Model, ContainerBackend, TartImage, Isolation): non-empty overrides
 //   - Maps (Env, AgentArgs): map merge, override wins on conflict
-//   - Lists (Mounts, Ports, CapAdd, Devices, Setup): additive
+//   - Lists (Ports, CapAdd, Devices, Setup, Directories): additive
 //   - Resources: per-field override (non-empty override wins)
 //   - Network: Isolated overrides (last wins), Allow is additive
 //   - AgentFiles: replacement semantics (non-nil replaces)
@@ -511,17 +599,25 @@ func mergeConfigs(base, override *YoloaiConfig) *YoloaiConfig {
 		AgentFiles:         agentFiles,
 		Env:                mergeMapFields(base.Env, override.Env),
 		AgentArgs:          mergeMapFields(base.AgentArgs, override.AgentArgs),
-		Mounts:             mergeSlices(base.Mounts, override.Mounts),
 		Ports:              mergeSlices(base.Ports, override.Ports),
 		CapAdd:             mergeSlices(base.CapAdd, override.CapAdd),
 		Devices:            mergeSlices(base.Devices, override.Devices),
 		Setup:              mergeSlices(base.Setup, override.Setup),
+		Directories:        mergeDirectories(base.Directories, override.Directories),
 		Resources:          mergeResources(base.Resources, override.Resources),
 		Network:            mergeNetwork(base.Network, override.Network),
 	}
 }
 
 // LoadConfig reads DataDir/defaults/config.yaml and extracts known fields.
+//
+// Validated against knownDefaultsKeys, same as LoadDefaultsConfig — an
+// unknown top-level key is an error here too. Before this fix it passed nil
+// and skipped validation entirely, so defaults/config.yaml was checked on the
+// no-profile path (LoadDefaultsConfig) and not on this one, even though both
+// read the identical file; `yoloai new` (via validateAndLoadConfig) always
+// calls this path, so a typo'd key went unreported precisely on the command
+// that config.md promised would catch it (TestArch_UnknownConfigKeysAreRejected).
 func LoadConfig(layout Layout) (*YoloaiConfig, error) {
 	configPath := layout.DefaultsConfigPath()
 
@@ -533,7 +629,7 @@ func LoadConfig(layout Layout) (*YoloaiConfig, error) {
 		return nil, fmt.Errorf("read config.yaml: %w", err)
 	}
 
-	return parseConfigYAML(data, configPath, nil, layout.Env().EnvForConfigInterpolation())
+	return parseConfigYAML(data, configPath, knownDefaultsKeys, layout.Env().EnvForConfigInterpolation())
 }
 
 // LoadGlobalConfig reads DataDir/config.yaml and extracts global settings.

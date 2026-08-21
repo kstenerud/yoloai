@@ -5,10 +5,10 @@ package create
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"path/filepath"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/testutil"
@@ -22,7 +22,7 @@ var _ runtime.Backend = (*fakeRuntime)(nil)
 // All container operations return "not implemented" (matching sandbox.mockRuntime).
 type fakeRuntime struct{}
 
-func (f *fakeRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
+func (f *fakeRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ feedback.ProgressSink, _ feedback.Sink, _ *slog.Logger, _ bool) error {
 	return nil
 }
 func (f *fakeRuntime) IsReady(_ context.Context) (bool, error) { return false, nil }
@@ -45,7 +45,7 @@ func (f *fakeRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _
 	return errFakeNotImplemented
 }
 func (f *fakeRuntime) Close() error { return nil }
-func (f *fakeRuntime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
+func (f *fakeRuntime) Prune(_ context.Context, _ []string, _ bool) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, errFakeNotImplemented
 }
 func (f *fakeRuntime) Logs(_ context.Context, _ string, _ int) string { return "" }

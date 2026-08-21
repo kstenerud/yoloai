@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -78,30 +79,40 @@ func TestFilterMounts_DockerSocket(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"/var/run/docker.sock:/var/run/docker.sock"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
+	mounts, notices := dc.FilterMounts("/workdir", "/home/user")
 	assert.Empty(t, mounts)
-	assert.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "docker socket")
+	require.Len(t, notices, 1)
+	assert.Equal(t, "devcontainer.mount_stripped", notices[0].Event)
+	assert.Equal(t, "docker_socket", notices[0].Fields["reason"])
 }
 
 func TestFilterMounts_CredentialDir(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"/home/user/.claude:/home/yoloai/.claude:ro"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
+	mounts, notices := dc.FilterMounts("/workdir", "/home/user")
 	assert.Empty(t, mounts)
-	assert.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "credential")
+	require.Len(t, notices, 1)
+	assert.Equal(t, "credential_dir", notices[0].Fields["reason"])
 }
 
+// TestFilterMounts_WorkdirConflict covers the strip whose source exists but
+// whose target would shadow the sandbox workdir mount.
+//
+// The source has to exist for this branch to be the one that fires. It did not
+// before: the fixture used "/other/path", so the mount was stripped as
+// source_missing, and the assertion passed only because the substring "workdir"
+// appears in the mount spec being quoted back. Asserting the reason instead of
+// a fragment of English is what surfaced it.
 func TestFilterMounts_WorkdirConflict(t *testing.T) {
+	src := t.TempDir()
 	dc := &DevcontainerConfig{
-		Mounts: []string{"/other/path:/workdir/myproject"},
+		Mounts: []string{src + ":/workdir/myproject"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir/myproject", "/home/user")
+	mounts, notices := dc.FilterMounts("/workdir/myproject", "/home/user")
 	assert.Empty(t, mounts)
-	assert.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "workdir")
+	require.Len(t, notices, 1)
+	assert.Equal(t, "workdir_conflict", notices[0].Fields["reason"])
 }
 
 func TestFilterMounts_PassThrough(t *testing.T) {
@@ -109,9 +120,9 @@ func TestFilterMounts_PassThrough(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{src + ":/home/yoloai/.config/sops:ro"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
+	mounts, notices := dc.FilterMounts("/workdir", "/home/user")
 	assert.Len(t, mounts, 1)
-	assert.Empty(t, warnings)
+	assert.Empty(t, notices)
 }
 
 func TestFilterMounts_ExpandLocalEnvHome(t *testing.T) {
@@ -131,20 +142,20 @@ func TestFilterMounts_TypeBindFormat(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"type=bind,source=/var/run/docker.sock,target=/var/run/docker.sock"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
+	mounts, notices := dc.FilterMounts("/workdir", "/home/user")
 	assert.Empty(t, mounts)
-	assert.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "docker socket")
+	require.Len(t, notices, 1)
+	assert.Equal(t, "docker_socket", notices[0].Fields["reason"])
 }
 
 func TestFilterMounts_MissingSourcePath(t *testing.T) {
 	dc := &DevcontainerConfig{
 		Mounts: []string{"/nonexistent/path/on/host:/container/path"},
 	}
-	mounts, warnings := dc.FilterMounts("/workdir", "/home/user")
+	mounts, notices := dc.FilterMounts("/workdir", "/home/user")
 	assert.Empty(t, mounts)
-	require.Len(t, warnings, 1)
-	assert.Contains(t, warnings[0], "source path does not exist")
+	require.Len(t, notices, 1)
+	assert.Equal(t, "source_missing", notices[0].Fields["reason"])
 }
 
 func TestFilterMounts_SourceFirstKeyValueFormat(t *testing.T) {
@@ -216,11 +227,12 @@ func TestParsedRunArgs_RefusesDangerousCaps(t *testing.T) {
 			"--cap-add", "SYS_NICE", // benign — still allowed
 		},
 	}
-	_, _, capAdd, unknownWarnings := dc.ParsedRunArgs()
+	_, _, capAdd, notices := dc.ParsedRunArgs()
 	assert.Equal(t, []string{"SYS_NICE"}, capAdd)
-	assert.Len(t, unknownWarnings, 3)
-	for _, w := range unknownWarnings {
-		assert.Contains(t, w, "refusing dangerous capability")
+	require.Len(t, notices, 3)
+	for _, n := range notices {
+		assert.Equal(t, "devcontainer.capability_refused", n.Event)
+		assert.Equal(t, feedback.LevelWarn, n.Level)
 	}
 }
 
@@ -228,8 +240,11 @@ func TestParsedRunArgs_UnknownFlags(t *testing.T) {
 	dc := &DevcontainerConfig{
 		RunArgs: []string{"--privileged", "--network=host"},
 	}
-	_, _, _, unknownWarnings := dc.ParsedRunArgs()
-	assert.Len(t, unknownWarnings, 2)
+	_, _, _, notices := dc.ParsedRunArgs()
+	require.Len(t, notices, 2)
+	for _, n := range notices {
+		assert.Equal(t, "devcontainer.run_arg_unsupported", n.Event)
+	}
 }
 
 func TestPostStartCommandUsesCompose_True(t *testing.T) {

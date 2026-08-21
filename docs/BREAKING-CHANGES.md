@@ -33,6 +33,282 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+## v0.12.0
+
+### Every public `io.Writer` is replaced by feedback sinks
+
+**Previous behavior:** `ClientCreateOptions.Output`, `SandboxCreateOptions.Output`,
+`SystemPruneOptions.Output` and `BuildImageOptions.Output` were `io.Writer`s that received the
+library's human-readable output as formatted text. `TartBaseAdmin.Add` took an `io.Writer`, and
+`Backend.Setup` / `ProfileImageBuilder.BuildProfileImage` / `Engine.EnsureSetup` did too.
+
+**New behavior:** there is no `io.Writer` in the public API. Two sinks replace it:
+
+- `feedback.Sink` receives `Notice`s — advisories addressed to the caller.
+- `feedback.ProgressSink` receives `Progress` records — what a long-running operation is doing
+  right now, carrying the step counters and byte totals a display needs.
+
+Field-by-field: `ClientCreateOptions.Output` → `Notices` + `Progress`;
+`SandboxCreateOptions.Output` → `Notices` + `Progress`; `SystemPruneOptions.Output` → `Notices`;
+`BuildImageOptions.Output` → `Notices` + `Progress`;
+`TartBaseAdmin.Add(ctx, plan, io.Writer)` → `(ctx, plan, feedback.ProgressSink)`;
+`Backend.Setup` and `BuildProfileImage` take `(progress feedback.ProgressSink, notices feedback.Sink)`
+in place of their writer. `runtime.Backend` implementors will not compile until updated.
+
+An embedder that just wants lines can wrap a writer: `feedback.WriterSink(w)` and
+`feedback.ProgressToWriter(w)` render one line per record, exactly as before.
+
+**A nil sink is now a programming error, not a default.** The option structs still accept nil and
+resolve it at construction (to `feedback.Discard` / `feedback.DiscardProgress`), so a caller who
+declares nothing still works. Below that edge, emitting to a nil sink panics — absorbing one would
+make "the caller wanted silence" and "the wiring is broken" the same observable.
+
+**Why it changed:** D145's 2026-08-19 amendment. The earlier design kept writers for progress on
+the grounds that it "carries a stream we do not own". That was wrong on the facts: none of the
+library's writer-bound `fmt.Fprint*` calls carried foreign bytes — every one was a sentence the
+library composed. Progress carries the most structure of anything emitted (`step 3/7`, `~30 GB`,
+`ios 18.2`), so text is the worst representation for it, not an exception. The subprocess streams
+that genuinely need a writer now get one inside the backend, where `exec.Cmd` requires it.
+
+### `yoloai system prune`'s informational lines move from stderr to stdout
+
+**Previous behavior:** per-backend prune commentary ("docker: would remove …", the containerd
+devmapper caveat) went to the `Output` writer, which the CLI pointed at stderr.
+
+**New behavior:** those are informational notices, and the CLI renders info to stdout and warnings
+to stderr — the same split `RenderNotices` has always applied to notices arriving on a result.
+Under `--json` they are suppressed rather than printed, so the document on stdout stays clean.
+
+**Why it changed:** D145. There were two rendering policies for the same kind of message depending
+on which API surface produced it; now there is one.
+
+### A `Client` with no `Logger` now discards diagnostics instead of using `slog.Default()`
+
+**Previous behavior:** `ClientCreateOptions.Logger` defaulted to `slog.Default()`, so an embedder
+that set nothing saw yoloAI's diagnostics appear in whatever handler the process had installed.
+
+**New behavior:** it defaults to a logger that discards everything. An embedder wanting library
+diagnostics passes a logger explicitly — `slog.Default()` still works if that is what they want.
+The CLI is unaffected: it installs its handler in `cliutil.InitLogger` and passes it explicitly.
+
+**Why it changed:** D145. The rule is "no undeclared destination", not "no globals". A singleton an
+entrypoint installs deliberately is fine; a library reaching for one because the caller said nothing
+publishes to wherever the runtime happens to point, and an embedder who never asked for output gets
+it anyway — in a daemon, mixed across principals.
+
+### The three prune methods on `runtime.Backend` no longer take an `io.Writer`
+
+**Previous behavior:** `Backend.Prune`, `CachePruner.PruneCache` and `StaleBasePruner.PruneStaleBases`
+each took an `output io.Writer` and wrote their findings to it as formatted text — which container
+failed to remove, which image would be removed, how many bytes were reclaimed. `PruneCache` returned
+`(int64, error)`; `PruneStaleBases` returned `([]string, int64, error)`. `runtime.PruneItem` was
+`{Kind, Name}`. `store.SweepStaleLocks` also took an `io.Writer`.
+
+**New behavior:** the writers are gone and everything comes back on the result.
+
+- `Prune(ctx, knownInstances, dryRun) (PruneResult, error)` — `PruneResult` gains `Notices`.
+- `PruneCache(ctx, includeImages, dryRun) (CachePruneResult, error)` — `{BytesReclaimed, Items, Notices}`.
+- `PruneStaleBases(ctx, dryRun) (StaleBasePruneResult, error)` — same shape; the `[]string` of refs
+  is now `Items[].Name`.
+- `runtime.PruneItem` gains `Action` (`removed` / `would-remove` / `failed` / `skipped`), `Reason`,
+  and `BytesReclaimed`, plus a `Removable()` predicate.
+- `store.SweepStaleLocks(layout, dryRun, sink feedback.Sink)`.
+
+An out-of-tree backend implementing `runtime.Backend` will not compile until its prune methods are
+updated. Nothing in the CLI's behaviour is lost: the advisories are still rendered to
+`SystemPruneOptions.Output` exactly as before, by `System.Prune`.
+
+**Why it changed:** D145. Text on a writer cannot be counted, filtered or serialised, and prune's
+output is a report. A removal that failed used to be dropped from the result entirely and mentioned
+only in a warning line, so a prune that reclaimed nothing was indistinguishable from a prune with
+nothing to reclaim — and under `--json` the failure was invisible.
+
+### `yoloai system prune` reports what it could not reclaim
+
+**Previous behavior:** a resource prune found but could not remove was silently absent from the
+result. In human mode a warning line appeared among the backend progress; under `--json` there was
+no trace at all.
+
+**New behavior:** `PruneResult` gains `SkippedItems` alongside `RemovedItems`, each entry carrying
+the action and the reason. Human mode prints an "N resource(s) not reclaimed" summary; `--json`
+gains a `skipped` array. `RemovedItems` keeps its exact meaning — only things that were, or would
+be, removed — because it drives the removal count and the destructive confirmation prompt.
+
+**Why it changed:** D145. This is the data the writer was carrying; it now has a typed home.
+
+### `.yoloai.yaml` project config is removed entirely
+
+**Previous behavior:** a repo-root `.yoloai.yaml` was read at sandbox creation and could set three
+keys: `archetype:` (overrode archetype auto-detection), `mounts:` (added host bind mounts, expanded
+through tilde expansion only), and `requires:` (printed "version verification not yet implemented;
+continuing" and did nothing else).
+
+**New behavior:** `.yoloai.yaml` is never read. If one is present at the workdir root, `yoloai new`
+prints a warning that the file is ignored, but none of its three keys take effect. `archetype:` no
+longer overrides auto-detection — use `--archetype` instead. `requires:` is gone outright; it never
+enforced anything. **`mounts:` is gone, and a repo relying on it loses those host mounts** — its
+entries passed only tilde expansion, unlike devcontainer.json's `mounts:`, which is filtered
+(`FilterMounts` strips the docker socket, credential dirs, and workdir collisions) before being
+applied. There is no replacement for arbitrary `.yoloai.yaml` mounts declared by the repo itself.
+The remaining ways to add a mount are all host-side, where the person running yoloAI chooses them:
+a profile's `mounts:`, the base config's `mounts:` (`~/.yoloai/defaults/config.yaml`), or
+devcontainer.json's `mounts:` (filtered). There is no `--mount` command-line flag.
+
+**Why it changed:** D140. The file was never documented for users (absent from README.md,
+`docs/GUIDE.md`, and shipped help text), two of its three keys were dead weight or a
+strictly-worse unfiltered duplicate of a devcontainer.json capability, and the third duplicated
+`--archetype`. A repo may describe what it is; it may not requisition what it gets.
+
+### The `mounts:` config/profile key is removed
+
+**Previous behavior:** the base config (`~/.yoloai/defaults/config.yaml`) and a profile's
+`config.yaml` could set `mounts:`, a list of raw `host:container[:ro]` bind-mount strings applied
+at container run time. The public API mirrored this as `ResolvedProfileConfig.Mounts`
+(`profile_config.go`) on the read model returned by `ProfileAdmin.Info()`.
+
+**New behavior:** `mounts:` is no longer read from either file. If a base config or profile still
+sets it, loading fails with an error naming the replacement and showing the conversion, rather
+than silently dropping the host access the entry granted:
+
+```
+mounts: ["/opt/tc:/opt/tc:ro"]   -> directories: [{path: /opt/tc, mode: ro}]
+mounts: ["/data:/mnt/data"]      -> directories: [{path: /data, mount: /mnt/data}]
+```
+
+`directories:` now works in **both** files — the base config (`~/.yoloai/defaults/config.yaml`)
+gains it in this same change, so every file that could set `mounts:` can set `directories:` in
+its place; the conversion above applies identically in either. `ResolvedProfileConfig.Mounts` is
+removed from the public API; `yoloai profile info` (both text and `--json` output) no longer
+shows a `Mounts` field. `devcontainer.json`'s own `mounts:` is unaffected — it still flows
+through and is unrelated to this key (D141).
+
+**Why it changed:** D142. `directories:` is a strict superset of what `mounts:` could do — the
+same host-path expressiveness plus mount-mode tiers plus every aux-dir safety guard
+(dangerous-path refusal, path-overlap detection, duplicate-container-path detection, the
+dirty-repo gate) that `mounts:` never had. The one thing `mounts:` did that `directories:` does
+not is skip those checks, which is a defect, not a capability. Its original purpose — getting
+on-disk credentials into the sandbox — is now served by four other, machine-computed mechanisms
+that never touched this key: `/run/secrets`, the home-seed mounts, `agent_files`, and macOS
+Keychain/credential brokering.
+
+### A profile no longer inherits any setting from `~/.yoloai/defaults/config.yaml`
+
+**Previous behavior:** when `yoloai new --profile <name>` was used, the profile chain was merged
+over the *user's personal* `~/.yoloai/defaults/config.yaml`, not over yoloAI's baked-in defaults.
+So a profile silently inherited whatever the personal file set for any field the profile itself
+didn't override: `env`, `agent_args`, `agent_files`, `cap_add`, `devices`, `setup`,
+`auto_commit_interval`, `isolation`, `network.allow` (the egress allowlist), `resources`, `ports`,
+`agent`, `model`, `os`, `container_backend`, and `tart_image`. This contradicted
+`docs/contributors/design/config.md`'s documented guarantee that profiles are self-contained and
+that personal defaults "do not carry into profiles — no exceptions."
+
+The same leak was independently present on the restart/relaunch path: `yoloai start`, `yoloai
+reset`, and any resume/custom-prompt relaunch of a `--profile` sandbox re-resolved `env`,
+`agent_args`, and `agent_files` from `~/.yoloai/defaults/config.yaml` on every restart, even
+though the sandbox was created clean. A profile sandbox's `env`/`agent_args`/`agent_files` could
+therefore differ between its first launch and any restart afterward, depending on what the
+personal config held at restart time.
+
+**New behavior:** a profile merges over yoloAI's baked-in defaults only, on both the create path
+and the restart/relaunch path. The fields above no longer carry over from
+`~/.yoloai/defaults/config.yaml` when `--profile` is used. If a profile needs a personal `env`
+var, capability, device, or egress-allowlist entry, it must set that value in the profile's own
+`config.yaml` — that is where `config.md` always said it belonged.
+
+**Two exceptions remain, and they are not fixed by this change: `isolation` and `model`.** Both
+reach the sandbox by a second route that this fix does not touch — the CLI resolves each one as
+"flag, else `~/.yoloai/defaults/config.yaml`" into a single value before the profile is merged, so
+a personal `isolation:` or `model:` still overrides a profile's. Setting either in your personal
+config and then using `--profile` still gives you the personal value, not the profile's. Tracked as
+[DF209](contributors/design/findings-unresolved.md); closing it needs the value's *source* to
+survive the CLI boundary, which is [D143](contributors/decisions/working-notes.md)'s subject. Until
+then, treat `config.md`'s "no exceptions" as holding for every field **except** these two.
+
+**Why it changed:** [DF207/DF208](contributors/design/findings-resolved.md). The code passed the
+loaded personal config as the profile merge's base instead of the baked-in defaults; the fix
+makes the code match the documented guarantee. The leak was config-wide, not limited to a
+handful of keys, and present at four call sites (one on create, three on restart/relaunch), not
+just one.
+
+### An unknown key in `~/.yoloai/defaults/config.yaml` is now rejected on every path, not just the no-profile one
+
+**Previous behavior:** `defaults/config.yaml` was validated against the known-keys list on the
+no-profile path (`LoadDefaultsConfig`, used when `--profile` is not given) but not on the path
+`yoloai new`, `yoloai start`/`restart`/`reset`, and the tart/injector config reads actually use
+(`config.LoadConfig`, called by `validateAndLoadConfig` at creation and by launch/restart/tart
+directly). `LoadConfig` passed `nil` for the known-keys check, so it silently parsed and ignored
+any unrecognized top-level key — a typo'd or renamed setting (`enviroment:` instead of `env:`, a
+key retired by a prior release) was accepted without a word on the command someone actually runs
+most often.
+
+**New behavior:** `LoadConfig` validates against the same `knownDefaultsKeys` list
+`LoadDefaultsConfig` already used. An unrecognized top-level key in `defaults/config.yaml` now
+fails every one of `LoadConfig`'s callers with `unknown config field(s): <keys>`, matching what
+`docs/contributors/design/config.md` already promised: "Unknown fields in either config file are
+an error."
+
+**Why it changed:** the same file was checked on one path and not the other, even though both read
+it — an inconsistency found while making that documented promise executable
+(`TestArch_UnknownConfigKeysAreRejected`). Nothing in the codebase writes a key outside
+`knownDefaultsKeys` into this file (the scaffold generator and `yoloai config set` both stay
+within it), so this closes a silent-typo gap without a known legitimate writer to break.
+
+### A profile's `os:` key is now rejected
+
+**Previous behavior:** a profile's `config.yaml` could set `os:`, and it was parsed, validated as
+a known key, and merged across the profile chain into `MergedConfig.OS` — but nothing ever read
+that field. The guest OS is resolved once, at the CLI, as `Coalesce(FlagStr(cmd, "os"), cfgOS)`
+(flag, else the *base* config), before backend selection and before a profile is even loaded. A
+profile's `os:` therefore never had any effect: it was accepted and silently discarded, on every
+version that ever supported it.
+
+**New behavior:** `LoadProfile` fails when a profile's `config.yaml` sets `os:`, with an error
+naming the key, saying it has no effect in a profile, and pointing at `--os` or the base config
+(`~/.yoloai/defaults/config.yaml`) instead.
+
+**Why it changed:** DF210. Nothing that worked stops working — the key never took effect from a
+profile — but a silent no-op became a load-time error, matching the `mounts:` precedent (D142):
+an inert key is rejected loudly rather than accepted and discarded. `os:` in the *base* config is
+unaffected; it is still read and still resolves `--os`'s default.
+
+### `--no-profile` is removed from `yoloai new` and `yoloai run`
+
+**Previous behavior:** `--no-profile` was accepted alongside `--profile` (mutually exclusive with
+it). `ResolveProfile` returned `""` when `--no-profile` was set, and also returned `""` when no
+profile flag was given at all — so passing `--no-profile` produced exactly the result of passing
+nothing. No behaviour was ever lost by dropping it: it could not change any outcome on any path.
+Its help text — "Use base image even if config sets a default profile" — described a
+default-profile config key that has never existed.
+
+**New behavior:** `--no-profile` is gone. `yoloai new ... --no-profile` and `yoloai run ...
+--no-profile` now fail with `unknown flag: --no-profile` instead of silently doing nothing.
+
+**Why it changed:** DF211. A flag that cannot change any outcome, whose help text promises a
+feature nobody built, is worse than no flag: it looks like it works. A real default-profile
+feature is later work, not a reason to keep a no-op flag around in the meantime.
+
+### `--env` no longer splits its value on commas, on `yoloai new` and `yoloai run`
+
+**Previous behavior:** `new` and `run` registered `--env` as a `StringSlice`, which splits every
+occurrence's value on commas. `--env NO_PROXY=localhost,127.0.0.1` was parsed as two values,
+`NO_PROXY=localhost` and `127.0.0.1`; the second has no `=`, so the command exited 2 with `invalid
+--env value "127.0.0.1": must be KEY=VAL` — an error naming a fragment the user never wrote as a
+value. `start`, `restart`, and `reset` already registered the same flag as `StringArray`, which
+does not split, so the identical invocation worked on those three and failed only on the two
+commands that create a sandbox.
+
+**New behavior:** `new` and `run` register `--env` as `StringArray`, matching `start`/`restart`/
+`reset`. `--env NO_PROXY=localhost,127.0.0.1` now sets one variable whose value contains a comma,
+on every command. Passing two variables now always requires repeating the flag
+(`--env A=1 --env B=2`) rather than joining them with a comma — that was already the only way to
+do it on `start`/`restart`/`reset`, and it never reliably worked on `new`/`run` either, since it
+broke on any value that itself contained a comma.
+
+**Why it changed:** DF195. A comma is ordinary in an environment value (`NO_PROXY`,
+`JAVA_TOOL_OPTIONS`, `GOFLAGS`, any comma-separated list), so splitting on it is the wrong default
+— and it was already wrong on three of the five commands that accept `--env`. Repeating a flag,
+not commas inside it, is how multiple values are meant to be passed.
+
 ## v0.11.0
 
 ### `yoloai files put` refuses to reuse a name removed while a tart sandbox was running

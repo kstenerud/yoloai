@@ -29,6 +29,27 @@ func TestNewCmd_DirtyWorkdirFlags(t *testing.T) {
 	assert.NotNil(t, cmd.Flags().Lookup("allow-dirty"))
 }
 
+func TestNewCmd_NoProfileFlagRemoved(t *testing.T) {
+	// DF211: --no-profile could never change ResolveProfile's outcome — "set" and
+	// "not set" produced the same result on every path — so it was deleted rather
+	// than kept as a permanent no-op.
+	cmd := NewNewCmd("test")
+	assert.Nil(t, cmd.Flags().Lookup("no-profile"))
+}
+
+func TestNewCmd_EnvFlagDoesNotSplitOnComma(t *testing.T) {
+	// DF195: --env was a StringSlice, which splits its value on commas, while
+	// start/restart/reset register the same flag as StringArray, which doesn't.
+	// A comma is ordinary in an env value (e.g. NO_PROXY=localhost,127.0.0.1), so
+	// new must match the other three: one --env occurrence is one variable.
+	cmd := NewNewCmd("test")
+	require.NoError(t, cmd.Flags().Parse([]string{"--env", "NO_PROXY=localhost,127.0.0.1"}))
+
+	got, err := cmd.Flags().GetStringArray("env")
+	require.NoError(t, err)
+	assert.Equal(t, []string{"NO_PROXY=localhost,127.0.0.1"}, got)
+}
+
 func TestParseNewCmdPositional_Errors(t *testing.T) {
 	tests := []struct {
 		name      string

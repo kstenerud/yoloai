@@ -29,7 +29,8 @@ import (
 //   - ResolveBackendForSandbox: reads from environment.json, not a flag; used by
 //     lifecycle commands (start, stop, attach, diff, apply, destroy).
 //   - ResolveAgent: similar flag→config→default; new command only.
-//   - ResolveProfile: has a --no-profile bypass that the others don't have.
+//   - ResolveProfile: flag only, no config fallback (DF211 — there is no
+//     default-profile config key to fall back to).
 //
 // These differences make a generic abstraction more obscure than the small
 // amount of duplicated structure.
@@ -166,6 +167,7 @@ func ResolveBackendForSandbox(name string) yoloai.BackendType {
 func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx context.Context, c *yoloai.Client) error) error {
 	ctx := cmd.Context()
 	l := Layout()
+	notices, progress := Feedback(cmd)
 	c, err := yoloai.NewClient(ctx, yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
 		HomeDir:     l.HomeDir,
@@ -173,7 +175,8 @@ func WithClient(cmd *cobra.Command, backend yoloai.BackendType, fn func(ctx cont
 		BackendType: backend,
 		Logger:      slog.Default(),
 		Input:       cmd.InOrStdin(),
-		Output:      cmd.ErrOrStderr(),
+		Notices:     notices,
+		Progress:    progress,
 		Env:         EdgeEnv(),
 	})
 	if err != nil {
@@ -243,13 +246,15 @@ func WithTrackedDir(cmd *cobra.Command, name, hostPath string, fn func(ctx conte
 // The caller is responsible for Close() (a no-op on a backend-less Client).
 func Client(cmd *cobra.Command) (*yoloai.Client, error) {
 	l := Layout()
+	notices, progress := Feedback(cmd)
 	return yoloai.NewClient(cmd.Context(), yoloai.ClientCreateOptions{
 		DataDir:   l.DataDir,
 		HomeDir:   l.HomeDir,
 		Principal: string(l.Principal),
 		Logger:    slog.Default(),
 		Input:     cmd.InOrStdin(),
-		Output:    cmd.ErrOrStderr(),
+		Notices:   notices,
+		Progress:  progress,
 		Env:       EdgeEnv(),
 	})
 }
@@ -380,16 +385,11 @@ func ResolveModelFromConfig() string {
 	return ""
 }
 
-// ResolveProfile determines the profile name from --no-profile, then --profile flag,
-// then empty string (no default profile). Used by the new command.
+// ResolveProfile returns the --profile flag's value, or empty string if unset
+// (no default profile). Used by new/run/mcp.
 func ResolveProfile(cmd *cobra.Command) string {
-	if noProfile, _ := cmd.Flags().GetBool("no-profile"); noProfile {
-		return ""
-	}
-	if p, _ := cmd.Flags().GetString("profile"); p != "" {
-		return p
-	}
-	return ""
+	p, _ := cmd.Flags().GetString("profile")
+	return p
 }
 
 // SandboxErrorHint wraps an error with the sandbox directory path and a hint

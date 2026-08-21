@@ -10,7 +10,6 @@ package runtimetest
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"strconv"
 	"strings"
@@ -20,6 +19,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
@@ -170,11 +170,11 @@ func (f *fakeConfBackend) GitExec(_ context.Context, _, _, _ string, _ ...string
 }
 
 func (f *fakeConfBackend) IsReady(_ context.Context) (bool, error) { return true, nil }
-func (f *fakeConfBackend) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
+func (f *fakeConfBackend) Setup(_ context.Context, _ config.Layout, _ string, _ feedback.ProgressSink, _ feedback.Sink, _ *slog.Logger, _ bool) error {
 	return nil
 }
 func (f *fakeConfBackend) Close() error { return nil }
-func (f *fakeConfBackend) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
+func (f *fakeConfBackend) Prune(_ context.Context, _ []string, _ bool) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, nil
 }
 func (f *fakeConfBackend) Logs(_ context.Context, _ string, _ int) string { return "" }

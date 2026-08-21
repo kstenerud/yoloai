@@ -1524,3 +1524,69 @@ as scarce as the failures and twice as useful.
   author within a day, that claim is unreviewed by construction and needs an outside reader before it
   lands. The cheap check is mechanical: grep the older decision's *rejected options* for the thing the
   new one is deciding. It costs one search and it would have caught this.
+
+### A39 — classified a corpus by filename prefix from a truncated listing, and built a trust ledger on it (2026-08-13)
+
+- **What I claimed:** in the prior-art gate of the mac-channel round, that "all of
+  `linux-enforcement/` is pre-v2", and from that, that **D139's argument for shape (B) over shape (A)
+  rested on pre-v2 evidence** and could not be cited as measured. That went into the round's queue
+  file as a load-bearing finding, under a heading announcing that the corpus splits by harness
+  generation.
+- **What was true:** seven of that directory's 59 results are v2, and they are exactly the two D139
+  cites. "V5's ifindex result" is `v2-v5-netdev-device-binding.txt` and "V6b showed a counter cannot
+  distinguish it" is `v6b-foreign-chain-shadowing.txt`. D139's fail-open leg meets the current bar,
+  and my correction to it was the thing that was wrong.
+- **How it happened, mechanically:** I listed the directory with a signature check piped through
+  `head -30`. The listing is alphabetical, `v*` sorts last, and 59 files do not fit in 30 lines. I
+  then wrote a conclusion quantified over the whole directory — "all of" — from a sample I had not
+  noticed was a sample. The parenthetical I added, "(K/L/C items)", is the tell: it names exactly the
+  three prefixes the truncation happened to show, and I read it as a description of the directory
+  rather than of my output.
+- **Caught by:** the owner relaying another agent's provenance work, which named the trap directly —
+  in `linux-enforcement/`, `v*` is a round-2 *item* and `r*` a round-1 item; the letter is the item,
+  not the harness version. I had inverted a naming convention I never checked existed.
+- **How far it travelled:** into the round's queue file, which is the artifact the round's synthesis
+  reads. It was there for one turn. Nothing built on it, because C1 does not depend on D139's
+  reasoning — but the queue file is precisely where a wrong fact would have been laundered into the
+  synthesis pass as settled prior art.
+- **Why it survived my own scepticism.** The claim *widened* a caution the owner had just given me.
+  Being told "prior research may have silently given wrong answers" made a finding that more research
+  was untrustworthy feel like diligence rather than like a claim needing its own evidence — the
+  D136 §3 asymmetry (**a bad run that agrees with you is the one that survives**) operating on a
+  reading rather than on a run. I applied a discrimination standard to every file in the corpus and
+  none to my own listing of it.
+- **The rule:** **a claim quantified over a directory needs a count, and the count has to come from
+  the same command that produced the claim.** `ls | wc -l` against the number of lines actually
+  classified; if they differ, the conclusion is about the sample. And a corpus-wide census is
+  code — a `for` loop over a full glob with its totals printed — not a listing read by eye. Concretely
+  here: `for f in *.txt; do ...; done | sort | uniq -c` prints 52/7 and cannot be truncated into
+  agreement.
+
+### A40 — cited a research result as current authority without checking which harness produced it, one turn before building the system that marks them (2026-08-13)
+
+- **What I claimed:** that tart falls back to a one-address host filter for `restricted`, "whose pf
+  realisation is already measured working on hardware", and that the fallback therefore "blocks
+  nothing". I sourced it from `macos-pf-privileged-path.md:308`.
+- **What was true:** tart's enforcement is **Softnet** — a host process holding the VM's network file
+  descriptor and enforcing its MAC — and it is already default-deny and already adversarial-grade
+  (`c2-softnet-adversarial.txt`: a root guest failed to escape by MAC spoof and by gateway override,
+  with the permitted address answering throughout). The pf result I cited is **pre-v2**, and a v2
+  result covering the same ground — `w8-softnet-enforcement.txt` — was sitting in the same corpus,
+  uncited by me and by the agent I handed the question to.
+- **Caught by:** the Mac agent, who was told to verify it and did. I had at least hedged: the prompt
+  said *"prior art contradicts a claim I made and you should trust the prior art over me."* That
+  hedge was itself wrong in an interesting way — **the prior art was also wrong**, and pointing at it
+  as the corrective would have replaced one stale reading with another.
+- **How far it travelled:** to the owner, as a claim that the fork "blocks nothing" and that the
+  vsock question was optional. It shaped which questions the Mac round was asked to answer, so the
+  round nearly inherited the error rather than finding it.
+- **Why this one stings.** One turn later I built the harness-provenance system — the stamp, the
+  guarantee table, the retrofit — on exactly the premise that **a result's provenance changes what
+  it supports and nothing on the artifact said so**. I had just written that a v1 result "supports
+  *we observed X* and not *X is the case*". The failure and its remedy were in the same session, in
+  that order, and I did not connect them until the correction came back.
+- **The rule:** **before citing a result, check which harness produced it — and check whether a newer
+  run covers the same ground.** The second half is the part I missed: the stale result was not
+  merely unmarked, it was *superseded*, and a `ls` of the same directory would have shown it. A
+  citation is a claim about currency as well as about content, and a document's line number is
+  evidence of neither.

@@ -7,9 +7,10 @@ package tart
 
 import (
 	"context"
-	"os"
 	"testing"
 
+	"github.com/kstenerud/yoloai/runtime"
+	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
 
@@ -55,9 +56,9 @@ func TestPruneCacheReportsReclaimDelta(t *testing.T) {
 	}, baseImg(31)...)
 	r, deleteLog := fakeTartEntries(t, entries)
 
-	reclaimed, err := r.PruneCache(context.Background(), true /*includeImages*/, false /*dryRun*/, os.Stderr)
+	cache, err := r.PruneCache(context.Background(), true /*includeImages*/, false /*dryRun*/)
 	require.NoError(t, err)
-	require.Equal(t, int64(60)*bytesPerGB, reclaimed)
+	require.Equal(t, int64(60)*bytesPerGB, cache.BytesReclaimed)
 
 	deleted := deletedNames(t, deleteLog)
 	require.Contains(t, deleted, provisionedImageName)
@@ -76,8 +77,14 @@ func TestPruneCacheDryRunReturnsEstimate(t *testing.T) {
 	}, baseImg(31)...)
 	r, deleteLog := fakeTartEntries(t, entries)
 
-	estimate, err := r.PruneCache(context.Background(), true /*includeImages*/, true /*dryRun*/, os.Stderr)
+	cache, err := r.PruneCache(context.Background(), true /*includeImages*/, true /*dryRun*/)
 	require.NoError(t, err)
-	require.Equal(t, int64(60)*bytesPerGB, estimate)
+	require.Equal(t, int64(60)*bytesPerGB, cache.BytesReclaimed)
 	require.Empty(t, deletedNames(t, deleteLog)) // nothing actually removed
+	// A dry run names what it would remove rather than only totalling it, so a
+	// caller can show the list without re-deriving it.
+	for _, item := range cache.Items {
+		assert.Equal(t, runtime.PruneActionWouldRemove, item.Action)
+	}
+	assert.Len(t, cache.Items, len(r.ownedImageRefs(context.Background())))
 }

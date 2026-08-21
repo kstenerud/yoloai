@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -16,6 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -422,14 +422,14 @@ func TestCreateWithImageRecovery(t *testing.T) {
 		t.Helper()
 		prev := rebuildProfileImage
 		rebuildProfileImage = func(_ context.Context, _ runtime.Backend, _ config.Layout, profile string,
-			_ []string, _ io.Writer, _ *slog.Logger, force bool) error {
+			_ []string, _ feedback.ProgressSink, _ feedback.Sink, _ *slog.Logger, force bool) error {
 			*calls = append(*calls, rebuildCall{profile, force})
 			return result
 		}
 		t.Cleanup(func() { rebuildProfileImage = prev })
 	}
 	st := func() *state.State {
-		return &state.State{Profile: "dev", Output: io.Discard}
+		return &state.State{Profile: "dev", Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	}
 
 	t.Run("rebuilds and retries once", func(t *testing.T) {
@@ -437,7 +437,7 @@ func TestCreateWithImageRecovery(t *testing.T) {
 		install(t, nil, &calls)
 		rt := &recoveryRuntime{errs: []error{missing}}
 
-		require.NoError(t, createWithImageRecovery(context.Background(), rt, st(), cfg))
+		require.NoError(t, createWithImageRecovery(context.Background(), rt, testLogger(), st(), cfg))
 		assert.Equal(t, 2, rt.creates, "one failure, one retry — never more")
 		require.Len(t, calls, 1)
 		assert.Equal(t, "dev", calls[0].profile)
@@ -450,7 +450,7 @@ func TestCreateWithImageRecovery(t *testing.T) {
 		install(t, nil, &calls)
 		rt := &recoveryRuntime{errs: []error{missing, missing}}
 
-		err := createWithImageRecovery(context.Background(), rt, st(), cfg)
+		err := createWithImageRecovery(context.Background(), rt, testLogger(), st(), cfg)
 		require.Error(t, err)
 		assert.Equal(t, 2, rt.creates, "exactly one retry, not a loop")
 		assert.Len(t, calls, 1)
@@ -464,7 +464,7 @@ func TestCreateWithImageRecovery(t *testing.T) {
 		install(t, buildErr, &calls)
 		rt := &recoveryRuntime{errs: []error{missing}}
 
-		err := createWithImageRecovery(context.Background(), rt, st(), cfg)
+		err := createWithImageRecovery(context.Background(), rt, testLogger(), st(), cfg)
 		require.Error(t, err)
 		assert.ErrorIs(t, err, buildErr, "the actionable error is the one the user must fix")
 		assert.Equal(t, 1, rt.creates, "a broken Dockerfile must not be retried")
@@ -477,7 +477,7 @@ func TestCreateWithImageRecovery(t *testing.T) {
 		other := errors.New("create container: port 8080 already allocated")
 		rt := &recoveryRuntime{errs: []error{other}}
 
-		err := createWithImageRecovery(context.Background(), rt, st(), cfg)
+		err := createWithImageRecovery(context.Background(), rt, testLogger(), st(), cfg)
 		assert.ErrorIs(t, err, other)
 		assert.Equal(t, 1, rt.creates)
 		assert.Empty(t, calls, "rebuilding on an unrelated failure would be a 3-minute red herring")
@@ -487,12 +487,18 @@ func TestCreateWithImageRecovery(t *testing.T) {
 		var calls []rebuildCall
 		install(t, nil, &calls)
 		rt := &recoveryRuntime{errs: []error{missing}}
-		bare := &state.State{Output: io.Discard}
+		bare := &state.State{Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 
-		err := createWithImageRecovery(context.Background(), rt, bare, cfg)
+		err := createWithImageRecovery(context.Background(), rt, testLogger(), bare, cfg)
 		require.Error(t, err)
 		assert.Empty(t, calls)
 		assert.Contains(t, err.Error(), "yoloai system build",
 			"still actionable, just not automatic")
 	})
 }
+
+// testLogger is the destination launch-path tests declare. Silence, explicitly
+// chosen: these tests assert on behaviour, not diagnostics, and the point of
+// the parameter is that a caller states where output goes rather than the
+// callee reaching for whatever the process happens to have installed (D145).
+func testLogger() *slog.Logger { return slog.New(slog.DiscardHandler) }

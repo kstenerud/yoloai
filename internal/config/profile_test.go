@@ -180,6 +180,44 @@ directories:
 	}
 }
 
+// TestLoadProfile_MountsKeyRejected pins D142: a profile that still sets the
+// retired mounts: key must fail to load, naming directories: as the
+// replacement, rather than silently dropping the mount.
+func TestLoadProfile_MountsKeyRejected(t *testing.T) {
+	yaml := `
+mounts:
+  - /opt/tc:/opt/tc:ro
+`
+	_, layout := setupProfileDir(t, "mounts-profile", yaml)
+
+	_, err := LoadProfile(layout, "mounts-profile")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "directories:") {
+		t.Errorf("error = %q, want it to name directories:", err.Error())
+	}
+}
+
+// TestLoadProfile_OSKeyRejected pins DF210: a profile's os: is parsed,
+// merged, and never read — the effective guest OS is resolved at the CLI
+// before a profile is loaded, so it must fail to load rather than silently
+// do nothing.
+func TestLoadProfile_OSKeyRejected(t *testing.T) {
+	yaml := `
+os: mac
+`
+	_, layout := setupProfileDir(t, "os-profile", yaml)
+
+	_, err := LoadProfile(layout, "os-profile")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !strings.Contains(err.Error(), "\"os:\"") {
+		t.Errorf("error = %q, want it to name the os: key", err.Error())
+	}
+}
+
 func TestLoadProfile_TartImage(t *testing.T) {
 	yaml := `
 tart:

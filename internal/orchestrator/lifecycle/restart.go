@@ -11,6 +11,7 @@ import (
 	"os"
 	"strings"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
@@ -58,18 +59,41 @@ func initializeAgentFilesIfNeeded(layout config.Layout, agentDef *agent.Definiti
 
 // resolvedAgentFiles returns the effective AgentFiles config after merging the
 // profile chain if a profile is set. Returns nil if no AgentFiles are configured.
+//
+// A profile is self-contained (config.md:165,167): the merge base is the
+// baked-in defaults, never the user's personal defaults/config.yaml, and a
+// profile whose chain sets no agent_files resolves to nil — not to the
+// personal value (DF207/DF208). Unlike resolveAgentArgs/resolveEnvForRestart,
+// this cannot be a plain base-argument swap: agent_files is commented out of
+// the baked-in defaults, so a profile that doesn't set it merges to a nil
+// MergedConfig.AgentFiles, and the old code specifically fell back to the
+// personal cfg.AgentFiles whenever merged.AgentFiles was nil — silently
+// re-leaking the exact value the base swap was meant to keep out. That
+// fallback is gone; merged.AgentFiles is now returned unconditionally on
+// success, matching prepare_profile.go's create-path pattern.
+//
+// The chain-resolution/merge error fallback also changed direction, from
+// cfg.AgentFiles to nil, when a profile is active: agent_files' list form
+// copies host files into the sandbox with no credential-exclusion filter at
+// all (DF201), so degrading a profile-active error to "copy the user's
+// personal agent state, unfiltered, into a profile sandbox" is the unsafe
+// direction. The no-profile path is unaffected and still returns
+// cfg.AgentFiles — that is correct and documented.
 func resolvedAgentFiles(layout config.Layout, cfg *config.YoloaiConfig, meta *store.Environment) *config.AgentFilesConfig {
-	agentFilesConfig := cfg.AgentFiles
 	if meta.Profile == "" {
-		return agentFilesConfig
+		return cfg.AgentFiles
 	}
 	chain, err := config.ResolveProfileChain(layout, meta.Profile)
 	if err != nil {
-		return agentFilesConfig
+		return nil
 	}
-	merged, err := config.MergeProfileChain(layout, cfg, chain)
-	if err != nil || merged.AgentFiles == nil {
-		return agentFilesConfig
+	bakedIn, err := config.LoadBakedInDefaults()
+	if err != nil {
+		return nil
+	}
+	merged, err := config.MergeProfileChain(layout, bakedIn, chain)
+	if err != nil {
+		return nil
 	}
 	return merged.AgentFiles
 }
@@ -83,11 +107,19 @@ func resolveEnvForRestart(layout config.Layout, meta *store.Environment) (map[st
 	}
 	envVars := cfg.Env
 	if meta.Profile != "" {
+		// A profile is self-contained (config.md:165,167): the merge base is the
+		// baked-in defaults, never the user's personal defaults/config.yaml — that
+		// would carry personal env (secrets, per DF207's description) into a
+		// profile that is supposed to behave identically for everyone
+		// (DF207/DF208).
 		chain, chainErr := config.ResolveProfileChain(layout, meta.Profile)
 		if chainErr == nil {
-			merged, mergeErr := config.MergeProfileChain(layout, cfg, chain)
-			if mergeErr == nil {
-				envVars = merged.Env
+			bakedIn, bakedErr := config.LoadBakedInDefaults()
+			if bakedErr == nil {
+				merged, mergeErr := config.MergeProfileChain(layout, bakedIn, chain)
+				if mergeErr == nil {
+					envVars = merged.Env
+				}
 			}
 		}
 	}
@@ -118,7 +150,7 @@ func mergeLaunchEnv(layout config.Layout, meta *store.Environment, extraEnv map[
 // return their output as a *Result's Notices (F8). noticeWriter classifies each
 // line's level from the line itself, so the mixed stream lands correctly without
 // this call site having to know which helpers write what (DF157).
-func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *notices) error {
+func recreateContainer(ctx context.Context, d state.Deps, name string, meta *store.Environment, resume bool, extraEnv map[string]string, n *feedback.Collector) error {
 	agentDef, acfg, err := requireAgent(d, name)
 	if err != nil {
 		return err
@@ -202,7 +234,7 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		NetworkMode:  np.Mode,
 		NetworkAllow: np.Allow,
 		Ports:        meta.Ports,
-		ConfigMounts: meta.Mounts,
+		ExtraMounts:  meta.Mounts,
 		TmuxConf:     cfgJSON.TmuxConf,
 		Resources:    meta.Resources,
 		CapAdd:       meta.CapAdd,
@@ -216,10 +248,14 @@ func recreateContainer(ctx context.Context, d state.Deps, name string, meta *sto
 		// reverting a brokered sandbox to direct key delivery (D106).
 		BrokerCredentials: meta.BrokerCredentials,
 		BrokerDisabled:    meta.BrokerDisabled,
-		ConfigJSON:        configData,
 		Layout:            d.Layout,
 		HomeDir:           d.Layout.HomeDir,
-		Output:            &noticeWriter{notices: n},
+		// Restart has no live stream: it returns a result the CLI prints once
+		// the call is over. So progress folds into the same collector as an
+		// info notice — otherwise the minutes of image-build output that
+		// explain a slow start would simply vanish (DF157's subject).
+		Notices:  n,
+		Progress: feedback.ProgressAsNotices(n),
 	}
 
 	if resume {

@@ -204,6 +204,15 @@ there is no spike outstanding.** What follows is measured, not sketched.
 
 ### Part 5 — degrade and disclose
 
+> **D135 IS RETIRED (2026-08-13, [D138](../../decisions/working-notes.md)).** Automatic
+> degradation is gone: a network mode the backend cannot deliver is now **refused**. The tiers
+> below no longer exist as separate guarantees — tiers 1 and 2 collapsed into `isolated` when
+> [D137](../../decisions/working-notes.md) measured that in-sandbox machinery cannot be hardened
+> against an agent holding `sudo`, and tier 3 became `restricted`
+> ([network-mode-reshape.md](network-mode-reshape.md)). **This whole section needs rewriting
+> against that.** It is left standing rather than half-edited, because what it describes was real
+> and its replacement is not built yet. **Do not implement from it.**
+
 **Decided 2026-08-11: [D135](../../decisions/working-notes.md). yoloAI never refuses a sandbox for
 lack of enforcement capability. It degrades to the strongest layer available and says which one that
 is.** The reasoning was already in the tree: `design/network-isolation.md` § *Threat Model* ranks the

@@ -317,39 +317,30 @@ func TestResolveModelFromConfig_NoFile(t *testing.T) {
 func TestResolveProfile_FlagSet(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("profile", "", "")
-	cmd.Flags().Bool("no-profile", false, "")
 	require.NoError(t, cmd.Flags().Set("profile", "custom"))
 
 	assert.Equal(t, "custom", cliutil.ResolveProfile(cmd))
 }
 
-func TestResolveProfile_NoProfileBypass(t *testing.T) {
+// DF211: --no-profile was removed because it could never change ResolveProfile's
+// outcome. Pin that a stray "no-profile" flag on the command (e.g. left over on
+// a caller that hasn't been swept) is not consulted — only --profile is.
+func TestResolveProfile_IgnoresNoProfileFlag(t *testing.T) {
 	cmd := &cobra.Command{}
 	cmd.Flags().String("profile", "", "")
 	cmd.Flags().Bool("no-profile", false, "")
 	require.NoError(t, cmd.Flags().Set("no-profile", "true"))
 	require.NoError(t, cmd.Flags().Set("profile", "custom"))
 
-	assert.Equal(t, "", cliutil.ResolveProfile(cmd))
+	assert.Equal(t, "custom", cliutil.ResolveProfile(cmd))
 }
 
-func TestResolveProfile_FlagEmptyWithConfig(t *testing.T) {
-	// ResolveProfile no longer reads profile from config — flag only.
+func TestResolveProfile_FlagEmpty(t *testing.T) {
+	// ResolveProfile does not read profile from config — flag only.
 	_ = clitest.Home(t)
 
 	cmd := &cobra.Command{}
 	cmd.Flags().String("profile", "", "")
-	cmd.Flags().Bool("no-profile", false, "")
-
-	assert.Equal(t, "", cliutil.ResolveProfile(cmd))
-}
-
-func TestResolveProfile_FlagEmptyNoConfig(t *testing.T) {
-	_ = clitest.Home(t)
-
-	cmd := &cobra.Command{}
-	cmd.Flags().String("profile", "", "")
-	cmd.Flags().Bool("no-profile", false, "")
 
 	assert.Equal(t, "", cliutil.ResolveProfile(cmd))
 }

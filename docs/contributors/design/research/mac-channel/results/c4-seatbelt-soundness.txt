@@ -1,0 +1,38 @@
+=== C4 ===
+what makes shape (B) sound on seatbelt, which has no capability bounding set?
+[harness v2] every expectation rests on a probe baselined with the mechanism absent and answering the other way; see procedures/verification-rounds.md
+
+-- controls and baselines (all held, or this would not render) --
+  baseline: the sandboxed process reaches the open internet over TCP: True   ((allow network*) — the A22 positive control; without it a profile that merely broke python would pass every denial claim below)
+  baseline: the sandboxed process reaches the host proxy socket: False   ((deny default) with no socket literal — the grant under test is absent, so the proxy socket must be unreachable)
+  baseline: the socket literal actually grants access: True   (the same grant, written vnode-resolved (/private/tmp/...))
+  baseline: a nested, fully permissive sandbox-exec reaches the internet: True   (the identical nested command run from an UNsandboxed parent — so a later refusal is the outer profile holding, not a broken command)
+  a sudo ticket is active, so the sudo arm measures containment and not authentication: True   (without a ticket sudo fails to authenticate and the refusal is free — the specimen this round was warned about)
+  sudo actually elevated in this arm: True   (uid=0)
+
+-- measurements --
+  under (deny default) with no network grant: False
+  unix under (deny default) with no network grant: False   (so `none` denies the proxy socket too — tmux's own socket is what C3 saw fail)
+  under (deny default) + one socket literal: False
+  under (deny default) + one socket literal: True
+  the same grant, written unresolved (/tmp/...): False
+  the same nested command from inside the (B) profile: False
+  under (deny default) + one socket literal, via sudo: False   (still root, still inside the profile)
+
+-- expectations, rendered from the values above --
+  [PASS] a root process cannot escape the seatbelt profile  <- under (deny default) + one socket literal, via sudo=False
+  [PASS] with no network grant, seatbelt denies TCP  <- under (deny default) with no network grant=False
+  [PASS] seatbelt can express shape (B): the proxy socket is reachable  <- under (deny default) + one socket literal=True
+  [PASS] ...while the open internet is not  <- under (deny default) + one socket literal=False
+  [PASS] an unresolved /tmp literal grants nothing, silently  <- the same grant, written unresolved (/tmp/...)=False
+  [PASS] the profile cannot be relaxed from inside by nesting a permissive one  <- the same nested command from inside the (B) profile=False
+
+-- WHAT WAS NOT TRIED --
+  - yoloAI's generated profile. `GenerateProfile` emits `(allow network*)` or nothing (`profile.go:369`); it has no shape-(B) form to test, which is the finding rather than a gap in this run
+  - whether the agent can make the *host-side* proxy do its bidding — this measures reachability, not what the proxy then permits, which is egress-proxy-build.md's subject
+  - SBPL's `network-bind`, and whether a sandboxed process can listen. Shape (B) as specified only needs outbound
+  - a profile written by an adversary rather than by us. sandbox-exec reads the profile *before* dropping in, so a compromised agent cannot supply one — but nothing here tests whether the agent can influence the file between generation and exec, which is a real TOCTOU question
+  - docker and podman, which D139 assigns (B) in the same breath and which do have a bounding set
+  - n. One host, macOS 26.5.1
+
+-- all live expectations held --

@@ -80,8 +80,9 @@ agent: claude                         # Agent to launch: aider, claude, codex, g
 # model:                              # Model name or alias; CLI --model overrides
 
 # agent_files: "${HOME}"              # string: base dir (agent subdir appended); list: specific files
-# mounts:                             # bind mounts added at container run time
-#   - ~/.gitconfig:/home/yoloai/.gitconfig:ro
+# directories:                        # auxiliary directories (same shape as a profile's)
+#   - path: ~/.ssh
+#     mode: ro
 # auto_commit_interval: 0             # seconds between auto-commits in :copy dirs; 0 = disabled
 # ports: []                           # default port mappings
 env: {}                               # Environment variables forwarded to container via /run/secrets/
@@ -96,7 +97,7 @@ env: {}                               # Environment variables forwarded to conta
 #   memory: 8g                        # docker --memory
 ```
 
-Settings are managed via `yoloai config get/set` or by editing the file directly. Unknown fields in either config file are an error — `yoloai new` fails with a clear message listing the unrecognized keys.
+Settings are managed via `yoloai config get/set` or by editing the file directly. **Unknown fields in either config file are an error** (`TestArch_UnknownConfigKeysAreRejected`) — `yoloai new` fails with a clear message listing the unrecognized keys.
 
 **Implemented settings:**
 
@@ -104,15 +105,15 @@ Settings are managed via `yoloai config get/set` or by editing the file directly
 - `container_backend` selects the Linux container backend. Valid values: `docker`, `podman`. Both work on Linux and macOS. Only applies when running Linux containers (`isolation: container` or `container-enhanced`) — `vm` and `vm-enhanced` use containerd, and `os: mac` uses Seatbelt or Tart. CLI `--backend` overrides config.
 - `tart.image` overrides the base VM image for the tart backend.
 - `tmux_conf` (global config) controls how user tmux config interacts with the container. Set by the interactive first-run setup. Values: `default+host`, `default`, `host`, `none` (see [setup.md](setup.md#tmux-configuration)).
-- `agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config.
+- `agent` selects the agent to launch. Valid values: `aider`, `claude`, `codex`, `gemini`, `opencode`. CLI `--agent` overrides config. **The library itself never defaults this field** (`TestArch_LibraryNeverDefaultsAgent`) — an unset `AgentType`/`Agent` is a missing required input at the `Client.CreateSandbox`/`create.Run` boundary, not a value the library silently fills in; only the CLI's own edge resolution falls back to `claude` when neither `--agent` nor config sets it.
 - `model` sets the model name or alias passed to the agent. Empty means the agent uses its own default. CLI `--model` overrides config.
 - `env` sets environment variables forwarded to the container. Values are written as files in `/run/secrets/` (same mechanism as API keys). API keys take precedence if a name conflicts. Supports `${VAR}` expansion. Set via `yoloai config set env.NAME value`. In profiles, `env` merges with baked-in defaults (profile values win on conflict).
 - `agent_args` sets per-agent default CLI args. Map of agent name → arg string. Args are inserted between the model flag and CLI passthrough (`--` args), so passthrough always wins. Set via `yoloai config set agent_args.aider "--no-auto-commits"`. In profiles, `agent_args` merges with baked-in defaults (profile values win on conflict per agent key).
 - `resources` sets container resource limits. `resources.cpus` (e.g., `"4"`, `"2.5"`) maps to `--cpus`. `resources.memory` (e.g., `"8g"`, `"512m"`) maps to `--memory`. CLI `--cpus` and `--memory` override config. Profile overrides individual values.
 - `network` controls network isolation. `network.isolated: true` enables network isolation for all sandboxes. `network.allow` lists additional allowed domains (additive with agent defaults). Non-empty `network.allow` implies `network.isolated: true`. CLI `--network-isolated` and `--network-allow` override config.
-- `mounts` specifies bind mounts added at container run time (e.g., `~/.gitconfig:/home/yoloai/.gitconfig:ro`). In profiles, mounts are additive (merged with baked-in defaults).
 - `auto_commit_interval` sets the interval in seconds between automatic git commits in `:copy` directories inside the container. Disabled by default (`0`). When enabled, a background loop periodically runs `git add -A && git commit` in each `:copy` directory, providing recovery checkpoints for unattended runs. Only affects `:copy` dirs (`:overlay` has its own mechanism; `:rw` is the user's live repo). Profile overrides baked-in default.
 - `agent_files` controls what files are copied into the sandbox's `agent-state/` directory on first run (see below).
+- `directories` mounts auxiliary host directories into the sandbox — same shape as a profile's `directories:` (`path`, optional `mode: rw`/`copy`/omit for read-only, optional custom `mount:` point), and the same guards (dangerous-path refusal, overlap detection, dirty-repo gate). Prepended before CLI `-d` dirs. Replaces the retired `mounts:` key (D142).
 
 Agents may define `AuthHintEnvVars` — environment variables that indicate authentication is configured through a non-API-key mechanism (e.g. local model server). When any of these vars are set (in host env or `env`), the auth check passes without requiring a cloud API key.
 
@@ -148,7 +149,7 @@ setup:                              # runs at container start
 
 **Environment variable interpolation in config files:** Config values in all `config.yaml` files (user defaults and profiles) support `${VAR}` interpolation from the host environment. Only the braced syntax `${VAR}` is recognized — bare `$VAR` is **not** interpolated and treated as literal text. This avoids the class of bugs where `$` in passwords, regex patterns, or shell strings is silently misinterpreted (a well-documented pain point with Docker Compose's unbraced `$VAR` support — see [Implementation Research](research/implementation.md)). Interpolation is applied after YAML parsing, so expanded values cannot break YAML syntax. Unset variables produce an error (fail-fast, not silent empty string). CLI path inputs also support `${VAR}` interpolation and `~/` expansion.
 
-**Tilde expansion in config files:** `~/` is expanded to `$HOME` in path-valued fields across all config files (`agent_files`, `mounts`, `workdir.path`, `directories[].path`). CLI path inputs also support `~/` expansion.
+**Tilde expansion in config files:** `~/` is expanded to `$HOME` in path-valued fields across all config files (`agent_files`, `workdir.path`, `directories[].path`). CLI path inputs also support `~/` expansion.
 
 ### 3. Profiles
 
@@ -161,15 +162,15 @@ Profiles live in `~/.yoloai/profiles/<name>/` and are always selected explicitly
 └── tmux.conf     ← optional; replaces baked-in default
 ```
 
-**Profiles are self-contained.** Profile config merges over baked-in defaults only — user defaults (`~/.yoloai/defaults/config.yaml`) do not apply when a profile is active. This makes profiles fully deterministic: their behavior is the same regardless of who runs them or what their personal defaults are.
+**Profiles are self-contained** (`TestArch_ProfileIgnoresPersonalDefaults`). Profile config merges over baked-in defaults only — user defaults (`~/.yoloai/defaults/config.yaml`) do not apply when a profile is active. This makes profiles fully deterministic: their behavior is the same regardless of who runs them or what their personal defaults are.
 
-**Personal defaults do not carry into profiles — no exceptions.** When a profile is active, settings from `defaults/config.yaml` are completely ignored: personal `mounts` (e.g. `~/.gitconfig`, `~/.ssh`), `agent_files`, `env`, `agent_args`, and everything else. If a profile sandbox needs `~/.gitconfig`, it must be listed in the profile's `mounts`. This is intentional: a profile that silently inherits personal state isn't reproducible. There is no "global mounts" escape hatch.
+**Personal defaults do not carry into profiles** (`TestArch_ProfileIgnoresPersonalDefaults`) — **except `isolation` and `model`, which still do** ([DF209](findings-resolved.md#df209--isolation-and-model-still-carry-from-personal-defaults-into-a-profile-by-a-second-route-df207df208-did-not-close-resolved-2026-08-15), by a second route the create pipeline cannot see from where it sits). For every other setting, when a profile is active, `defaults/config.yaml` is ignored: personal `agent_files`, `env`, `agent_args`, and everything else but those two. If a profile sandbox needs `~/.gitconfig`, it must be listed in the profile's `directories`. This is intentional: a profile that silently inherits personal state isn't reproducible. There is no "global directories" escape hatch.
 
 **File resolution.** For each file (Dockerfile, tmux.conf), the profile directory is checked first; if absent, the baked-in default is used. For `config.yaml`, the baked-in default config is loaded first, then the profile's config.yaml is merged on top.
 
 **Name validation:** Profile names must match `^[a-zA-Z0-9][a-zA-Z0-9_.-]*$`, max 56 characters. Profile names become Docker image tags (`yoloai-cli-<profile>`), so the character restrictions ensure compatibility with Docker's naming rules.
 
-**Implemented profile fields:** `agent`, `model`, `os`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `mounts`, `isolation`, `cap_add`, `devices`, `setup`, `auto_commit_interval`. Unknown fields are an error — `yoloai new` fails with a clear message listing the unrecognized keys. This catches typos and fields that have been renamed.
+**Implemented profile fields:** `agent`, `model`, `os`, `container_backend`, `tart.image`, `env`, `agent_args`, `agent_files`, `ports`, `workdir`, `directories`, `resources`, `network`, `isolation`, `cap_add`, `devices`, `setup`, `auto_commit_interval`. Unknown fields are an error — `yoloai new` fails with a clear message listing the unrecognized keys. This catches typos and fields that have been renamed.
 
 **Machine-specific fields — fail loudly if prerequisites are absent.** `isolation` and `os` select runtime environments that may not be available on every machine. `isolation: vm` uses Kata Containers on Linux (requires KVM) and Tart on macOS (requires Tart installed). `isolation: vm-enhanced` is Linux-only and additionally requires Firecracker. `isolation: container-privileged` requires a container backend (Docker/Podman) and runs on both Linux and macOS hosts via that backend's Linux VM; it is only unavailable with `os: mac` (Seatbelt/Tart have no privileged mode). `os: linux` is the default and works everywhere. `os: mac` requires a macOS host; the specific backend depends on `isolation` (`container` → Seatbelt, `vm` → Tart). All other isolation levels may also have prerequisites (e.g. `container-enhanced` requires gVisor). If the required prerequisites are not present, `yoloai new` fails with a clear error — it does not silently fall back to a different mode. A profile that specifies `isolation` or `os` will not work everywhere.
 
@@ -210,8 +211,6 @@ env:
 # agent_files:                            # list: specific files/dirs
 #   - ~/.claude/settings.json
 #   - /shared/configs/CLAUDE.md
-# mounts:
-#   - ~/.ssh:/home/yoloai/.ssh:ro
 resources:
   cpus: "4"
   memory: 16g
@@ -272,7 +271,6 @@ CLI workdir **replaces** profile workdir. CLI `-d` dirs are **additive** with pr
 | `workdir`              | Profile provides default, CLI replaces                                                |
 | `directories`          | Profile provides defaults, CLI `-d` is additive                                       |
 | `agent_files`          | Profile **replaces** baked-in (no merge)                                              |
-| `mounts`               | Additive                                                                              |
 | `resources`            | Profile overrides individual values                                                   |
 | `cap_add`              | Additive                                                                              |
 | `devices`              | Additive                                                                              |

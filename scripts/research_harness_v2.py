@@ -186,6 +186,16 @@ class Probe:
         return m
 
 
+#: Printed into every report so a result carries its own provenance. A reader who finds a
+#: raw `.txt` in `results/` cannot otherwise tell which harness produced it, and the
+#: guarantees differ in a way that changes what the result supports — see
+#: `docs/contributors/procedures/verification-rounds.md` § Which harness produced a result.
+HARNESS_GUARANTEE = (
+    "every expectation rests on a probe baselined with the mechanism absent and answering "
+    "the other way; see procedures/verification-rounds.md"
+)
+
+
 @dataclass
 class Harness:
     """Records a run and renders its report.
@@ -446,6 +456,7 @@ class Harness:
         print(f"=== {self.name} ===", file=stream)
         if self.description:
             print(self.description, file=stream)
+        print(f"[harness v{HARNESS_VERSION}] {HARNESS_GUARANTEE}", file=stream)
 
         print("\n-- controls and baselines (all held, or this would not render) --", file=stream)
         for c in controls:

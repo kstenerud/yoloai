@@ -8,7 +8,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"strings"
 
@@ -18,6 +17,7 @@ import (
 	"github.com/containerd/containerd/v2/core/snapshots"
 	cerrdefs "github.com/containerd/errdefs"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
@@ -26,7 +26,7 @@ import (
 // A container is orphaned when its com.yoloai.* labels mark it a yoloai instance
 // owned by this principal (runtime.IsOrphanCandidate, D62) and its name is not in
 // knownInstances. For each removed container, CNI teardown is attempted.
-func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
+func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool) (runtime.PruneResult, error) {
 	ctx = r.withNamespace(ctx)
 
 	known := make(map[string]bool, len(knownInstances))
@@ -61,17 +61,18 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		}
 
 		item := runtime.PruneItem{
-			Kind: "container",
-			Name: name,
+			Kind:   "container",
+			Name:   name,
+			Action: runtime.PruneActionWouldRemove,
 		}
 
 		if !dryRun {
-			if err := r.Remove(ctx, name); err != nil {
-				if !errors.Is(err, runtime.ErrNotFound) {
-					fmt.Fprintf(output, "Warning: failed to remove container %s: %v\n", name, err) //nolint:errcheck // best-effort output
-					continue
-				}
-				// Container already gone — treat as successful deletion.
+			item.Action = runtime.PruneActionRemoved
+			// Already gone counts as removed: the caller asked for it not to
+			// exist, and it does not.
+			if err := r.Remove(ctx, name); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+				item.Action = runtime.PruneActionFailed
+				item.Reason = err.Error()
 			}
 		}
 		result.Items = append(result.Items, item)
@@ -80,7 +81,7 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 	// Sweep leaked network namespaces the container-keyed teardown can no longer
 	// reach (DF72): a crash left /var/run/netns/yoloai-<instance> with no
 	// container record and no cni-state.json.
-	result.Items = append(result.Items, r.reapOrphanNetns(known, existing, dryRun, output)...)
+	result.Items = append(result.Items, r.reapOrphanNetns(known, existing, dryRun)...)
 
 	return result, nil
 }
@@ -96,7 +97,7 @@ const netnsDir = "/var/run/netns"
 // from both the existing container IDs and the known-sandbox set). Reaps the
 // netns and its stale IPAM lease. Scoped to this principal's instance prefix; the
 // cross-data-dir over-reap caveat (DF45 sibling) is documented in D114.
-func (r *Runtime) reapOrphanNetns(known, existing map[string]bool, dryRun bool, output io.Writer) []runtime.PruneItem {
+func (r *Runtime) reapOrphanNetns(known, existing map[string]bool, dryRun bool) []runtime.PruneItem {
 	entries, err := os.ReadDir(netnsDir)
 	if err != nil {
 		return nil // no netns dir (or unreadable) — nothing to sweep
@@ -108,14 +109,17 @@ func (r *Runtime) reapOrphanNetns(known, existing map[string]bool, dryRun bool, 
 	var items []runtime.PruneItem
 	for _, ns := range selectOrphanNetns(names, known, existing, config.InstancePrefix(r.layout.Principal)) {
 		containerName := strings.TrimPrefix(ns, "yoloai-")
+		item := runtime.PruneItem{Kind: "netns", Name: ns, Action: runtime.PruneActionWouldRemove}
 		if !dryRun {
 			if derr := deleteNetNS(ns); derr != nil {
-				fmt.Fprintf(output, "Warning: delete orphan netns %s: %v\n", ns, derr) //nolint:errcheck // best-effort progress
-				continue
+				item.Action = runtime.PruneActionFailed
+				item.Reason = derr.Error()
+			} else {
+				item.Action = runtime.PruneActionRemoved
+				cleanupStaleIPAMLeases(containerName)
 			}
-			cleanupStaleIPAMLeases(containerName)
 		}
-		items = append(items, runtime.PruneItem{Kind: "netns", Name: ns})
+		items = append(items, item)
 	}
 	return items
 }
@@ -159,23 +163,24 @@ var snapshotterNames = []string{"overlayfs", "devmapper"}
 // Refuses to run if any container in the namespace is still active — the
 // caller must stop those first (typically via `yoloai destroy` or
 // `yoloai system prune`).
-func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error) {
+func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool) (runtime.CachePruneResult, error) {
+	var result runtime.CachePruneResult
 	// The containerd backend has no regenerable build cache distinct from the
 	// base image — image layers and their snapshots ARE the only reclaimable
 	// content, and removing them forces a rebuild. So plain `prune`
 	// (includeImages=false) is a no-op; only `prune --images` reclaims.
 	if !includeImages {
-		return 0, nil
+		return result, nil
 	}
 
 	ctx = r.withNamespace(ctx)
 
-	proceed, err := r.reconcileBlockingContainers(ctx, dryRun, output)
+	proceed, err := r.reconcileBlockingContainers(ctx, dryRun, &result)
 	if err != nil {
-		return 0, err
+		return runtime.CachePruneResult{}, err
 	}
 	if !proceed {
-		return 0, nil
+		return result, nil
 	}
 
 	// Measure the content store before and after the image prune. Deleting an
@@ -184,16 +189,16 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	// content-store size is host disk that the prune actually freed. In dry-run
 	// nothing is deleted, so the whole content store is what *would* be freed.
 	contentBefore := r.contentStoreBytes(ctx)
-	if err := r.pruneImages(ctx, dryRun, output); err != nil {
-		return 0, err
+	if err := r.pruneImages(ctx, dryRun, &result); err != nil {
+		return runtime.CachePruneResult{}, err
 	}
 	contentFreed := contentBefore
 	if !dryRun {
 		contentFreed = max(contentBefore-r.contentStoreBytes(ctx), 0)
 	}
 
-	snapFreed := r.pruneSnapshots(ctx, dryRun, output)
-	reclaimed := contentFreed + snapFreed
+	snapFreed := r.pruneSnapshots(ctx, dryRun, &result)
+	result.BytesReclaimed = contentFreed + snapFreed
 	// Print a per-backend reclaim line like docker/podman so containerd's
 	// contribution to the aggregate is visible rather than silently folded in.
 	// Both tiers free host disk and are counted: the content store (compressed
@@ -201,10 +206,20 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	// blocks return to the thin-pool but free no host disk, so pruneSnapshots
 	// reports them separately and excludes them from snapFreed (DF59).
 	if !dryRun {
-		fmt.Fprintf(output, "containerd: reclaimed %s (%s image content + %s snapshot layers)\n", //nolint:errcheck
-			runtime.FormatBytes(reclaimed), runtime.FormatBytes(contentFreed), runtime.FormatBytes(snapFreed))
+		result.Notices = append(result.Notices, feedback.Notice{
+			Event: "prune.cache_reclaimed",
+			Level: feedback.LevelInfo,
+			Message: fmt.Sprintf("containerd: reclaimed %s (%s image content + %s snapshot layers)",
+				runtime.FormatBytes(result.BytesReclaimed), runtime.FormatBytes(contentFreed), runtime.FormatBytes(snapFreed)),
+			Fields: map[string]any{
+				"backend":        "containerd",
+				"bytes":          result.BytesReclaimed,
+				"content_bytes":  contentFreed,
+				"snapshot_bytes": snapFreed,
+			},
+		})
 	}
-	return reclaimed, nil
+	return result, nil
 }
 
 // contentStoreBytes sums the on-disk size of every blob in the namespace's
@@ -241,7 +256,7 @@ func (r *Runtime) contentStoreBytes(ctx context.Context) int64 {
 //
 // In dry-run nothing is removed; blockers are reported as "would …". A stopped
 // container that fails to remove is treated as a hard blocker (skip, report).
-func (r *Runtime) reconcileBlockingContainers(ctx context.Context, dryRun bool, output io.Writer) (proceed bool, err error) {
+func (r *Runtime) reconcileBlockingContainers(ctx context.Context, dryRun bool, result *runtime.CachePruneResult) (proceed bool, err error) {
 	containers, err := r.client.Containers(ctx)
 	if err != nil {
 		return false, fmt.Errorf("list containers: %w", err)
@@ -267,23 +282,35 @@ func (r *Runtime) reconcileBlockingContainers(ctx context.Context, dryRun bool, 
 	}
 
 	if len(running) > 0 {
+		// A running sandbox is a skipped *item*, not commentary: the resource
+		// is named, the disposition is "not attempted", and the reason says
+		// what the user must change. That makes "what stopped my prune?"
+		// answerable from the result instead of from the transcript.
 		for _, name := range running {
-			fmt.Fprintf(output, "containerd: skipping image reclaim — sandbox %q is running; stop it first (yoloai stop %s, or yoloai destroy %s)\n", //nolint:errcheck
-				name, name, name)
+			result.Items = append(result.Items, runtime.PruneItem{
+				Kind:   "image",
+				Name:   name,
+				Action: runtime.PruneActionSkipped,
+				Reason: fmt.Sprintf("sandbox %q is running; stop it first (yoloai stop %s, or yoloai destroy %s)", name, name, name),
+			})
 		}
 		return false, nil
 	}
 
 	for _, name := range stopped {
+		item := runtime.PruneItem{Kind: "container", Name: name, Action: runtime.PruneActionWouldRemove}
 		if dryRun {
-			fmt.Fprintf(output, "containerd: would remove stopped sandbox container %s to reclaim its image (recreated on next start)\n", name) //nolint:errcheck
+			result.Items = append(result.Items, item)
 			continue
 		}
 		if rmErr := r.Remove(ctx, name); rmErr != nil && !errors.Is(rmErr, runtime.ErrNotFound) {
-			fmt.Fprintf(output, "containerd: could not remove stopped container %s: %v — skipping image reclaim\n", name, rmErr) //nolint:errcheck
+			item.Action = runtime.PruneActionFailed
+			item.Reason = fmt.Sprintf("%v — skipping image reclaim", rmErr)
+			result.Items = append(result.Items, item)
 			return false, nil
 		}
-		fmt.Fprintf(output, "containerd: removed stopped sandbox container %s to reclaim its image (recreated on next start)\n", name) //nolint:errcheck
+		item.Action = runtime.PruneActionRemoved
+		result.Items = append(result.Items, item)
 	}
 	return true, nil
 }
@@ -305,22 +332,22 @@ func (r *Runtime) containerRunning(ctx context.Context, ctr client.Container) bo
 
 // pruneImages removes every image record in the namespace (or reports what
 // would be removed in dry-run mode).
-func (r *Runtime) pruneImages(ctx context.Context, dryRun bool, output io.Writer) error {
+func (r *Runtime) pruneImages(ctx context.Context, dryRun bool, result *runtime.CachePruneResult) error {
 	imgSvc := r.client.ImageService()
 	imgs, err := imgSvc.List(ctx)
 	if err != nil {
 		return fmt.Errorf("list images: %w", err)
 	}
 	for _, img := range imgs {
-		if dryRun {
-			fmt.Fprintf(output, "containerd: would remove image %s\n", img.Name) //nolint:errcheck
-			continue
+		item := runtime.PruneItem{Kind: "image", Name: img.Name, Action: runtime.PruneActionWouldRemove}
+		if !dryRun {
+			item.Action = runtime.PruneActionRemoved
+			if err := imgSvc.Delete(ctx, img.Name, images.SynchronousDelete()); err != nil && !cerrdefs.IsNotFound(err) {
+				item.Action = runtime.PruneActionFailed
+				item.Reason = err.Error()
+			}
 		}
-		if err := imgSvc.Delete(ctx, img.Name, images.SynchronousDelete()); err != nil && !cerrdefs.IsNotFound(err) {
-			fmt.Fprintf(output, "containerd: failed to remove image %s: %v\n", img.Name, err) //nolint:errcheck
-			continue
-		}
-		fmt.Fprintf(output, "containerd: removed image %s\n", img.Name) //nolint:errcheck
+		result.Items = append(result.Items, item)
 	}
 	return nil
 }
@@ -406,14 +433,14 @@ func orderLeafFirst(infos []snapshots.Info) []string {
 // drops. Without it the backing file stays fully allocated. Counting these bytes
 // in the reclaimed total would over-report on a no-discard pool, so we surface
 // them on their own line with the discard caveat and leave them out (DF59).
-func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Writer) int64 {
+func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, result *runtime.CachePruneResult) int64 {
 	var hostFreed, devmapperBytes int64
 	for _, snapshotter := range snapshotterNames {
 		infos, present := r.snapshotInfos(ctx, snapshotter)
 		if !present || len(infos) == 0 {
 			continue
 		}
-		n := r.pruneSnapshotter(ctx, snapshotter, orderLeafFirst(infos), dryRun, output)
+		n := r.pruneSnapshotter(ctx, snapshotter, orderLeafFirst(infos), dryRun, result)
 		// devmapper host reclaim is discard-dependent (see the doc comment), so
 		// it's reported separately and kept out of the counted total; overlayfs
 		// snapshots always free host disk and are counted.
@@ -428,9 +455,16 @@ func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Wri
 		if dryRun {
 			verb = "would be returned"
 		}
-		fmt.Fprintf(output, "containerd: %s of devmapper blocks %s to the thin-pool (not counted in the reclaimed total).\n", //nolint:errcheck
-			runtime.FormatBytes(devmapperBytes), verb)
-		fmt.Fprintf(output, "  With discard_blocks = true in the pool config (recommended) this is also freed from the host; otherwise the pool backing file stays allocated — enable discard_blocks, or reclaim it manually (see backend-idiosyncrasies.md \"devmapper caveat — discard_blocks\").\n") //nolint:errcheck
+		result.Notices = append(result.Notices, feedback.Notice{
+			Event: "prune.devmapper_blocks_returned",
+			Level: feedback.LevelInfo,
+			Message: fmt.Sprintf("containerd: %s of devmapper blocks %s to the thin-pool (not counted in the reclaimed total).\n"+
+				"  With discard_blocks = true in the pool config (recommended) this is also freed from the host; "+
+				"otherwise the pool backing file stays allocated — enable discard_blocks, or reclaim it manually "+
+				"(see backend-idiosyncrasies.md \"devmapper caveat — discard_blocks\").",
+				runtime.FormatBytes(devmapperBytes), verb),
+			Fields: map[string]any{"backend": "containerd", "bytes": devmapperBytes},
+		})
 	}
 	return hostFreed
 }
@@ -442,7 +476,7 @@ func (r *Runtime) pruneSnapshots(ctx context.Context, dryRun bool, output io.Wri
 // snapshot already gone (NotFound) still counts. Only a genuine Remove error
 // (including a FailedPrecondition that survives correct ordering, e.g. an
 // unexpected external hold) is excluded from the total and warned about.
-func (r *Runtime) pruneSnapshotter(ctx context.Context, snapshotter string, names []string, dryRun bool, output io.Writer) int64 {
+func (r *Runtime) pruneSnapshotter(ctx context.Context, snapshotter string, names []string, dryRun bool, result *runtime.CachePruneResult) int64 {
 	snapSvc := r.client.SnapshotService(snapshotter)
 	var reclaimed int64
 	for _, name := range names {
@@ -450,15 +484,26 @@ func (r *Runtime) pruneSnapshotter(ctx context.Context, snapshotter string, name
 		if u, uerr := snapSvc.Usage(ctx, name); uerr == nil {
 			size = u.Size
 		}
+		item := runtime.PruneItem{
+			Kind:           "snapshot",
+			Name:           name,
+			Action:         runtime.PruneActionWouldRemove,
+			BytesReclaimed: size,
+		}
 		if dryRun {
-			fmt.Fprintf(output, "containerd: would remove %s snapshot %s\n", snapshotter, name) //nolint:errcheck
+			result.Items = append(result.Items, item)
 			reclaimed += size
 			continue
 		}
 		if err := snapSvc.Remove(ctx, name); err != nil && !cerrdefs.IsNotFound(err) {
-			fmt.Fprintf(output, "containerd: failed to remove %s snapshot %s: %v\n", snapshotter, name, err) //nolint:errcheck
+			item.Action = runtime.PruneActionFailed
+			item.Reason = err.Error()
+			item.BytesReclaimed = 0
+			result.Items = append(result.Items, item)
 			continue
 		}
+		item.Action = runtime.PruneActionRemoved
+		result.Items = append(result.Items, item)
 		reclaimed += size
 	}
 	return reclaimed

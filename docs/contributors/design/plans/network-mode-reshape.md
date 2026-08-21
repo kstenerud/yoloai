@@ -7,7 +7,7 @@
 - **Status:** PLANNED — designed, no code.
 - **Depends on:** egress-proxy-build.md
 
-  Only step 5 needs it — steps 1–4 depend on nothing.
+  Only step 4 needs it — steps 1–3 depend on nothing.
 - **Rides:** **a migration.** See § *Why this is migration-bearing* — a released binary reading a
   `restricted` record does not error, it silently produces an unisolated sandbox. Per rule 12 /
   [D131](../../decisions/working-notes.md) the work goes to `release-v0.12.0` and **not to `main`**.
@@ -25,12 +25,21 @@ the only thing that decides what a mode is worth against an agent that turns on 
 | `restricted` | **outside** the sandbox | restricts egress, hardened against a compromised agent. |
 | `none` | — | no network at all. Nothing in or out. |
 
-**Each value names a trust boundary, not a mechanism**, and that is what keeps this compatible with
-[netpolicy.md](../netpolicy.md) § *Hostile containment*, which says mode is the **intent** and
-strategy is the **realization**, and warns against adding a mode where a strategy would do.
-*In-sandbox* versus *out-of-sandbox* is intent — it is the question *"can the thing I am containing
-switch it off?"* — and it is answered before any mechanism is chosen. `ip-filter` and `egress-proxy`
-remain strategies underneath. **That carve stands; this plan does not overturn it.**
+**Each value names a trust boundary, not a mechanism.** `ip-filter` and `egress-proxy` remain
+strategies underneath, so [netpolicy.md](../netpolicy.md)'s mode-is-intent / strategy-is-realization
+split survives — but **one sentence of it does not, and this plan supersedes that sentence rather
+than continuing it.** netpolicy.md §3 decided this exact question: *"'Hostile' = `isolated` + the
+`egress-proxy` strategy — a new **strategy**, not a new **mode**."* `restricted` is that
+combination, promoted to a mode.
+
+The reason to overturn it is that its premise changed. It was written when the proxy was expected to
+be *"a strictly-better interpretation of the same allowlist… with no policy-model change and no
+contract change"*. [D137](../../decisions/working-notes.md) and the chokepoint round make it
+neither: `--port` stops working, live `allow`/`deny` stops working, brokering becomes mandatory, and
+the policy set must be fixed at creation. **A strategy that changes the contract is a mode.** An
+earlier draft of this plan claimed the carve was untouched and cited a neighbouring section as
+endorsement — the supersession-as-continuity failure [A38](../../agent-failures.md) records,
+recurring inside the plan that records it.
 
 The ordering falls out of the axis rather than out of the adjectives, which is why the values can be
 read cold: machinery nowhere, inside, outside, no network.
@@ -81,12 +90,14 @@ none, because there is nothing for a credential to reach.
 ### `restricted` — one route out, and it is the proxy
 
 All routes are removed and a single host-side proxy is the only destination
-([D139](../../decisions/working-notes.md)). Several network features cannot survive that. Each is a
-deliberate compromise for the guarantee, not an oversight:
+([D139](../../decisions/working-notes.md)) — **one shape on every backend**, since the Mac round
+found each macOS backend already carries a channel: apple via `container run --publish-socket`,
+tart via Softnet, seatbelt via an SBPL socket literal. Several network features cannot survive
+that. Each is a deliberate compromise for the guarantee, not an oversight:
 
 | Requested | Behaviour | Why |
 | --- | --- | --- |
-| `--port` | **refuse** | a guest with no route cannot answer inbound. A **contract property of the mode**, not of the mechanism — a backend falling back to shape (A) could technically publish and must not, or the mode means different things per backend |
+| `--port` | **refuse** | a guest with no route cannot answer inbound |
 | live `allow` / `deny` | **refuse** | D137 §2 requires the policy set fixed at creation; a runtime-mutable allowlist is the open-ended set moving rather than closing |
 | brokering | **mandatory** | the single destination *is* the broker's injector. A credential must not enter a sandbox whose whole premise is that it cannot be trusted with one |
 | MCP servers needing arbitrary egress | **refuse** | they would need a second route |
@@ -119,34 +130,90 @@ rule 9 deprecation entry — and rule 12: **`release-v0.12.0`, not `main`.**
 Each refusal is newly-rejected input: a `BREAKING-CHANGES.md` entry and a test that goes red on
 revert (rule 10).
 
-**Where the checks belong: below the CLI.** Every refusal has at least three doors — the flag, a
-profile, and the library API — and `netpolicy.Compose` (single call site, `prepare_dirs.go:342`) is
-downstream of all of them. The existing `--port`-under-`none` check is the counter-example to copy
-*away* from: `new.go:207` reads the flag only, so profile- and archetype-supplied ports slip past
-([DF197](../findings-unresolved.md)). The runtime path already gets this right — `Network.Allow`
-refuses on a `none` sandbox — and creation is the one entry point that does not.
+**These are not per-flag guards. They are one validation the product does not have.**
+
+The tempting fix is a check per flag, and it is wrong twice over. It would be the fourth mechanism
+for one job (GEN §18), and it would sit in the layer that the door most worth defending does not
+pass through: **the library**. `Client.CreateSandbox` → `SandboxCreateOptions.toInternal()` →
+`Engine.Create` never enters `internal/cli`, and `toInternal` is a pure field copy — it carries
+`Network`, `NetworkAllow` and `Ports` across verbatim (`sandbox_options.go:165-167`) and nothing
+validates any of them afterwards. So an integrator can ask for `none` with an allowlist and ports
+today and be told nothing. A profile is a third door, and archetypes a fourth for ports.
+
+**Where it goes, and it is earlier than it looks.** Everything the check needs — `opts.Network`,
+`opts.NetworkAllow`, `opts.Ports`, `opts.Agent` — is **final at the end of Phase 1**
+(`resolveProfileAndArchetype`, `create.go:237`); the last writes are `prepare_profile.go:141`,
+`:199`, `:146`, `:208`, `:99` and `prepare_archetype.go:283`, and nothing writes them afterwards.
+`buildNetworkConfig` (`prepare_dirs.go:341`) is a pure function of those, so the resolved mode is
+available immediately.
+
+**So the check goes right after `create.go:240` — before `replaceSandboxIfNeeded`.** That ordering
+is not cosmetic: `replaceSandboxIfNeeded` (`:242`) calls `launch.Teardown` and **destroys the user's
+existing sandbox**, and Phase 2 (`:253`, `:266`) copies the whole workdir. Validating after Phase 3,
+as an earlier draft of this plan said, would mean `yoloai new box . --replace --network=none
+--port 3000` tears down a working sandbox, copies the tree, and *then* refuses. The `defer
+os.RemoveAll` cleans up the new directory; nothing restores the old one.
+
+**One caveat that decides where the code cannot go:** `prepareSandboxState` takes `opts` **by
+value** (`create.go:230`). The merged ports exist only inside it — a validator in `create.Run` or
+`Engine.Create` would read pre-merge values and be silently wrong.
+
+**`Compose` takes the user-allowlist half and only that.** It has one call site
+(`prepare_dirs.go:342`), so refusing there means the discard cannot happen even if the outer check
+is bypassed. But it must refuse on a non-empty **`userAllow`** *only* — it receives `agentFloor` as
+a list and cannot see *which* agent produced it, so a floor-based refusal there would kill
+`--agent claude --network=none` inside `Compose`, make the outer agent check dead code, **and still
+wave `aider` through**, since aider has no floor. The agent predicate belongs in the outer
+validator, where `opts.Agent` and `agentDef` are both in scope.
+
+**The broker is not in this validation at all**, and cannot be. `create.Options` has no broker
+field: `SandboxCreateOptions.Broker`/`NoBroker` exist but `toInternal()` drops them
+(`sandbox_options.go:145-181`), the CLI routes them through `SandboxStartOptions` instead, they are
+persisted to meta at **start** (`start.go:99`), and they are consumed at **launch**
+(`brokerCredentials`, `launch.go:592`). `restricted`'s "brokering is mandatory" is also unevaluable
+at create — it depends on `resolveBrokerReach`, which needs a live backend. So **the broker and
+credential-delivery rows of both tables are launch-side work**, sitting beside the existing refusal
+at `launch.go:613`, and they are not part of step 1.
+
+The runtime path is the model to copy: `Network.Allow` → `requireIsolated` refuses on a `none`
+sandbox regardless of how the request arrived, because it validates against the **stored mode**
+rather than against the flag that produced it. The existing `--port` check is the counter-example —
+`new.go:207` reads `cmd.Flags().GetStringSlice("port")`, so every non-flag door slips past
+([DF197](../findings-unresolved.md)).
 
 **One correction to an earlier draft, because it changes what the argument rests on:** a profile has
 no mode key at all. `config.NetworkConfig` is `Isolated bool` + `Allow []string`, so a profile can
-supply the allowlist half but never `none`. The conclusion survives — all doors still converge on
-`Compose` — but four modes mean a **new config key**, which is a rule-1 rename carrying a 12-month
-user-facing deprecation, a real parser (`handleYoloaiNetwork` validates nothing today), and edits to
-the shipped default config and the profile scaffold.
+supply the allowlist half but never `none`. The conclusion survives — but four modes mean a **new
+config key**, which is a rule-1 rename carrying a 12-month user-facing deprecation, a real parser
+(`handleYoloaiNetwork` validates nothing today), and edits to the shipped default config and the
+profile scaffold.
 
-## What must be verified before this ships
+**MCP reaches none of this.** No tool accepts a network mode or ports (`internal/mcpsrv/tools.go`),
+and `sandbox_status` drops `network_mode`. Not a hole today — an MCP caller cannot request a mode it
+cannot express — but it means the four-mode story does not reach that surface, and `restricted` will
+be unrequestable there until it does.
 
-**`--network-none` is not honoured on containerd, apple or tart.** containerd says so in its own
-comment (*"the `runtime.NetworkMode == "none"` CLI flag is not currently honored… setupCNI is
-unconditional"*); apple reads the mode only for `"isolated"`; tart has no `NetworkMode` handling at
-all. docker and podman honour it natively, and seatbelt omits `(allow network*)`.
+## What the Mac round settled, and what it left open
 
-Shipped help says *"it holds on every backend"* and `netpolicy.md` says *"`none` is a hard boundary
-on every backend"*. Both are wrong on half the backends, both are security claims in user-facing
-text, and this is a **live defect independent of this plan** — filed as
-[DF198](../findings-unresolved.md). Static reading only: the containerd half is verifiable on the
-Linux host, apple and tart need the Mac. **Correct the text first, then the backends** — and note
-that under D138 an unenforceable `none` must be *refused*, which needs a `BackendCaps` field that
-does not exist (`runtime.go:284` carries only `NetworkIsolation bool`).
+**`--network-none` is confirmed broken on three backends, and in three different ways** — measured,
+no longer a static reading. apple and tart both reach the internet under it, and apple additionally
+holds a **global IPv6 address**, so a v4-only fix still leaves reach. seatbelt is a third behaviour:
+it refuses to start, because SBPL's `network*` covers `AF_UNIX` and tmux loses its socket
+([DF199](../findings-unresolved.md)). apple's remedy is one flag and is measured: `container run
+--network none` works, and `none` is a special value rather than an unattachable network name.
+
+**The conformance case that should have caught all of this cannot fail and does not run**
+([DF200](../findings-unresolved.md)): its only assertion sits inside `if err == nil`, and it lives
+in the docker-only suite while the five other backends run `RunInterfaceConformance`. Fixing the
+case matters more than fixing any one backend — it is the thing that would have made this a test
+failure in 2026-06 rather than a finding in 2026-08.
+
+**Still open after the round, and none of it blocks step 1:** Softnet's dynamic policy channel
+(JSON-RPC over a unix socket with flow-table clearing — the route to live revocation, already built
+upstream, while `tart run` exposes only boot-time flags); throughput and latency of apple's channel
+under real HTTP; whether a host socket endpoint survives restart and reboot; and UDP/ICMP/DNS on
+tart, since the earlier pf shape filtered TCP only. **`runtime/tart` passes no Softnet flag today**,
+so none of tart's enforcement composes with yoloAI yet.
 
 ## What this does not decide
 
@@ -164,15 +231,38 @@ does not exist (`runtime.go:284` carries only `NetworkIsolation bool`).
 
 ## Order of work
 
-1. **`Compose` refuses what a mode cannot honour** — allowlist under `none`, real agent under
-   `none`. Fixes a live defect ([DF196](../findings-unresolved.md)); needs nothing else.
-2. **Move `--port`'s refusal below the CLI** ([DF197](../findings-unresolved.md)) — same shape, same
-   layer, second instance of the class, so fix them together (GEN §18).
-3. **Correct the `none` claims in shipped help and `netpolicy.md`** ([DF198](../findings-unresolved.md)),
-   then fix or refuse `none` per backend.
-4. **`--network=` enum**, booleans as deprecated aliases, both registered in `deprecations.md` with
+1. **One mode-capability validation in `prepareSandboxState`**, after `create.go:240` and before
+   the destructive replace, covering **allowlist, ports and agent** — plus `Compose` refusing a
+   non-empty user allowlist at its own layer. Closes [DF196](../findings-unresolved.md) and
+   [DF197](../findings-unresolved.md) together; they are two symptoms of this step being absent, so
+   fixing them separately would build the mechanism twice.
+
+   **Decide two open rows before writing a line**, because both change where code goes: whether a
+   non-empty *agent floor* under `none` is an error (it must not be `Compose`'s call — see above),
+   and whether an allowlist under **`open`** is an error. The second is a **third instance of the
+   same class**: `Compose`'s `default` branch discards `userAllow` for the empty mode exactly as the
+   `none` branch does, hidden from the CLI only because `--network-allow` promotes to
+   `--network-isolated`, and therefore live on the library and profile doors. It is in neither
+   finding.
+
+   **Rule 10 without a new fake.** `prepareSandboxState` runs end to end against the existing
+   `fakeRuntime` in `create_prepare_test.go`, untagged and inside `make check` — three cases there
+   (`none` + allowlist, `none` + profile ports, `none` + real agent) plus inverting
+   `compose_test.go:51` and `create_prepare_test.go:105`, which currently *assert* the silent
+   discard. The library door is then covered by a `toInternal` field-carry assertion rather than a
+   ~40-method `runtime.Backend` fake in the root package, which is what testing `Client.CreateSandbox`
+   directly would cost. `toInternal` is a pure copy, so the two together prove the door.
+
+   **It reaches only new sandboxes.** `restart.go:200` rebuilds state from `netpolicy.json` and
+   `meta.Ports` and never re-validates, so an existing `none`-plus-ports sandbox keeps relaunching.
+   Say so in the BREAKING-CHANGES entry, and decide whether step 3's migrator repairs or rejects
+   such a record — that decision sets step 3's scope.
+2. **Correct the `none` claims in shipped help and `netpolicy.md`** ([DF198](../findings-unresolved.md)),
+   then fix or refuse `none` per backend. The text has to be rewritten for the new modes anyway, so
+   it lands with them rather than ahead of them.
+3. **`--network=` enum**, booleans as deprecated aliases, both registered in `deprecations.md` with
    the date incurred (rule 9). Carries the schema bump and the migrator.
-5. **`restricted` becomes selectable** once `egress-proxy-build.md` has something behind it. Until
+4. **`restricted` becomes selectable** once `egress-proxy-build.md` has something behind it. Until
    then the value does not exist, rather than existing and degrading — which D138 retires.
 
 ## Surfaces to sweep (rule 2)

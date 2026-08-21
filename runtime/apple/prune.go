@@ -6,8 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"io"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -88,9 +88,21 @@ func (r *Runtime) systemDF(ctx context.Context) (dfUsage, error) {
 // running builder reports containers.reclaimable=0 even though deleting it
 // frees real bytes) — reclaim here is instead measured as the drop in total
 // `system df` footprint (images+containers+volumes) across the prune.
-func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error) {
+func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool) (runtime.CachePruneResult, error) {
 	if dryRun {
-		return r.pruneCacheDryRun(ctx, includeImages, output), nil
+		return r.pruneCacheDryRun(ctx, includeImages), nil
+	}
+
+	var result runtime.CachePruneResult
+	// All four sweeps fail the same way — one `container` subcommand did not
+	// run — so they share an event and name the subcommand in a field.
+	subcommandFailed := func(operation string, err error) {
+		result.Notices = append(result.Notices, feedback.Notice{
+			Event:   "prune.subcommand_failed",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("apple: %s failed: %v", operation, err),
+			Fields:  map[string]any{"backend": "apple", "operation": operation},
+		})
 	}
 
 	before, _ := r.systemDF(ctx)
@@ -103,34 +115,39 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 	//
 	// Stopped containers first, mirroring the docker backend's ordering.
 	if _, err := r.runContainer(ctx, "prune"); err != nil {
-		fmt.Fprintf(output, "apple: container prune failed: %v\n", err) //nolint:errcheck
+		subcommandFailed("container prune", err)
 	}
 
 	// Dangling images — always, both modes (matches the core Prune's docker
 	// counterpart, which removes these regardless of includeImages).
 	if _, err := r.runContainer(ctx, "image", "prune"); err != nil {
-		fmt.Fprintf(output, "apple: image prune failed: %v\n", err) //nolint:errcheck
+		subcommandFailed("image prune", err)
 	}
 
 	// Build cache: only lever is deleting the builder; it is recreated
 	// automatically by Setup on next use. May error if no builder exists —
 	// swallow and continue.
 	if _, err := r.runContainer(ctx, "builder", "delete", "--force"); err != nil {
-		fmt.Fprintf(output, "apple: builder delete failed: %v\n", err) //nolint:errcheck
+		subcommandFailed("builder delete", err)
 	}
 
 	// Unused (non-dangling) images too, but only when asked — this forces a
 	// rebuild of yoloai-base on next sandbox creation.
 	if includeImages {
 		if _, err := r.runContainer(ctx, "image", "prune", "--all"); err != nil {
-			fmt.Fprintf(output, "apple: image prune --all failed: %v\n", err) //nolint:errcheck
+			subcommandFailed("image prune --all", err)
 		}
 	}
 
 	after, _ := r.systemDF(ctx)
-	reclaimed := reclaimDelta(before, after)
-	fmt.Fprintf(output, "apple: reclaimed %s\n", runtime.FormatBytes(reclaimed)) //nolint:errcheck
-	return reclaimed, nil
+	result.BytesReclaimed = reclaimDelta(before, after)
+	result.Notices = append(result.Notices, feedback.Notice{
+		Event:   "prune.cache_reclaimed",
+		Level:   feedback.LevelInfo,
+		Message: fmt.Sprintf("apple: reclaimed %s", runtime.FormatBytes(result.BytesReclaimed)),
+		Fields:  map[string]any{"backend": "apple", "bytes": result.BytesReclaimed},
+	})
+	return result, nil
 }
 
 // dryRunReclaimEstimate returns the reclaim a dry-run can promise up front.
@@ -154,25 +171,34 @@ func dryRunReclaimEstimate(df dfUsage, includeImages bool) int64 {
 // the pre-measurable reclaim (see dryRunReclaimEstimate); the build cache freed
 // by deleting the builder is unmeasurable up front, so it's called out in the
 // message but not counted in the returned estimate.
-func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool, output io.Writer) int64 {
+func (r *Runtime) pruneCacheDryRun(ctx context.Context, includeImages bool) runtime.CachePruneResult {
+	var result runtime.CachePruneResult
 	df, err := r.systemDF(ctx)
 	if err != nil {
-		fmt.Fprintf(output, "apple: could not estimate reclaimable cache: %v\n", err) //nolint:errcheck
-		return 0
+		result.Notices = append(result.Notices, feedback.Notice{
+			Event:   "prune.estimate_unavailable",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("apple: could not estimate reclaimable cache: %v", err),
+			Fields:  map[string]any{"backend": "apple"},
+		})
+		return result
 	}
 
 	// This runs as the CLI's internal scan on every prune, not only under
 	// --dry-run, so it must not frame itself as a dry-run mode. The BuildKit
 	// build cache freed by deleting the builder is unmeasurable up front, so it's
 	// always called out even when the measurable estimate is 0.
-	estimate := dryRunReclaimEstimate(df, includeImages)
+	result.BytesReclaimed = dryRunReclaimEstimate(df, includeImages)
+	message := "apple: would remove build cache + dangling images (size measured after prune); BuildKit build cache also freed"
 	if includeImages {
-		//nolint:errcheck // best-effort progress output
-		fmt.Fprintf(output, "apple: would remove build cache + dangling and unused images (~%s); BuildKit build cache also freed\n",
-			runtime.FormatBytes(estimate))
-	} else {
-		//nolint:errcheck // best-effort progress output
-		fmt.Fprintf(output, "apple: would remove build cache + dangling images (size measured after prune); BuildKit build cache also freed\n")
+		message = fmt.Sprintf("apple: would remove build cache + dangling and unused images (~%s); BuildKit build cache also freed",
+			runtime.FormatBytes(result.BytesReclaimed))
 	}
-	return estimate
+	result.Notices = append(result.Notices, feedback.Notice{
+		Event:   "prune.cache_estimated",
+		Level:   feedback.LevelInfo,
+		Message: message,
+		Fields:  map[string]any{"backend": "apple", "bytes": result.BytesReclaimed},
+	})
+	return result
 }

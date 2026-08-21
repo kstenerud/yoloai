@@ -5,13 +5,13 @@ package runtime
 import (
 	"context"
 	"errors"
-	"io"
 	"io/fs"
 	"log/slog"
 	"strings"
 	"syscall"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 )
 
@@ -21,15 +21,65 @@ var (
 	ErrNotRunning = errors.New("instance not running")
 )
 
-// PruneItem describes a single orphaned resource found during pruning.
+// PruneAction says what happened, or would happen, to a PruneItem.
+//
+// It exists because "prune found this" and "prune removed this" and "prune
+// tried and could not" were previously the same thing on the result and three
+// different sentences on a writer. A caller counting what it reclaimed, and a
+// caller listing what needs a human, both had to parse prose to tell them
+// apart — and the prose was per-backend.
+type PruneAction string
+
+const (
+	// PruneActionRemoved: the resource is gone.
+	PruneActionRemoved PruneAction = "removed"
+	// PruneActionWouldRemove: a dry run identified it; nothing was touched.
+	PruneActionWouldRemove PruneAction = "would-remove"
+	// PruneActionFailed: removal was attempted and did not succeed. Reason
+	// carries the backend's error text.
+	PruneActionFailed PruneAction = "failed"
+	// PruneActionSkipped: removal was not attempted, deliberately. Reason
+	// says what would have to change — a running sandbox, a held image.
+	PruneActionSkipped PruneAction = "skipped"
+)
+
+// PruneItem describes a single resource pruning found, and what became of it.
 type PruneItem struct {
-	Kind string // "container", "vm", "image"
-	Name string // instance name or short image ID
+	// Kind classifies the resource: "container", "vm", "image", "snapshot",
+	// "netns", "stale-base". Open-set; the public layer maps it to a
+	// PruneItemKind.
+	Kind string
+	// Name is the resource identifier — instance name, short image ID, ref.
+	Name string
+	// Action is what happened to it. The zero value is deliberately not a
+	// valid action: a backend that forgets to set one is not silently
+	// reported as having removed something.
+	Action PruneAction
+	// Reason explains a Failed or Skipped action, in the backend's own words.
+	// Empty for Removed and WouldRemove, where there is nothing to explain.
+	Reason string
+	// BytesReclaimed is the space this item freed, or 0 when the backend
+	// cannot attribute bytes to individual resources — which is the common
+	// case, since most report only a total.
+	BytesReclaimed int64
 }
 
-// PruneResult summarizes orphaned resources found by a backend.
+// Removable reports whether the item was removed or would be under a real run.
+// It is the predicate a caller counting reclaimable resources wants: a failed
+// or skipped item is something to tell a human about, not something reclaimed.
+func (i PruneItem) Removable() bool {
+	return i.Action == PruneActionRemoved || i.Action == PruneActionWouldRemove
+}
+
+// PruneResult summarizes what a backend's prune found and did.
+//
+// Notices carry the advisories that are not about any one item — a backend
+// subcommand that failed outright, a caveat about how the host reclaims space.
+// Anything that *is* about one resource belongs in Items, where it can be
+// counted and filtered instead of read.
 type PruneResult struct {
-	Items []PruneItem
+	Items   []PruneItem
+	Notices []feedback.Notice
 }
 
 // MountSpec describes a bind mount from host into the sandbox instance.
@@ -478,7 +528,12 @@ type Backend interface {
 	// layout is the active config.Layout — backends use it to derive
 	// host paths (e.g. base-image build lock locations). Q-W.5 threads
 	// it through the interface so backends never read ambient HOME.
-	Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error
+	// Setup makes the backend's base image current, reporting what it is doing
+	// to progress. It takes a ProgressSink rather than an io.Writer: nothing it
+	// emits is foreign bytes — the subprocess streams it pipes are adapted to
+	// records inside the backend, at the one seam where exec.Cmd forces a
+	// writer (D145).
+	Setup(ctx context.Context, layout config.Layout, sourceDir string, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger, force bool) error
 
 	// IsReady returns true if the backend is ready to launch agents (image
 	// built, prerequisites present, etc.). Each backend determines readiness
@@ -516,7 +571,12 @@ type Backend interface {
 	// Prune removes orphaned backend resources. knownInstances lists instance
 	// names that have valid sandbox directories; anything else named yoloai-*
 	// is considered orphaned. When dryRun is true, reports without removing.
-	Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (PruneResult, error)
+	//
+	// Everything it has to say comes back on the PruneResult. It takes no
+	// writer: what prune produces is a report, and a report rendered to text
+	// inside the backend cannot be counted, filtered, or serialised by the
+	// caller that asked for it (D145).
+	Prune(ctx context.Context, knownInstances []string, dryRun bool) (PruneResult, error)
 
 	// Close releases any resources held by the runtime.
 	Close() error

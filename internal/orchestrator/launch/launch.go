@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -19,6 +18,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/broker"
 	"github.com/kstenerud/yoloai/internal/config"
@@ -42,20 +42,6 @@ import (
 // enough to cover a cold Kata VM boot + virtio-fs propagation; on
 // timeout the caller removes the secrets dir anyway (we never leak it).
 const secretsConsumedTimeout = 30 * time.Second
-
-// WarningPrefix marks a line written to state.State.Output as a warning rather
-// than progress. That stream carries both — port-availability warnings from
-// filterAvailablePorts alongside a streamed image build from ensureImageLineage —
-// so a line's level can only be read from the line.
-//
-// On the create path Output is a terminal and the prefix simply prints. On the
-// restart path it is a noticeWriter, which classifies on this exact constant and
-// strips it, so the level survives into a structured Notice instead of the whole
-// stream being labelled one way. It is exported for that consumer: sharing the
-// literal is what stops the producer and the classifier from drifting apart,
-// which is how every line of build progress came to be reported as a warning
-// (DF157).
-const WarningPrefix = "Warning: "
 
 // LaunchContainer creates a sandbox instance from State, starts it,
 // and cleans up credential temp files. Used by both initial creation and
@@ -81,6 +67,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	// — so both paths broker identically (D105/D106).
 	spec := envspec.BuildEnvSpec(st.Agent)
 	secretEnv := envsetup.ResolveSecretEnv(spec, envVars, st.Layout)
+	discloseInjectedCredentials(st, spec)
 	bro, err := brokerCredentials(ctx, d.Runtime, st, secretEnv)
 	if err != nil {
 		return err
@@ -134,10 +121,10 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	if err != nil {
 		return err
 	}
-	ports = filterAvailablePorts(ports, outputOr(st.Output))
+	ports = filterAvailablePorts(ports, st.Notices)
 
 	for _, w := range advisoryWarnings(ctx, d.Runtime, st.Isolation) {
-		fmt.Fprintf(outputOr(st.Output), WarningPrefix+"%s\n", w) //nolint:errcheck // best-effort output
+		feedback.Warnf(st.Notices, "capability.advisory_check_failed", "%s", w)
 	}
 
 	// Re-ensure the image right before bringing it up, not only at create (DF156).
@@ -162,7 +149,7 @@ func LaunchContainer(ctx context.Context, d state.Deps, st *state.State) (err er
 	}
 	mnts = append(mnts, scriptMount...)
 
-	if err = buildAndStart(ctx, d.Runtime, st, mnts, ports, secretsDir != "", secretEnv, bro, baseChecksum); err != nil {
+	if err = buildAndStart(ctx, d.Runtime, d.LoggerOr(), st, mnts, ports, secretsDir != "", secretEnv, bro, baseChecksum); err != nil {
 		return err // the deferred rollbackPartialLaunch reaps the injector + container + netns
 	}
 	return nil
@@ -192,7 +179,7 @@ func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) (str
 	if !ok {
 		return "", nil
 	}
-	out, logger := outputOr(st.Output), slog.Default()
+	logger := d.LoggerOr()
 
 	// No profile means the sandbox runs yoloai-base itself, and Setup is the
 	// check for that image. EnsureProfileImage cannot be used here: it resolves a
@@ -201,11 +188,11 @@ func ensureImageLineage(ctx context.Context, d state.Deps, st *state.State) (str
 	// reached, which is why the guard has to be explicit rather than implied.
 	if st.Profile == "" {
 		baseProfileDir := filepath.Join(st.Layout.ProfilesDir(), "base")
-		if err := d.Runtime.Setup(ctx, st.Layout, baseProfileDir, out, logger, false); err != nil {
+		if err := d.Runtime.Setup(ctx, st.Layout, baseProfileDir, st.Progress, st.Notices, logger, false); err != nil {
 			return "", fmt.Errorf("ensure base image is current: %w", err)
 		}
 	} else if err := rebuildProfileImage(ctx, d.Runtime, st.Layout, st.Profile,
-		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, logger, false); err != nil {
+		profiles.AutoBuildSecrets(st.Layout.HomeDir), st.Progress, st.Notices, logger, false); err != nil {
 		return "", fmt.Errorf("ensure image is current: %w", err)
 	}
 
@@ -319,7 +306,7 @@ func UsesSidecarFirewall(rt runtime.Backend, isolation runtime.IsolationMode, ne
 // comes up on a keepalive_only holder and sandbox-setup.py is launched as a
 // separate process over it — the S3 re-route. Otherwise it follows the legacy
 // path: the agent is welded into the entrypoint as before.
-func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, baseChecksum string) error {
+func buildAndStart(ctx context.Context, rt runtime.Backend, logger *slog.Logger, st *state.State, mnts []runtime.MountSpec, ports []runtime.PortMapping, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, baseChecksum string) error {
 	cname := store.InstanceName(st.Layout.Principal, st.Name)
 	sidecarFirewall := UsesSidecarFirewall(rt, st.Isolation, st.NetworkMode)
 	instanceCfg, err := buildInstanceConfig(rt.Descriptor(), st, mnts, ports, bro, sidecarFirewall, baseChecksum)
@@ -340,11 +327,11 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 	// condition, so the two stay in sync — a backend on the legacy bring-up also
 	// gets legacy /run/secrets staging.
 	if launcher, ok := usesAgentFreeLaunch(rt, st.Isolation); ok {
-		if err := startViaLaunch(ctx, rt, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv, bro, sidecarFirewall); err != nil {
+		if err := startViaLaunch(ctx, rt, logger, launcher, st, cname, instanceCfg, markerPath, hasSecrets, secretEnv, bro, sidecarFirewall); err != nil {
 			return err
 		}
 	} else {
-		if err := startLegacy(ctx, rt, st, cname, instanceCfg, markerPath, hasSecrets); err != nil {
+		if err := startLegacy(ctx, rt, logger, st, cname, instanceCfg, markerPath, hasSecrets); err != nil {
 			return err
 		}
 	}
@@ -367,7 +354,7 @@ func buildAndStart(ctx context.Context, rt runtime.Backend, st *state.State, mnt
 //     + named vars); there is no /run/secrets read on this path.
 //  5. The secrets-consumed marker wait is SKIPPED on the Launch path (hasSecrets is
 //     false; secrets were not staged to a host dir so no synchronization is needed).
-func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, sidecarFirewall bool) error {
+func startViaLaunch(ctx context.Context, rt runtime.Backend, logger *slog.Logger, launcher runtime.ProcessLauncher, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool, secretEnv map[string]string, bro brokerOutcome, sidecarFirewall bool) error {
 	if err := patchKeepaliveOnly(st.SandboxDir, true); err != nil {
 		return fmt.Errorf("patch keepalive_only: %w", err)
 	}
@@ -395,7 +382,7 @@ func startViaLaunch(ctx context.Context, rt runtime.Backend, launcher runtime.Pr
 	readyPath := store.SubstrateReadyMarkerPath(st.SandboxDir)
 	_ = os.Remove(readyPath)
 
-	if err := createWithImageRecovery(ctx, rt, st, instanceCfg); err != nil {
+	if err := createWithImageRecovery(ctx, rt, logger, st, instanceCfg); err != nil {
 		return err
 	}
 	if err := rt.Start(ctx, cname); err != nil {
@@ -926,8 +913,8 @@ func applyBrokerEnv(secretEnv map[string]string, bc *agent.BrokerConfig, reach r
 // runtime.ProcessLauncher: create the instance, start it, and wait for the
 // entrypoint (which runs sandbox-setup.py inline) to consume secrets.
 // No keepalive_only patch; the agent is welded into the entrypoint as before.
-func startLegacy(ctx context.Context, rt runtime.Backend, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
-	if err := createWithImageRecovery(ctx, rt, st, instanceCfg); err != nil {
+func startLegacy(ctx context.Context, rt runtime.Backend, logger *slog.Logger, st *state.State, cname string, instanceCfg runtime.InstanceConfig, markerPath string, hasSecrets bool) error {
+	if err := createWithImageRecovery(ctx, rt, logger, st, instanceCfg); err != nil {
 		return err
 	}
 	if err := rt.Start(ctx, cname); err != nil {
@@ -1247,7 +1234,7 @@ var rebuildProfileImage = profiles.EnsureProfileImage
 // genuinely broken Dockerfile has to fail rather than spin, and both failure
 // paths below say a rebuild was already attempted, because "it failed twice for
 // the same reason" is a materially different diagnosis from the first failure.
-func createWithImageRecovery(ctx context.Context, rt runtime.Backend, st *state.State, instanceCfg runtime.InstanceConfig) error {
+func createWithImageRecovery(ctx context.Context, rt runtime.Backend, logger *slog.Logger, st *state.State, instanceCfg runtime.InstanceConfig) error {
 	err := gvisorStartHint(st.Isolation, rt.Create(ctx, instanceCfg))
 	if err == nil {
 		return nil
@@ -1256,12 +1243,16 @@ func createWithImageRecovery(ctx context.Context, rt runtime.Backend, st *state.
 		return missingImageHint(instanceCfg.ImageRef, st.Profile, err)
 	}
 
-	out := outputOr(st.Output)
-	fmt.Fprintf(out, "Profile image %s is recorded as built but missing from this backend's store; rebuilding it...\n", //nolint:errcheck // best-effort progress
-		instanceCfg.ImageRef)
+	feedback.Emit(st.Notices, feedback.Notice{
+		Event: "profile.image_rebuilding",
+		Level: feedback.LevelInfo,
+		Message: fmt.Sprintf("Profile image %s is recorded as built but missing from this backend's store; rebuilding it...",
+			instanceCfg.ImageRef),
+		Fields: map[string]any{"image": instanceCfg.ImageRef, "profile": st.Profile},
+	})
 
 	if buildErr := rebuildProfileImage(ctx, rt, st.Layout, st.Profile,
-		profiles.AutoBuildSecrets(st.Layout.HomeDir), out, slog.Default(), true); buildErr != nil {
+		profiles.AutoBuildSecrets(st.Layout.HomeDir), st.Progress, st.Notices, logger, true); buildErr != nil {
 		return fmt.Errorf("%w\n\nThis was an automatic rebuild of %q, triggered because creating "+
 			"the instance failed with: %v", buildErr, instanceCfg.ImageRef, err)
 	}
@@ -1361,13 +1352,18 @@ func verifyInstanceRunning(ctx context.Context, rt runtime.Backend, st *state.St
 // filterAvailablePorts removes any port mappings where the host port is already
 // in use, printing a warning for each skipped entry. Best-effort: a TOCTOU race
 // is possible but Docker's own error is the fallback for that case.
-func filterAvailablePorts(ports []runtime.PortMapping, output io.Writer) []runtime.PortMapping {
+func filterAvailablePorts(ports []runtime.PortMapping, sink feedback.Sink) []runtime.PortMapping {
 	var available []runtime.PortMapping
 	for _, p := range ports {
 		l, err := net.Listen("tcp", fmt.Sprintf(":%d", p.HostPort))
 		if err != nil {
-			fmt.Fprintf(output, WarningPrefix+"skipping port %d:%d — host port %d is already in use\n", //nolint:errcheck // best-effort output
-				p.HostPort, p.ContainerPort, p.HostPort)
+			feedback.Emit(sink, feedback.Notice{
+				Event: "ports.unavailable",
+				Level: feedback.LevelWarn,
+				Message: fmt.Sprintf("skipping port %d:%d — host port %d is already in use",
+					p.HostPort, p.ContainerPort, p.HostPort),
+				Fields: map[string]any{"host_port": p.HostPort, "container_port": p.ContainerPort},
+			})
 			continue
 		}
 		_ = l.Close()
@@ -1510,11 +1506,19 @@ func parseMemoryString(s string) (int64, error) {
 	return int64(val * float64(multiplier)), nil
 }
 
-// outputOr returns o when non-nil, otherwise io.Discard, so leaf writers never
-// see a nil io.Writer. Mirrors the façade Engine.outputFor.
-func outputOr(o io.Writer) io.Writer {
-	if o != nil {
-		return o
+// discloseInjectedCredentials writes the D144 line-2 disclosure to st.Output,
+// naming the credential env vars actually resolved from the host-env snapshot
+// for spec's declaring agent — a grant selection may not make silently
+// (D144: "Selection ... may not grant them invisibly"). A no-op when nothing
+// resolved: DescribeInjectedCredentials returns "" in that case, and silence
+// must mean "nothing was granted".
+//
+// Written to st.Output (via outputOr, nil-safe): on `new`/`run` that is the
+// create pipeline's progress writer, streamed straight to stderr; on
+// `start`/`reset` it is wrapped as a noticeWriter and surfaces through the
+// result's Notices (F8) — both reach a human running the command.
+func discloseInjectedCredentials(st *state.State, spec envsetup.EnvSpec) {
+	if line := envsetup.DescribeInjectedCredentials(spec, st.Layout); line != "" {
+		feedback.Infof(st.Notices, "credentials.injected", "%s", line)
 	}
-	return io.Discard
 }

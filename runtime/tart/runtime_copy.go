@@ -6,8 +6,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
-	"io"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 )
 
@@ -16,9 +16,9 @@ import (
 // The ditto copy approach produced incomplete runtimes that failed to boot simulators.
 // VM must be running with Xcode configured.
 // env is the explicit subprocess environment (DEV §12); pass r.execEnv from the Runtime.
-// Progress is written to progress (the caller's writer); the library never
-// touches the process's os.Stdout/Stderr (§12).
-func CopyRuntimeToVM(ctx context.Context, env []string, tartBin, vmName string, runtime RuntimeVersion, progress io.Writer) error {
+// Progress is emitted as records; the library never touches the process's
+// os.Stdout/Stderr (§12).
+func CopyRuntimeToVM(ctx context.Context, env []string, tartBin, vmName string, runtime RuntimeVersion, progress feedback.ProgressSink) error {
 	// Capitalize platform for xcodebuild (iOS, tvOS, watchOS, visionOS)
 	platformCap := CapitalizePlatform(runtime.Platform)
 
@@ -26,23 +26,31 @@ func CopyRuntimeToVM(ctx context.Context, env []string, tartBin, vmName string, 
 	// Note: xcodebuild -downloadPlatform doesn't support specific version selection;
 	// it always downloads the latest available. The runtime is resolved on the host
 	// before this function is called, so we know what version should be available.
-	fmt.Fprintf(progress, "Downloading %s %s runtime...\n", platformCap, runtime.Version) //nolint:errcheck // best-effort progress
+	feedback.EmitProgress(progress, feedback.Progress{
+		Event:   "runtime.downloading",
+		Message: fmt.Sprintf("Downloading %s %s runtime...", platformCap, runtime.Version),
+		Fields:  map[string]any{"platform": runtime.Platform, "version": runtime.Version},
+	})
 	downloadCmd := fmt.Sprintf("xcodebuild -downloadPlatform %s", platformCap)
 	args := execArgs(vmName, "bash", "-c", downloadCmd)
 	cmd := sysexec.CommandContext(ctx, env, tartBin, args...)
 
-	// Stream the subprocess's live progress to the caller's writer.
-	// xcodebuild outputs progress updates with carriage returns (\r); a TTY
-	// writer animates them, a non-TTY one just scrolls.
-	cmd.Stdout = progress
-	cmd.Stderr = progress
+	// xcodebuild reports download progress as \r-terminated updates with no
+	// newline until the end. ProgressWriter splits on \r as well as \n for
+	// exactly this, so each update is its own record — a terminal consumer can
+	// redraw in place, and anything else can sample or drop them. Handing it a
+	// raw writer instead would buffer a multi-GB download into one line.
+	pw := feedback.NewProgressWriter(progress, "runtime.download_output")
+	defer pw.Flush()
+	cmd.Stdout = pw
+	cmd.Stderr = pw
 
 	if err := cmd.Run(); err != nil {
 		return fmt.Errorf("download runtime: %w", err)
 	}
 
 	// Verify runtime is recognized by simctl
-	fmt.Fprintf(progress, "Verifying runtime...\n") //nolint:errcheck // best-effort progress
+	feedback.Progressf(progress, "runtime.verifying", "Verifying runtime...")
 	verifyCmd := fmt.Sprintf("xcrun simctl list runtimes 2>&1 | grep '%s %s'",
 		platformCap, runtime.Version)
 	args = execArgs(vmName, "bash", "-c", verifyCmd)
@@ -56,6 +64,6 @@ func CopyRuntimeToVM(ctx context.Context, env []string, tartBin, vmName string, 
 		return fmt.Errorf("verify runtime: %w", err)
 	}
 
-	fmt.Fprintf(progress, "Runtime verified successfully\n") //nolint:errcheck // best-effort progress
+	feedback.Progressf(progress, "runtime.verified", "Runtime verified successfully")
 	return nil
 }

@@ -170,6 +170,7 @@ func (s *FileAgentSpec) toDefinition() *Definition {
 		NetworkAllowlist:  s.NetworkAllowlist,
 		ContextFile:       s.ContextFile,
 		AgentFilesExclude: s.AgentFilesExclude,
+		UserDefined:       true,
 	}
 }
 

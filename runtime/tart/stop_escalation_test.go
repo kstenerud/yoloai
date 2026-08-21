@@ -66,7 +66,7 @@ esac
 
 	// --- capture slog output ---
 	var logBuf bytes.Buffer
-	origLogger := slog.Default()
+	origLogger := slog.Default() //nolint:forbidigo // saved to restore after the test swaps the global; the swap is the test's setup, not a library reach (D145)
 	slog.SetDefault(slog.New(slog.NewJSONHandler(&logBuf, nil)))
 	defer slog.SetDefault(origLogger)
 

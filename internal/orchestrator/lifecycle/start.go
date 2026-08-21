@@ -11,6 +11,7 @@ import (
 	"os"
 	"slices"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -62,15 +63,15 @@ func Start(ctx context.Context, d state.Deps, name string, opts StartOptions) (*
 		return nil, err
 	}
 	defer unlock()
-	var n notices
+	var n feedback.Collector
 	startErr := start(ctx, d, name, opts, &n)
-	return &StartResult{Notices: n.list}, startErr
+	return &StartResult{Notices: n.Notices()}, startErr
 }
 
 // applyIsolationOverride applies the isolation mode override from opts to meta
 // if it differs from the current value. Validates mode, checks backend support,
 // and saves meta. No-op when opts.Isolation is empty or unchanged.
-func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions, sandboxDir string, meta *store.Environment, n *notices) error {
+func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions, sandboxDir string, meta *store.Environment, n *feedback.Collector) error {
 	if opts.Isolation == "" || opts.Isolation == meta.Isolation {
 		return nil
 	}
@@ -92,7 +93,7 @@ func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions
 	if err := store.SaveEnvironment(sandboxDir, meta); err != nil {
 		return fmt.Errorf("save meta: %w", err)
 	}
-	n.infof("Isolation mode updated to %s", opts.Isolation)
+	feedback.Infof(n, "sandbox.isolation_updated", "Isolation mode updated to %s", opts.Isolation)
 	return nil
 }
 
@@ -101,9 +102,10 @@ func applyIsolationOverride(ctx context.Context, d state.Deps, opts StartOptions
 // sandbox is brokered, restart/start re-broker from meta so the real key is never
 // silently re-delivered into the container on a later launch. Unlike the vscode
 // option there is no runtime-config patch — brokering lives entirely in the
-// host-side launch path, not the entrypoint. (Opting back out is the future
-// --no-broker; not wired here.)
-func applyBrokerOption(d state.Deps, opts StartOptions, sandboxDir string, meta *store.Environment, n *notices) error {
+// host-side launch path, not the entrypoint. --no-broker opts back out and is
+// equally sticky, so a sandbox created brokered can be moved to direct delivery
+// and stays there until asked otherwise.
+func applyBrokerOption(d state.Deps, opts StartOptions, sandboxDir string, meta *store.Environment, n *feedback.Collector) error {
 	// Resolve the explicit posture: --broker forces on, --no-broker forces off,
 	// neither leaves the persisted posture untouched (sticky). The two flags are
 	// mutually exclusive (validated at the CLI). The posture is persisted so a
@@ -127,16 +129,16 @@ func applyBrokerOption(d state.Deps, opts StartOptions, sandboxDir string, meta 
 		return fmt.Errorf("save meta: %w", err)
 	}
 	if on {
-		n.infof("Credential brokering enabled (the agent's API key stays host-side)")
+		feedback.Infof(n, "sandbox.brokering_enabled", "Credential brokering enabled (the agent's API key stays host-side)")
 	} else {
-		n.infof("Credential brokering disabled (the agent's API key is delivered directly)")
+		feedback.Infof(n, "sandbox.brokering_disabled", "Credential brokering disabled (the agent's API key is delivered directly)")
 	}
 	return nil
 }
 
 // applyVscodeTunnelOption enables the VS Code Remote Tunnel in meta and
 // runtime-config.json when opts.VscodeTunnel is true and not already enabled.
-func applyVscodeTunnelOption(d state.Deps, opts StartOptions, sandboxDir, name string, meta *store.Environment, n *notices) error {
+func applyVscodeTunnelOption(d state.Deps, opts StartOptions, sandboxDir, name string, meta *store.Environment, n *feedback.Collector) error {
 	if !opts.VscodeTunnel || meta.VscodeTunnel {
 		return nil
 	}
@@ -147,7 +149,7 @@ func applyVscodeTunnelOption(d state.Deps, opts StartOptions, sandboxDir, name s
 	if err := patchConfigVscodeTunnel(sandboxDir, name); err != nil {
 		return fmt.Errorf("patch runtime-config.json for vscode-tunnel: %w", err)
 	}
-	n.infof("VS Code tunnel enabled")
+	feedback.Infof(n, "sandbox.vscode_tunnel_enabled", "VS Code tunnel enabled")
 	return nil
 }
 
@@ -200,7 +202,7 @@ func preparePromptForStart(opts StartOptions, sandboxDir string, meta *store.Env
 // nothing here re-resolves the image — which makes this the container backends'
 // real stale-lineage case, and the common one: a long-lived sandbox that has
 // finished a task, sat through a yoloAI upgrade, and is asked to run another.
-func handleTerminalStatus(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
+func handleTerminalStatus(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *feedback.Collector) error {
 	slog.Info("relaunching agent", "event", "sandbox.start.agent.relaunch", "sandbox", name)
 	warnIfImageLineageStale(ctx, d, cname, name, n)
 	switch {
@@ -217,14 +219,14 @@ func handleTerminalStatus(ctx context.Context, d state.Deps, cname, name string,
 			return err
 		}
 	}
-	n.infof("Agent relaunched in sandbox %s", name)
+	feedback.Infof(n, "agent.relaunched", "Agent relaunched in sandbox %s", name)
 	return nil
 }
 
 // handleStoppedOrRemovedStatus recreates the container for a sandbox whose
 // container is stopped or removed. removeStopped indicates the container still
 // exists and must be removed first. successMsg is printed on success.
-func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string, n *notices) error {
+func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt, removeStopped bool, successMsg string, n *feedback.Collector) error {
 	if removeStopped && !d.Runtime.Descriptor().Capabilities.HostFilesystem {
 		// Container backends (Docker, Podman, containerd): the sandbox directory
 		// lives on the host separately from the container, so Remove only deletes
@@ -254,7 +256,7 @@ func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name
 	if err := recreateContainer(ctx, d, name, meta, opts.Resume, opts.Env, n); err != nil {
 		return err
 	}
-	n.infof("%s", successMsg)
+	feedback.Infof(n, "sandbox.started", "%s", successMsg)
 	return nil
 }
 
@@ -262,7 +264,7 @@ func handleStoppedOrRemovedStatus(ctx context.Context, d state.Deps, cname, name
 // Credentials are refreshed, the VM is resumed via runtime.Start (which kills
 // the stale tmux session and runs the setup script), and executeVMWorkDirSetup
 // is skipped because the work directory is already present from the suspend.
-func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *notices) error {
+func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string, meta *store.Environment, opts StartOptions, promptText string, customPrompt bool, n *feedback.Collector) error {
 	slog.Info("resuming suspended sandbox", "event", "sandbox.start.resume", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 
@@ -309,7 +311,7 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 	// Don't call executeVMWorkDirSetup: the work directory is already present
 	// inside the VM from before the suspend.
 
-	n.infof("Sandbox %s resumed", name)
+	feedback.Infof(n, "sandbox.resumed", "Sandbox %s resumed", name)
 	return nil
 }
 
@@ -336,7 +338,7 @@ func handleSuspendedResume(ctx context.Context, d state.Deps, cname, name string
 // An absent label reads as stale, by the same decision the base path already
 // made (checksumLabelStale): an image predating the scheme cannot vouch for
 // itself, and one warning is the right price.
-func warnIfImageLineageStale(ctx context.Context, d state.Deps, cname, name string, n *notices) {
+func warnIfImageLineageStale(ctx context.Context, d state.Deps, cname, name string, n *feedback.Collector) {
 	builder, ok := runtime.ProfileImageBuilderOf(d.Runtime)
 	if !ok {
 		return // no image concept (tart, seatbelt): scripts are delivered at launch
@@ -352,7 +354,7 @@ func warnIfImageLineageStale(ctx context.Context, d state.Deps, cname, name stri
 	if info.Labels[runtime.BaseChecksumLabel] == want {
 		return
 	}
-	n.warnf("this sandbox is running an image built against a different yoloai-base than this "+
+	feedback.Warnf(n, "image.lineage_stale", "this sandbox is running an image built against a different yoloai-base than this "+
 		"version of yoloai expects, so in-sandbox tooling may not match what the host drives. "+
 		"Starting it leaves the image as-is; `yoloai restart %s` rebuilds and re-creates the "+
 		"container, keeping the sandbox's files but discarding anything installed inside it "+
@@ -365,16 +367,16 @@ func warnIfImageLineageStale(ctx context.Context, d state.Deps, cname, name stri
 // the current Docker provider may still live in one the user switched away from,
 // so recreating here abandons the original. No-op for backends without an
 // advisory or when the recreate was expected.
-func maybeWarnRecreateAdvisory(ctx context.Context, d state.Deps, opts StartOptions, n *notices) {
+func maybeWarnRecreateAdvisory(ctx context.Context, d state.Deps, opts StartOptions, n *feedback.Collector) {
 	if opts.Recreating {
 		return
 	}
 	if adv := runtime.RecreateAdvisoryFor(ctx, d.Runtime); adv != "" {
-		n.warnf("%s", adv)
+		feedback.Warnf(n, "sandbox.recreate_advised", "%s", adv)
 	}
 }
 
-func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n *notices) error {
+func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n *feedback.Collector) error {
 	slog.Info("starting sandbox", "event", "sandbox.start", "sandbox", name)
 	sandboxDir := d.Layout.SandboxDir(name)
 	if err := store.RequireSandboxDir(sandboxDir); err != nil {
@@ -428,7 +430,7 @@ func start(ctx context.Context, d state.Deps, name string, opts StartOptions, n 
 
 	switch st {
 	case status.StatusActive, status.StatusIdle:
-		n.infof("Sandbox %s is already running", name)
+		feedback.Infof(n, "sandbox.already_running", "Sandbox %s is already running", name)
 		return nil
 
 	case status.StatusDone, status.StatusFailed:

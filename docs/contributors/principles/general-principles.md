@@ -239,7 +239,7 @@ For every flag with a safety dimension: pick the safe default. The unsafe option
 - **`:overlay` requires `CAP_SYS_ADMIN`** and is opt-in. The default (`:copy`) avoids the capability grant entirely.
 - **Sandbox name required, no auto-generation** (`docs/contributors/design/README.md` §Design Principles). Anonymous sandboxes lead to sprawl; named sandboxes are findable.
 - **Credentials via file-based bind-mount, not env vars** (`docs/contributors/design/security.md`). OWASP and CIS Docker Benchmark guidance is "never pass secrets as env vars to `docker run`"; yoloAI follows it.
-- **Seatbelt default-deny on host filesystem and host environment** (D15). The user opts in to credential access via `env:` and `mounts:` config.
+- **Seatbelt default-deny on host filesystem and host environment** (D15). The user opts in to credential access via `env:` and `directories:` config (`mounts:` until [D142](../decisions/working-notes.md) retired it).
 - **Network is unrestricted by default** but `--network-isolated` and `--network-none` are first-class. The default reflects what most users need (agent API calls); the safety flags are easy to add.
 - **Dirty-repo warning** (`docs/contributors/design/security.md`): `:rw` on a directory with uncommitted changes triggers a warning. The default doesn't refuse, but it doesn't go silent either.
 - **Run as non-root** in the container (user `yoloai` matching host UID/GID), not as root.

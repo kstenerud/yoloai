@@ -50,7 +50,7 @@ func registerCrossBackendFake(t *testing.T) {
 // and the os.Stat miss returns before any runtime call.
 func TestEngine_DestroyForOverwrite_MissingDestIsNoop(t *testing.T) {
 	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
-	e := NewEngineWithRuntime(nil, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	e := NewEngineWithRuntime(nil, slog.New(slog.DiscardHandler), strings.NewReader(""), WithLayout(layout))
 	require.NoError(t, e.DestroyForOverwrite(context.Background(), "ghost"))
 }
 
@@ -61,7 +61,7 @@ func TestEngine_DestroyForOverwrite_MissingDestIsNoop(t *testing.T) {
 func TestEngine_DepsForSandbox_ReusesEngineRuntimeWhenBackendMatches(t *testing.T) {
 	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
 	mock := &mockRuntime{}
-	e := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	e := NewEngineWithRuntime(mock, slog.New(slog.DiscardHandler), strings.NewReader(""), WithLayout(layout))
 
 	name := "same-backend"
 	sandboxDir := layout.SandboxDir(name)
@@ -87,7 +87,7 @@ func TestEngine_DepsForSandbox_ReusesEngineRuntimeWhenBackendMatches(t *testing.
 func TestEngine_DepsForSandbox_FallsBackWhenMetadataUnreadable(t *testing.T) {
 	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
 	mock := &mockRuntime{}
-	e := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	e := NewEngineWithRuntime(mock, slog.New(slog.DiscardHandler), strings.NewReader(""), WithLayout(layout))
 
 	// No environment.json written for "ghost" — LoadEnvironment fails to read it.
 	deps, cleanup, err := e.depsForSandbox(context.Background(), "ghost")
@@ -109,7 +109,7 @@ func TestEngine_DepsForSandbox_OpensAndClosesForDifferentBackend(t *testing.T) {
 
 	layout := config.NewLayout(filepath.Join(t.TempDir(), ".yoloai"))
 	mock := &mockRuntime{}
-	e := NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	e := NewEngineWithRuntime(mock, slog.New(slog.DiscardHandler), strings.NewReader(""), WithLayout(layout))
 
 	name := "other-backend"
 	sandboxDir := layout.SandboxDir(name)

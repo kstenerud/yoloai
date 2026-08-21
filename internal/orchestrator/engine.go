@@ -12,6 +12,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/internal/orchestrator/state"
@@ -110,6 +111,11 @@ func WithLayout(layout config.Layout) EngineOption {
 // the CLI command handlers always pass WithLayout; only direct
 // test construction needs to remember it (use config.NewLayout
 // with t.TempDir-based DataDir).
+// Logger returns the destination the Engine was constructed with, so a sibling
+// handle built from the same Client (System) inherits it rather than reaching
+// for the process-global handler (D145).
+func (e *Engine) Logger() *slog.Logger { return e.logger }
+
 func NewEngine(backend runtime.BackendType, logger *slog.Logger, input io.Reader, opts ...EngineOption) *Engine {
 	return newEngine(backend, nil, false, logger, input, opts...)
 }
@@ -213,7 +219,7 @@ func (e *Engine) Close() error {
 // opened the runtime (or via TryEnsure for the host-only-fallback verbs, where a
 // nil runtime is acceptable).
 func (e *Engine) deps() state.Deps {
-	return state.Deps{Runtime: e.runtime, Layout: e.layout, Input: e.input}
+	return state.Deps{Runtime: e.runtime, Layout: e.layout, Input: e.input, Logger: e.logger}
 }
 
 // Layout returns the Engine's path-resolution Layout. Read-only —
@@ -232,18 +238,15 @@ func (e *Engine) Layout() config.Layout { return e.layout }
 // UX lives in the app layer (the CLI's `yoloai system setup`), which
 // records its own "wizard has run" bookkeeping — none of the library's
 // business.
-func (e *Engine) EnsureSetup(ctx context.Context, out io.Writer) error {
+func (e *Engine) EnsureSetup(ctx context.Context, progress feedback.ProgressSink, notices feedback.Sink) error {
 	if err := e.ensure(ctx); err != nil {
 		return err
-	}
-	if out == nil {
-		out = io.Discard
 	}
 	if err := e.ensureLayoutScaffold(); err != nil {
 		return err
 	}
 	baseProfileDir := e.layout.ProfileDir("base")
-	return e.runtime.Setup(ctx, e.layout, baseProfileDir, out, e.logger, false)
+	return e.runtime.Setup(ctx, e.layout, baseProfileDir, progress, notices, e.logger, false)
 }
 
 // ensureDefaultsDir creates DataDir/defaults/ and materializes the

@@ -15,10 +15,14 @@ import (
 	"github.com/kstenerud/yoloai/internal/agent"
 )
 
+// Claude's aliases reach the vendor CLI unchanged, which resolves them to the
+// current generation. Expanding them here would pin whatever was current when
+// the table was last edited — the drift DF223 records.
 func TestResolveModel_Alias(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
-	result := ResolveModel(agentDef, "sonnet", nil)
-	assert.Equal(t, "claude-sonnet-4-6", result)
+	for _, alias := range []string{"sonnet", "opus", "haiku"} {
+		assert.Equal(t, alias, ResolveModel(agentDef, alias, nil))
+	}
 }
 
 func TestResolveModel_FullName(t *testing.T) {
@@ -50,7 +54,7 @@ func TestResolveModel_UserAliasCustomKey(t *testing.T) {
 func TestResolveModel_NilUserAliasesFallsBack(t *testing.T) {
 	agentDef := agent.GetAgent("claude")
 	result := ResolveModel(agentDef, "sonnet", nil)
-	assert.Equal(t, "claude-sonnet-4-6", result)
+	assert.Equal(t, "sonnet", result)
 }
 
 func TestBuildAgentCommand_InteractiveWithModel(t *testing.T) {

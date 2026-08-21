@@ -6,11 +6,11 @@ package create
 import (
 	"context"
 	"fmt"
-	"io"
 	"log/slog"
 	"os"
 	"strings"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/envsetup"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -52,7 +52,7 @@ func parseAndValidateDirs(ctx context.Context, d state.Deps, opts Options, agent
 
 	defaultDirModes(workdir, auxDirs)
 
-	if err := checkDirSafety(workdir, auxDirs, outputFor(opts.Output), d.Layout.HomeDir); err != nil {
+	if err := checkDirSafety(workdir, auxDirs, opts.Notices, d.Layout.HomeDir); err != nil {
 		return nil, nil, err
 	}
 
@@ -89,7 +89,7 @@ func defaultDirModes(workdir *DirSpec, auxDirs []*DirSpec) {
 // checkAuthAndLocalhostWarnings performs auth checks and localhost URL warnings.
 func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mergedEnv map[string]string, cfgModel string, opts Options) error {
 	auth := envsetup.ResolveAuthPresence(envspec.BuildEnvSpec(agentDef), mergedEnv, d.Layout)
-	if err := checkAgentAuth(agentDef, auth, outputFor(opts.Output)); err != nil {
+	if err := checkAgentAuth(agentDef, auth, opts.Notices); err != nil {
 		return err
 	}
 
@@ -102,12 +102,17 @@ func checkAuthAndLocalhostWarnings(d state.Deps, agentDef *agent.Definition, mer
 }
 
 // checkAgentAuth verifies that the agent has the necessary authentication configured.
-func checkAgentAuth(agentDef *agent.Definition, auth envsetup.AuthPresence, output io.Writer) error {
+func checkAgentAuth(agentDef *agent.Definition, auth envsetup.AuthPresence, sink feedback.Sink) error {
 	if auth.OK() {
 		return nil
 	}
 	if agentDef.AuthOptional {
-		fmt.Fprintf(output, "Warning: no authentication detected for %s (it may use credentials yoloai cannot check)\n", agentDef.Type) //nolint:errcheck // best-effort warning
+		feedback.Emit(sink, feedback.Notice{
+			Event:   "agent.auth_undetected",
+			Level:   feedback.LevelWarn,
+			Message: fmt.Sprintf("no authentication detected for %s (it may use credentials yoloai cannot check)", agentDef.Type),
+			Fields:  map[string]any{"agent": string(agentDef.Type)},
+		})
 		return nil
 	}
 	msg := fmt.Sprintf("no authentication found for %s: set %s",
@@ -163,10 +168,10 @@ func buildAuxDirs(auxSpecs []DirSpec) ([]*DirSpec, error) {
 
 // checkDirSafety checks for dangerous directories in workdir and aux dirs.
 // homeDir is used to detect if the user's home directory is being mounted.
-func checkDirSafety(workdir *DirSpec, auxDirs []*DirSpec, output io.Writer, homeDir string) error {
+func checkDirSafety(workdir *DirSpec, auxDirs []*DirSpec, sink feedback.Sink, homeDir string) error {
 	if workspace.IsDangerousDir(workdir.Path, homeDir) {
 		if workdir.AllowDangerousPath {
-			fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", workdir.Path) //nolint:errcheck // best-effort output
+			warnDangerousDir(sink, workdir.Path)
 		} else {
 			return yoerrors.NewUsageError("refusing to mount dangerous directory %s (use :force to override)", workdir.Path)
 		}
@@ -174,13 +179,29 @@ func checkDirSafety(workdir *DirSpec, auxDirs []*DirSpec, output io.Writer, home
 	for _, ad := range auxDirs {
 		if workspace.IsDangerousDir(ad.Path, homeDir) {
 			if ad.AllowDangerousPath {
-				fmt.Fprintf(output, "WARNING: mounting dangerous directory %s\n", ad.Path) //nolint:errcheck // best-effort output
+				warnDangerousDir(sink, ad.Path)
 			} else {
 				return yoerrors.NewUsageError("refusing to mount dangerous directory %s (use :force to override)", ad.Path)
 			}
 		}
 	}
 	return nil
+}
+
+// warnDangerousDir reports a dangerous host directory the user forced open.
+//
+// The two sites used to write "WARNING: " in capitals, which no other warning
+// in the codebase does and which the restart path's classifier does not
+// recognise -- the level was carried by a string that only some producers
+// agreed on. Emitting a level removes the question: how a warning looks is now
+// decided once, by whoever renders it.
+func warnDangerousDir(sink feedback.Sink, path string) {
+	feedback.Emit(sink, feedback.Notice{
+		Event:   "directory.dangerous_mounted",
+		Level:   feedback.LevelWarn,
+		Message: fmt.Sprintf("mounting dangerous directory %s", path),
+		Fields:  map[string]any{"path": path},
+	})
 }
 
 // checkDirOverlaps checks for path overlaps and duplicate mount paths.

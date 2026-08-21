@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/cli/bugreport"
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
@@ -145,8 +146,10 @@ func WriteSandboxSectionsForFlag(w io.Writer, name, reportType string) {
 		Principal:   string(l.Principal),
 		BackendType: yoloai.BackendType(backend),
 		Input:       os.Stdin,
-		Output:      io.Discard, // best-effort path; don't write to the in-progress bug report
-		Env:         cliutil.EdgeEnv(),
+		// Best-effort path: nothing must land in the in-progress bug report.
+		Notices:  feedback.Discard,
+		Progress: feedback.DiscardProgress,
+		Env:      cliutil.EdgeEnv(),
 	})
 	if err != nil {
 		return

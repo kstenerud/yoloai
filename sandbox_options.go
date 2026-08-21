@@ -5,8 +5,8 @@ package yoloai
 
 import (
 	"fmt"
-	"io"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/orchestrator"
 )
 
@@ -133,11 +133,12 @@ type SandboxCreateOptions struct {
 	// DirSpec.AllowDirty.
 	AllowDirtyWorkdir bool
 
-	// Output receives the create pipeline's human-readable progress (profile
-	// image build stream, advisory warnings). Per-call so concurrent Creates on
-	// one Client don't interleave on a shared writer. Nil falls back to the
-	// Client's ClientCreateOptions.Output.
-	Output io.Writer
+	// Notices receives advisories from the create pipeline; Progress receives
+	// what it is doing right now (image builds, archetype detection). Per-call
+	// so concurrent Creates never interleave. Nil on either falls back to the
+	// Client's corresponding sink.
+	Notices  feedback.Sink
+	Progress feedback.ProgressSink
 }
 
 // toInternal maps the public SandboxCreateOptions onto the internal sandbox struct.
@@ -176,7 +177,8 @@ func (o SandboxCreateOptions) toInternal() orchestrator.CreateOptions {
 		Runtimes:             o.Runtimes,
 		VscodeTunnel:         o.VscodeTunnel,
 		Archetype:            o.Archetype,
-		Output:               o.Output,
+		Notices:              o.Notices,
+		Progress:             o.Progress,
 	}
 }
 

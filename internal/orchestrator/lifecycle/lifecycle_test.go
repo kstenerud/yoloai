@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"io"
 	"io/fs"
 	"log/slog"
 	"os"
@@ -21,6 +20,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
 	"github.com/kstenerud/yoloai/internal/orchestrator/agentcfg"
@@ -1431,32 +1431,32 @@ func TestApplyBrokerOption_PersistsAndIsIdempotent(t *testing.T) {
 	d := newLifecycleDeps(&lifecycleMockRuntime{}, tmpDir)
 
 	// Auto (neither flag): nothing persisted — the default posture isn't pinned.
-	require.NoError(t, applyBrokerOption(d, StartOptions{}, sandboxDir, meta, &notices{}))
+	require.NoError(t, applyBrokerOption(d, StartOptions{}, sandboxDir, meta, &feedback.Collector{}))
 	reloaded, err := store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.False(t, reloaded.BrokerCredentials, "auto -> not persisted")
 	assert.False(t, reloaded.BrokerDisabled, "auto -> not persisted")
 
 	// --broker: forced-on persisted.
-	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: true}, sandboxDir, meta, &notices{}))
+	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: true}, sandboxDir, meta, &feedback.Collector{}))
 	reloaded, err = store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.True(t, reloaded.BrokerCredentials, "--broker -> forced-on persisted")
 	assert.False(t, reloaded.BrokerDisabled)
 
 	// Idempotent.
-	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: true}, sandboxDir, reloaded, &notices{}))
+	require.NoError(t, applyBrokerOption(d, StartOptions{Broker: true}, sandboxDir, reloaded, &feedback.Collector{}))
 	assert.True(t, reloaded.BrokerCredentials)
 
 	// --no-broker flips the persisted posture to forced-off (and clears forced-on).
-	require.NoError(t, applyBrokerOption(d, StartOptions{NoBroker: true}, sandboxDir, reloaded, &notices{}))
+	require.NoError(t, applyBrokerOption(d, StartOptions{NoBroker: true}, sandboxDir, reloaded, &feedback.Collector{}))
 	reloaded, err = store.LoadEnvironment(sandboxDir)
 	require.NoError(t, err)
 	assert.False(t, reloaded.BrokerCredentials, "--no-broker clears forced-on")
 	assert.True(t, reloaded.BrokerDisabled, "--no-broker -> forced-off persisted")
 
 	// Auto after an explicit choice leaves it untouched (sticky).
-	require.NoError(t, applyBrokerOption(d, StartOptions{}, sandboxDir, reloaded, &notices{}))
+	require.NoError(t, applyBrokerOption(d, StartOptions{}, sandboxDir, reloaded, &feedback.Collector{}))
 	assert.True(t, reloaded.BrokerDisabled, "auto does not disturb a persisted choice")
 }
 
@@ -1492,7 +1492,7 @@ type lineageBuilderFake struct {
 	storeLabels map[string]string
 }
 
-func (lineageBuilderFake) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, io.Writer, *slog.Logger) error {
+func (lineageBuilderFake) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, feedback.ProgressSink, feedback.Sink, *slog.Logger) error {
 	return nil
 }
 
@@ -1541,14 +1541,14 @@ func TestWarnIfImageLineageStale(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			n := &notices{}
+			n := &feedback.Collector{}
 			warnIfImageLineageStale(context.Background(), state.Deps{Runtime: tc.rt}, "yoloai-cli-box", "box", n)
 			if tc.wantWarn {
-				require.Len(t, n.list, 1, tc.why)
-				assert.Equal(t, NoticeWarn, n.list[0].Level)
-				assert.Contains(t, n.list[0].Message, "different yoloai-base")
+				require.Len(t, n.Notices(), 1, tc.why)
+				assert.Equal(t, NoticeWarn, n.Notices()[0].Level)
+				assert.Contains(t, n.Notices()[0].Message, "different yoloai-base")
 			} else {
-				assert.Empty(t, n.list, tc.why)
+				assert.Empty(t, n.Notices(), tc.why)
 			}
 		})
 	}
@@ -1561,7 +1561,7 @@ type buildingMock struct {
 	expected string
 }
 
-func (buildingMock) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, io.Writer, *slog.Logger) error {
+func (buildingMock) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, feedback.ProgressSink, feedback.Sink, *slog.Logger) error {
 	return nil
 }
 func (buildingMock) ImageLabels(context.Context, string) (map[string]string, bool) {
@@ -1668,10 +1668,10 @@ func TestWarnIfImageLineageStale_ComparesAgainstBinaryNotStore(t *testing.T) {
 		storeLabels: map[string]string{runtime.BaseChecksumLabel: stale},
 	}
 
-	n := &notices{}
+	n := &feedback.Collector{}
 	warnIfImageLineageStale(context.Background(), state.Deps{Runtime: rt}, "yoloai-cli-box", "box", n)
 
-	require.Len(t, n.list, 1,
+	require.Len(t, n.Notices(), 1,
 		"the sandbox and the un-rebuilt base tag agree with each other and disagree with the binary; "+
 			"only comparing against the binary catches it")
 }
@@ -1688,11 +1688,11 @@ func TestWarnIfImageLineageStale_ComparesAgainstBinaryNotStore(t *testing.T) {
 func TestWarnIfImageLineageStale_RemedyIsRestartByBareName(t *testing.T) {
 	rt := lineageBuilderFake{lineageFake: lineageFake{labels: map[string]string{}}, expected: "base-v2"}
 
-	n := &notices{}
+	n := &feedback.Collector{}
 	warnIfImageLineageStale(context.Background(), state.Deps{Runtime: rt}, "yoloai-cli-box", "box", n)
 
-	require.Len(t, n.list, 1)
-	msg := n.list[0].Message
+	require.Len(t, n.Notices(), 1)
+	msg := n.Notices()[0].Message
 	assert.Contains(t, msg, "yoloai restart box", "must name a command the user can paste")
 	assert.NotContains(t, msg, "yoloai-cli-box", "the instance name is not addressable by the CLI")
 	assert.NotContains(t, msg, "destroy", "destroying discards the sandbox for no benefit")

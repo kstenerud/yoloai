@@ -52,6 +52,66 @@ func TestCreate_CleansUpIncompleteOnNew(t *testing.T) {
 	assert.NotErrorIs(t, err, ErrSandboxExists)
 }
 
+// TestArch_LibraryNeverDefaultsAgent is the claim cited by config.md's
+// "Implemented settings" table for `agent` and by sandbox_options.go:48-51:
+// AgentType/Agent is a required input the library refuses to default, not an
+// optional one it silently fills in with "claude" or any other agent — an
+// unset agent is a missing input, and the caller (the CLI, or an embedder)
+// owns picking one. See the TestArch_ prefix convention, AGENTS.md
+// "Preparing a PR". The refusal itself lives at create.go:443-445.
+func TestArch_LibraryNeverDefaultsAgent(t *testing.T) {
+	tmpDir := t.TempDir()
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	d := state.Deps{
+		Runtime: &mockRuntime{},
+		Layout:  layout,
+		Input:   strings.NewReader(""),
+	}
+
+	_, err := create.Run(context.Background(), d, create.Options{
+		Name:    "no-agent",
+		Workdir: create.DirSpec{Path: tmpDir},
+		// Agent deliberately left empty.
+		Version: "test",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "agent is required")
+}
+
+// TestArch_UnknownConfigKeysAreRejected is the claim cited by config.md:
+// "Unknown fields in either config file are an error — `yoloai new` fails
+// with a clear message listing the unrecognized keys." See the TestArch_
+// prefix convention, AGENTS.md "Preparing a PR". Exercised on the `new` path
+// specifically: create.Run always loads defaults/config.yaml via
+// config.LoadConfig (create.go:485), which used to skip validation
+// entirely — it passed nil for knownKeys where LoadDefaultsConfig passed
+// knownDefaultsKeys, so the SAME file was checked on the no-profile path and
+// not on this one. Fixed alongside this test.
+func TestArch_UnknownConfigKeysAreRejected(t *testing.T) {
+	tmpDir := t.TempDir()
+	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
+	require.NoError(t, os.MkdirAll(layout.DefaultsDir(), 0750))
+	require.NoError(t, os.WriteFile(layout.DefaultsConfigPath(),
+		[]byte("agent: claude\nnotarealkey: oops\n"), 0600))
+
+	d := state.Deps{
+		Runtime: &mockRuntime{},
+		Layout:  layout,
+		Input:   strings.NewReader(""),
+	}
+	_, err := create.Run(context.Background(), d, create.Options{
+		Name:    "unknown-key",
+		Workdir: create.DirSpec{Path: tmpDir},
+		Agent:   "test",
+		Version: "test",
+	})
+
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unknown config field")
+	assert.Contains(t, err.Error(), "notarealkey")
+}
+
 func TestCreate_CleansUpOnPrepareFail(t *testing.T) {
 	tmpDir := t.TempDir()
 

@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"io"
 	"os"
 	"regexp"
 	"strings"
@@ -65,7 +64,7 @@ func legacyCLIVMName(name string, principal config.PrincipalSegment) bool {
 }
 
 // Prune implements runtime.Backend.
-func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool, output io.Writer) (runtime.PruneResult, error) {
+func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun bool) (runtime.PruneResult, error) {
 	known := make(map[string]bool, len(knownInstances))
 	for _, name := range knownInstances {
 		known[name] = true
@@ -98,19 +97,19 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 		}
 
 		item := runtime.PruneItem{
-			Kind: "vm",
-			Name: name,
+			Kind:   "vm",
+			Name:   name,
+			Action: runtime.PruneActionWouldRemove,
 		}
 
 		if !dryRun {
 			// Stop the VM before deleting — tart delete fails on running VMs.
 			r.stopVM(ctx, name)
-			if _, err := r.runTart(ctx, "delete", name); err != nil {
-				if !errors.Is(err, runtime.ErrNotFound) {
-					fmt.Fprintf(output, "Warning: failed to delete VM %s: %v\n", name, err) //nolint:errcheck // best-effort output
-					continue
-				}
-				// VM already gone — treat as successful deletion.
+			// VM already gone — treat as successful deletion.
+			item.Action = runtime.PruneActionRemoved
+			if err := func() error { _, e := r.runTart(ctx, "delete", name); return e }(); err != nil && !errors.Is(err, runtime.ErrNotFound) {
+				item.Action = runtime.PruneActionFailed
+				item.Reason = err.Error()
 			}
 		}
 		result.Items = append(result.Items, item)
@@ -135,9 +134,10 @@ func (r *Runtime) Prune(ctx context.Context, knownInstances []string, dryRun boo
 // CacheUsage across the prune (before − after), the same self-attributed delta
 // docker/podman use (working-notes D37). tart's `list` Size is whole-GB, so the
 // figure is coarse but reconciles with what `system disk` reports.
-func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, output io.Writer) (int64, error) {
+func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool) (runtime.CachePruneResult, error) {
+	var result runtime.CachePruneResult
 	if !includeImages {
-		return 0, nil
+		return result, nil
 	}
 
 	before := r.ownedImageBytes(ctx)
@@ -145,31 +145,34 @@ func (r *Runtime) PruneCache(ctx context.Context, includeImages, dryRun bool, ou
 
 	if dryRun {
 		for _, name := range refs {
-			fmt.Fprintf(output, "tart: would remove cached image %s\n", name) //nolint:errcheck // best-effort output
+			result.Items = append(result.Items, runtime.PruneItem{
+				Kind: "image", Name: name, Action: runtime.PruneActionWouldRemove,
+			})
 		}
 		if before < 0 {
 			before = 0
 		}
-		return before, nil
+		result.BytesReclaimed = before
+		return result, nil
 	}
 
 	for _, name := range refs {
 		// delete fails on a running VM; stop first (no-op for OCI images).
 		r.stopVM(ctx, name)
+		item := runtime.PruneItem{Kind: "image", Name: name, Action: runtime.PruneActionRemoved}
 		if _, err := r.runTart(ctx, "delete", name); err != nil && !errors.Is(err, runtime.ErrNotFound) {
-			fmt.Fprintf(output, "tart: failed to remove cached image %s: %v\n", name, err) //nolint:errcheck // best-effort output
-			continue
+			item.Action = runtime.PruneActionFailed
+			item.Reason = err.Error()
 		}
-		fmt.Fprintf(output, "tart: removed cached image %s\n", name) //nolint:errcheck // best-effort output
+		result.Items = append(result.Items, item)
 	}
 
 	// Drop the provision checksum so needsBuild re-provisions cleanly even
 	// if a future base happens to hash identically.
 	_ = os.Remove(r.tartBaseChecksumPath())
 
-	reclaimed := int64(0)
 	if after := r.ownedImageBytes(ctx); before >= 0 && after >= 0 && before > after {
-		reclaimed = before - after
+		result.BytesReclaimed = before - after
 	}
-	return reclaimed, nil
+	return result, nil
 }

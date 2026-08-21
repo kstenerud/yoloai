@@ -26,7 +26,6 @@ type ResolvedProfileConfig struct {
 	Directories        []ProfileAuxDir    `json:"directories,omitempty"`
 	Resources          *ProfileResources  `json:"resources,omitempty"`
 	Network            *ProfileNetwork    `json:"network,omitempty"`
-	Mounts             []string           `json:"mounts,omitempty"`
 	AgentArgs          map[string]string  `json:"agent_args,omitempty"`
 	AgentFiles         *ProfileAgentFiles `json:"agent_files,omitempty"`
 	CapAdd             []string           `json:"cap_add,omitempty"`
@@ -86,7 +85,6 @@ func resolvedProfileConfigFromMerged(m *config.MergedConfig) *ResolvedProfileCon
 		TartImage:          m.TartImage,
 		Env:                m.Env,
 		Ports:              m.Ports,
-		Mounts:             m.Mounts,
 		AgentArgs:          m.AgentArgs,
 		CapAdd:             m.CapAdd,
 		Devices:            m.Devices,

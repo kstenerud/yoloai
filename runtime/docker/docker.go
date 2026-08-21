@@ -31,6 +31,7 @@ import (
 	"github.com/docker/go-connections/nat"
 	"github.com/docker/go-connections/tlsconfig"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/runtime"
@@ -349,7 +350,7 @@ func (r *Runtime) Client() *dockerclient.Client {
 // yoloai-base:latest while the first is doing so — producing
 // "AlreadyExists: image already exists" from the Docker daemon.
 // Mirrors runtime/tart/base_lock.go.
-func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger, force bool) error {
 	unlock, err := AcquireBaseLock(layout, "yoloai-base")
 	if err != nil {
 		return fmt.Errorf("acquire base lock: %w", err)
@@ -366,14 +367,15 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 
 	if force || !exists {
 		if !exists {
-			fmt.Fprintln(output, "Building base image (first run only, this may take a few minutes)...") //nolint:errcheck // best-effort output
+			feedback.Progressf(progress, "image.base_building",
+				"Building base image (first run only, this may take a few minutes)...")
 		}
-		return r.buildBaseImage(ctx, layout, output, logger)
+		return r.buildBaseImage(ctx, layout, progress, logger)
 	}
 
 	if r.baseImageStale(ctx) {
-		fmt.Fprintln(output, "Base image resources updated, rebuilding...") //nolint:errcheck // best-effort output
-		return r.buildBaseImage(ctx, layout, output, logger)
+		feedback.Progressf(progress, "image.base_rebuilding", "Base image resources updated, rebuilding...")
+		return r.buildBaseImage(ctx, layout, progress, logger)
 	}
 
 	return nil
@@ -451,10 +453,17 @@ func (r *Runtime) imageExists(ctx context.Context, imageRef string) (bool, error
 	}
 	if present {
 		if waits == 0 {
-			slog.Default().Warn("image present in list but ImageInspect reported it missing; treating as present (containerd-store inspect flap)",
+			// slog.Default is legitimate here and nowhere near it: this is
+			// operator-addressed — a note that the daemon disagreed with
+			// itself — and imageExists is reached from IsReady, a Backend
+			// method with no logger to thread. The destination is declared by
+			// the entrypoint (cliutil.InitLogger), which is the distinction
+			// D145 draws: the ban is on reaching for a handler nobody set,
+			// not on the global itself.
+			slog.Default().Warn("image present in list but ImageInspect reported it missing; treating as present (containerd-store inspect flap)", //nolint:forbidigo // operator-addressed diagnostic on a path with no threaded logger (D145)
 				"image", imageRef)
 		} else {
-			slog.Default().Warn("image surfaced in list only after backoff; treating as present (containerd store warm-up)",
+			slog.Default().Warn("image surfaced in list only after backoff; treating as present (containerd store warm-up)", //nolint:forbidigo // operator-addressed diagnostic on a path with no threaded logger (D145)
 				"image", imageRef, "retries", waits)
 		}
 	}

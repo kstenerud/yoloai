@@ -14,11 +14,13 @@ sys.path.insert(0, str(_REPO / "scripts"))
 
 from check_revert_red import (  # noqa: E402
     Change,
+    is_test_file,
     Outcome,
     changed_sources,
     claims_behavior_change,
     commit_type,
     is_build_failure,
+    is_cosmetic,
     probe,
     scope_for,
     types_touching,
@@ -117,9 +119,29 @@ def _run(argv: list[str], cwd: Path) -> subprocess.CompletedProcess[str]:
     return subprocess.run(argv, cwd=cwd, capture_output=True, text=True, check=False)
 
 
+# git refuses to commit without a committer identity, and a developer machine
+# supplies one from ~/.gitconfig while CI does not. Every commit here therefore
+# passes the identity inline — an omission is invisible locally and fails only
+# in CI, which is what these two helpers exist to prevent.
+_IDENTITY = ["-c", "user.email=t@t", "-c", "user.name=t"]
+
+
 def _commit(repo: Path, subject: str) -> None:
     _run(["git", "add", "-A"], repo)
-    _run(["git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-m", subject], repo)
+    _run(["git", *_IDENTITY, "commit", "-m", subject], repo)
+
+
+def _amend(repo: Path, message: str) -> None:
+    """Rewrite the tip commit's message.
+
+    Checked, unlike _run: a silent failure here leaves the ORIGINAL message in
+    place, so the test goes on to assert against a commit it did not create and
+    fails somewhere else entirely. That is precisely how this went unnoticed —
+    the amend failed in CI for want of an identity, and the error surfaced as
+    check_revert_red.py declining to exempt a commit type nobody had set.
+    """
+    done = _run(["git", *_IDENTITY, "commit", "--amend", "-m", message], repo)
+    assert done.returncode == 0, f"git commit --amend failed: {done.stdout}{done.stderr}"
 
 
 def _go_repo(tmp_path: Path, *, covered: bool) -> Path:
@@ -172,7 +194,7 @@ def test_it_stays_quiet_when_a_test_does_go_red(tmp_path: Path) -> None:
 def test_the_commit_type_exempts_the_same_uncovered_change(tmp_path: Path) -> None:
     """The escape hatch, proven to work on input the gate otherwise rejects."""
     repo = _go_repo(tmp_path, covered=False)
-    _run(["git", "commit", "--amend", "-m", "refactor(calc): correct the multiplier"], repo)
+    _amend(repo, "refactor(calc): correct the multiplier")
     done = _run(
         [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
     )
@@ -188,11 +210,7 @@ def test_a_verified_by_trailer_records_rather_than_bypasses(tmp_path: Path) -> N
     claim must appear in the output — an exemption nobody sees is a bypass.
     """
     repo = _go_repo(tmp_path, covered=False)
-    _run(
-        ["git", "commit", "--amend", "-m",
-         "fix(calc): correct the multiplier\n\nVerified-By: make smoketest, podman tier"],
-        repo,
-    )
+    _amend(repo, "fix(calc): correct the multiplier\n\nVerified-By: make smoketest, podman tier")
     done = _run(
         [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
     )
@@ -204,10 +222,7 @@ def test_a_verified_by_trailer_records_rather_than_bypasses(tmp_path: Path) -> N
 def test_an_empty_verified_by_trailer_does_not_exempt(tmp_path: Path) -> None:
     """`Verified-By:` with nothing after it is not a claim, and must not read as one."""
     repo = _go_repo(tmp_path, covered=False)
-    _run(
-        ["git", "commit", "--amend", "-m", "fix(calc): correct the multiplier\n\nVerified-By:"],
-        repo,
-    )
+    _amend(repo, "fix(calc): correct the multiplier\n\nVerified-By:")
     done = _run(
         [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
     )
@@ -230,6 +245,101 @@ def test_a_deleted_file_is_reported_unchecked_rather_than_passed(tmp_path: Path)
     out = probe(str(repo), "HEAD~1", "HEAD", Change("calc/calc.go", "D"), timeout=60)
     assert out == Outcome("calc/calc.go", "UNCHECKED", "deleted; reverting would re-add it")
     assert out.is_failure is False
+
+
+# --- a change that could not be covered because it changes nothing ------------
+
+
+def _edit_repo(tmp_path: Path, name: str, *, before: str, after: str, path: str) -> Path:
+    """A repo whose tip commit is one `fix` rewriting `path` from `before` to `after`."""
+    repo = tmp_path / name
+    (repo / Path(path).parent).mkdir(parents=True, exist_ok=True)
+    _run(["git", "init", "-q", "-b", "main"], repo)
+    (repo / path).write_text(before)
+    _commit(repo, "chore: baseline")
+    (repo / path).write_text(after)
+    _commit(repo, "fix(x): change it")
+    return repo
+
+
+def test_a_go_comment_only_change_is_cosmetic(tmp_path: Path) -> None:
+    """The false positive this exists to remove: `9124d487` edited a doc comment in a
+    `feat` commit, and got reported exactly like a behaviour change with no test."""
+    repo = _edit_repo(
+        tmp_path, "gocomment", path="calc/calc.go",
+        before="package calc\n\n// Double doubles.\nfunc Double(n int) int { return n * 2 }\n",
+        after="package calc\n\n// Double returns twice n.\nfunc Double(n int) int { return n * 2 }\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "calc/calc.go") is True
+
+
+def test_a_go_code_change_beside_a_comment_change_is_not_cosmetic(tmp_path: Path) -> None:
+    """Without this arm the guard is shown to fire, not to discriminate — and a
+    suppression that also swallows the real change would be far worse than the noise
+    it removes."""
+    repo = _edit_repo(
+        tmp_path, "gocode", path="calc/calc.go",
+        before="package calc\n\n// Double doubles.\nfunc Double(n int) int { return n * 2 }\n",
+        after="package calc\n\n// Double returns twice n.\nfunc Double(n int) int { return n * 3 }\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "calc/calc.go") is False
+
+
+def test_a_go_file_containing_a_block_comment_declines_to_classify(tmp_path: Path) -> None:
+    """A changed line inside `/* */` is indistinguishable from code by inspection, and
+    a guard loose enough to call `*p = 0` a comment would suppress a real finding. So
+    the presence of `/*` anywhere in the file falls back to probing it."""
+    repo = _edit_repo(
+        tmp_path, "goblock", path="calc/calc.go",
+        before="package calc\n\n/* Double doubles. */\nfunc Double(n int) int { return n * 2 }\n",
+        after="package calc\n\n/* Double returns twice n. */\nfunc Double(n int) int { return n * 2 }\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "calc/calc.go") is False
+
+
+def test_a_python_comment_only_change_is_cosmetic(tmp_path: Path) -> None:
+    repo = _edit_repo(
+        tmp_path, "pycomment", path="pkg/thing.py",
+        before="# doubles\ndef double(n):\n    return n * 2\n",
+        after="# returns twice n\ndef double(n):\n    return n * 2\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "pkg/thing.py") is True
+
+
+def test_a_python_code_change_is_not_cosmetic(tmp_path: Path) -> None:
+    repo = _edit_repo(
+        tmp_path, "pycode", path="pkg/thing.py",
+        before="# doubles\ndef double(n):\n    return n * 2\n",
+        after="# doubles\ndef double(n):\n    return n * 3\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "pkg/thing.py") is False
+
+
+def test_unparseable_python_declines_to_classify(tmp_path: Path) -> None:
+    """Reading a syntax error as "no AST difference" would exempt the file outright."""
+    repo = _edit_repo(
+        tmp_path, "pybroken", path="pkg/thing.py",
+        before="def double(n):\n    return n * 2\n",
+        after="def double(n)\n    return n * 2\n",
+    )
+    assert is_cosmetic(str(repo), "HEAD~1", "HEAD", "pkg/thing.py") is False
+
+
+def test_the_gate_passes_a_commit_whose_only_change_is_a_comment(tmp_path: Path) -> None:
+    """End to end: the whole point is that this exits 0 rather than demanding a test
+    for a comment."""
+    repo = _edit_repo(
+        tmp_path, "e2ecomment", path="calc/calc.go",
+        before="package calc\n\n// Double doubles.\nfunc Double(n int) int { return n * 2 }\n",
+        after="package calc\n\n// Double returns twice n.\nfunc Double(n int) int { return n * 2 }\n",
+    )
+    (repo / "go.mod").write_text("module example.com/m\n\ngo 1.21\n")
+    _commit(repo, "chore: add the module file")
+    done = _run(
+        [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~2"], repo
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "comment or formatting only" in done.stdout
 
 
 # --- reading the range -------------------------------------------------------
@@ -263,3 +373,63 @@ def test_the_real_repo_can_be_read(tmp_path: Path) -> None:
     changes = changed_sources("HEAD~1", "HEAD")
     for c in changes:
         assert isinstance(types_touching("HEAD~1", "HEAD", c.path), set)
+
+
+# --- what counts as a test file ----------------------------------------------
+
+
+def test_python_tests_are_identified_by_directory_not_filename() -> None:
+    """The specimen this rule was rebuilt from: scripts/smoke_test.py.
+
+    It is the only `*_test.py` path in the repo and it is a 4000-line harness, not
+    a test, so matching Python tests by filename exempted it permanently -- every
+    `fix` to it went unchecked. The mirror-image error came with it: conftest.py
+    matches neither name pattern and was therefore treated as behavioural source
+    that must go red. Both directions are pinned, because fixing one and
+    reintroducing the other would look identical in the gate's output.
+    """
+    assert not is_test_file("scripts/smoke_test.py")
+    assert is_test_file("scripts/tests/conftest.py")
+    assert is_test_file("scripts/tests/test_smoke_matrix.py")
+    assert is_test_file("runtime/monitor/tests/test_setup_helpers.py")
+
+
+def test_go_still_uses_the_suffix_its_compiler_enforces() -> None:
+    """The location rule is Python's alone. Go's suffix is not a convention, it is
+    the build system, so a Go file is still judged by its name."""
+    assert is_test_file("runtime/apple/apple_test.go")
+    assert not is_test_file("runtime/apple/apple.go")
+    assert not is_test_file("runtime/runtimetest/conformance.go")
+
+
+def test_the_smoke_harness_is_in_scope_for_the_gate() -> None:
+    """The consequence of the above, stated in the gate's own terms: the harness
+    must now be a file the gate can actually run tests for."""
+    assert scope_for("scripts/smoke_test.py") is not None
+
+
+def _unscopeable_repo(tmp_path: Path) -> Path:
+    """A behavioural commit touching only a file this gate cannot scope or run."""
+    repo = tmp_path / "unscopeable"
+    repo.mkdir(parents=True)
+    _run(["git", "init", "-q", "-b", "main"], repo)
+    (repo / "README.md").write_text("x\n")
+    _commit(repo, "chore: baseline")
+    (repo / "helper.rb").write_text("puts 1\n")
+    _commit(repo, "fix(x): change something unscopeable")
+    return repo
+
+
+def test_a_behavioural_commit_that_checks_nothing_names_what_it_skipped(tmp_path: Path) -> None:
+    """Silence is what let the harness go unchecked: the gate printed "no
+    behavioral source changes" over a `fix` that rewrote scheduling logic. True of
+    what the gate could see, false about the commit. A run that checks nothing must
+    now name the files and say why each was skipped."""
+    repo = _unscopeable_repo(tmp_path)
+    done = _run(
+        [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
+    )
+    assert done.returncode == 0, "a warning, not a hard failure -- a noisy gate gets disabled"
+    assert "Nothing was checked" in done.stdout, done.stdout
+    assert "helper.rb" in done.stdout, "the blind spot must be named, not counted"
+    assert "blind spot, not a pass" in done.stdout

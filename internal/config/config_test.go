@@ -584,6 +584,7 @@ func TestIsKnownConfigPath(t *testing.T) {
 		"network",
 		"network.allow",
 		"agent_files",
+		"directories",
 		"env",
 		"env.OLLAMA_API_BASE",
 		"agent_args.claude",
@@ -600,6 +601,7 @@ func TestIsKnownConfigPath(t *testing.T) {
 		"tart.foo",
 		"resources.gpu",
 		"network.foo",
+		"mounts",
 		"mounts.foo",
 		"env.",
 		"model_aliases.fast.extra",
@@ -634,6 +636,7 @@ func TestIsSettableConfigPath(t *testing.T) {
 		"network",
 		"network.allow",
 		"mounts",
+		"directories",
 		"env.",
 		"model_aliases.fast.extra",
 	}
@@ -851,4 +854,67 @@ func TestGetConfigValue_AutoCommitInterval(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, found)
 	assert.Equal(t, "0", val)
+}
+
+// TestLoadConfig_MountsKeyRejected pins D142: a base config that still sets
+// the retired mounts: key must fail to load, naming directories: as the
+// replacement, rather than silently dropping the mount.
+func TestLoadConfig_MountsKeyRejected(t *testing.T) {
+	dir, layout := configDir(t)
+
+	content := "mounts:\n  - /opt/tc:/opt/tc:ro\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	_, err := LoadConfig(layout)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "directories:")
+}
+
+// TestLoadConfig_MountsKeyRejected_Defaults exercises the LoadDefaultsConfig
+// path (baked-in defaults merged with defaults/config.yaml) — the path
+// actually used by sandbox creation — rather than the raw LoadConfig reader.
+func TestLoadConfig_MountsKeyRejected_Defaults(t *testing.T) {
+	dir, layout := configDir(t)
+
+	content := "mounts:\n  - /opt/tc:/opt/tc:ro\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	_, err := LoadDefaultsConfig(layout)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "directories:")
+}
+
+// TestLoadDefaultsConfig_Directories pins that directories: survives the
+// baked-in-defaults + user-override merge (mergeConfigs), not just the raw
+// LoadConfig read — the baked-in YAML never sets directories:, so this fails
+// if mergeConfigs drops the override's Directories on the floor.
+func TestLoadDefaultsConfig_Directories(t *testing.T) {
+	dir, layout := configDir(t)
+
+	content := "directories:\n  - path: /home/user/shared-lib\n    mode: rw\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadDefaultsConfig(layout)
+	require.NoError(t, err)
+	require.Len(t, cfg.Directories, 1)
+	assert.Equal(t, "/home/user/shared-lib", cfg.Directories[0].Path)
+	assert.Equal(t, "rw", cfg.Directories[0].Mode)
+}
+
+// TestLoadConfig_Directories pins D142's replacement: the base config now
+// accepts directories: (previously profile-only), parsed the same way as a
+// profile's, with mode and a custom mount point honoured.
+func TestLoadConfig_Directories(t *testing.T) {
+	dir, layout := configDir(t)
+
+	content := "directories:\n  - path: /home/user/shared-lib\n    mode: rw\n    mount: /usr/local/lib/shared\n  - path: /home/user/types\n"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, "config.yaml"), []byte(content), 0600))
+
+	cfg, err := LoadConfig(layout)
+	require.NoError(t, err)
+	require.Len(t, cfg.Directories, 2)
+	assert.Equal(t, "/home/user/shared-lib", cfg.Directories[0].Path)
+	assert.Equal(t, "rw", cfg.Directories[0].Mode)
+	assert.Equal(t, "/usr/local/lib/shared", cfg.Directories[0].Mount)
+	assert.Equal(t, "/home/user/types", cfg.Directories[1].Path)
 }

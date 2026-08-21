@@ -283,6 +283,60 @@ linters:
           msg: "builtin println writes to stderr — use an injected io.Writer or the threaded slog.Logger; §12"
         - pattern: "^log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)$"
           msg: "the log default logger writes to stderr — use the threaded slog.Logger; §12"
+        # D145: slog.Default() is a backdoor to ambient configuration. The rule
+        # is "no undeclared destination", not "no globals" — an entrypoint that
+        # installs a handler and passes it down has declared one, and that is
+        # fine. What is banned is *reaching* for the global: a library that does
+        # so publishes wherever the runtime happens to point, and in a daemon
+        # merges every principal's diagnostics into one stream. The CLI is
+        # excluded below (it owns the handler, installed in cliutil.InitLogger);
+        # everything else takes a threaded *slog.Logger, or carries an inline
+        # nolint naming why the diagnostic is operator-addressed.
+        - pattern: "^slog\\.Default$"
+          msg: "reaching for the process-global logger is an undeclared destination — take a threaded *slog.Logger (state.Deps.Logger, or a parameter); §12 / D145"
+
+        # D145 step 5: the ban is a *class*, not a list — any API whose result
+        # depends on ambient process state rather than its arguments. The list
+        # was already incomplete in two places that read nothing named "env":
+        #
+        #   filepath.Abs calls os.Getwd, which is banned two dozen lines above.
+        #   Resolving a caller's relative path against the *process's* working
+        #   directory is right by coincidence in a single-principal CLI and
+        #   wrong everywhere else — a daemon resolves against its own cwd,
+        #   never the caller's. See DF222.
+        #
+        #   os.TempDir reads $TMPDIR. yoloAI owns a temp root (layout.TempDir);
+        #   falling back to the ambient one puts sandbox state somewhere the
+        #   layout does not know about and prune cannot sweep.
+        #
+        # NOT banned, and declared here so it stops looking like an oversight:
+        # exec.LookPath reads $PATH, and that is the point — it answers "is this
+        # backend's binary installed on this host", which is a question about
+        # the host and has no non-ambient form. Its ~20 uses are all that.
+        # D145: fmt.Fprint* is how the threaded writer comes back, and it comes
+        # back at the point somebody wants to tell a user something. Library
+        # code has no such writer any more -- feedback is a Notice or a
+        # Progress, on a sink -- so the ban is absolute here rather than
+        # conditional on the destination, which is the only form forbidigo can
+        # express: it matches call names, not argument types, and cannot tell
+        # Fprintf(w, ...) from Fprintf(&builder, ...).
+        #
+        # String building uses internal/textbuf.Printf, which keeps the printf
+        # shape but takes a Buffer (an in-memory accumulator) rather than an
+        # io.Writer — so the distinction forbidigo cannot make lexically is made
+        # structurally instead, and cannot be circumvented by misuse.
+        # internal/cli and cmd/ are excluded below: rendering is their job.
+        #
+        # This is the point-of-mistake half. TestArch_LibraryTakesNoFeedbackWriter
+        # is the structural half, catching the parameter rather than the call --
+        # needed because this rule cannot see a write to an already-licensed
+        # writer, and that one cannot see a call that reuses one.
+        - pattern: "^fmt\\.Fprint(f|ln)?$"
+          msg: "library code does not format text for humans — emit a feedback.Notice (Warnf/Infof) or a feedback.Progress (Progressf); to build a string use textbuf.Printf, which takes a buffer and cannot be aimed at a caller's stream; §12 / D145"
+        - pattern: "^filepath\\.Abs$"
+          msg: "resolves against the process working directory (it calls the banned os.Getwd) — resolve at the CLI edge and pass an absolute path down; §12 / DF222"
+        - pattern: "^os\\.TempDir$"
+          msg: "reads $TMPDIR — use layout.TempDir(), which prune knows how to sweep; §12"
         - pattern: "^syscall\\.Getenv$"
           msg: "ambient env backdoor below os — forbidden; §12"
         - pattern: "^syscall\\.Setenv$"
@@ -431,7 +485,7 @@ linters:
       - path: "_test\\.go"
         linters:
           - forbidigo
-        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Fprint|Fprintf|Fprintln|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
       # internal/sysexec is THE licensed exec.Command* site — the funnel that
       # sets an explicit env; every other caller routes through it.
       #
@@ -443,7 +497,7 @@ linters:
       - path: "internal/testutil/"
         linters:
           - forbidigo
-        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
+        text: "os\\.(WriteFile|OpenFile|MkdirAll|UserHomeDir|UserConfigDir|UserCacheDir|Getwd|Getuid|Getgid|Getenv|LookupEnv|ExpandEnv|Setenv|Unsetenv|Clearenv|Chdir|Args|Geteuid|Getegid|Getgroups|Getppid|Hostname|Stdin|Stdout|Stderr)|filepath\\.Dir|fmt\\.(Print|Printf|Println|Fprint|Fprintf|Fprintln|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|syscall\\.(Getenv|Setenv|Getuid|Getgid|Geteuid|Getegid|Getgroups|Getppid)|user\\.(Current|Lookup|LookupId|LookupGroup|LookupGroupId)|time\\.Local|sandbox\\.(NewManager|Manager)|runtime\\.(New|Runtime)|\\.EnvFor[A-Z]\\w*|\\.PassthroughEnv"
       - path: "internal/sysexec/"
         linters:
           - forbidigo
@@ -470,24 +524,48 @@ linters:
           - forbidigo
         text: "os\\.(Stdin|Stdout|Stderr|Args)"
 
+      # The CLI is where a user's relative path becomes absolute: its working
+      # directory IS the caller's, which is the one place that is true. Library
+      # code must receive the resolved path (§12 / DF222).
+      - path: "^internal/cli/"
+        linters:
+          - forbidigo
+        text: "filepath\\.Abs"
+
       # §12 stdio-by-mechanism boundary: the CLI and the cmd/ entrypoint own
       # the process's stdin/stdout/stderr, so they may print/scan through fmt,
       # the builtins, or the log default logger. Library packages take explicit
       # io.Reader/Writer instead (justified inline where they legitimately
       # can't). The CLI in practice uses fmt.Fprintf(cmd.OutOrStdout()); this
       # exclusion just keeps the boundary unconstrained.
+      #
+      # slog.Default is here for the same reason and only for this path: the
+      # CLI *installs* the handler (cliutil.InitLogger calls slog.SetDefault),
+      # so reading it back is propagating a destination it declared, not
+      # reaching for one nobody set. That is exactly the distinction D145 draws,
+      # and it is why the ban is on the reach and not on the global.
       - path: "^(internal/cli/|cmd/)"
         linters:
           - forbidigo
-        text: "fmt\\.(Print|Printf|Println|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)"
+        text: "fmt\\.(Print|Printf|Println|Fprint|Fprintf|Fprintln|Scan|Scanf|Scanln)|^print(ln)?$|log\\.(Print|Printf|Println|Fatal|Fatalf|Fatalln|Panic|Panicf|Panicln)|slog\\.Default"
 
       # The MCP stdio proxy is a transport boundary: it bridges the MCP
       # client's stdin/stdout to the in-sandbox process, so owning the
-      # process streams is precisely its job.
+      # process streams is precisely its job. Its Fprint calls forward
+      # protocol frames verbatim — bytes belonging to the peer, never prose.
       - path: "internal/mcpsrv/proxy\\.go"
         linters:
           - forbidigo
-        text: "os\\.(Stdin|Stdout|Stderr)"
+        text: "os\\.(Stdin|Stdout|Stderr)|fmt\\.Fprint(f|ln)?"
+
+      # feedback/writer.go IS the sanctioned rendering point: WriterSink and
+      # ProgressToWriter exist to turn records into bytes for a caller who
+      # asked for bytes. Confining that to one file is what makes the ban
+      # elsewhere absolute (D145).
+      - path: "^feedback/writer\\.go$"
+        linters:
+          - forbidigo
+        text: "fmt\\.Fprint(f|ln)?"
 
       # W-L10 spine-layering allowlist. The orchestration spine itself
       # (the root yoloai package — client.go, system.go, discovery.go,

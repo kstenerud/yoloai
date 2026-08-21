@@ -42,7 +42,7 @@ func TestScaffold_MaterialisesTheBaseDockerfile(t *testing.T) {
 	assert.Contains(t, string(written), "EDITING THIS FILE HAS NO EFFECT",
 		"the copy must say it is a copy: it sits beside profile Dockerfiles that ARE read from disk, "+
 			"so a reader's default assumption is the wrong one. The header lives here and NOT in the "+
-			"built file — it is false in the repo, and it would eat into apple's 16 KiB build cap")
+			"built file, where it would be false: in the repo, editing that file IS how the image changes")
 
 	info, err := os.Stat(path)
 	require.NoError(t, err)

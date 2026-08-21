@@ -7,8 +7,7 @@
 package store
 
 import (
-	"io"
-
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 )
 
@@ -37,6 +36,6 @@ func RemoveLockFile(_ config.Layout, _ string) error {
 
 // SweepStaleLocks is a no-op on Windows — AcquireLock never creates lock
 // files on this platform, so there are none to sweep.
-func SweepStaleLocks(_ config.Layout, _ bool, _ io.Writer) ([]string, error) {
+func SweepStaleLocks(_ config.Layout, _ bool, _ feedback.Sink) ([]string, error) {
 	return nil, nil
 }

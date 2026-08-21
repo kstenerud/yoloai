@@ -5,11 +5,11 @@
 package seatbelt
 
 import (
-	"io"
 	"os"
 	"path/filepath"
 	"testing"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/store"
 	"github.com/stretchr/testify/assert"
@@ -165,14 +165,14 @@ func TestReapOrphanProcs_NormalizesKnownReapsGroupAndSkipsSelf(t *testing.T) {
 	known := []string{store.InstanceName(r.layout.Principal, "keep")}
 
 	// Dry run: reports the orphan group but kills nothing.
-	items := r.reapOrphanProcs(known, true, io.Discard)
+	items, _ := r.reapOrphanProcs(known, true)
 	require.Len(t, items, 2)
 	assert.Equal(t, "tmux", string(items[0].Kind))
 	assert.Equal(t, "process", string(items[1].Kind))
 	assert.Empty(t, killed)
 
 	// Real run: reaps the orphan tmux server + its monitor, never self or keep.
-	items = r.reapOrphanProcs(known, false, io.Discard)
+	items, _ = r.reapOrphanProcs(known, false)
 	require.Len(t, items, 2)
 	assert.Equal(t, []int{1, 2}, killed)
 }
@@ -181,7 +181,14 @@ func TestReapOrphanProcs_EnumerationFailureIsNonFatal(t *testing.T) {
 	r := &Runtime{layout: config.NewLayout(t.TempDir()).WithPrincipal(config.CLIPrincipal)}
 	restore := stubEnumErr()
 	defer restore()
-	assert.Nil(t, r.reapOrphanProcs(nil, false, io.Discard))
+
+	items, notices := r.reapOrphanProcs(nil, false)
+	assert.Nil(t, items)
+	// The sweep not running is reported, not swallowed: a prune that could not
+	// look for leaked processes must not read as a prune that found none.
+	require.Len(t, notices, 1)
+	assert.Equal(t, "prune.process_sweep_failed", notices[0].Event)
+	assert.Equal(t, feedback.LevelWarn, notices[0].Level)
 }
 
 // --- test doubles -----------------------------------------------------------

@@ -16,6 +16,7 @@ import (
 	"strings"
 
 	yoloai "github.com/kstenerud/yoloai"
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/yoerrors"
 	"github.com/spf13/cobra"
 )
@@ -143,7 +144,10 @@ func runSystemTartAdd(cmd *cobra.Command, args []string) error {
 
 	fmt.Fprintf(cmd.OutOrStdout(), "\nCreating runtime base: %s\n\n", plan.Name) //nolint:errcheck
 
-	if _, err := h.Add(ctx, plan, cmd.OutOrStdout()); err != nil {
+	// This package renders nothing but these lines and is barred from importing
+	// internal/cli (see the package doc), so it takes the public writer-backed
+	// sink rather than the CLI's renderer.
+	if _, err := h.Add(ctx, plan, feedback.ProgressToWriter(cmd.OutOrStdout())); err != nil {
 		var exists *yoloai.TartBaseExistsError
 		if errors.As(err, &exists) {
 			return yoerrors.NewUsageError("Runtime base '%s' already exists.\n\nUse 'yoloai system tart list' to see all bases.", plan.Name)

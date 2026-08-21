@@ -5,8 +5,6 @@ package system
 
 import (
 	"fmt"
-	"io"
-	"os"
 
 	"github.com/kstenerud/yoloai/internal/cli/cliutil"
 
@@ -96,12 +94,14 @@ func runSystemBuild(cmd *cobra.Command, args []string, backend yoloai.BackendTyp
 	if backend != "" {
 		bt = yoloai.BackendType(backend)
 	}
+	notices, progress := cliutil.Feedback(cmd)
 	opts := yoloai.BuildImageOptions{
 		Profile:     profile,
 		BackendType: bt,
 		Rebuild:     rebuild,
 		Secrets:     secrets,
-		Output:      buildOutputFor(cmd),
+		Notices:     notices,
+		Progress:    progress,
 	}
 	// BackendEnv pins DOCKER_HOST when the backend is a docker-VM alias
 	// (orbstack/docker-desktop), so the base image is built in the same daemon
@@ -136,16 +136,6 @@ func prepareBuildSecrets(secretFlags []string, hasProfile bool) ([]string, error
 		secrets = append(secrets, expanded)
 	}
 	return append(yoloai.AutoBuildSecrets(homeDir), secrets...), nil
-}
-
-// buildOutputFor returns stderr for human mode (build stream is
-// noisy; users want to see progress) and io.Discard in --json mode
-// (machine-readable output mustn't be polluted by build stream).
-func buildOutputFor(cmd *cobra.Command) io.Writer {
-	if cliutil.JSONEnabled(cmd) {
-		return io.Discard
-	}
-	return os.Stderr
 }
 
 // reportBuildOK prints the post-build "Built successfully" line in
@@ -184,12 +174,14 @@ func runSystemBuildAll(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
+	notices, progress := cliutil.Feedback(cmd)
 	opts := yoloai.BuildImageOptions{
 		Profile:     profile,
 		BackendType: yoloai.BackendsAll,
 		Rebuild:     rebuild,
 		Secrets:     secrets,
-		Output:      buildOutputFor(cmd),
+		Notices:     notices,
+		Progress:    progress,
 	}
 	sys, err := cliutil.System()
 	if err != nil {

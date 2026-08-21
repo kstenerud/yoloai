@@ -5,9 +5,9 @@ package yoloai
 import (
 	"context"
 	"fmt"
-	"io"
 	"strings"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 	tartrt "github.com/kstenerud/yoloai/runtime/tart"
@@ -115,12 +115,12 @@ func (a *TartBaseAdmin) List(ctx context.Context) ([]TartBaseInfo, error) {
 // Add builds the runtime base described by plan. It is atomic with respect to
 // the create: it re-checks existence under the base lock before building.
 // Returns *TartBaseExistsError if a base with plan.Name already exists.
-// Build progress (a slow, minutes-long operation) is written to progress; pass
+// Build progress (a slow, minutes-long operation) is emitted as records; pass
 // nil to discard it. The library never writes to the process's os.Stdout (§12)
-// — the CLI passes cmd.OutOrStdout(), a daemon passes its own writer.
-func (a *TartBaseAdmin) Add(ctx context.Context, plan TartBasePlan, progress io.Writer) (TartBaseInfo, error) {
+// — the CLI supplies a sink that renders, a daemon one that streams.
+func (a *TartBaseAdmin) Add(ctx context.Context, plan TartBasePlan, progress feedback.ProgressSink) (TartBaseInfo, error) {
 	if progress == nil {
-		progress = io.Discard
+		progress = feedback.DiscardProgress
 	}
 	r, closeRT, err := a.open(ctx)
 	if err != nil {

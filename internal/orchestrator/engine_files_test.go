@@ -76,7 +76,7 @@ func newImportEngine(t *testing.T, backendType runtime.BackendType) (*Engine, co
 	require.NoError(t, store.SaveEnvironment(sandboxDir, &store.Environment{
 		Name: "box", BackendType: backendType, CreatedAt: time.Now(),
 	}))
-	return NewEngine("", slog.Default(), strings.NewReader(""), WithLayout(layout)), layout
+	return NewEngine("", slog.New(slog.DiscardHandler), strings.NewReader(""), WithLayout(layout)), layout
 }
 
 func newRefreshEngine(t *testing.T, rt *refreshingRuntime) (*Engine, config.Layout) {

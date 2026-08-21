@@ -5,8 +5,7 @@
 package state
 
 import (
-	"io"
-
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/orchestrator/archetype"
@@ -52,27 +51,24 @@ type State struct {
 	NetworkMode       string
 	NetworkAllow      []string
 	Ports             []string
-	ConfigMounts      []string // extra bind mounts from config/profile (host:container[:ro])
+	ExtraMounts       []string // devcontainer-derived bind mounts (host:container[:ro]); config/profile mounts: retired (D142), governed by D141 now
 	TmuxConf          string
 	Resources         *config.ResourceLimits
 	CapAdd            []string              // Linux capabilities from config/profile
 	Devices           []string              // host devices from config/profile
 	Setup             []string              // setup commands from config/profile
 	Isolation         runtime.IsolationMode // isolation mode from config/profile
-	IsolationExplicit bool                  // true when isolation was set via --isolation flag
 	VscodeTunnel      bool                  // true when VS Code Remote Tunnel is enabled
 	BrokerCredentials bool                  // forced-on: --broker was given (persisted). On a backend that can't host an injector this is an error, not a silent skip (D106)
 	BrokerDisabled    bool                  // forced-off: --no-broker was given (persisted). Suppresses the default-on brokering. At most one of these two is set; both false = auto (broker where supported)
 	Environment       *store.Environment
-	ConfigJSON        []byte
-	// Archetype fields
-	Archetype                 archetype.Archetype
-	DockerdRequired           bool
-	Devcontainer              *archetype.DevcontainerConfig
-	DevcontainerMounts        []string
-	DevcontainerMountWarnings []string
-	WorkdirMode               string        // resolved workdir mode ("copy", "overlay", "rw")
-	Layout                    config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
-	HomeDir                   string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
-	Output                    io.Writer     // create-pipeline progress writer (CreateOptions.Output); F8
+	Archetype         archetype.Archetype
+	Layout            config.Layout // Q-W.3: DataDir-rooted Layout propagated from the Engine
+	HomeDir           string        // Q-W.6: host home dir (layout.HomeDir); used for ~ expansion
+	// Notices and Progress are where this launch reports to. Two sinks rather
+	// than one writer: an advisory is a fact about the call that a caller may
+	// want on its result, while progress is only meaningful live — and a
+	// consumer routes them differently (D145).
+	Notices  feedback.Sink
+	Progress feedback.ProgressSink
 }

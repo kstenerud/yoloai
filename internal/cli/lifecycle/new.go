@@ -49,7 +49,6 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().StringP("model", "m", "", "Model name or alias")
 	cmd.Flags().String("agent", "", "Agent to use (default from config or claude)")
 	cmd.Flags().String("profile", "", "Profile to use (from ~/.yoloai/profiles/)")
-	cmd.Flags().Bool("no-profile", false, "Use base image even if config sets a default profile")
 	cmd.Flags().String("backend", "", "Runtime backend (see 'yoloai system backends')")
 	cmd.Flags().Bool("network-none", false, "Disable network access")
 	cmd.Flags().Bool("network-isolated", false, "Allow only agent API traffic (IPv4 iptables allowlist; IPv6 unfiltered; a guardrail, not containment for a hostile agent — see 'yoloai help security')")
@@ -63,7 +62,7 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
 	cmd.Flags().String("isolation", "", "Isolation mode: container (default), container-enhanced (gVisor), container-privileged (--privileged, use for Docker-in-Docker), vm (Kata+QEMU), vm-enhanced (Kata+Firecracker)")
 	cmd.Flags().String("os", "", "Target OS: linux (default), mac")
-	cmd.Flags().StringSlice("env", nil, "Environment variable (KEY=VAL, repeatable)")
+	cmd.Flags().StringArray("env", nil, "Environment variable (KEY=VAL, repeatable)")
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
 	cmd.Flags().Bool("vscode-tunnel", false, "Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine)")
 	cmd.Flags().Bool("broker", false, "Require credential brokering: keep the agent's API key host-side (errors if the backend can't). On by default for supported backends (Linux docker)")
@@ -72,7 +71,6 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().Bool("copy-strict", false, "For :copy dirs, strip git history instead of preserving it (fresh baseline). Use for repos with unrotated secrets in history. Per-dir :copy-all / :copy-strict suffixes still win.")
 
 	cmd.MarkFlagsMutuallyExclusive("network-none", "network-isolated")
-	cmd.MarkFlagsMutuallyExclusive("profile", "no-profile")
 	cmd.MarkFlagsMutuallyExclusive("broker", "no-broker")
 }
 
@@ -115,14 +113,12 @@ func runNewCmd(cmd *cobra.Command, args []string, version string) error {
 
 // newCreateClient builds the Client used by the create-family verbs (new, run).
 // Its one quirk vs other Client-using commands: in JSON mode the Engine's
-// progress output is suppressed (io.Discard) so it doesn't pollute the JSON
-// document on stdout — WithClient hardcodes cmd.ErrOrStderr, so the create
-// verbs construct the Client by hand to override Output.
+// progress and informational notices are suppressed so they don't pollute the
+// JSON document on stdout. Warnings still reach stderr, which is a change from
+// the old hand-rolled io.Discard: a warning vanishing because the caller asked
+// for JSON was never intentional, and RenderNotices already kept them.
 func newCreateClient(cmd *cobra.Command, version string) (*yoloai.Client, error) {
-	mgrOutput := cmd.ErrOrStderr()
-	if cliutil.JSONEnabled(cmd) {
-		mgrOutput = io.Discard
-	}
+	notices, progress := cliutil.Feedback(cmd)
 	l := cliutil.Layout()
 	c, err := yoloai.NewClient(cmd.Context(), yoloai.ClientCreateOptions{
 		DataDir:     l.DataDir,
@@ -130,7 +126,8 @@ func newCreateClient(cmd *cobra.Command, version string) (*yoloai.Client, error)
 		Principal:   string(l.Principal),
 		BackendType: yoloai.BackendType(cliutil.ResolveBackend(cmd)),
 		Input:       cmd.InOrStdin(),
-		Output:      mgrOutput,
+		Notices:     notices,
+		Progress:    progress,
 		Version:     version,
 		Env:         cliutil.BackendEnv(cmd),
 	})
@@ -216,7 +213,7 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	cpus, _ := cmd.Flags().GetString("cpus")
 	memory, _ := cmd.Flags().GetString("memory")
 	debug, _ := cmd.Flags().GetBool("debug")
-	envSlice, _ := cmd.Flags().GetStringSlice("env")
+	envSlice, _ := cmd.Flags().GetStringArray("env")
 	runtimes, _ := cmd.Flags().GetStringArray("runtime")
 	vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
 	broker, _ := cmd.Flags().GetBool("broker")

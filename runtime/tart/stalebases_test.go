@@ -7,9 +7,9 @@ package tart
 
 import (
 	"context"
-	"os"
 	"testing"
 
+	"github.com/kstenerud/yoloai/runtime"
 	"github.com/stretchr/testify/require"
 )
 
@@ -61,10 +61,11 @@ func TestCacheUsage_ReportsStaleBytes(t *testing.T) {
 func TestPruneStaleBases_RemovesSupersededOnly(t *testing.T) {
 	r, deleteLog := fakeTartEntries(t, staleInventory())
 
-	removed, reclaimed, err := r.PruneStaleBases(context.Background(), false /*dryRun*/, os.Stderr)
+	stale, err := r.PruneStaleBases(context.Background(), false /*dryRun*/)
 	require.NoError(t, err)
-	require.Equal(t, []string{"ghcr.io/cirruslabs/macos-sequoia-base"}, removed)
-	require.Equal(t, int64(31)*bytesPerGB, reclaimed)
+	require.Equal(t, []string{"ghcr.io/cirruslabs/macos-sequoia-base"}, staleNames(stale))
+	require.Equal(t, int64(31)*bytesPerGB, stale.BytesReclaimed)
+	require.Equal(t, runtime.PruneActionRemoved, stale.Items[0].Action)
 
 	deleted := deletedNames(t, deleteLog)
 	require.ElementsMatch(t, []string{seqTag, seqDigest}, deleted)
@@ -77,10 +78,12 @@ func TestPruneStaleBases_RemovesSupersededOnly(t *testing.T) {
 func TestPruneStaleBases_DryRunDeletesNothing(t *testing.T) {
 	r, deleteLog := fakeTartEntries(t, staleInventory())
 
-	removed, reclaimed, err := r.PruneStaleBases(context.Background(), true /*dryRun*/, os.Stderr)
+	stale, err := r.PruneStaleBases(context.Background(), true /*dryRun*/)
 	require.NoError(t, err)
-	require.Equal(t, []string{"ghcr.io/cirruslabs/macos-sequoia-base"}, removed)
-	require.Equal(t, int64(31)*bytesPerGB, reclaimed)
+	require.Equal(t, []string{"ghcr.io/cirruslabs/macos-sequoia-base"}, staleNames(stale))
+	require.Equal(t, int64(31)*bytesPerGB, stale.BytesReclaimed)
+	require.Equal(t, runtime.PruneActionWouldRemove, stale.Items[0].Action,
+		"a dry run must say it would remove, not that it did")
 	require.Empty(t, deletedNames(t, deleteLog), "dry run must not delete")
 }
 
@@ -90,10 +93,10 @@ func TestPruneStaleBases_NoneWhenOnlyCurrentBase(t *testing.T) {
 		{name: tahoeTag, source: "OCI", sizeGB: 30},
 	})
 
-	removed, reclaimed, err := r.PruneStaleBases(context.Background(), false, os.Stderr)
+	stale, err := r.PruneStaleBases(context.Background(), false)
 	require.NoError(t, err)
-	require.Empty(t, removed)
-	require.Zero(t, reclaimed)
+	require.Empty(t, stale.Items)
+	require.Zero(t, stale.BytesReclaimed)
 	require.Empty(t, deletedNames(t, deleteLog))
 }
 
@@ -181,4 +184,13 @@ func TestStaleBaseImages_BaseOverrideNoExtraProtection(t *testing.T) {
 	require.Len(t, stale, 1,
 		"when override is itself a -base image, the other base is flagged normally")
 	require.Equal(t, "ghcr.io/cirruslabs/macos-tahoe-base", stale[0].Repo)
+}
+
+// staleNames lists the base repos a PruneStaleBases result names, in order.
+func staleNames(res runtime.StaleBasePruneResult) []string {
+	names := make([]string, 0, len(res.Items))
+	for _, item := range res.Items {
+		names = append(names, item.Name)
+	}
+	return names
 }

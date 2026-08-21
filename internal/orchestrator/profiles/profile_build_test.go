@@ -5,7 +5,6 @@ package profiles
 
 import (
 	"context"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -14,6 +13,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/runtime"
 )
@@ -150,7 +150,7 @@ type labelFake struct {
 	ok     bool
 }
 
-func (labelFake) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, io.Writer, *slog.Logger) error {
+func (labelFake) BuildProfileImage(context.Context, string, string, string, []string, config.Layout, feedback.ProgressSink, feedback.Sink, *slog.Logger) error {
 	return nil
 }
 func (f labelFake) ImageLabels(context.Context, string) (map[string]string, bool) {

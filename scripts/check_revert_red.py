@@ -51,6 +51,7 @@ work one interrupted run away from being lost.
 from __future__ import annotations
 
 import argparse
+import ast
 import re
 import shutil
 import subprocess
@@ -70,7 +71,16 @@ SUBJECT_RE = re.compile(r"^(?P<type>[a-z]+)(?:\([^)]*\))?(?P<bang>!)?:")
 GO_SOURCE = re.compile(r"\.go$")
 GO_TEST = re.compile(r"_test\.go$")
 PY_SOURCE = re.compile(r"\.py$")
-PY_TEST = re.compile(r"(^|/)(test_[^/]+\.py|[^/]+_test\.py)$")
+
+# A Python file is a test because of WHERE it lives, not what it is called. Every
+# one of this repo's Python tests sits in a `tests/` directory, and identifying
+# them by filename got both directions wrong: `scripts/smoke_test.py` is the only
+# `*_test.py` path in the tree and is a 4000-line harness rather than a test, so
+# every `fix` to it was silently exempt; while `tests/conftest.py` matches neither
+# name pattern and was therefore treated as behavioral source that must go red.
+# `*_test.go` is safe to match by name because in Go the compiler agrees; the same
+# suffix in Python is a borrowed idiom that only ever matched the wrong file.
+PY_TEST = re.compile(r"(^|/)tests/")
 
 # Directories pytest is pointed at; a Python change outside them has no scope to run.
 PY_ROOTS = ("runtime/monitor", "runtime/docker/resources", "scripts")
@@ -85,7 +95,7 @@ class Change:
 @dataclass(frozen=True)
 class Outcome:
     path: str
-    verdict: str  # RED_TEST | RED_BUILD | GREEN | CLAIMED | UNCHECKED
+    verdict: str  # RED_TEST | RED_BUILD | GREEN | CLAIMED | COSMETIC | UNCHECKED
     detail: str = ""
 
     @property
@@ -127,11 +137,114 @@ def changed_sources(base: str, head: str) -> list[Change]:
         if len(parts) < 2:
             continue
         status, path = parts[0][:1], parts[-1]
-        if GO_TEST.search(path) or PY_TEST.search(path):
+        if is_test_file(path):
             continue  # a test file's own revert is not the question
         if GO_SOURCE.search(path) or PY_SOURCE.search(path):
             changes.append(Change(path=path, status=status))
     return changes
+
+
+def is_test_file(path: str) -> bool:
+    """Whether this path is test code, and so not the thing being asked to go red.
+
+    Each language is asked in its own terms: Go by the suffix its compiler already
+    enforces, Python by the directory this repo actually keeps its tests in. Kept
+    as one function so the two rules cannot drift apart unnoticed, which is how the
+    Python half came to borrow Go's suffix and exempt the smoke harness.
+    """
+    if GO_SOURCE.search(path):
+        return bool(GO_TEST.search(path))
+    if PY_SOURCE.search(path):
+        return bool(PY_TEST.search(path))
+    return False
+
+
+def unchecked_behavioral_files(base: str, head: str) -> list[tuple[str, str]]:
+    """Files a feat/fix/perf commit changed that this gate could not check, and why.
+
+    Only ever consulted when nothing was checked at all, to turn a reassuring
+    silence into a named blind spot. Deliberately reports *reasons* rather than a
+    count: "no behavioral source changes" was technically true of the run that
+    missed a scheduling rewrite, and a number would have been just as true and
+    just as useless.
+    """
+    out = _git("diff", "--name-status", f"{base}...{head}").stdout
+    unchecked: list[tuple[str, str]] = []
+    for line in out.splitlines():
+        parts = line.split("\t")
+        if len(parts) < 2:
+            continue
+        path = parts[-1]
+        if not claims_behavior_change(types_touching(base, head, path)):
+            continue
+        if is_test_file(path):
+            unchecked.append((path, "classified as test code, so never asked to go red"))
+        elif not (GO_SOURCE.search(path) or PY_SOURCE.search(path)):
+            unchecked.append((path, "not a language this gate can scope or run"))
+        elif scope_for(path) is None:
+            unchecked.append((path, "no test scope covers it (outside PY_ROOTS)"))
+    return unchecked
+
+
+def changed_lines(base: str, head: str, path: str, cwd: str | None = None) -> list[str]:
+    """The added and removed content lines for one path, without their +/- marker.
+
+    `-U0` so context lines are not mistaken for changes, and `--ignore-all-space`
+    so a reindent is not either.
+    """
+    out = _git(
+        "diff", "-U0", "--ignore-all-space", f"{base}...{head}", "--", path, cwd=cwd
+    ).stdout
+    lines = []
+    for line in out.splitlines():
+        if line.startswith(("+++", "---", "@@", "diff ", "index ", "new file", "deleted file")):
+            continue
+        if line.startswith(("+", "-")):
+            lines.append(line[1:])
+    return lines
+
+
+def is_cosmetic(tree: str, base: str, head: str, path: str) -> bool:
+    """Whether the change to `path` cannot affect behaviour, so no test could notice.
+
+    A `feat` commit that adjusts a doc comment alongside its real work leaves this
+    gate reporting the comment's file as an uncovered behaviour change, because
+    reverting a comment of course breaks nothing. That is a false positive, and this
+    gate's whole claim on a contributor's attention is that it does not produce them
+    — `9124d487` is the specimen: a two-line doc-comment edit on `applyBrokerOption`,
+    reported identically to a real missing test.
+
+    Both tests below are *exact within their guard* and decline to classify whenever
+    they cannot be sure. Declining means the file is probed as before, so the worst
+    case is the behaviour we already had.
+
+    * **Go**: every changed line is a `//` comment or blank, and neither version of
+      the file contains `/*` anywhere. Without that second condition a changed line
+      inside a block comment is indistinguishable from code by inspection, and a
+      guard that reads `*p = 0` as a comment would suppress a real finding.
+    * **Python**: the two versions parse to the same AST. That covers `#` comments
+      and formatting together. A docstring edit is *not* covered — docstrings are
+      AST nodes — so it still reports as it does today.
+    """
+    if GO_SOURCE.search(path):
+        before = _git("show", f"{base}:{path}", cwd=tree).stdout
+        after = _git("show", f"{head}:{path}", cwd=tree).stdout
+        if "/*" in before or "/*" in after:
+            return False  # cannot tell a block-comment line from code
+        changed = changed_lines(base, head, path, cwd=tree)
+        return bool(changed) and all(
+            not line.strip() or line.strip().startswith("//") for line in changed
+        )
+
+    if PY_SOURCE.search(path):
+        try:
+            before = ast.dump(ast.parse(_git("show", f"{base}:{path}", cwd=tree).stdout))
+            after = ast.dump(ast.parse(_git("show", f"{head}:{path}", cwd=tree).stdout))
+        except SyntaxError:
+            return False  # unparseable on either side; let the probe speak
+        return before == after
+
+    return False
 
 
 def types_touching(base: str, head: str, path: str) -> set[str | None]:
@@ -199,6 +312,8 @@ def probe(tree: str, base: str, head: str, change: Change, timeout: int) -> Outc
     claim = verified_out_of_suite(base, head, change.path)
     if claim:
         return Outcome(change.path, "CLAIMED", f"Verified-By: {claim}")
+    if change.status == "M" and is_cosmetic(tree, base, head, change.path):
+        return Outcome(change.path, "COSMETIC", "comment or formatting only; no behaviour to cover")
     scope = scope_for(change.path)
     if scope is None:
         return Outcome(change.path, "UNCHECKED", "no test scope covers this path")
@@ -239,6 +354,7 @@ def report(outcomes: list[Outcome]) -> str:
         ("RED_BUILD", "Load-bearing, but only at compile time"),
         ("RED_TEST", "Covered — a test fails when these are reverted"),
         ("CLAIMED", "Verified outside the suite, on the author's word — review this"),
+        ("COSMETIC", "No behaviour changed, so nothing could cover it"),
         ("UNCHECKED", "Not checked by this gate"),
     ):
         rows = [o for o in outcomes if o.verdict == verdict]
@@ -265,6 +381,26 @@ def main() -> int:
     owed = [c for c in changes if claims_behavior_change(types_touching(args.base, args.head, c.path))]
     exempt = len(changes) - len(owed)
     if not owed:
+        # A behavioral commit whose every file fell out of scope is not a pass; it
+        # is the gate reporting that it checked nothing, and it must say which
+        # files and why. Printing "no behavioral source changes" over a `fix` that
+        # rewrote scheduling logic is exactly how the smoke harness went unchecked
+        # for as long as it did — the message was true of what the gate could see
+        # and false about the commit.
+        unchecked = unchecked_behavioral_files(args.base, args.head)
+        if unchecked:
+            print(
+                f"Nothing was checked in {args.base}..{args.head}, but a feat/fix/perf commit "
+                f"touched {len(unchecked)} file(s) this gate cannot scope:"
+            )
+            for path, why in unchecked:
+                print(f"  {path}  — {why}")
+            print(
+                "\nThat is a blind spot, not a pass. Either the commit type is wrong, or the\n"
+                "behaviour needs a test somewhere this gate can run, or it is genuinely\n"
+                "unreachable here and belongs behind a Verified-By: trailer naming what you ran."
+            )
+            return 0
         print(f"No behavioral source changes in {args.base}..{args.head} ({exempt} exempt by type).")
         return 0
 

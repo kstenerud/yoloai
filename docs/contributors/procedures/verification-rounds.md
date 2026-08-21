@@ -94,6 +94,46 @@ split **29 confirming the hypothesis to 8 contradicting it** — and every contr
 chased inside its round, because a contradicting result makes you look. That asymmetry is why this
 rule is structural instead of an instruction to stay sceptical.
 
+## 3b. Which harness produced a result, and what that guarantees
+
+**A result outlives the script that made it.** `results/*.txt` are plain text, read years later by
+someone who will not open the harness. The versions guarantee different things, and the difference
+changes what a result *supports* — so **every result must say which harness produced it, and a
+reader must check what that version promised before relying on the result.**
+
+From v2 onward the report stamps itself: `[harness v2] every expectation rests on a probe baselined
+with the mechanism absent and answering the other way`. Earlier results carry no stamp and are
+marked in their directory's `results/README.md` instead.
+
+| Provenance | What it guarantees | What it does **not** |
+| --- | --- | --- |
+| **pre-harness** (hand-written, shell) | nothing structural | the verdict is prose written by the same reader who formed the hypothesis. Treat as a lab notebook, never as a result. |
+| **`research_harness_v1`** | the report is *rendered from recorded data*, not written by hand; controls are declared and a failed control voids the run | **no negative self-test.** An expectation may rest on a probe that was never shown to report the other answer — the free-negative class, and the largest bucket in the D136 count. It also has three known defects (D134): `expect()` accepts a non-`bool`; a failed control voids *without printing* the measurements; an arm cannot be voided without voiding the whole run. |
+| **`research_harness_v2`** | v1's guarantees, the three defects fixed, **plus** the mandatory invariant: every expectation rests on a probe baselined with the mechanism absent and answering the other way, or carries a rendered `unbaselined=` waiver | it still cannot tell you the *arms were separable*, that the population was right, or that the frame was. `confounded-arms`, `frame-capture` and `inference-overreach` all survive it — every one of those has a specimen caught by a human reading a row against the tool's own output. |
+
+**The reader's rule, and it is not "prefer newer".** A v1 result is not wrong; it is *unwarranted in
+one specific way*. Before relying on one, ask the question v1 could not: **was that probe ever shown
+saying the opposite?** If the run does not record it, the result supports "we observed X" and not
+"X is the case" — which is fine for a census and fatal for a guarantee.
+
+**Where the corpora stand, 2026-08-13.**
+
+- `design/research/linux-enforcement/results/` — **marked.** Three classes in one directory, and a
+  prefix collision worth knowing about: `r*` names are round-1 *items* on harness **v1**, `v*` names
+  are round-2 *items* on harness **v2**. The letter is the item, not the version.
+- `design/research/proxy-chokepoint/results/` — **marked.** All v2.
+- `design/research/macos-isolation-spike/results/` — **owed.** Mostly v2 with some unharnessed
+  scripts, but not marked at the time of writing because a round was live in that directory and
+  editing under it would have produced a merge conflict, not clarity. Whoever closes that round
+  marks it; the three generations of superseded position already in that directory are exactly why
+  it needs doing.
+- Everything under `design/research/*.md` — reading, not measurement. Those documents say so
+  themselves; `prior-art-egress-enforcement.md` states its evidence level in its first paragraph.
+
+**v1 is frozen and is deliberately not being retrofitted.** D134 freezes it so its research keeps
+reproducing; adding a stamp would make every archived v1 result differ from a fresh re-run, which is
+the property the freeze exists to protect. Its results are marked externally instead.
+
 ## 4. Results land continuously; the plan does not move until the round closes
 
 - `results/` is a fact store. Every run lands there as it happens, including the invalidated ones —

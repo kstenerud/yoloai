@@ -25,7 +25,7 @@ import (
 func newCloneMgr(tmpDir string) *Engine {
 	mock := &lifecycleMockRuntime{}
 	layout := config.NewLayout(filepath.Join(tmpDir, ".yoloai"))
-	return NewEngineWithRuntime(mock, slog.Default(), strings.NewReader(""), WithLayout(layout))
+	return NewEngineWithRuntime(mock, slog.New(slog.DiscardHandler), strings.NewReader(""), WithLayout(layout))
 }
 
 func createCloneSource(t *testing.T, tmpDir, name string) {

@@ -21,6 +21,8 @@ type startOpts struct {
 	promptFile   string
 	vscodeTunnel bool
 	env          []string
+	broker       bool
+	noBroker     bool
 }
 
 func NewStartCmd() *cobra.Command {
@@ -39,7 +41,19 @@ func NewStartCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.promptFile, "prompt-file", "f", "", "File containing new prompt")
 	cmd.Flags().BoolVar(&opts.vscodeTunnel, "vscode-tunnel", false, "Enable VS Code Remote Tunnel (persisted; takes effect on container recreate)")
 	cmd.Flags().StringArrayVar(&opts.env, "env", nil, "Per-sandbox env var KEY=VAL (not persisted; re-supply on each start)")
+	// INTERIM SHAPE — do not copy this as a pattern (DF225). One tri-state
+	// (auto / required / disabled) carried as two booleans whose fourth
+	// combination is meaningless and is excluded at runtime below rather than by
+	// the type. It is deliberately identical to `new`'s: the same encoding
+	// already spans the public options struct, state.State, and the persisted
+	// meta, so introducing the right shape *here* would make five layers
+	// disagree, which is worse than six that agree. Collapsing it changes the
+	// on-disk field names, so it waits for v0.13.0, which is migration-bearing
+	// anyway.
+	cmd.Flags().BoolVar(&opts.broker, "broker", false, "Require credential brokering from this start on: keep the agent's API key host-side (persisted)")
+	cmd.Flags().BoolVar(&opts.noBroker, "no-broker", false, "Disable credential brokering from this start on: deliver the agent's API key into the sandbox directly (persisted)")
 
+	cmd.MarkFlagsMutuallyExclusive("broker", "no-broker")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt")
 	cmd.MarkFlagsMutuallyExclusive("resume", "prompt-file")
 	cmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
@@ -77,6 +91,8 @@ func runStart(cmd *cobra.Command, args []string, opts *startOpts) error {
 			PromptFile:   opts.promptFile,
 			VscodeTunnel: opts.vscodeTunnel,
 			Env:          envMap,
+			Broker:       opts.broker,
+			NoBroker:     opts.noBroker,
 		})
 		if res != nil {
 			cliutil.RenderNotices(cmd, res.Notices)

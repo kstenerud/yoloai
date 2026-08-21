@@ -7,6 +7,28 @@
 Counterpart to `../../macos-isolation-spike/results/`. This directory holds only the runs; harness
 scripts are one level up.
 
+**Which harness produced which run — check this before relying on any of them.** Three provenance
+classes live in this one directory, and the guarantees differ in a way that changes what a result
+supports. The authority is
+[`procedures/verification-rounds.md`](../../../../procedures/verification-rounds.md) § *Which
+harness produced a result*; the short version is that **only v2 guarantees a probe was ever shown
+reporting the opposite answer.**
+
+| Prefix | Harness | Read it as |
+| --- | --- | --- |
+| `c1-`, `k2-`, `k3-`, `l10-` and any run with no script one level up | **pre-harness** — hand-written | a lab notebook. The verdict is prose by the same reader who formed the hypothesis. |
+| `k1-`, `p1b-`, `r7-` … `r15-` | **v1** (`research_harness_v1.py`) | rendered from recorded data, controls declared — but an expectation here **may rest on a probe never shown to report failure**. Before citing one as a guarantee, check whether that run records the probe answering the other way. |
+| `v1-`, `v1b-`, `v2-v5-`, `v3-`, `v4-`, `v6b-`, `v7-` (round 2) | **v2** | the negative self-test is structural: no expectation renders unless its probe was baselined with the mechanism absent and came out the other way. |
+
+**The prefix collision is unfortunate and worth reading twice:** `r*` names are *round-1 items* run
+on harness **v1**, while `v*` names are *round-2 items* run on harness **v2**. The letter in the
+filename is the item, not the harness version.
+
+From v2 onward a run stamps its own provenance into the report (`[harness v2] …`), so this table is
+only needed for runs that predate the stamp. v1 is frozen and deliberately not retrofitted — adding
+a stamp would make every archived v1 result differ from a fresh re-run, which is what the freeze
+protects.
+
 **Where the conclusions live.** Synthesis applied these results on 2026-08-09 — cite those documents,
 not this index: [enforcement-state-reaping.md](../../../plans/enforcement-state-reaping.md) (rules 0b and
 5, the key question, the verification answer), [macos-pf-privileged-path.md](../../../plans/macos-pf-privileged-path.md),

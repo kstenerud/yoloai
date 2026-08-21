@@ -28,6 +28,8 @@ func TestBuildEnvSpec_NormalAgent(t *testing.T) {
 	assert.True(t, spec.HasStateDir)
 	assert.NotEmpty(t, spec.SeedFiles)
 	assert.True(t, spec.ShortLivedOAuthWarning)
+	assert.Equal(t, "claude", spec.AgentName)
+	assert.False(t, spec.UserDefined, "a shipped agent.go Definition must not carry the file-defined marker")
 
 	// Field mapping check on first seed file
 	var found bool
@@ -81,6 +83,15 @@ func TestBuildEnvSpec_NoStateDirAgent(t *testing.T) {
 	assert.Equal(t, "", spec.StateRelPath)
 	assert.False(t, spec.HasStateDir)
 	assert.Nil(t, spec.SettingsPatches)
+}
+
+func TestBuildEnvSpec_UserDefinedAgentIsMarked(t *testing.T) {
+	def := &agent.Definition{Type: "diamond", UserDefined: true, APIKeyEnvVars: []string{"DIAMOND_KEY"}}
+
+	spec := envspec.BuildEnvSpec(def)
+
+	assert.Equal(t, "diamond", spec.AgentName)
+	assert.True(t, spec.UserDefined, "a file-defined agent's marker must carry through to the EnvSpec that reaches DescribeInjectedCredentials")
 }
 
 func TestBuildEnvSpec_SeedFileMapping(t *testing.T) {

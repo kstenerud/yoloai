@@ -97,19 +97,20 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 The `# hadolint ignore=...` directive immediately precedes the `RUN` line. The explanatory comment is above the directive.
 
-**Keep the justification short, and here rather than there.** The rationale for each standing suppression belongs in this document, once; the Dockerfile carries a pointer. That is not tidiness — it is the size budget below, and a comment duplicated in both places is the first thing to go when the budget bites.
+**Keep the justification short, and here rather than there.** The rationale for each standing suppression belongs in this document, once; the Dockerfile carries a pointer. That is an editing standard: one rule, stated once, in the place a reader will look. It was *also* a size rule until 2026-08-19, and no longer is — see below.
 
-### Size budget: 16 KiB, and it is a hard failure
+### Size budget: instructions, not prose
 
-**Apple's `container build` rejects a Dockerfile larger than 16384 bytes** ([apple/container#735](https://github.com/apple/container/issues/735), open as of 2026-07-30). It fails the build outright — `invalidArgument: "Dockerfile size (N bytes) exceeds the maximum allowed size of 16384 bytes"` — so it is not a soft limit to drift past.
+**The budget is real, but it is spent on instructions.** The apple backend blanks every prose comment out of the Dockerfile before handing it to `container build` ([DF229](../design/findings-resolved.md)), so comments in this file are free. Write the rationale a reader needs.
 
-Three things make this easy to trip:
+**What the limit actually is.** [apple/container#735](https://github.com/apple/container/issues/735) documents a 16384-byte cap and reports it cleanly at exactly that size. It is not the operative limit: below 16384 there is an **effective ceiling** past which the build dies instantly with `unavailable: "Stream unexpectedly closed."` and no other output at all — no step list, no line, no file name. That ceiling is content-dependent, measured across a ~1 KB band (15016–15967) with nothing simple predicting where a given file lands; non-ASCII characters lower it, costing several times their bytes. `maxDockerfileBytes` in `runtime/apple/dockerfile.go` is therefore a deliberately conservative proxy set well below the lowest measurement, and the backend refuses an oversize file with a real error rather than letting the builder swallow it.
 
-- **Comments are the majority of the file** (~58% at the time of writing), so prose is what consumes the budget, not instructions.
-- **Nothing in the build enforces it.** docker, podman and containerd have no such limit, so a Linux `make check` and a full Linux smoke run both pass while the apple backend is broken. It surfaces only on a Mac.
-- **It was reached by three unremarkable commits.** The file sat at 14012 bytes, then a comment block, a version bump and a header took it to 17645 — the version bump alone landed 33 bytes under the limit without anyone noticing.
+Two things still make this worth knowing:
 
-`TestDockerfile_FitsAppleBuilderLimit` (`runtime/docker/`) now gates it, so the failure is a red test on any platform rather than a broken build on one. When it fires, the fix is to relocate prose — to this document, to the finding it cites, or to a docstring — not to shave words until it passes.
+- **Nothing in a Linux build enforces it.** docker, podman and containerd have no such limit, so a Linux `make check` and a full Linux smoke run both pass while the apple backend is broken. It surfaces only on a Mac — which is why the gate is a portable unit test.
+- **It has been reached twice by unremarkable commits.** The file sat at 14012 bytes, then a comment block, a version bump and a header took it to 17645. Later, at 15346 bytes, it passed a gate calibrated to the documented cap and was refused by the builder anyway.
+
+`TestBaseDockerfile_FitsTheAppleBuilder` (`runtime/apple/`) gates the **stripped** size — the bytes that actually reach the builder — so the failure is a red test on any platform rather than a broken build on one. When it fires, prose is not the lever: the fix is fewer or shorter instructions.
 
 **The user-facing "do not edit this" header is not part of the budget.** It is prepended when the reference copy is materialised to `defaults/base-image.Dockerfile`, never stored in the built file: the warning is false in the repo (where editing *is* how you change it) and only true of the generated copy, so where it lives is a correctness question before it is a size one.
 

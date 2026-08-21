@@ -4,7 +4,7 @@
 
 # Next release
 
-**Next release version: `v0.11.1`**
+**Next release version: `v0.12.1`**
 
 ## How this works
 
@@ -60,12 +60,39 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
+*Nothing yet.*
+
+## Deferred to v0.13.0 — the network release
+
+*Not "dropped" and not "done": scoped out of this cut, deliberately, on 2026-08-14. Both remaining
+plans build on [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary)'s
+provenance — D141 must tell operator-authored from repo-derived, and the network mode validation must
+tell a typed port from an inherited one — so building either first means building provenance twice,
+in two places, and then owning both. **The migration rides with `network-mode-reshape.md`, so v0.12.0
+carries none** and rule 12's constraint applies to v0.13.0's branch rather than this one.*
+
+*The Apple Container DNS work joined this section on 2026-08-20, on the same rule and not on its
+merits: it moves `LibrarySchemaVersion` to 7 and carries a v6→v7 migrator, and v0.12.0 was cut as a
+release that carries no migration. It is an outside contribution and it targets `release-v0.12.0`,
+so **it needs retargeting at `release-v0.13.0` rather than at `main`** — D131 is the whole reason
+that branch exists.*
+
+- [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [enforcement-build.md](design/plans/enforcement-build.md) — Host-side enforcement — build brief
 - [DF188](design/findings-unresolved.md) — `resolve_domains` accepts whatever a resolver returns, so a sinkholed allowlist domain installs a rule that matches nothing and says nothing
 - [DF189](design/findings-unresolved.md) — yoloAI's CNI subnet is byte-identical to podman's default allocator pool, so two sandboxes on one host can hold the same address
 - [DF190](design/findings-unresolved.md) — an apple sandbox silently loses all egress when an unrelated sandbox restarts and reclaims its vmnet bridge index
 - [DF193](design/findings-unresolved.md) — a guest can pre-create the on-create-done marker, and the host promotes it to permanent state on the next start, so setup commands never run
 - [DF194](design/findings-unresolved.md) — a guest holding `CAP_NET_ADMIN` can unbind its own host-side enforcement by destroying its own interface, and the sandbox returns unenforced unless something reinstalls
+- [network-mode-reshape.md](design/plans/network-mode-reshape.md) — Network mode reshape — one flag, four trust boundaries
+- [DF196](design/findings-unresolved.md) — `--network-none` silently swallows an allowlist: `--network-allow` is accepted, discarded, and never recorded
+- [DF197](design/findings-unresolved.md) — `--port` is refused with `--network-none` at the CLI only, so a profile's or archetype's ports are accepted and silently dropped
+- [DF198](design/findings-unresolved.md) — `--network-none` is silently unenforced on containerd, apple and tart, while shipped help says it holds on every backend
+- [DF199](design/findings-unresolved.md) — `--network-none` makes a seatbelt sandbox fail to start, because SBPL's `network*` class also covers unix sockets
+- [DF200](design/findings-unresolved.md) — the `NetworkNone` conformance case cannot fail, and does not run on any backend that has the defect
+- [D141](decisions/working-notes.md#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed) — A repo may not widen the sandbox boundary; requests that would are refused and listed
+- [repo-request-trust.md](design/plans/repo-request-trust.md) — Repo-request trust — balk and list, never filter and proceed
+- [PR #50](https://github.com/kstenerud/yoloai/pull/50) — Configurable DNS for Apple Container sandboxes
 
 ## Candidates — undecided
 
@@ -109,16 +136,43 @@ landed — verified-stale doc claims not to "finish". Scoped to one release cycl
      be written before the tag exists.
    - Glance at [deprecations.md](deprecations.md) — anything past its due date is a retire-or-extend
      call. *(Nothing due until 2026-09-12.)*
-   - **Reset this file** to the initial state below, with the version field assuming the point
-     release after the one just cut.
 5. Commit, push, **wait for CI to go green on that pushed head**, then tag and release. The drain
    commit is a change like any other, so the head you verified in step 2 is not the head you are
    tagging until CI has passed on it too.
+6. **Once the tag exists**, reset this file to the initial state below, with the version field
+   assuming the point release after the one just cut.
+
+### The tag is the only irreversible boundary
+
+**Resetting this file happens after the tag, not before it (step 6, not step 4).** Its job is to
+stage the *next* release, and there is no next release until this one is a fact — the same reasoning
+`LibrarySchemaReleases` already carries one bullet up. The two drains are not alike and are
+deliberately split: `BREAKING-CHANGES.md` **must** drain before the tag, because `release.yml`
+asserts an empty `## Unreleased` at the tag and the tagged tree has to carry the `## vX.Y.Z`
+heading. This file is gated by nothing, so it has no reason to be reset on a prediction.
+
+**When the cut slips — and it does — put the version field back and keep filing.** v0.12.0 was
+drained on 2026-08-20 at ritual step 4, and then five more commits landed for it: two apple-backend
+fixes without which the release test could not pass, a dependency bump, and two harness fixes. For
+that window the page said `v0.12.1` and *"Nothing yet"* while the branch was accumulating v0.12.0.
+Restoring it meant reading the drain commit's diff to recover a list the page was supposed to be
+holding.
+
+So: **before the tag, both staging files are still live.** Anything that lands goes in them, and a
+`## vX.Y.Z` heading in BREAKING-CHANGES is editable right up until the tag — rule 1 freezes it *once
+tagged*, which is a different moment than *once written*. Nothing about a drain is a commitment;
+only a tag is.
+
+**Why this went wrong is worth keeping.** The drain was not a mistake in execution — it was step 4,
+performed correctly, in order. The defect is that step 4 asks you to record "this release is done"
+while steps 1 and 2 can still send you back. A step that encodes optimism will be wrong exactly as
+often as releases slip, which is not rarely.
 
 ## Initial state
 
 What "reset" means — restore exactly this, keeping everything above `## In scope` and below
-`## The release ritual`:
+`## The release ritual`. **Done at ritual step 6, once the tag exists** — see "The tag is the only
+irreversible boundary":
 
 - **Version field:** the next point release after the one just cut (`0.y.z+1`; post-beta
   `x.y.z+1`), with no escalation note. It escalates again on its own, when something breaking lands.

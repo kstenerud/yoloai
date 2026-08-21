@@ -25,6 +25,8 @@ sandbox.go               → Sandbox handle: lifecycle + flat readers (Inspect, 
 system.go                → Orchestration spine: System (DiskUsage, Prune, Build, Check)
 runtime_imports_linux.go → Linux-specific backend registration (containerd)
 yoerrors/                → Public typed error sentinels (top-level pkg; re-exported via the yoloai package)
+feedback/                → Public advisory records (Notice) + their destination (Sink); stdlib-only so every layer can emit
+internal/textbuf/        → printf into an in-memory buffer; the shape fmt.Fprintf had, without its io.Writer
 cmd/yoloai/              → Binary entry point
 internal/agent/          → Agent plugin definitions (Aider, Claude, Codex, Gemini, OpenCode, test, idle)
 internal/cli/            → Cobra command tree and CLI plumbing
@@ -59,7 +61,7 @@ internal/orchestrator/invocation/  → Leaf: agent invocation/command assembly
 internal/envsetup/       → Layer (D91): stages agent-specific sandbox contents host-side — secret-dir, seed files, settings, agent-files, keychain credential sourcing (the substrate's dual). Was internal/orchestrator/provision/.
 internal/orchestrator/profiles/    → Leaf: profile image building (dependency order, staleness)
 internal/orchestrator/runtimeconfig/ → Leaf: ContainerConfig assembly for the runtime layer
-internal/orchestrator/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + .yoloai.yaml + VS Code workspace injection
+internal/orchestrator/archetype/   → Project archetype detection (devcontainer, compose, apple, simple) + VS Code workspace injection
 internal/orchestrator/baseline/    → Leaf: the one place a copy-mode work copy's diff baseline is established; shared by create and reset so they cannot disagree (DF120)
 copyflow/       → Git-format diff/apply machinery for :copy and :rw modes
 internal/orchestrator/state/       → Leaf: shared value types (DirSpec, State, Deps, IsolationPerms/Perms) every F5 leaf imports
@@ -301,7 +303,10 @@ result to `Layout`. The library does not probe for it.
 
 | File | Purpose |
 |------|---------|
-| `runtime.go` | `Backend` interface — pluggable backend abstraction. Generic types: `MountSpec`, `PortMapping`, `InstanceConfig`, `InstanceInfo`, `ExecResult`, `BackendCaps`, `ResourceLimits`, `PruneItem`, `PruneResult`. Optional interfaces: `UsernsProvider`, `WorkDirSetup`. Sentinel errors: `ErrNotFound`, `ErrNotRunning`. |
+| `runtime.go` | `Backend` interface — pluggable backend abstraction. Generic types: `MountSpec`, `PortMapping`, `InstanceConfig`, `InstanceInfo`, `ExecResult`, `BackendCaps`, `ResourceLimits`, `PruneItem`, `PruneAction`, `PruneResult`. Optional interfaces: `UsernsProvider`, `WorkDirSetup`. Sentinel errors: `ErrNotFound`, `ErrNotRunning`. **No method on `Backend` takes an `io.Writer`** — `Setup` and `BuildProfileImage` take a
+`feedback.ProgressSink` plus a `feedback.Sink`, and the subprocess streams they pipe are adapted to
+records inside the backend at the one seam `exec.Cmd` forces (D145, 2026-08-19). The three prune
+methods (`Prune`, `CachePruner.PruneCache`, `StaleBasePruner.PruneStaleBases`) take no sink at all — what prune produces is a report, so it comes back as `PruneItem`s carrying an `Action` and a `Reason` plus `feedback.Notice`s for what is not about any one resource (D145). `PruneItem.Removable()` is the predicate that keeps a failed removal out of the count driving the CLI's destructive confirmation. |
 | `registry.go` | Backend registry. `Register(name, factory, descriptor)` called by each backend's `init()` with a `(Factory, BackendDescriptor)` tuple. `New()` instantiates a Runtime by name. `Descriptor(name)` and `Descriptors()` return static facts without instantiating. `Available()` lists registered backend names. |
 | `isolation.go` | `IsolationContainerRuntime()` — maps isolation modes to OCI runtimes (e.g., `container-enhanced` → `runsc`, `vm` → `kata`). `IsolationSnapshotter()` — maps to containerd snapshotters. |
 | `exec.go` | `RunCmdExec()`, `RunCmdExecRaw()` — shared helpers for running `exec.Cmd` and building `ExecResult`. |
@@ -449,13 +454,12 @@ provision, profiles, runtimeconfig} ← launch ← {create, lifecycle}`.
 
 ### `internal/orchestrator/archetype/`
 
-Environment archetype detection, devcontainer.json parsing, `.yoloai.yaml` loading, and VS Code workspace injection. Imported by `orchestrator/` (one-way; archetype/ does not import orchestrator/).
+Environment archetype detection, devcontainer.json parsing, and VS Code workspace injection. Imported by `orchestrator/` (one-way; archetype/ does not import orchestrator/).
 
 | File | Purpose |
 |------|---------|
 | `archetype.go` | `Archetype` type, constants (simple/compose/devcontainer/apple), `ParseArchetype()`, `ValidArchetypes()`, `DetectArchetype()` — auto-detects project type from workdir signals. |
 | `devcontainer.go` | `LifecycleCmd` (string/array/object unmarshaling), `DevcontainerConfig` struct, `LoadDevcontainer()`, `ExtractPorts()`, `FilterMounts()`, `MergedEnv()`, `ParsedRunArgs()`, `WarnIgnoredFields()`, `PostStartCommandUsesCompose()`, `DockerComposeFilePresent()`. Converting a `LifecycleCmd` to `runtime-config.json`'s representation moved to the consumer: unexported `lifecycleCmdToJSON()` in `internal/orchestrator/create/create.go`. |
-| `yoloaiyaml.go` | `YoloAIProjectConfig` struct, `LoadYoloAIYaml()` — loads `.yoloai.yaml` project config with archetype declaration, extra mounts, and requires constraints. |
 | `vscode.go` | `InjectVSCodeWorkspace()` — writes `.vscode/extensions.json` and `.vscode/settings.json` from devcontainer.json customizations into the workdir copy. Existing keys win. |
 
 ### `copyflow/`
@@ -477,6 +481,77 @@ On-disk sandbox state — paths, metadata, and creation-completion flags. Leaf s
 | `paths.go` | `EncodePath()` / `DecodePath()` — caret encoding for filesystem-safe names. `InstanceName(principal, name)` — principal-aware runtime handle: `yoloai-<principal>-<name>` (the CLI's principal is `cli`; the empty principal is invalid and panics per D126). `LegacyCLIInstanceName(name)` — the pre-D126 `yoloai-<name>` form, used only by migrations. `Dir()`, `WorkDir()`, `RequireSandboxDir()`. No `:overlay` path helper survives here: the one the flatten migrator still needed moved to `internal/config/pretier`, which freezes the pre-tier layout the migrators read. `ValidateName()` delegates to `config.ParseSandboxName` (containerd-conformant grammar). Centralized filename constants (`EnvironmentFile`, `RuntimeConfigFile`, `AgentStatusFile`, `SandboxStateFile`, etc.) and `ErrSandboxNotFound`. |
 | `environment.go` | `Environment` / `WorkdirEnvironment` / `DirEnvironment` structs, `SaveEnvironment()` / `LoadEnvironment()` — sandbox metadata persistence as `environment.json`. `Environment.BackendType` records which runtime backend was used; `Environment.Principal` records the owning principal (D62). |
 | `sandbox_state.go` | `SandboxState` struct, `LoadSandboxState()`, `SaveSandboxState()` — per-sandbox runtime state (`sandbox-state.json`, legacy: `state.json`). Tracks `agent_files_initialized` and `on_create_commands_done`. Separate from `Environment` which is immutable after creation. |
+
+### `feedback/`
+
+Advisory feedback addressed to whoever called the API — CLI, MCP server, embedder, daemon (D145).
+The line that decides membership is *who is addressed*: a message for the **caller** is feedback and
+must be threaded or returned, because a process global cannot say which caller a line belongs to; a
+message for the **operator** is a diagnostic and stays on the logger, whose handler the entrypoint
+installs. The rule is "no undeclared destination", not "no globals".
+
+`TestArch_LibraryTakesNoFeedbackWriter` pins the invariant the whole design rests on: **no library
+function takes an `io.Writer` for feedback.** The surviving writers are declared in that test's
+`licensedWriters`, each with a reason about *bytes* — a terminal, a subprocess, a protocol peer —
+and an entry matching nothing is itself a failure, so the allowlist cannot rot into licensing
+whatever later takes the name. It is one of **two** gates. `forbidigo` bans `fmt.Fprint*` in library code — the point-of-mistake
+half, firing on the line rather than the parameter — and this fence catches the declaration, which
+is how the mechanism spreads before anyone writes to it (`state.State.Output` never appeared in a
+parameter list at all). Neither alone suffices: the ban cannot see a write into an already-licensed
+writer, and the fence cannot see a call. The ban is absolute because forbidigo matches call names
+and not argument types; string building goes through `internal/textbuf.Printf`, which keeps the
+printf shape but takes a buffer rather than an `io.Writer`.
+
+`TestArch_FeedbackHasNoYoloaiDependencies` pins that this package imports nothing else in the
+module. That is what lets `runtime/`, `store/` and `copyflow/` emit without importing anything above
+them; the first internal dependency would compile fine and surface later as an import cycle in an
+unrelated change.
+
+Deliberately absent: no universal record type (results are per-API and typed) and no error level
+(errors are returned — a notice is for what did *not* fail the call).
+
+**Progress is a record here too**, and the 2026-08-19 D145 amendment records why the first design
+said otherwise: it kept writers for "a stream we do not own", but the foreign seam is
+`cmd.Stdout = w`, a different mechanism from the `fmt.Fprint*` calls in the same functions. Not one
+of the library's writer-bound `fmt.Fprint*` calls carried foreign bytes; every one was a sentence
+we composed. Progress carries the most structure of anything the library emits, so it is the worst
+case for text, not an exception to it.
+
+| File | Purpose |
+|------|---------|
+| `feedback.go` | `Notice` (semantic dotted `Event`, `Level`, rendered `Message`, optional `Fields`), `LevelInfo`/`LevelWarn`, and the `Infof`/`Warnf` emission helpers. `Event` is what makes a consumer a lookup rather than a match on message text, so it is a required argument, not a field a site may omit. |
+| `sink.go` | `Sink` (one method, `Notice`), `SinkFunc`, `Discard`, `Collector` (mutex-guarded — prune fans out across backends), `Tee`. A `nil` Sink panics naming `Discard`: dropping notices is legitimate, so it is stated rather than caused by a zero-valued field. Not a channel — a channel imposes a drain/close lifecycle, and an unbuffered one nobody reads deadlocks the library mid-operation. |
+| `progress.go` | `Progress` (`Event`, `Message`, `Fields` — **no level**), `ProgressSink`, `DiscardProgress`, `Progressf`/`EmitProgress`, `ProgressAsNotices` (for a caller with no live stream — the restart path folds progress into its result), and `ProgressWriter`. Separate from `Notice` because progress has no severity and because consumers route it differently: a notice rides home on a result, progress is only meaningful live. `ProgressWriter` is the subprocess seam — `exec.Cmd.Stdout` must be an `io.Writer`, so a backend streaming `docker build` writes there and each line becomes a record. `Flush` exists for the child's unterminated last line, which is disproportionately the error text. |
+| `writer.go` | `WriterSink`, `ProgressToWriter` and `WarningPrefix` — the adapter for a caller who handed over an `io.Writer`, rendering one line per notice in the bytes yoloAI has always written. It renders and discards, so the event and fields die here; that is the loss records exist to avoid, which is why it is the fallback for the byte-stream contract rather than the shape to build on. `launch.WarningPrefix` aliases the constant for the migration window. |
+
+### `internal/textbuf/`
+
+`Printf(b Buffer, format string, args ...any)` — printf-style appending to an in-memory text
+buffer. One function, and it exists to resolve a conflict rather than to save typing.
+
+`fmt.Fprint*` is banned in library code (D145), and the ban must be absolute because `forbidigo`
+matches call names rather than argument types — it cannot tell a write to a caller's stream from
+one to a local builder. That also outlaws `fmt.Fprintf(&b, …)`, the normal way to build a string in
+Go. `Printf` restores the shape while making the distinction **structural**: it takes a `Buffer`,
+never an `io.Writer`, so misuse cannot turn it back into the mechanism the ban removes.
+
+`Buffer` requires `String()` as well as `WriteString()` — not because `Printf` calls it, but to
+exclude. `WriteString` alone would admit `*os.File` and `*bufio.Writer`, which are real
+destinations. `TestArch_BufferExcludesRealDestinations` pins that exclusion, including the positive
+half, so it cannot pass by the interface becoming unsatisfiable.
+
+### `internal/orchestrator/state/`
+
+The shared value types every F5 leaf imports: `DirSpec`, `State`, `Deps`, `IsolationPerms`/`Perms`.
+
+`State` is the per-launch resolved configuration, assembled at one site (`create.Run`) and consumed
+at many. That shape has a failure mode worth knowing about, because it produced seven instances
+before anyone counted (DF221): **adding a field is free, nothing forces a consumer to appear, and a
+field with no reader has no test that can go red** — so it is invisible rather than merely unused.
+`TestArch_EveryStateFieldHasAReader` is what makes the next one fail instead of accumulate.
+
+`Deps.Logger` carries the caller's declared diagnostic destination down to the leaves; use
+`Deps.LoggerOr()` at the few sites that build a partial `Deps` (D145).
 
 ### `internal/workspace/`
 
@@ -523,7 +598,7 @@ stat-only mode; returns the diff text directly. Lives in `copyflow`.
 ### `orchestrator.CloneOptions`
 Parameters for `Engine.Clone()`. Source and destination sandbox names, optional overrides.
 
-### `archetype.Archetype` / `archetype.DevcontainerConfig` / `archetype.YoloAIProjectConfig`
+### `archetype.Archetype` / `archetype.DevcontainerConfig`
 Project-archetype detection types. Lives in `orchestrator/archetype`.
 
 ### `agent.Definition`

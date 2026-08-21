@@ -941,7 +941,11 @@ func TestIntegration_CredentialInjection(t *testing.T) {
 // currently present in the system temp dir.
 func existingSecretsDirs(t *testing.T) map[string]struct{} {
 	t.Helper()
-	entries, err := os.ReadDir(os.TempDir())
+	// The ambient temp dir is the subject: this asserts that yoloAI does not
+	// leave secrets dirs behind *there*, which is where they would land if the
+	// layout-owned temp root were bypassed. Reading layout.TempDir() would test
+	// the opposite of the thing at risk.
+	entries, err := os.ReadDir(os.TempDir()) //nolint:forbidigo // asserting the ambient temp dir stays clean is the point of the check
 	require.NoError(t, err)
 	out := make(map[string]struct{})
 	for _, e := range entries {

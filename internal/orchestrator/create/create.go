@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/envsetup"
@@ -110,23 +111,11 @@ type Options struct {
 	VscodeTunnel         bool                  // --vscode-tunnel flag
 	Archetype            string                // --archetype flag (empty = auto-detect)
 
-	// Output receives the create pipeline's human-readable progress (profile
-	// image build stream, advisory warnings). Per-call so concurrent Creates on
-	// the same Engine don't interleave on a shared writer. Nil falls back to
-	// the Engine's output writer (the Client's Options.Output). F8.
-	Output io.Writer
-}
-
-// outputFor resolves a create-pipeline progress writer: the per-call
-// Options.Output when set, otherwise io.Discard. Never returns nil, so
-// leaf writers can't panic on a nil io.Writer regardless of which create helper
-// a caller enters through. The yoloai.Client seeds Options.Output from its
-// Options.Output, so a nil here means a direct library caller opted out. F8.
-func outputFor(o io.Writer) io.Writer {
-	if o != nil {
-		return o
-	}
-	return io.Discard
+	// Notices and Progress are where this create reports to. Per-call, so
+	// concurrent Creates never interleave; both are required, with
+	// feedback.Discard / feedback.DiscardProgress as the way to say "nothing".
+	Notices  feedback.Sink
+	Progress feedback.ProgressSink
 }
 
 // Run creates and optionally starts a new sandbox.
@@ -250,7 +239,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 
 	// Phase 2: Create directory structure and seed sandbox.
 	perms := store.Perms()
-	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, agentDirMountPaths(workdir, auxDirs), outputFor(opts.Output))
+	agentFilesInitialized, err := createAndSeedSandbox(ctx, d, sandboxDir, agentDef, ri.profile, perms, agentDirMountPaths(workdir, auxDirs), opts.Notices)
 	if err != nil {
 		return nil, err
 	}
@@ -279,7 +268,7 @@ func prepareSandboxState(ctx context.Context, d state.Deps, opts Options) (*stat
 	}
 
 	success = true
-	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, model, networkMode, networkAllow, ri, configData, tmuxConf, d.Layout, d.Layout.HomeDir), nil
+	return buildSandboxStateResult(opts, sandboxDir, workdir, workCopyDir, auxDirs, agentDef, meta, model, networkMode, networkAllow, ri, tmuxConf, d.Layout, d.Layout.HomeDir), nil
 }
 
 // resolvedCreateInputs carries the Phase-1 resolution outputs (profile, archetype,
@@ -289,8 +278,6 @@ type resolvedCreateInputs struct {
 	profile         *profileResult
 	archetype       archetype.Archetype
 	devcontainerCfg *archetype.DevcontainerConfig
-	dcMounts        []string
-	dcMountWarnings []string
 	mergedMounts    []string
 	onCreateDone    bool
 }
@@ -306,18 +293,18 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		return nil, err
 	}
 
-	if err := applyConfigDefaults(opts, ycfg, pr); err != nil {
+	if err := applyConfigDefaults(opts, ycfg, pr, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation()); err != nil {
 		return nil, err
 	}
 
-	resolvedArchetype, devcontainerCfg, dcMounts, dcMountWarnings, err := resolveAndApplyArchetype(ctx, d, opts, pr)
+	resolvedArchetype, devcontainerCfg, dcMounts, dcMountNotices, err := resolveAndApplyArchetype(ctx, d, opts, pr)
 	if err != nil {
 		return nil, err
 	}
 
 	mergeDcMounts(pr, dcMounts)
-	for _, w := range dcMountWarnings {
-		fmt.Fprintln(outputFor(opts.Output), w) //nolint:errcheck // best-effort warning
+	for _, n := range dcMountNotices {
+		feedback.Emit(opts.Notices, n)
 	}
 
 	mergedMounts, err := validateAndExpandMounts(pr.mounts, d.Layout.HomeDir, d.Layout.Env().EnvForConfigInterpolation())
@@ -329,21 +316,19 @@ func resolveProfileAndArchetype(ctx context.Context, d state.Deps, opts *Options
 		profile:         pr,
 		archetype:       resolvedArchetype,
 		devcontainerCfg: devcontainerCfg,
-		dcMounts:        dcMounts,
-		dcMountWarnings: dcMountWarnings,
 		mergedMounts:    mergedMounts,
 		onCreateDone:    loadOnCreateDone(d.Layout.SandboxDir(opts.Name)),
 	}, nil
 }
 
 // createAndSeedSandbox creates directory structure and seeds the sandbox with agent files.
-func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms store.IsolationPerms, trustPaths []string, output io.Writer) (bool, error) {
+func createAndSeedSandbox(ctx context.Context, d state.Deps, sandboxDir string, agentDef *agent.Definition, pr *profileResult, perms store.IsolationPerms, trustPaths []string, sink feedback.Sink) (bool, error) {
 	_ = ctx // reserved for future use
 	if err := createSandboxDirs(sandboxDir, perms); err != nil {
 		return false, err
 	}
 	spec := envspec.BuildEnvSpec(agentDef)
-	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, trustPaths, output)
+	return envsetup.SeedSandbox(spec, sandboxDir, pr.agentFiles, d.Layout.HomeDir, d.Layout, trustPaths, sink)
 }
 
 // agentDirMountPaths returns the guest-visible mount paths of the workdir and
@@ -392,43 +377,37 @@ func buildConfigAndEnvironment(ctx context.Context, d state.Deps, opts Options, 
 // buildSandboxStateResult constructs the State from all resolved values.
 // networkMode and networkAllow are passed explicitly because the substrate
 // record (meta) no longer carries them (D90); they live in netpolicy.json.
-func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, model string, networkMode string, networkAllow []string, ri *resolvedCreateInputs, configData []byte, tmuxConf string, layout config.Layout, homeDir string) *state.State {
+func buildSandboxStateResult(opts Options, sandboxDir string, workdir *DirSpec, workCopyDir string, auxDirs []*DirSpec, agentDef *agent.Definition, meta *store.Environment, model string, networkMode string, networkAllow []string, ri *resolvedCreateInputs, tmuxConf string, layout config.Layout, homeDir string) *state.State {
 	pr := ri.profile
 	return &state.State{
-		Name:                      opts.Name,
-		SandboxDir:                sandboxDir,
-		Workdir:                   workdir,
-		WorkCopyDir:               workCopyDir,
-		AuxDirs:                   auxDirs,
-		Agent:                     agentDef,
-		Model:                     model,
-		Profile:                   pr.name,
-		ImageRef:                  pr.imageRef,
-		Env:                       pr.env,
-		HasPrompt:                 meta.HasPrompt,
-		NetworkMode:               networkMode,
-		NetworkAllow:              networkAllow,
-		Ports:                     opts.Ports,
-		ConfigMounts:              ri.mergedMounts,
-		TmuxConf:                  tmuxConf,
-		Resources:                 pr.resources,
-		CapAdd:                    pr.capAdd,
-		Devices:                   pr.devices,
-		Setup:                     pr.setup,
-		Isolation:                 pr.isolation,
-		IsolationExplicit:         pr.isolationExplicit,
-		VscodeTunnel:              opts.VscodeTunnel,
-		Environment:               meta,
-		ConfigJSON:                configData,
-		Archetype:                 ri.archetype,
-		DockerdRequired:           pr.archetypeDockerDRequired,
-		Devcontainer:              ri.devcontainerCfg,
-		DevcontainerMounts:        ri.dcMounts,
-		DevcontainerMountWarnings: ri.dcMountWarnings,
-		WorkdirMode:               string(workdir.Mode),
-		Layout:                    layout,
-		HomeDir:                   homeDir,
-		Output:                    opts.Output,
+		Name:         opts.Name,
+		SandboxDir:   sandboxDir,
+		Workdir:      workdir,
+		WorkCopyDir:  workCopyDir,
+		AuxDirs:      auxDirs,
+		Agent:        agentDef,
+		Model:        model,
+		Profile:      pr.name,
+		ImageRef:     pr.imageRef,
+		Env:          pr.env,
+		HasPrompt:    meta.HasPrompt,
+		NetworkMode:  networkMode,
+		NetworkAllow: networkAllow,
+		Ports:        opts.Ports,
+		ExtraMounts:  ri.mergedMounts,
+		TmuxConf:     tmuxConf,
+		Resources:    pr.resources,
+		CapAdd:       pr.capAdd,
+		Devices:      pr.devices,
+		Setup:        pr.setup,
+		Isolation:    pr.isolation,
+		VscodeTunnel: opts.VscodeTunnel,
+		Environment:  meta,
+		Archetype:    ri.archetype,
+		Layout:       layout,
+		HomeDir:      homeDir,
+		Notices:      opts.Notices,
+		Progress:     opts.Progress,
 	}
 }
 
@@ -510,7 +489,7 @@ func resolveRuntimeBase(ctx context.Context, d state.Deps, opts *Options, pr *pr
 	if err != nil {
 		return err
 	}
-	_, _ = fmt.Fprintf(outputFor(opts.Output), "Using runtime base %s\n", imageRef)
+	feedback.Infof(opts.Notices, "image.base_selected", "Using runtime base %s", imageRef)
 	pr.imageRef = imageRef
 	return nil
 }

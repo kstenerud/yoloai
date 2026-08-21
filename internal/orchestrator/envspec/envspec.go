@@ -27,6 +27,8 @@ func BuildEnvSpec(def *agent.Definition) envsetup.EnvSpec {
 		ContextFile:            def.ContextFile,
 		SettingsPatches:        settingsPatches(def),
 		ShortLivedOAuthWarning: def.ShortLivedOAuthWarning,
+		AgentName:              string(def.Type),
+		UserDefined:            def.UserDefined,
 	}
 }
 

@@ -4,11 +4,12 @@ package envsetup
 
 import (
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
 	"github.com/kstenerud/yoloai/store"
@@ -25,10 +26,45 @@ func ResolveSecretEnv(spec EnvSpec, configEnv map[string]string, hostEnv config.
 	for k, v := range configEnv {
 		out[k] = v
 	}
-	for k, v := range hostEnv.Env().EnvForAgentCredentials(append(spec.APIKeyEnvVars, spec.AuthHintEnvVars...)) {
+	for k, v := range resolvedHostCredentials(spec, hostEnv) {
 		out[k] = v
 	}
 	return out
+}
+
+// resolvedHostCredentials returns the subset of spec's declared credential
+// keys (APIKeyEnvVars + AuthHintEnvVars) actually present in hostEnv's
+// snapshot. Factored out so ResolveSecretEnv (what gets injected) and
+// DescribeInjectedCredentials (what gets disclosed) can never compute a
+// different set — D144 line 2 requires the disclosure name exactly what was
+// injected from the host, not what was merely declared.
+func resolvedHostCredentials(spec EnvSpec, hostEnv config.Layout) map[string]string {
+	return hostEnv.Env().EnvForAgentCredentials(append(spec.APIKeyEnvVars, spec.AuthHintEnvVars...))
+}
+
+// DescribeInjectedCredentials returns a human-readable D144 line-2 disclosure
+// line naming the credential env vars actually resolved from hostEnv's
+// snapshot for spec's declaring agent (spec.AgentName) — never the
+// merely-declared set, and never config's env: entries, since those are
+// values the user typed themselves rather than a grant an agent declaration
+// pulled in. "" when nothing resolved: silence must mean nothing was
+// granted, so an unconditional line would train a reader to ignore it.
+func DescribeInjectedCredentials(spec EnvSpec, hostEnv config.Layout) string {
+	resolved := resolvedHostCredentials(spec, hostEnv)
+	if len(resolved) == 0 {
+		return ""
+	}
+	keys := make([]string, 0, len(resolved))
+	for k := range resolved {
+		keys = append(keys, k)
+	}
+	sort.Strings(keys)
+
+	declarer := fmt.Sprintf("agent %q", spec.AgentName)
+	if spec.UserDefined {
+		declarer = fmt.Sprintf("user-defined agent %q", spec.AgentName)
+	}
+	return fmt.Sprintf("credentials injected from the environment: %s (declared by %s)", strings.Join(keys, ", "), declarer)
 }
 
 // StageSecretEnv writes a resolved secret map to a fresh owner-only temp dir as
@@ -388,7 +424,7 @@ func RefreshHomeSeed(spec EnvSpec, sandboxDir string, hasAPIKey bool, homeDir st
 // homeDir is used for ~ expansion in seed file host paths.
 // hostEnv supplies both the agent-credential lookups (HasAnyAPIKey/CopySeedFiles)
 // and, via its curated interpolation map, the ${VAR} expansion in CopyAgentFiles.
-func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, trustPaths []string, output io.Writer) (agentFilesInitialized bool, err error) {
+func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesConfig, homeDir string, hostEnv config.Layout, trustPaths []string, sink feedback.Sink) (agentFilesInitialized bool, err error) {
 	hasAPIKey := HasAnyAPIKey(spec, hostEnv)
 	copiedAuth, err := RefreshHomeSeed(spec, sandboxDir, hasAPIKey, homeDir, hostEnv, trustPaths)
 	if err != nil {
@@ -396,10 +432,18 @@ func SeedSandbox(spec EnvSpec, sandboxDir string, agentFiles *config.AgentFilesC
 	}
 
 	if spec.ShortLivedOAuthWarning && copiedAuth {
-		fmt.Fprintln(output, "Warning: using OAuth credentials from ~/.claude/.credentials.json")                         //nolint:errcheck // best-effort warning
-		fmt.Fprintln(output, "  These tokens expire after ~30 minutes and may fail in long-running sessions.")            //nolint:errcheck // best-effort warning
-		fmt.Fprintln(output, "  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.") //nolint:errcheck // best-effort warning
-		fmt.Fprintln(output)                                                                                              //nolint:errcheck // best-effort warning
+		// One notice, not four lines: it is one fact about the credentials the
+		// sandbox was seeded with. The trailing blank line the writer version
+		// emitted is gone — spacing is the renderer's business, and a library
+		// deciding it is the coupling this conversion removes.
+		feedback.Emit(sink, feedback.Notice{
+			Event: "credentials.short_lived_oauth",
+			Level: feedback.LevelWarn,
+			Message: "using OAuth credentials from ~/.claude/.credentials.json\n" +
+				"  These tokens expire after ~30 minutes and may fail in long-running sessions.\n" +
+				"  For reliable auth, run 'claude setup-token' and export CLAUDE_CODE_OAUTH_TOKEN instead.",
+			Fields: map[string]any{"source": "~/.claude/.credentials.json"},
+		})
 	}
 
 	if agentFiles != nil && spec.HasStateDir {

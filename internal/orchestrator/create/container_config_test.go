@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/agent"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/git"
@@ -111,7 +112,7 @@ func TestResolveAgentParams_HeadlessDowngrade(t *testing.T) {
 	prompt := "do something"
 
 	// Headless=true but no auth → effective headless must be false (downgraded).
-	opts := Options{Agent: "claude", Prompt: prompt, Headless: true}
+	opts := Options{Agent: "claude", Prompt: prompt, Headless: true, Notices: feedback.Discard, Progress: feedback.DiscardProgress}
 	_, _, _, _, _, headless, err := resolveAgentParams(claudeDef, opts, pr, gcfg, homeDir, noAuthLayout, nil)
 	require.NoError(t, err)
 	assert.False(t, headless, "headless without observable auth must be downgraded to interactive")

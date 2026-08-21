@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/buildinfo"
 	"github.com/kstenerud/yoloai/internal/config"
 	"github.com/kstenerud/yoloai/internal/fileutil"
@@ -108,7 +109,7 @@ var requiredTools = []string{"tmux", "node", "jq", "rg", "claude"}
 // accepted to satisfy the runtime.Backend interface (Q-W.5) and remains
 // available for any future host-path needs (e.g., lock files) without a
 // further signature change.
-func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger, force bool) error {
 	baseImage := r.resolveBaseImage(sourceDir)
 
 	// Serialize base creation so concurrent processes don't race on the shared
@@ -137,10 +138,14 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 		return fmt.Errorf("check base image: %w", err)
 	}
 	if !baseExists {
-		fmt.Fprintf(output, "Pulling base macOS VM image (%s)...\n", baseImage)            //nolint:errcheck // best-effort
-		fmt.Fprintln(output, "This is a one-time download (~30 GB) and may take a while.") //nolint:errcheck // best-effort
+		feedback.EmitProgress(progress, feedback.Progress{
+			Event: "image.base_pulling",
+			Message: fmt.Sprintf("Pulling base macOS VM image (%s)...\n"+
+				"This is a one-time download (~30 GB) and may take a while.", baseImage),
+			Fields: map[string]any{"image": baseImage, "approx_bytes": int64(30) << 30},
+		})
 
-		if err := r.pullImage(ctx, baseImage, output); err != nil {
+		if err := r.pullImage(ctx, baseImage, progress); err != nil {
 			return fmt.Errorf("pull base image: %w", err)
 		}
 	}
@@ -152,20 +157,20 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 	tempVM := generateTempVMName(provisionedImageName)
 	defer r.cleanupTempVM(ctx, tempVM)
 
-	fmt.Fprintln(output, "Cloning base image for provisioning...") //nolint:errcheck // best-effort
+	feedback.Progressf(progress, "image.base_cloning", "Cloning base image for provisioning...")
 	if _, err := r.runTart(ctx, "clone", baseImage, tempVM); err != nil {
 		return fmt.Errorf("clone base image: %w", err)
 	}
 
-	fmt.Fprintln(output, "Booting VM for provisioning (installing dev tools)...") //nolint:errcheck // best-effort
-	if err := r.bootForProvisioning(ctx, tempVM, baseImage, output, logger); err != nil {
+	feedback.Progressf(progress, "vm.provisioning_boot", "Booting VM for provisioning (installing dev tools)...")
+	if err := r.bootForProvisioning(ctx, tempVM, baseImage, progress, logger); err != nil {
 		return fmt.Errorf("provision VM: %w", err)
 	}
 
 	// Swap: replace the old base with the freshly verified temp VM.
 	provExists, _ := r.vmExistsNamed(ctx, provisionedImageName)
 	if provExists {
-		fmt.Fprintln(output, "Promoting newly provisioned image...") //nolint:errcheck // best-effort
+		feedback.Progressf(progress, "image.base_promoting", "Promoting newly provisioned image...")
 		// Stop the old base before deleting it: `tart delete` on a running VM
 		// fails with a misleading "instance not found", which would abandon a
 		// fully-provisioned (and possibly hour-long) build at the final step.
@@ -185,7 +190,7 @@ func (r *Runtime) Setup(ctx context.Context, _ config.Layout, sourceDir string, 
 	r.recordBuildChecksum(baseImage)
 	r.recordBuildInfo(baseImage)
 
-	fmt.Fprintln(output, "Base VM image provisioned successfully.") //nolint:errcheck // best-effort
+	feedback.Progressf(progress, "image.base_provisioned", "Base VM image provisioned successfully.")
 	return nil
 }
 
@@ -345,7 +350,7 @@ func (r *Runtime) recordBuildInfo(baseImage string) {
 // verifyTools asserts every requiredTools binary resolves on the VM's login
 // shell PATH (zsh -l sources ~/.zprofile). Returns an error naming the first
 // missing tool — that is what the provisioned base must guarantee.
-func (r *Runtime) verifyTools(ctx context.Context, vmName string, output io.Writer) error {
+func (r *Runtime) verifyTools(ctx context.Context, vmName string, progress feedback.ProgressSink) error {
 	script := fmt.Sprintf(
 		`for t in %s; do command -v "$t" >/dev/null 2>&1 || { echo "MISSING: $t" >&2; exit 1; }; done`,
 		strings.Join(requiredTools, " "),
@@ -355,7 +360,9 @@ func (r *Runtime) verifyTools(ctx context.Context, vmName string, output io.Writ
 	// Tee into a tail buffer so the failure names the missing tool on the error
 	// itself, not only on the stream (DF145).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "vm.command_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -382,12 +389,14 @@ func (r *Runtime) writeImprint(ctx context.Context, vmName, baseImage string) er
 }
 
 // pullImage pulls a Tart VM image from a registry.
-func (r *Runtime) pullImage(ctx context.Context, imageRef string, output io.Writer) error {
+func (r *Runtime) pullImage(ctx context.Context, imageRef string, progress feedback.ProgressSink) error {
 	cmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, "pull", imageRef)
 	// Tee into a tail buffer so a pull failure (auth, network, disk) explains
 	// itself on the error, not only on the stream (DF145).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "vm.command_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	cmd.Stdout = w
 	cmd.Stderr = w
 	if err := cmd.Run(); err != nil {
@@ -399,7 +408,7 @@ func (r *Runtime) pullImage(ctx context.Context, imageRef string, output io.Writ
 // bootForProvisioning boots a VM, runs provision commands, verifies the
 // required tools resolve on the login PATH, writes a build imprint, then shuts
 // the VM down. baseImage is needed for the imprint's provision checksum.
-func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage string, output io.Writer, logger *slog.Logger) error {
+func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage string, progress feedback.ProgressSink, logger *slog.Logger) error {
 	// Capture tart run output to a temp log for debugging
 	vmLog, err := r.layout.CreateTemp("yoloai-tart-*.log")
 	if err != nil {
@@ -441,7 +450,7 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 	}()
 
 	// Wait for VM to be accessible
-	fmt.Fprintln(output, "Waiting for VM to boot (macOS VMs can take 30-60s)...") //nolint:errcheck // best-effort
+	feedback.Progressf(progress, "vm.boot_waiting", "Waiting for VM to boot (macOS VMs can take 30-60s)...")
 	if err := r.waitForBoot(ctx, vmName, procDone); err != nil {
 		// Show tart run output on failure to aid debugging
 		if logData, readErr := os.ReadFile(vmLogPath); readErr == nil && len(logData) > 0 { //nolint:gosec // G304: temp file we created
@@ -451,14 +460,18 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 			if limitErr := checkVMLimitError(string(logData)); limitErr != nil {
 				return limitErr
 			}
-			fmt.Fprintf(output, "tart run output:\n%s\n", string(logData)) //nolint:errcheck // best-effort diagnostic output
+			feedback.Progressf(progress, "vm.boot_log", "tart run output:\n%s", string(logData))
 		}
 		return fmt.Errorf("vm did not become accessible: %w", err)
 	}
 
 	// Run each provision command
 	for i, cmdStr := range provisionCommands {
-		fmt.Fprintf(output, "Provisioning step %d/%d...\n", i+1, len(provisionCommands)) //nolint:errcheck // best-effort
+		feedback.EmitProgress(progress, feedback.Progress{
+			Event:   "vm.provision_step",
+			Message: fmt.Sprintf("Provisioning step %d/%d...", i+1, len(provisionCommands)),
+			Fields:  map[string]any{"step": i + 1, "of": len(provisionCommands)},
+		})
 		logger.Debug("provisioning", "step", i+1, "command", cmdStr)
 
 		args := execArgs(vmName, "bash", "-c", cmdStr)
@@ -466,7 +479,8 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 		// Tee into a tail buffer so the step's actual failure (apt error,
 		// network fault) rides on the error, not only on the stream (DF145).
 		tail := sysexec.NewTailBuffer(buildErrorTailLines)
-		w := io.MultiWriter(output, tail)
+		pw := feedback.NewProgressWriter(progress, "vm.provision_output")
+		w := io.MultiWriter(pw, tail)
 		provCmd.Stdout = w
 		provCmd.Stderr = w
 
@@ -478,8 +492,8 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 	// Verify every required tool resolves on the LOGIN shell PATH (zsh -l
 	// sources ~/.zprofile) — that is the PATH the agent and tmux pane will use.
 	// A missing tool fails the build here, before the new base is promoted.
-	fmt.Fprintln(output, "Verifying provisioned tools...") //nolint:errcheck // best-effort
-	if err := r.verifyTools(ctx, vmName, output); err != nil {
+	feedback.Progressf(progress, "vm.tools_verifying", "Verifying provisioned tools...")
+	if err := r.verifyTools(ctx, vmName, progress); err != nil {
 		return err
 	}
 
@@ -487,7 +501,7 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 	// provision checksum and a UTC timestamp. Metadata only — not a rebuild
 	// trigger (the checksum drives rebuilds; embedding it here would be
 	// circular if it were part of provisionCommands).
-	fmt.Fprintln(output, "Writing base image imprint...") //nolint:errcheck // best-effort
+	feedback.Progressf(progress, "image.imprint_writing", "Writing base image imprint...")
 	if err := r.writeImprint(ctx, vmName, baseImage); err != nil {
 		return fmt.Errorf("write imprint: %w", err)
 	}
@@ -496,16 +510,21 @@ func (r *Runtime) bootForProvisioning(ctx context.Context, vmName, baseImage str
 	// disk image is cloned for sandboxes. Without this, an external tart stop
 	// (ACPI power-off) may not wait for macOS to commit all pending writes,
 	// causing installed packages and profile edits to be missing in clones.
-	fmt.Fprintln(output, "Flushing filesystem and shutting down provisioning VM...") //nolint:errcheck // best-effort
+	feedback.Progressf(progress, "vm.shutting_down", "Flushing filesystem and shutting down provisioning VM...")
 	shutArgs := execArgs(vmName, "bash", "-c", "sync; sudo /sbin/shutdown -h now")
 	shutCmd := sysexec.CommandContext(ctx, r.execEnv, r.tartBin, shutArgs...)
-	shutCmd.Stdout = output
-	shutCmd.Stderr = output
+	// One of the three sites that used to pass the caller's writer straight to
+	// the child (D145 amendment). The shutdown exec emits almost nothing, so
+	// flattening it to lines costs nothing real.
+	shutPw := feedback.NewProgressWriter(progress, "vm.shutdown_output")
+	defer shutPw.Flush()
+	shutCmd.Stdout = shutPw
+	shutCmd.Stderr = shutPw
 	_ = shutCmd.Run() // VM shuts down during exec — non-zero exit is expected
 
 	// Wait for tart run to exit, confirming the VM has fully powered off and
 	// its disk image is in a consistent state.
-	fmt.Fprintln(output, "Waiting for VM to fully power off...") //nolint:errcheck // best-effort
+	feedback.Progressf(progress, "vm.poweroff_waiting", "Waiting for VM to fully power off...")
 	select {
 	case <-procDone:
 		logger.Debug("provisioning VM powered off cleanly", "vm", vmName)
@@ -526,7 +545,7 @@ func (r *Runtime) BaseExists(ctx context.Context, baseName string) (bool, error)
 // CreateBase creates a new runtime base image with specified runtimes.
 // Progress is written to progress (the caller's writer); the library never
 // touches the process's os.Stdout/Stderr (§12).
-func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []RuntimeVersion, progress io.Writer) error {
+func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []RuntimeVersion, progress feedback.ProgressSink) error {
 	tempVM := generateTempVMName(baseName)
 	defer r.cleanupTempVM(ctx, tempVM) // Always cleanup temp VM
 
@@ -542,14 +561,18 @@ func (r *Runtime) CreateBase(ctx context.Context, baseName string, runtimes []Ru
 	defer r.stopVM(ctx, tempVM) // Ensure VM stopped before snapshot
 
 	// Configure Xcode in VM (required for xcodebuild)
-	fmt.Fprintf(progress, "Configuring Xcode...\n") //nolint:errcheck // best-effort progress
+	feedback.Progressf(progress, "xcode.configuring", "Configuring Xcode...")
 	if err := r.configureXcodeInVM(ctx, tempVM); err != nil {
 		return fmt.Errorf("configure Xcode: %w", err)
 	}
 
 	// Copy each runtime into the VM
 	for _, rt := range runtimes {
-		fmt.Fprintf(progress, "Copying %s %s runtime (this may take several minutes)...\n", rt.Platform, rt.Version) //nolint:errcheck // best-effort progress
+		feedback.EmitProgress(progress, feedback.Progress{
+			Event:   "runtime.copying",
+			Message: fmt.Sprintf("Copying %s %s runtime (this may take several minutes)...", rt.Platform, rt.Version),
+			Fields:  map[string]any{"platform": rt.Platform, "version": rt.Version},
+		})
 		if err := CopyRuntimeToVM(ctx, r.execEnv, r.tartBin, tempVM, rt, progress); err != nil {
 			return fmt.Errorf("copy %s %s: %w", rt.Platform, rt.Version, err)
 		}

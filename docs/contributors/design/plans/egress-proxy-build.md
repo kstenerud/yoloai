@@ -236,6 +236,18 @@ would fail.
    working documented combination start being refused — rule 1, a `BREAKING-CHANGES.md` entry, and
    a version escalation. Price it before choosing, not after.
 
+**Two apple constraints, measured, that decide the proxy's shape before any code**
+(`design/research/mac-channel/results/c1-apple-channel.txt`):
+
+1. **The channel's direction is inverted.** `container run --publish-socket host:guest` has the
+   *host* create the endpoint and refuses to reuse an existing one, so **the guest connects and the
+   host listens** — the guest cannot initiate. vsock to host CID 2 was refused on every port tried.
+   A proxy therefore needs either a guest-side shim multiplexing local connections over the one
+   channel, or a host-side proxy that connects in and speaks a reverse protocol. **Not decided**,
+   and it is the first thing to decide, because it changes what runs inside the sandbox.
+2. **`sun_path` is 108 bytes.** A host endpoint under `~/.yoloai/sandboxes/<name>/` can exceed it.
+   This bit the round before it was noticed, so it will bite an implementation too.
+
 **And one thing this brief must not decide by itself.** git-over-SSH works through a `CONNECT`
 tunnel — the stream reached GitHub's sshd. But no `nc`/`socat`/`corkscrew` ships in the image, so
 supporting it is a decision about the image; and allowing it hands the proxy an opaque byte stream

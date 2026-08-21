@@ -71,7 +71,8 @@ exists to fix.
 Full detail and the reasoning behind each rule:
 **`docs/contributors/procedures/pull-requests.md`**. Ordered by how likely you are to trip — but
 the numbers are cited from other documents, so a new rule appends rather than inserts. Rule 10 is
-the newest and belongs about third.
+the newest and belongs about third. Rule 13 belongs last: it only fires on an edit to four
+narrowly-scoped documents, a narrower surface than any of the other twelve govern.
 
 1. **A user-visible break needs a `docs/BREAKING-CHANGES.md` entry in the same PR** — under
    `## Unreleased`, never under a `## vX.Y.Z` heading (those are frozen once tagged). Renamed
@@ -165,6 +166,21 @@ the newest and belongs about third.
    for doing what the tool told them. "Merge the migration last" does not fix this: it shortens the
    window, and a short window is still open. Non-migration work keeps going to `main` and must be
    kept merged into the release branch, which is the real cost and is the price of the guarantee.
+13. **A load-bearing architectural claim gets a `TestArch_` citation.** The test is: *if this
+   sentence were false, would a reader give a wrong instruction or build the wrong thing?* If yes,
+   write (or find) a test named `TestArch_<Claim>`, make it genuinely fail when the claim stops
+   holding, and cite it in the prose by its bare name in backticks — `` `TestArch_ProfileIgnoresPersonalDefaults` ``
+   — so "is this still true?" is answered by `make check`, not by trust. Reserve the prefix for
+   this alone; it is what makes `scripts/check_claim_citations.py` a grep instead of a judgment
+   call. The scope is deliberately narrow — `docs/contributors/architecture/*.md`,
+   `docs/contributors/design/config.md`, `docs/contributors/principles/*.md`, and
+   `docs/contributors/decisions/working-notes.md`, nowhere else — for the same reason
+   `check_citation_provenance.py` is scoped to `research/*.md` (D122): a gate that fires on
+   prose it was never meant to police gets disabled, and findings/plans/`docs/GUIDE.md` are full
+   of claims that are current status, not standing architectural guarantees. **"Nothing — this is
+   a judgment, not a claim" is a legitimate answer.** Most sentences in these documents assert an
+   opinion, a tradeoff, or a decision's reasoning, none of which a test can check; only mark the
+   ones asserting a checkable fact about what the code does.
 
 ## The quality gate
 

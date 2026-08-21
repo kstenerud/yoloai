@@ -1954,37 +1954,381 @@ So the axis is no longer "how strong is the filter" but **where the machinery si
 - **[D137](#d137--in-guest-enforcement-is-abandoned-as-a-containment-boundary-the-guest-gets-one-destination-and-all-policy-moves-to-a-host-side-proxy) rejected alternative 4 is superseded.** It declined to refuse `--network-isolated` where it could not be enforced adversarially, citing D135. That citation no longer holds.
 - **`yoloai doctor` becomes load-bearing**, since a refused create is where most users would first meet their backend's ceiling. The error must name the strongest available mode, so the remedy is in the message rather than in a second command.
 - **The default stays `open`**, which promises nothing and so cannot fail to be delivered.
-## D139 — `restricted` is realised by giving the guest no IP stack and a socket to the proxy; a one-address filter is the fallback where that channel does not exist
+## D139 — `restricted` gives the guest no IP stack and a socket to the host-side proxy, on every backend
 
-**Date:** 2026-08-12. **Status:** Active. **Implements [D137](#d137--in-guest-enforcement-is-abandoned-as-a-containment-boundary-the-guest-gets-one-destination-and-all-policy-moves-to-a-host-side-proxy) §3.** **Consumers:** [egress-proxy-build.md](../design/plans/egress-proxy-build.md), [network-mode-reshape.md](../design/plans/network-mode-reshape.md), `runtime/`, `internal/netpolicy/`.
+**Date:** 2026-08-12, **rewritten 2026-08-13** after the Mac channel round. **Status:** Active. **Implements [D137](#d137--in-guest-enforcement-is-abandoned-as-a-containment-boundary-the-guest-gets-one-destination-and-all-policy-moves-to-a-host-side-proxy) §3 and settles its open fork.** **Consumers:** [egress-proxy-build.md](../design/plans/egress-proxy-build.md), [network-mode-reshape.md](../design/plans/network-mode-reshape.md), `runtime/`, `internal/netpolicy/`.
 
-**The question D137 deliberately left open.** Two shapes satisfy its invariant — *the sandbox's only egress is a host-side proxy under a principal the agent has no privilege over*. **(A)** a normal guest stack with a filter permitting one address; **(B)** a guest with no IP stack at all, reaching the proxy over a socket. The [chokepoint round](../archive/plans/proxy-chokepoint-verification-round.md) measured everything that distinguishes them and found the coverage fork-independent: both present identical traffic to the proxy, because what reaches it is decided by the client's proxy configuration, not by how the route was removed.
+**Decision. `restricted` is one shape on every backend: the guest has no IP stack, and reaches a host-side proxy over a socket.** There is no per-backend fallback, because after measurement no backend needs one.
 
-**Decision. (B) is the shape.** Where a backend cannot carry the channel, **(A) is a permitted realisation of the same invariant** and the mode is still `restricted` — the shape is an implementation detail below the mode, which is the whole point of stating the invariant separately.
+**What the original draft got wrong, and why it mattered.** It permitted a second realisation — "shape (A)", a normal guest stack with a host filter permitting one address — for backends that could not carry a socket, and called the choice "an implementation detail below the mode". An audit refused that, correctly. The two shapes do not deliver the same guarantee: under (A) a missing or stale filter leaves the guest with a working stack and full reach ([DF194](../design/findings-unresolved.md), and V6b showed a counter cannot distinguish it), while under (B) there is nothing to fail open *to*. One mode name over two failure modes is exactly the defect [D138](#d138--automatic-degradation-is-retired-a-network-mode-the-backend-cannot-deliver-is-refused) retires from `isolated`, reappearing one level down — recorded as [A38](../agent-failures.md)'s shape recurring in the record that fixes it.
 
-**Why (B), stated as what has to stay correct.** Count the load-bearing parts:
+**The fork dissolved rather than being decided**, which is the outcome worth noting: the question was never "which shape do we accept on weak backends", it was "is any backend actually weak". [`archive/plans/mac-channel-verification-round.md`](../archive/plans/mac-channel-verification-round.md) measured that none is. Raw runs: `design/research/mac-channel/results/`.
 
-- **(A):** the `CAP_NET_ADMIN` bounding-set drop, **plus** a host filter that is present, correct, and bound to the right interface for the sandbox's entire life, **plus** detection for the cases where it is not.
-- **(B):** the `CAP_NET_ADMIN` bounding-set drop.
+| Backend | Channel that carries (B) | Evidence |
+| --- | --- | --- |
+| docker, podman | `--network none` + a bind-mounted unix socket | the Linux chokepoint round |
+| **apple** | **`container run --publish-socket host:guest`** — arbitrary bidirectional data across the VM boundary, intact with `--network none` (guest holds `lo` only, egress gone), 5/5 concurrent | `c1-apple-channel.txt` |
+| **tart** | **Softnet**, already default-deny and already adversarial-grade | `w8-softnet-enforcement.txt`, `c2-softnet-adversarial.txt` |
+| **seatbelt** | SBPL `(deny default)` + `(allow network-outbound (literal "<socket>"))` | `c4-seatbelt-soundness.txt` |
 
-That drop is the *one* vector `agent-privilege-reality.txt` measured surviving `sudo` — sysctl `ok`, file tamper `ok`, netlink **refused**, because a bounding-set drop is inherited across `sudo` and ordinary root operations are not. So (B) rests entirely on the single mechanism measured to hold against exactly the adversary this exists to contain, and on nothing else.
+**Two corrections to what this record previously asserted about macOS, both of which I had from an unverified reading.**
 
-**The failure modes differ in kind, not degree.** Under (A) a missing or stale filter leaves the guest with a working stack and full reach — that is [DF194](../design/findings-unresolved.md) and V5's ifindex result, and V6b showed a counter cannot distinguish it. Under (B) **there is nothing to fail open to**: a missing rule is not a hole, because there is no route. Three consequences follow for free rather than by mechanism: `ipv6-sidestep.txt`'s class cannot arise because there is no stack in either family; there is no per-sandbox host state to reap, which is the entire subject of `enforcement-state-reaping.md`; and the acquisition cost V7 measured disappears with the rules.
+- **tart's enforcement is Softnet, not `pf`, and not absent.** I claimed tart fell back to (A) "whose pf realisation is already measured working", citing `macos-pf-privileged-path.md:308` — a **pre-v2 result**, which the provenance rules now in `procedures/verification-rounds.md` exist to stop being cited this way. Softnet is a *host process holding the VM's network file descriptor and enforcing its MAC*, so there is no in-guest handle to attack: a root guest was measured failing to escape by MAC spoof and by gateway override, with the permitted address still answering throughout (A22's positive control). That makes tart's enforcement out-of-sandbox by construction — it is `restricted`'s shape, not a weaker one.
+- **Seatbelt's soundness is not the `CAP_NET_ADMIN` bounding-set drop.** This record's original reasoning counted that drop as (B)'s single load-bearing mechanism and then assigned seatbelt (B) — but seatbelt is macOS process sandboxing and has no bounding set. The real mechanism is that an SBPL profile is applied at exec, inherited, and **cannot be relaxed from inside**: a nested fully-permissive `sandbox-exec` escapes from an unsandboxed parent and not from within, and a process confirmed at uid 0 stays contained. The conclusion survives; the reasoning did not, and an argument that reaches the right answer for a mechanism the platform does not have is not evidence.
 
-**The one measured cost, and why it did not decide against.** A stack-less guest cannot publish a port. `--port` composes with `--network-isolated` today, so this is a real capability loss and a rule-1 break. The owner's call is that `--port` is special-purpose — for when something in the sandbox must answer connection requests — and that losing it under a mode whose point is that nothing can reach the sandbox is acceptable, provided it fails loudly. [P7](../design/research/proxy-chokepoint/results/p7-port-publishing.txt) found the CLI already refuses `--port` with `--network-none`, so the message and the code path exist. **The round opened expecting this to cost a second per-backend channel; it costs one flag combination.**
+**Why (B), restated now that it is the only shape.** It rests on one thing per platform — the capability drop on Linux, the SBPL profile on seatbelt, the host-held FD on tart, the VM boundary on apple — and in each case that thing is outside the agent's reach by construction rather than by a rule that has to stay correct. Three consequences follow for free: `ipv6-sidestep.txt`'s class cannot arise because there is no stack in either family; there is no per-sandbox host filter state to reap, which is most of `enforcement-state-reaping.md`'s subject; and V7's install cost disappears with the rules.
 
-**Prior art converges here**, which per [D136 §1](#d136--a-verification-round-is-a-fixed-item-set-opened-by-prior-art-closed-once-and-probed-by-harnesses-that-must-show-they-can-report-failure) is a constraint rather than a footnote: `prior-art-egress-enforcement.md` §5 records the peer group running "agent VMs with no external interface at all, talking over a virtual socket to a host-side proxy".
-
-**What this makes cheap on the majority backends, and expensive on the minority.** docker, podman and seatbelt get (B) for less machinery than (A) — `--network none` plus a bound socket, no veth, no filter, no IPAM, nothing to reap. The VM backends (apple, tart, containerd/Kata) need the channel to cross a VM boundary, which is the vsock question that belongs to whoever works on macOS. **It blocks nothing:** those backends take (A), whose pf realisation is already measured working on hardware against a genuinely privileged guest. If vsock proves usable, they upgrade later without a mode change.
+**`--port` is refused under `restricted`** — a guest with no route cannot answer inbound. With the fallback gone this is simply a property of the mode, and the earlier worry that an (A) backend could technically publish and must not is moot.
 
 **Rejected.**
-1. **(A) everywhere, for uniformity.** Uniformity is worth less than the residual it leaves: on the backends where (B) is cheap, choosing (A) means keeping a filter correct for a sandbox's whole life to buy nothing the socket does not already give.
-2. **Wait for the vsock answer before deciding.** It gates one backend family, both shapes satisfy the invariant, and the fallback is measured. Blocking the majority on a question only a Mac can answer is the coupling this workstream's split was made to avoid.
-3. **Keep `--port` under `restricted` via a reverse forwarder.** Unmeasured, and it re-introduces the second per-backend channel that (B)'s cost was feared to be. Buildable later if anyone asks; the mode's contract does not promise it.
-
-**One thing the shape does NOT get to vary.** Where a backend falls back to (A), a one-address filter over a normal stack *could* technically still publish a port — and it must not. `--port` is refused under `restricted` as a property of the **mode's contract**, not of the mechanism that happens to implement it, or the mode means different things on different backends and stops being something a user can reason about. The same applies to anything else the mode balks at.
+1. **Keep (A) as a fallback anyway, in case a future backend needs it.** YAGNI, and it would re-introduce the two-guarantees-one-name defect for a backend that does not exist. If one ever does, D138 refuses the mode there until it has a channel — which is the posture, not an exception to it.
+2. **Wait for a throughput measurement before committing.** Unmeasured and worth measuring, but it cannot change the shape: no alternative shape is on the table, so a slow channel is a performance defect rather than a fork.
 
 **Consequences.**
-- **`enforcement-state-reaping.md` loses most of its subject on the (B) backends** and keeps it on the (A) ones. It is not retired; its scope narrows to the fallback.
-- **The two-subscription liveness design (V1/V1b) still applies to (A) and not to (B)**, where there is no rule whose disappearance needs detecting.
-- **A conformance case must be mechanism-blind**, asserting from inside the guest that a non-proxy destination is unreachable while the proxy is, with a positive control beside it ([A22](../agent-failures.md)) — so it passes on either shape and cannot be satisfied by a fake.
+- **`enforcement-state-reaping.md` loses its subject**, rather than narrowing as the previous draft said. There is no per-sandbox filter rule anywhere, so there is nothing keyed to a device to reap. The plan needs re-scoping to whatever remains — sockets and their paths, not rules.
+- **The two-subscription liveness design (V1/V1b) has no `restricted` role.** It detected a rule going inert; there is no rule. It stays relevant only to `isolated`.
+- **Two apple constraints are build blockers and belong in `egress-proxy-build.md` before code**: the channel's **direction is inverted** (the host creates the endpoint and the guest connects to it — the guest cannot initiate, and vsock to host CID 2 is refused on every port tried), so a proxy needs either a guest-side shim or a host proxy speaking a reverse protocol; and `sun_path` is **108 bytes**, which a host endpoint under `~/.yoloai/sandboxes/<name>/` can exceed.
+- **tart does not compose with yoloAI yet** — `runtime/tart` passes no Softnet flag today, and `tart run` exposes only boot-time flags. Softnet's dynamic policy channel (JSON-RPC over a unix socket, with flow-table clearing, already built upstream) is the route to live revocation and is unexplored.
+
+## D140 — `.yoloai.yaml` project config is removed entirely
+
+**Date:** 2026-08-13. **Status:** Active. **Supersedes the `yoloai.yaml` element of [D18](../decisions/working-notes-archive.md#d18--environment-archetypes-devcontainer--yoloaiyaml--archetype)** (retroactive, 2026-05-19), which named three archetypes for environment definitions — *devcontainer*, *yoloai.yaml*, and *archetype* — and specifically the text "*yoloai.yaml* — yoloAI-native config in the project root." **Consumers:** `internal/orchestrator/archetype/`, `internal/orchestrator/create/`, `docs/contributors/design/environments.md`.
+
+**Decision. `.yoloai.yaml` is deleted, not deprecated-in-place: its `archetype:`, `mounts:`, and `requires:` keys are no longer read, parsed, or acted on.** A workdir that still has one gets a warning at `yoloai new` naming the file as ignored — an existence check only, never a parse — so a repo relying on `mounts:` learns its host mounts are gone instead of losing them silently. See [deprecations.md](../deprecations.md) for the warning's own retirement clock.
+
+**Why each key goes.**
+- **`archetype:`** duplicated `--archetype` with no capability of its own. Two ways to say the same thing is not two features.
+- **`mounts:`** duplicated devcontainer.json's `mounts:`, and was strictly worse: devcontainer mounts pass `FilterMounts` (strips the docker socket, credential dirs, workdir collisions) before being applied to an untrusted, auto-detected repo; `.yoloai.yaml` mounts passed only tilde expansion. Same untrusted input, no filter — a second, weaker path to the same capability.
+- **`requires:`** printed "version verification not yet implemented; continuing" and did nothing else. It never enforced anything in the time it existed.
+
+**The file was never documented for users** — absent from `README.md`, `docs/GUIDE.md`, and `internal/cli/helpcmd/help/` — so nothing shipped tells a user it exists, and removing it breaks no documented promise.
+
+**The principle: a repo may describe what it is; it may not requisition what it gets.** `devcontainer.json` and `docker-compose.yaml` describe project shape and yoloAI translates that into a sandbox — that stays. A file whose whole job is to reach past yoloAI's own filtering and ask the host for mounts, or to pick the enforcement mode a CLI flag already picks, is not describing the project; it is issuing yoloAI instructions on the project's behalf, from an untrusted, auto-read input. That is the wrong direction for a repo-root file to point.
+
+**Rejected.**
+1. **Keep `archetype:` only, drop `mounts:`/`requires:`.** Considered — `archetype:` is harmless in isolation. Rejected because it still duplicates `--archetype` for zero gain, and a partial removal leaves the file half-alive: still undocumented, still a surface `code-map.md`/`environments.md` must describe, for a capability with an existing single-owner (the flag).
+2. **Filter `.yoloai.yaml` mounts through `FilterMounts` instead of removing them.** Fixes the security gap without a breaking change. Rejected because it leaves two mount sources to keep in sync forever (`devcontainer.json`'s and this file's), for a file nothing documents and no evidence anyone uses — YAGNI once the duplication is named.
+3. **Implement `requires:` for real instead of removing it.** Out of scope of this decision and not free — version verification is its own feature with its own design questions. Nothing forces bundling that build with a config file that duplicates `--archetype` and under-filters mounts.
+
+**Consequences.**
+- **Breaking (rule 1):** `docs/BREAKING-CHANGES.md` entry under `## Unreleased`; escalates the release. A repo whose only mounts came from `.yoloai.yaml` `mounts:` loses them. There is deliberately no repo-side replacement; the remaining mount sources are all host-side — a profile's `mounts:`, the base config's `mounts:`, or devcontainer.json's `mounts:` (filtered). **yoloAI has no `--mount` flag**, which is itself worth noting: the most privilege-bearing key in the config has no CLI surface at all.
+- **The existence-check warning is itself a deprecation** (D127) and is registered in [deprecations.md](../deprecations.md), `Incurred: 2026-08-13`.
+- `internal/orchestrator/archetype/yoloaiyaml.go` and its test are deleted outright — no compatibility reader, because there is nothing left to be compatible with once the keys do nothing.
+- `docs/contributors/architecture/code-map.md` and `docs/contributors/design/environments.md` drop `.yoloai.yaml` from their file lists and Project Spec sections (the architecture tier is D124-gated on this; a stale name there fails `make check`).
+
+---
+
+## D141 — A repo may not widen the sandbox boundary; requests that would are refused and listed
+
+**Date:** 2026-08-13. **Status:** Active. **Extends [D140](#d140--yoloaiyaml-project-config-is-removed-entirely)'s principle to the file that stays.** Supersedes no decision — the behaviour it replaces (`FilterMounts`, `dangerousRunArgCaps`) was never decided, it accreted, which is itself the finding. **Consumers:** `internal/orchestrator/archetype/`, `internal/orchestrator/create/`, `internal/cli/lifecycle/`.
+
+**Decision. `devcontainer.json` stays supported, and every request in it that would widen the sandbox boundary is refused at create — all of them at once, in one message that lists each one. A single per-invocation flag grants the whole list.** Nothing is silently stripped and nothing is silently granted.
+
+**The line is the sandbox boundary, not the source of the request.** A repo-supplied request is refused when it changes what the sandbox can reach *outside itself*, and allowed when it happens *inside* a boundary that already exists:
+
+| Refused — widens the boundary | Allowed — happens inside it |
+| --- | --- |
+| `mounts` — host paths enter the sandbox | `postCreateCommand` and siblings |
+| `runArgs --cap-add` — kernel capabilities | `containerEnv` / `remoteEnv` |
+| `runArgs --privileged` | `runArgs --cpus` / `--memory` |
+| `forwardPorts` / `appPort` — binds a host port | |
+
+**Why lifecycle commands are on the allowed side, which is the load-bearing call.** They run as the unprivileged `yoloai` user (`entrypoint.py:324` execs `sandbox-setup.py` via `gosu yoloai`), inside the sandbox, *after* the egress policy is applied. Running a repo's own code in a disposable sandbox is what yoloAI is for — the agent will run it one prompt later regardless, and refusing it buys nothing. It is also the pragmatic half: nearly every real devcontainer has a `postCreateCommand`, so refusing it would make "safe by default" mean **devcontainer support is off by default**, which contradicts the reason D18 chose to support the format at all.
+
+**What this replaces is filter-and-proceed, in three flavours, none of them decided.**
+- **Capabilities:** a 17-entry denylist (`dangerousRunArgCaps`) stripped the known-dangerous ones with a warning and granted everything else silently. **The denylist disappears** — any capability request is refused. A denylist of escape-enabling capabilities cannot be complete by construction, and its own comment admits the shape was chosen "so that benign, non-escalating caps in a devcontainer still work" — an availability argument standing in for a safety one.
+- **Mounts:** `FilterMounts` stripped the docker socket, credential dirs and workdir collisions, then granted the rest. Now the presence of any mount is refused.
+- **`forwardPorts`:** granted silently. Now refused.
+
+All three are the silent degradation [D138](#d138--automatic-degradation-is-retired-a-network-mode-the-backend-cannot-deliver-is-refused) retired, surviving in a corner that decision did not sweep.
+
+**One flag, not per-category, and the reason is that the refusal message *is* the granularity.** The user sees every unsafe request enumerated before deciding, so an all-or-nothing accept is already an informed one. Per-category flags would be real CLI surface bought for a distinction the list already draws. Named for its consequence rather than as a generic override (the `AbandonUnappliedWork` convention): the flag says the repo may widen the sandbox boundary.
+
+**The flag is per-invocation and is never a persisted config key.** This is the one constraint that must land with the feature rather than after it. In a daemon the person who set the flag is not the person whose host paths get mounted, and the repo arrives with no human in the loop — but that failure does not wait for a daemon. A persisted `trust_repo: true` in `defaults/config.yaml` reproduces it immediately on the CLI: set once, silently applied to every sandbox afterwards, including the repo the agent edited last week. Making it unpersistable now is free; retrofitting it once someone's config depends on it is a breaking change.
+
+**Accepted risk, explicitly.** With the flag set, an agent that edits `devcontainer.json` and a user who re-creates with the flag will get whatever the agent asked for. That is the user's call to make and the flag exists to let them make it. The protection that matters is that the default refuses, and that the refusal names every request — so the edit is visible at the moment it would take effect.
+
+**Rejected.**
+1. **Keep filtering, improve the filters.** Rejected because a filter answers "which of these do we happen to know are dangerous", which is a question that cannot be answered completely, and because stripping a request the repo made is exactly the degradation D138 retired.
+2. **Per-request prompting.** Rejected as the fiddliness a single balk avoids: one refusal listing everything is one decision, and it works unattended and in scripts where a prompt cannot.
+3. **Per-category flags.** Rejected above — the enumerated list already gives the user the per-category view, without four flags to document and combine.
+4. **Refuse lifecycle commands too.** Rejected: they execute inside the containment boundary as an unprivileged user, and refusing them turns devcontainer support off for the overwhelming majority of real repos.
+
+**Consequences.**
+- **Breaking (rule 1):** a repo whose `devcontainer.json` carries mounts, capabilities or `forwardPorts` now fails to create until the flag is passed. `docs/BREAKING-CHANGES.md` entry under `## Unreleased`.
+- `dangerousRunArgCaps` and `FilterMounts` are deleted rather than rewired — the refusal needs to know only *that* a request exists, never whether it is on a list.
+- The refusal must land before any destructive or expensive step in `prepareSandboxState`, for the same reason the mode-capability validation does: `--replace` tears down an existing sandbox, and Phase 2 copies the whole workdir.
+- Plan: [`repo-request-trust.md`](../design/plans/repo-request-trust.md).
+
+**Amendment, 2026-08-13 (same day, before any implementation) — how consent persists, and how a later edit is handled.** The decision above said what to refuse and who may grant it. It did not say what happens on the *second* launch, and the naive answers are both wrong: refusing to re-read `devcontainer.json` means a user who edits it to declare something they missed gets no effect for their effort, while re-reading it freely means the repo governs a running sandbox.
+
+**At create, the approved `devcontainer.json` is copied verbatim into the sandbox's yoloAI-managed directory.** That copy is the consent record. At every launch, the repo's current file is compared against it, and:
+
+- **The requested set is a subset of the approved set** — proceed, and overwrite the copy with the repo's current file. This happens for any change that does not increase sensitive reach, cosmetic ones included.
+- **The requested set contains anything the approved set does not** — balk, listing exactly the new items. The user grants, and the copy is then overwritten.
+
+**Consent does not accumulate.** The copy is the only memory, so removing an item removes its approval: allow X, delete X, re-add X later, and the re-add balks, because it is an increase against the *current* baseline rather than against a history. There is no ratchet, and nothing has to remember what was ever approved.
+
+**Effective values come from the copy, never from the repo.** This is what makes re-reading safe and what fixes a defect the original decision left standing: `buildEnvironment` (`create.go:723`) currently persists repo-derived `Mounts`, `Ports`, `CapAdd` and `Resources` into `environment.json`, so a grant became permanent and the per-invocation flag was cosmetic — one `--trust-repo` at create, and every later launch re-applied the repo's requests with no flag and no re-consent. Under this amendment `environment.json` carries operator-authored values only, and repo-derived values are re-derived from the approved copy, which nothing but an explicit grant rewrites.
+
+**The safety property, and the reason consulting repo content at every launch does not violate the "not on start, not on restart" rule.** The comparison is default-deny on additions only, so *the worst an agent can achieve by editing `devcontainer.json` is to stop its own sandbox from starting.* It can never grant itself anything. A denial of service against oneself is not an escalation.
+
+**This does not weaken the "flag is never persisted" rule.** The *flag* remains per-invocation and unpersistable; what persists is the *approved file*, which is a record of a human decision about a specific set of requests, not a standing authorisation that applies to requests nobody has seen yet. A stored `trust_repo: true` would grant whatever a repo asks tomorrow; a stored approved copy grants exactly what was on screen when someone said yes.
+
+**The file compared is always the host-side workdir's, never the in-sandbox copy.** Under a `:copy` workdir the sandbox holds its own copy of the repo, and the agent can write it freely; those edits are not a request until the user applies them, at which point they become the host file and are compared like anything else. The rule is not merely that the in-sandbox copy is untrustworthy — it is that a successful comparison *rewrites the consent record*, so reading an agent-writable file would hand the agent write influence over a yoloAI-managed file. Even where no escalation can be constructed from it today, the consent record must only ever be written from a source the operator controls.
+
+**Details.** The comparison is over the extracted request *set*, not the file's bytes — a hash would balk on a reformatted comment or an edited `postCreateCommand`, and a prompt that fires every time is one people learn to dismiss unread. The file is stored verbatim rather than as an extracted set, so both sides of the comparison run through identical extraction logic at compare time and the record cannot drift from what today's parser would detect; it is also auditable as "exactly what you approved". An existing sandbox with no stored copy balks rather than being grandfathered, which needs its own `BREAKING-CHANGES` line: sandboxes created before this will need one re-approval.
+
+---
+
+## D142 — The `mounts:` config/profile key is retired; `directories:` is its strict superset
+
+**Date:** 2026-08-13. **Status:** Active. **Closes an Open question from [D141](#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed)'s plan, [`repo-request-trust.md`](../design/plans/repo-request-trust.md).** **Consumers:** `internal/config/`, `internal/orchestrator/create/`, `internal/cli/profile/`, `profile_config.go`.
+
+**Decision. The `mounts:` key is removed from both the base config (`~/.yoloai/defaults/config.yaml`) and profile `config.yaml`, along with its public-API mirror `ResolvedProfileConfig.Mounts`. A file that still sets it fails to load with an error naming `directories:` and showing the conversion, rather than silently dropping the mount.** `devcontainer.json`'s own `mounts:` is untouched by this decision — it is a different key, on a different (repo-supplied, untrusted) input, and stays governed by D141.
+
+**Why `directories:` fully subsumes `mounts:`.** `config.ProfileDir{Path, Mode, Mount}` carries a custom container mount point and the `ro`/`rw`/`copy` tiers — everything `mounts:`'s `host:container[:ro]` syntax could express — and additionally flows through every aux-dir guard `prependProfileDirs` wires into `opts.AuxDirs`: dangerous-path refusal, path-overlap detection, duplicate-container-path detection, and the dirty-repo gate. `mounts:`'s own parser (`validateAndExpandMounts`) only checked that the string parsed. **The one thing `mounts:` did that `directories:` does not is skip those checks — that is a defect, not a capability**, and it is not a reason to keep a second mechanism alive.
+
+**Why now, and why the credential-delivery angle matters.** `mounts:`'s original purpose — getting on-disk credentials (SSH keys, `.gitconfig`, cloud CLI config) into the sandbox — is now served by four mechanisms that never touch this key: `/run/secrets` (env-var-sourced secrets), the home-seed mounts (`internal/orchestrator/mounts/mounts.go`, which copy to a staging dir and mount the copy rather than bind-mounting the original), `agent_files`, and macOS Keychain/credential brokering. Every one of them is machine-computed from a narrower, purpose-built input, not a raw host-path string a user hand-writes. `mounts:` had stopped being anyone's only route to anything.
+
+**`directories:` is no longer profile-only — the base config gains it too, as part of this same change, additive rather than breaking.** `config.YoloaiConfig` gets a `Directories []ProfileDir` field, parsed the same way and applied through the same `prependProfileDirs` path a profile uses, so a base-config directory gets identical expansion and identical guards. Pointing the rejection error at a key the offending file could not hold would have been a poor remedy for a removal this decision was already making — better to close that gap than document it. This is what makes the swap clean: every file that could set `mounts:` can set `directories:` in its place, with no capability lost and no asymmetric caveat in the error message.
+
+**Rejected.**
+1. **Keep `mounts:`, but route it through the aux-dir guards.** This is `directories:` with a second spelling — it does not add expressiveness, only a second parser and a second merge path to keep in sync forever.
+2. **Leave `mounts:` as-is and document it properly.** The key has one line of user documentation and no example anywhere (`docs/GUIDE.md:681`, before this change), so under-documentation was never really the defect — the missing guards were. Two mechanisms for one job is exactly what GEN §18 asks to be named before a fix is built, and naming it here is what settles it: `directories:` already solves this, elegantly, on a sibling path.
+3. **Give the base config `directories:` as a follow-up, after shipping the removal with the asymmetric error.** Rejected once raised: `release-v0.12.0` is already a migration-bearing breaking release branch, so there is no schema or caution cost to fold the addition into the same commit, and shipping the removal first would mean shipping a known-poor error message on purpose.
+
+**Consequences.**
+- **Breaking (rule 1):** `docs/BREAKING-CHANGES.md` entry under `## Unreleased`, covering both the config/profile key and the `ResolvedProfileConfig.Mounts` public-API removal, with the conversion shown. The base config gaining `directories:` is additive and carries no entry of its own.
+- **The rejecting reader is a deprecation** (D127): it exists only so a config file written before this decision gets a clear, actionable error instead of a silently-ignored key. Registered in [deprecations.md](../deprecations.md), `Incurred: 2026-08-13`, 12-month user-facing grace period (it waits on people editing config files they forgot they wrote).
+- `store.Environment`'s persisted `mounts` key and `yoloai.Environment.Mounts` are unrelated to this decision and are untouched — they carry devcontainer-derived mounts only, and renaming them would need a schema migration this decision does not incur. The Go field name carrying them on `state.State` is **not** persisted, though, so it is renamed `ConfigMounts` → `ExtraMounts` in the same commit — nothing from config reaches it any more, only devcontainer.json.
+- `pr.mounts` (`internal/orchestrator/create`) keeps its name and type; after this change it starts empty for every sandbox and is populated only by `mergeDcMounts` from devcontainer.json, per D141.
+
+---
+
+## D143 — configuration is resolved from provenance-tagged layers, not merged eagerly at each boundary
+
+**Date:** 2026-08-14. **Status:** Active — **partially invalidated by audit 2026-08-15; the layer refactor is deferred to v0.13.0.** See "Audit corrections" below. **Supersedes:** see "What this reverses" below. **Consumers:** `internal/config/`, `internal/orchestrator/create/`, `internal/orchestrator/lifecycle/`, `internal/cli/`. **Plan:** [`config-provenance-layers.md`](../design/plans/config-provenance-layers.md).
+
+**Decision. Each configuration source is parsed into its own layer, tagged with where it came from, and the layers travel together to a single resolver that applies a declared per-key policy.** Values stop being merged eagerly at each boundary, so *"who supplied this?"* survives to the point where it is needed instead of being destroyed on the way.
+
+**Four layers, and the count matters — two things that look like layers are not.**
+
+| # | Layer | Loaded from |
+| --- | --- | --- |
+| 1 | baked-in defaults | `config.DefaultConfigYAML` — **must be total** |
+| 2 | persistent preference | the named profile if there is one, **otherwise** the user's `defaults/config.yaml` |
+| 3 | repo | `devcontainer.json`, translated |
+| 4 | caller | `SandboxCreateOptions` — the CLI included |
+
+**Layer 2 is one layer with two mutually exclusive sources, not two layers.** The exclusivity is total and deliberate (`config.md:165,167`), both sources hold the same keys, and both sit at the same precedence position — so "when a profile is present, drop the user-defaults layer" is not a rule the resolver applies, it is *how the layer is loaded*. That distinction is the whole point: as a rule it is something callers construct, and four of seven constructed it wrong (see "Audit corrections" below); as a loader it is unrepresentable otherwise. A guarantee that cannot be expressed incorrectly beats one that is merely enforced.
+
+**The CLI is not a layer — it is a caller, and already is one architecturally** (it builds `SandboxCreateOptions` and calls `Client.CreateSandbox`). What makes it *look* like a layer is a defect: it **also** reads the user's config, at six sites — `ResolveBackend`, `rawBackendPreference`, `ResolveContainerBackendConfig`, `ResolveAgentFromConfig`, `ResolveModelFromConfig` (`cli/cliutil/client.go:62,90,132,357,376`) and `resolveNewIsolationOS` (`cli/lifecycle/new.go:538`) — while the library reads the same file independently at `create/create.go:485`. Two readers of one file, and the CLI's read is the one that collapses flag-and-config into a single string before the library can tell them apart.
+
+**Every key the CLI resolves from config is broken, worked around, or handled by a different mechanism. Six for six:**
+
+| Key | State |
+| --- | --- |
+| `agent` | broken — `baseAgent` (`prepare_profile.go:109`) was hand-built to recover what the CLI destroyed, but its two sides come from different loaders and never match on a default install — DF213 |
+| `model` | personal config beats the profile — DF209 |
+| `isolation` | same — DF209 |
+| `os` | a profile's `os:` is parsed, merged into `MergedConfig`, and **never read** — DF210 |
+| `backend`, `container_backend` | not merged at all; validated as a constraint via `ValidateProfileBackend` |
+
+So the fix is **subtractive**: the CLI stops reading config and does one job — translate flags into a caller layer. `Coalesce`, `ResolveAgentFromConfig`, `ResolveModelFromConfig` and the isolation/os fallbacks largely disappear, and **DF209 becomes unrepresentable**: a value never loaded cannot be merged. This requires the caller layer to express *unset* (below), so the two changes are one change.
+
+**Totality invariant: layer 1 specifies every key, so resolution never falls off the end.** One key breaks it today and has already cost something: `agent_files` is *commented out* of the shipped template (`defaults.go:66`), which is exactly why `resolvedAgentFiles`' nil-fallback re-leaked the personal value (DF208). **`isolation` does not break the invariant the way this decision originally claimed.** It is not present-but-empty: `defaults.go:42` sets `isolation: container`. What actually breaks the invariant is worse — **there are two loaders with different layer sets.** `LoadDefaultsConfig` merges the baked-in defaults back over the on-disk file; `LoadConfig` does not. The no-profile create path (`create.go:485`) reads with `LoadConfig`, so layer 1 is never applied there at all, not applied-with-an-empty-value. Making layer 1 total and always-applied has a real cost this decision must own: on the no-profile path, `isolation` would move from the backend's own base mode (`process` on seatbelt, `vm` on apple) to the baked-in `container` — a user-visible behavior change on both. So the invariant's precise form is: layer 1 specifies every key *and is applied on every path*, and that second half is work this decision has to do, not a property it can assume.
+
+**Two things adjacent to the stack that are deliberately outside it.** The **agent definition** contributes a `NetworkAllowlist` *floor* that `netpolicy.Compose` prepends after every layer and no layer may lower — different semantics, so it sits beside the resolver rather than in the stack. The **backend** resolves `isolation: ""` to its own base mode (`process` on seatbelt, `vm` on apple), which is a step *after* layering, not a layer. Keeping both out is what stops the resolver needing a special case for "this layer is different".
+
+**The problem is not any one defect; it is that the answer is unavailable.** yoloAI collapses sources early — `Coalesce(flag, config)` at the CLI (`new.go:544`), `MergeProfileChain(base, chain)` in the merge, `append(profileValue, cliValue...)` in the pipeline — and every collapse discards which source won. Nine findings from one audit are the same missing answer wearing different clothes:
+
+| Question that could not be asked | Filed as |
+| --- | --- |
+| did the user type this port, or did a profile / `devcontainer.json` supply it? | DF197 |
+| did the user set this mode, or did config? | DF196, DF206 |
+| is this value the profile's or the machine's personal default? | DF207, DF208, **DF209** |
+| did the user choose this isolation mode deliberately? | DF205 |
+| is this mount operator-authored or repo-derived? | D141 |
+
+**The evidence that this is architectural rather than sloppy: four of seven call sites got the same thing wrong.** `MergeProfileChain` has seven callers, not four — three more live in `profile.go`'s `ProfileAdmin.Info`/`infoBase` (`:147,156,179`), and all three correctly pass `config.LoadBakedInDefaults()`, and had done since 2026-06-03. So the guarantee `config.md:165,167` states in bold was not violated by every caller — it was violated by every caller of one particular shape. **The sharper diagnosis: the trap is not the parameter, it is having a config already in scope.** The four wrong sites (`resolveProfileConfig` in `prepare_profile.go`, `resolveAgentArgs` and the injector reconciliation in `lifecycle.go`, `resolvedAgentFiles`/`resolveEnvForRestart` in `restart.go`) are all orchestrator functions that already held a `ycfg`/`cfg` when they reached `MergeProfileChain`, and reused it as the base. The three correct sites had nothing in scope to reuse — they had to load something, and loaded `LoadBakedInDefaults()`. A parameter whose wrong value is whatever config happens to already be in scope is not a trap with one slot; it only springs on a caller that has something to substitute — which is still every caller that could reach for the wrong thing, but is not "everyone."
+
+**What it retires.** The provenance mechanisms this codebase already grew, one per key, each in a different style: `baseAgent` (`prepare_profile.go:109`, comparing against the config value to detect a CLI override — sound in shape, broken in this instance; DF213), `IsolationExplicit` (`state.go:62`, a side-channel bit that is written, never read, and `true` for values nobody typed — DF205), the `opts.Network == NetworkModeDefault` gates (`prepare_profile.go:154,218`, which infer provenance from a sentinel and silently discard a list when they guess — DF206), and a fourth this decision had missed entirely: `netpolicy.Compose`'s `WithProvenance` (`internal/netpolicy/compose.go:7-50`, re-exported at `network.go:16-31`), which already tags each domain in an additive list with a `DomainSource`. It is the only one of the four that is **per-element**, and the only one on the **public API**. It is also the only one with a documented limitation that strengthens this decision's own case: its docstring says provenance "degrades gracefully to 'everything looks user-added'", so a domain from a profile, from `defaults/config.yaml`, and from `--network-allow` are indistinguishable — exactly the distinction DF209 needs, and a two-valued `DomainSource` cannot make it. A real resolver needs at least four sources (baked-in, personal/profile, repo, caller); widening a shipped public enum from two values to four is a public API break this decision had not costed. Four answers to one question, none of them generalised, one of them already shipped.
+
+**One resolver, not per-consumer resolution.** Layers give consumers the inputs; if each then decides precedence for itself, the 4-of-7 divergence returns with better raw material. Precedence is genuinely non-uniform — `ports`/`network.allow`/`directories` are additive, `mounts`/`env`/`isolation` replace, `agent_args` map-merges — so the policy is a **declared per-key table**, in one place, testable and diffable. Today that table exists only as the implicit order of assignments across three files, which is why reconstructing it took a full audit.
+
+**The rule that pays for the whole thing.** *Profiles are self-contained* becomes one line — **when a profile layer is present, drop the user-defaults layer** — instead of being re-implemented per key at four call sites, which is how DF207/DF208/DF209 happened. Nothing is left for a fifth caller to get wrong, because there is no `base` argument to pass.
+
+**Three constraints, each a real cost.**
+1. **Presence must be explicit.** A layer must distinguish "did not set this key" from "set it to empty", so keys need pointers or an option type rather than zero values. This also resolves a live ambiguity: `isolation: ""` is currently a *meaningful sentinel* meaning "ask the backend" (`runtime/isomode.go`), so the zero value already does double duty.
+2. **Sources are not the same shape.** `devcontainer.json` is not a `YoloaiConfig`; profiles hold keys the base config does not. Each edge therefore **translates** into a common layer shape carrying only the keys it can express — the parse-don't-validate rule applied one level up, and what keeps the resolver from needing to know what a devcontainer is.
+3. **It is invisible when it works.** If the policy table reproduces today's precedence, nothing user-visible changes except the defects that disappear — which also means the tests must pin the *policy*, not the outcome of one path.
+
+**Rejected.**
+1. **Fix each finding where it manifests.** What we have been doing, and DF209 is the specimen: the create-path leak was fixed, and the identical leak through the CLI's `Coalesce` survived because the information was already gone by then. Some of these defects are *unfixable* at their site.
+2. **Add a provenance flag per key, as needed.** This is `IsolationExplicit`, which is dead, wrong, and looks usable — the worst of the three outcomes. Special machinery per key is what generated the inconsistency.
+3. **Generalise `baseAgent`'s comparison trick.** Its shape is sound, but this instance is broken (DF213), and generalising a scalar comparison to per-element list provenance is a different problem: "who contributed this element" is per-element, not per-key, so there is no single scalar value to carry alongside and compare.
+4. **Do it later, after D141 and the network mode work.** Rejected because both need provenance: D141 must distinguish operator-authored from repo-derived, and the network validation must distinguish a typed port from an inherited one. Building them first means building provenance twice, badly, in two places — and then owning both.
+
+**Audit corrections (2026-08-15).** Three independent audits of this decision found several of its supporting claims false. They are corrected in place above: the caller count (four of seven, not four of four — with the sharper diagnosis that the trap is a config already in scope, not the parameter itself), the totality-invariant claim about `isolation` (the real gap is two loaders with different layer sets, not an empty value), and the claim that `baseAgent` works (it does not — DF213 — though its shape is sound). "What it retires" gained a fourth mechanism this decision had missed: `netpolicy.Compose`'s per-element, public-API provenance. Two more corrections follow: what this decision reverses, and which half of it is actually decided.
+
+**Second audit correction (2026-08-15, same day, later): two of the cited mechanisms are already gone.** DF205 and DF206 were fixed directly, ahead of this decision, rather than waiting for it — `IsolationExplicit` (referenced below as a present-tense example) was deleted outright, not "retired by this work"; the `opts.Network == NetworkModeDefault` gates no longer discard the allowlist, only the mode promotion. Neither removes this decision's motivation: the *questions* in the table above ("did the user choose this isolation mode deliberately?", "did the user set this mode, or did config?") are exactly as unanswered as before — DF205's fix deleted a bad answer, it did not supply a correct one, and DF206's fix stopped one symptom (the allowlist) without giving the pipeline any way to tell an explicit `--isolation`/mode flag from a config-supplied one. See `findings-resolved.md` for both. Left uncorrected below, in place, as the artifacts they described at time of writing — this file is a decision record, not a rolling status page.
+
+**What this reverses.** D140, D141 and D142 each name what they supersede; this decision, as first written, named nothing — while its CLI-stops-reading-config half quietly reverses three documented, deliberate design statements rather than refining them:
+- `principles/development-principles.md:649`, the convenience corollary: *"In yoloAI the **CLI is exactly this layer**: it resolves `--agent` / config / `"claude"`, selects a backend… Pushing those defaults down into the library would rob the power-user (the embedder/daemon) of the explicit, no-magic surface that is the whole point of library-first."*
+- `sandbox_options.go:48-51`, a public godoc contract: *"the library never picks a default — embedders choose their own. The CLI resolves `--agent` / config / `"claude"` at its own edge."*
+- `design/config.md:56-61`, labelled an implementation requirement: *"These are separate code paths, not a three-way merge."*
+
+Each describes the CLI reading config as the deliberate, documented shape — not an oversight this decision happens to clean up. Making the CLI stop reading config does not refine that shape; it discards it, and that discarding deserves its own review rather than riding in as a side effect of the layering work.
+
+**Two changes, not one — only the first is decided.**
+1. **The repair (stands).** `state.State` is already the per-run config — 26 functions take it, consumed by `create`, `mounts`, `launch`, `restart` — but it is populated by scattered mutation across `prepare_profile.go`, `prepare_archetype.go` and `applyCLIOverrides`, rebuilt differently at restart, and bypassed by three sites (DF212). Assembling it through one resolver with a declared per-key policy matches the architecture that already exists; it does not invent a new one.
+2. **The reversal (undecided, deferred to v0.13.0).** Whether the CLI stops reading config files at all — the part "What this reverses" names above — is not decided by this entry. It reverses a documented design choice and needs its own review, on its own timeline, separate from the repair.
+
+**Consequences.** No user-visible change if the policy table is faithful; the defects it closes are listed above. It touches `YoloaiConfig`, `MergedConfig`, `ProfileConfig`, `create.Options` and `profileResult`, so it is sequenced before D141 and before `network-mode-reshape.md` step 1 rather than alongside them. `IsolationExplicit` (DF205) was already deleted directly, ahead of this decision — see the second audit correction above — so this work has nothing left to retire there; the provenance question it stood in for is still this decision's to answer.
+
+---
+
+## D144 — ambient environment: read once at the CLI, name freely in an agent definition, never grant invisibly
+
+**Date:** 2026-08-16. **Status:** Active — lines 1 and 3 already hold; line 2's disclosure is the new work. **Supersedes no decision**, but *states* a policy that until now existed only as enforcement (`forbidigo` rules + `development-principles.md` §12) with no decision saying what it is for. **Consumers:** `internal/cli/cliutil/`, `internal/config/host_env.go`, `internal/envsetup/`, `internal/agent/`.
+
+**Decision. Three lines, and they are about three different things that kept getting conflated.**
+
+1. **Reading.** yoloAI reads the ambient process environment at exactly one place — `cliutil/layout.go`'s licensed `os.Environ()` — and threads the snapshot down as data. The library never reads the live environment; `ClientOptions.Env` is the only source it resolves credentials and `${VAR}` references from, and a caller that passes nothing gets nothing. *Already true, and gated: `os.Getenv`, `os.Environ`, `os.LookupEnv`, `os.ExpandEnv`, `syscall.Getenv` and `syscall.Environ` are forbidden repo-wide by `forbidigo`, with one path exemption.*
+2. **Selection.** Any agent definition — shipped or file-defined — may name the env keys its agent needs. **What it may not do is grant them invisibly: the keys actually injected are disclosed at launch, naming the declaration that asked for them and whether that declaration is user-authored.**
+3. **Values.** `--env KEY=VAL` is literal and per-invocation. yoloAI performs no ambient read for it; the shell expands `$FOO` if the user writes it.
+
+**The distinction that makes line 1 stable, and that resolves an argument [D143](#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary) left open.** Configuration files and the ambient environment are not the same kind of source, so "who may read it" has different answers. A config file is **deterministic given a layout** — any caller pointing at the same layout gets the same values, so reading it deep in the library is safe. The ambient environment is **process-scoped and invisible** — a daemon's environment is not its callers', so reading it below the boundary silently attributes one principal's credentials to another. D143 proposes moving config reading *down*; this decision keeps ambient reading *up*. Both follow from the same test: **is this source deterministic given the caller's inputs?**
+
+**Why line 2 is disclosure and not a bound — the first draft of this decision was wrong.** It said the set of injectable keys should be fixed in code. The owner's objection killed it in one sentence: a code allowlist can only enumerate agents yoloAI ships, so a new harness needing `DIAMOND_KEY` would be refused by construction — which makes file-defined agents useless for the one thing they exist for. Extensibility is the feature.
+
+**What the actual risk is, once that is admitted.** `~/.yoloai/agents/*.yaml` is the user's own data dir, not repo content and not attacker-reachable without write access to their yoloAI state. A file agent naming `DIAMOND_KEY` is the user configuring their own machine — the same act as `--env DIAMOND_KEY=$DIAMOND_KEY`, only persistent. So this is **not an escalation**, and [DF202](../design/findings-resolved.md) is re-rated LOW accordingly. What remains is real but narrower:
+- **The grant is invisible at the moment it matters.** A declaration is written once, in a file, and consumed silently forever. An agent file copied from a blog post or a colleague can declare `GITHUB_TOKEN`, and nothing tells the user that every sandbox using that agent hands the token to the untrusted party.
+- **Shipped and user-authored declarations are indistinguishable at the point of use**, though only ours are reviewed. The reach is not new with file agents — `opencode` already declares `GITHUB_TOKEN`, `AWS_ACCESS_KEY_ID` and `AWS_PROFILE` (`agent.go:503`) — file agents only extend who may widen it.
+
+**Rejected.**
+1. **A code-baked allowlist of injectable keys.** Rejected on the owner's objection above: it cannot enumerate what it does not ship.
+2. **A denylist of high-value credentials** (SSH keys, cloud root creds). Rejected for the reason [D141](#d141--a-repo-may-not-widen-the-sandbox-boundary-requests-that-would-are-refused-and-listed) rejected the `cap_add` denylist: it cannot be complete, and its incompleteness is invisible. A denylist that misses `DIAMOND_KEY` reads exactly like one that considered it.
+3. **Per-invocation consent for file-agent credentials.** Rejected as ceremony: unlike a repo, the file *is* the user's own configuration, so re-confirming it on every run trains the user to dismiss the prompt — the failure D141's own "balk once, list everything" shape exists to avoid.
+4. **Refusing file agents credentials entirely** (name keys, but require `--env` for values). Rejected because it defeats the convenience the mechanism exists for, and pushes users toward pasting credentials into shell history.
+
+**Consequences.**
+- Disclosure at launch, where `ResolveSecretEnv` runs (`launch.go:83`), naming the injected keys and the declaring agent. `agent.Definition` gains a marker for file-defined agents; it has none today.
+- Line 1 becomes a claim rather than an enforcement detail: `TestArch_LibraryNeverReadsAmbientEnv` asserts that a variable present in the live process environment but absent from the threaded snapshot does not reach a sandbox. `forbidigo` bans the call; the test pins the behaviour, which is the half a linter cannot check.
+- **No BREAKING-CHANGES entry.** Nothing is refused that was accepted before; output is added.
+
+---
+
+## D145 — all feedback is a structured record routed by the caller; a threaded `io.Writer` is not a channel
+
+**Date:** 2026-08-16. **Status:** IMPLEMENTED in v0.12.0 (2026-08-19), including the two amendments below. **Supersedes no decision**, but completes one that was only half-enforced: `forbidigo` already bans direct printing, and this closes the bypass that ban leaves open. **Consumers:** `internal/orchestrator/`, `internal/envsetup/`, `internal/cli/`. **Plan:** [`feedback-routing.md`](../archive/plans/feedback-routing.md) (archived on completion).
+
+**Decision. Library code emits structured records; it never formats text for a human. Exactly one layer — the caller's routing point, which for this repo is the CLI — decides where a record goes and what it looks like.** A `*slog.Logger` threaded as a parameter is the emission channel. A threaded `io.Writer` is not.
+
+**Why the existing ban does not cover this.** `fmt.Print*`, `println` and `log.Print*` are forbidden repo-wide by `forbidigo` — the *"no println outside the routing layer"* half is real and enforced. But `fmt.Fprintf(w, …)` to a threaded writer satisfies that ban while violating its purpose, and it is the dominant pattern: **19 writer parameters across `internal/`, 26 `fmt.Fprint*` calls in `internal/orchestrator/` alone.** A threaded writer *looks* disciplined — an explicit parameter, not a global — while hardcoding the one assumption a non-CLI consumer cannot satisfy: that a human is watching a text stream, now, in order.
+
+**Why it matters here specifically.** yoloAI has four consumer shapes already — the CLI, the MCP server, library embedders, and the daemon the D141/D144 work keeps designing for. Each wants different routing: stdout, stderr, a system log, a structured feed shipped onward over HTTPS. A formatted string has already thrown away what the routing needs — level, event identity, and the fields that would let a consumer filter or re-render. **Formatting is a rendering decision, and rendering belongs to whoever knows the destination.**
+
+**Four mechanisms exist today, not two.** Naming them all matters, because consolidating onto the wrong one imports a different defect:
+
+| Mechanism | Scale | Problem |
+| --- | --- | --- |
+| threaded `io.Writer` + `fmt.Fprint*` | 19 params / 26 calls | unstructured; assumes a watching human |
+| `noticeWriter` → `StartResult.Notices` | start/reset paths | structured-ish, and *returned* — the closest thing to right |
+| threaded `*slog.Logger` | 4 sites | the target shape |
+| the process-global logger | **~111 sites** — 8 `slog.Default()` plus **103 package-level `slog.Info/Warn/Error/Debug(`**, against 114 calls on a threaded logger | ambient *only when the destination was never declared* — see below |
+
+**A correction that changed this decision's shape.** The first draft counted 8 global sites. That was wrong by an order of magnitude: package-level `slog.Info(…)` writes to the same process-global handler as `slog.Default()`, and there are 103 of those. The number reached the owner and informed a scoping call before it was checked.
+
+**Feedback and diagnostics are different, and only one of them must be threaded.** The distinguishing test is **who is addressed**:
+
+- **Feedback is addressed to the *caller* of this API** — what happened to *their* sandbox, in *their* invocation. It is per-call and per-principal, so it must be threaded or returned. A process-global sink cannot express "this belongs to that caller", and in a multi-principal daemon it merges principals.
+- **Diagnostics are addressed to the *operator of the process*.** They are process-scoped by nature, so a **singleton is the better match than dependency injection** — threading a logger through every function to serve a process-wide concern is ceremony that buys nothing.
+
+**So the rule is not "no globals" but "no undeclared destination".** What §12 objects to is *ambient* — nobody chose it, it was simply there. A singleton whose handler is **explicitly installed at process start** — by the CLI, or by a daemon before it launches its web service — is a declared destination, and is fine. What is forbidden is *implicit defaulting*: reaching for the global when nothing has set it, so output goes wherever the runtime happens to send it.
+
+That narrows the work sharply: most of the 103 are diagnostics and stay where they are, provided each entrypoint declares its handler and the declaration is checkable.
+
+**Exposure is per-API, not one global answer.** The first draft posed "is a record a stream event or a return value?" as one question needing one answer. It is not. The same record is legitimately a **return value** on `Create` — the caller has a result in hand and wants notices attached to it — and a **stream event** on a long-running `Start` or `Attach`, where there is nothing to attach to yet. Emission is uniform: one record, one helper. **Exposure is declared by each API surface as part of its contract**, chosen for what that surface's caller is actually doing. This removes the risk of converting every site onto a shape that suits `Create` and fights `Attach`.
+
+**Rejected.**
+1. **Keep the threaded writer and document it.** Rejected: it is not a documentation gap. The writer *cannot* carry level or fields, so no amount of convention makes it routable — a consumer receives bytes and has to parse them back into the structure the emitter already had and discarded.
+2. **`slog.Default()` everywhere.** Rejected: ambient. It is the same defect DEV §12 exists to prevent, and a multi-principal embedder would get one process-wide sink for every principal's output.
+3. **Convert only new code and leave the 26 sites.** Rejected on `security-principles.md §11`: a mechanism that follows one convention here and another there is a hygiene defect in its own right, and the drift is what an audit misses. It also means two conventions live indefinitely, since nothing would force the second conversion.
+4. **Defer to v0.13.0.** The recommendation was to defer on size — 19 signatures, 26 call sites, and every test asserting on captured text. Overruled by the owner: it lands in v0.12.0 with the D144 work it is adjacent to.
+
+**Consequences.**
+- The D144 credential disclosure (`launch.go`'s `discloseInjectedCredentials`, shipped in `78d68d20`) writes to `state.Output` and is instance 27. It converts with the class, not before it — a lone site differing from its 26 siblings is precisely rejected-alternative 3.
+- Tests asserting on captured output text become tests asserting on records. That is a net improvement — asserting a field beats asserting a substring — but it is real work and is the bulk of the diff.
+- `forbidigo` gains a rule for the bypass once the conversion lands, or the ban is decoration: **the gate is what stops mechanism five appearing.**
+- **The ban generalises from a list to a class**, at the owner's direction: *any API whose behaviour depends on ambient process state rather than on its arguments*. Today `forbidigo` enumerates — `os.Getenv`, `os.Environ`, `os.UserHomeDir`, `os.Getwd`, `time.Local`, `user.Current` — and an enumeration drifts. The proof it already has: **`filepath.Abs` is used 4 times, is not banned, and silently calls `os.Getwd()`, which is** — the same ambient read wearing a path-manipulation name, walking past the gate. `os.TempDir` (2 uses, reads `TMPDIR`) is the same shape. `exec.LookPath` (28 uses, ambient `PATH`) is probably a legitimate exception and should be a *declared* one rather than an oversight.
+
+**Amendment, 2026-08-17 — the shape, settled. Several of the original draft's assumptions did not survive the count.**
+
+**There is no universal record type; the common thing is a *notice*.** The first draft assumed one `Record` carried everywhere. That conflates two different things: a call's **result** is per-API and typed (`CreateResult`, `StartResult`, a prune report), while the *incidental* things that happened during the call — "port 3000 was skipped", "git history was not preserved", "credentials were injected from the environment" — are the same shape everywhere. That type already exists and is already public: **`Notice`**. So the work is not to invent a type but to give `Notice` a level that was *chosen* rather than reconstructed from a `"Warning: "` prefix, give it fields, and make it **emittable** instead of parsed back out of bytes. **Every API returns a result, and notices ride on it.**
+
+**Sinks, not channels — and the reason is the owner's own rule.** A channel imposes a lifecycle contract on the caller: somebody must close it and somebody must *drain* it. A caller supplying an unbuffered channel and not reading it deadlocks mid-`Create`; a nil channel blocks forever. Both are silent hangs, the worst failure shape available, and both are the "too easy to do unintentionally" objection that already forbade nil emitters. More decisively, **a channel is a buffering-and-lifecycle decision imposed at our boundary**, and the owner's ruling on ordering was that such decisions belong to the consumer: a later HTTPS consumer does its own job-ID, status and buffering convention. The asymmetry settles it — `OnNotice = func(n Notice) { ch <- n }` turns a sink into a channel in one line, while the reverse needs a goroutine, a close protocol and a drain guarantee forced on everyone. **A sink at the boundary; a channel is one line away for whoever wants one.**
+
+**The event ID is internal, and it names *what happened*, not *who emitted it*.** Making it public was proposed and rejected: no consumer for it could be named, since callers receive typed results and read fields rather than filtering strings. Internally it earns its place by making the renderer a **lookup instead of a string match** — the CLI switches on `sandbox.create.archetype.resolved` to choose a rendering, and matching on message text is precisely the `WarningPrefix` fragility being deleted, reintroduced one layer up. Naming rules follow from *what happened*, not from provenance:
+- **Code moves; events do not.** A name derived from where the code lives changes under a refactor that altered no behaviour, breaking every renderer and filter keyed to it.
+- **One thing, one name; two things, two names.** This is why the five CLI/orchestrator collisions are resolved by **dropping the CLI's duplicates**: `sandbox.start` meant two different things from two layers. Under a provenance contract the duplicates would have been correct.
+- **Readable without the code**, per the standard's naming rules: dotted and self-describing (`sandbox.launch.port_skipped`), never abbreviated to something requiring the package layout to decode. ~60 slog sites already carry such an `"event"` key; this promotes an existing convention rather than inventing one.
+
+**No `Error` level.** An error is **returned**, never emitted. A notice exists for what did *not* fail the call but the caller should know. Levels are Info and Warn; allowing Error would report every failure twice and leave "how does a caller learn something failed" with two answers.
+
+**Progress is a third category, and the first draft did not have it.** `"Downloading runtime (~30 GB)…"`, `"Booting VM for provisioning…"`, `"Waiting for VM to power off…"` are not advisories: they are only meaningful **live**, and are worthless in a result read afterwards. A notice is a fact about the call; progress is a fact about *now*. There are ~20 in `runtime/tart` alone. Progress stays on the stream; it is not accumulated into a result.
+
+**The writer stays where it carries a stream we do not own.** Determined per method, not per package:
+
+| Method | Foreign stream | Writer |
+| --- | --- | --- |
+| `Setup` | subprocess stdout/stderr (`tart/build.go:502-503`, `containerd/image.go:227-228`) | **stays** |
+| `BuildProfileImage` | build output (`docker/build.go:299`) | **stays** |
+| `StdioExec` | process stdio by definition | **stays** |
+| `Prune`, `PruneCache`, `PruneStaleBases` | none | **removed** — their lines are a *report* (`"reclaimed 2.1 GB"`, `"would remove X"`), which is the answer to the call, so they become **richer typed results**, not notices |
+
+So three public interface methods change, not eight.
+
+**The rule for what is not feedback**, stated as a rule because a list gets re-litigated at every call site: **a writer is not feedback when it carries bytes to something we do not own (process stdio, a build stream) or when it builds a document (the seatbelt SBPL profile, the in-sandbox context markdown, JSON encoding). It is feedback when it tells somebody what happened.**
+
+**Corrected counts, since two wrong figures reached the owner before being checked.** The advisory population is **108** writes to a threaded writer in library code, **79 of them in `runtime/`** — the original "26 / 19" counted `internal/orchestrator/` only, and a later claim that 108 was itself inflated was wrong: it is not. What *is* smaller than stated is the public-interface churn (three methods, above). The slog triage held: **~18 of 103 package-level calls are caller-addressed**, the rest operator-addressed and staying.
+
+**The migration window, and its forced end.** Today the level lives in the message text: the library writes `"Warning: …"` and `noticeWriter` recovers the level by matching that literal prefix. During conversion both mechanisms must work at once, and that window has two failure modes. Deleting `WarningPrefix` early silently downgrades every unconverted site to info — DF157's scar, in reverse. Leaving it long enough to look like the design regrows it, because new code copies its surroundings. So the coexistence is marked explicitly temporary, and **its end is forced rather than remembered**: a test asserting no library code emits the prefix, which goes green only when the last site converts and permanently guards it thereafter.
+
+**Also settled:** `nil` is refused at the boundary and `feedback.Discard` is the declared way to ask for silence, so leaf code never guards; rendering moves to a `render` package which holds the `forbidigo` exemption for `fmt.Fprint*`, making the ban expressible as a scoped convention rather than an unenforceable type-based rule.
+
+**Amendment, 2026-08-19 — progress is a record too, and the writer leaves the public API entirely. This reverses the "the writer stays where it carries a stream we do not own" table above, which was wrong on the facts.**
+
+**What the table got wrong.** It cited `tart/build.go:502-503`, `containerd/image.go:227-228` and `docker/build.go:299` as the foreign streams justifying a writer on `Setup` and `BuildProfileImage`. Those lines are `cmd.Stdout = w` assignments — **a different mechanism from the `fmt.Fprint*` calls in the same functions**, and the table treated "this function hands a writer to a subprocess" as if it meant "this function's feedback needs a writer". Counted directly: of the 32 `fmt.Fprint*` calls to a threaded writer left in library code, **zero carry foreign bytes.** Every one is a sentence we compose — `"Pulling base macOS VM image (~30 GB)…"`, `"Provisioning step %d/%d…"`, `"Waiting for VM to boot…"`. The foreign seam never was a `fmt.Fprint*` call.
+
+**And the other half of the argument proved a different point than the one it was used for.** *"Progress is only meaningful live"* is a claim about **lifetime** — it argues against accumulating progress into a result, and that part stands. It says nothing about **shape**, and it was used as if it did. The two were conflated.
+
+**Progress is in fact the worst case for text, not the best.** It carries the most structure of anything the library emits and formatting destroys all of it: `"Provisioning step 3/7"` is `{step: 3, of: 7}`; `"Downloading iOS 18.2 runtime"` is `{platform, version}`; `"~30 GB"` is a byte count. A progress bar — the most obvious consumer progress has — cannot be built from our prose without regexing it back, which is the `WarningPrefix` defect again in a third location. A daemon streaming progress over SSE has to re-derive everything we just threw away.
+
+**So progress becomes a record**, with its own type and its own sink:
+- A **distinct type**, not a `Notice` with a progress level. "Progress has no severity" should be a fact the compiler holds, not a comment; and consumers route the two differently — a notice attaches to a result, progress is transient and only ever streams.
+- A **separate sink**, so a caller declares each destination independently. The CLI streams progress to stderr and keeps notices for the result; a daemon streams progress to a job feed and attaches notices to the job record.
+
+**The subprocess seam keeps an `io.Writer`, but as an implementation detail, not a public field.** `exec.Cmd.Stdout` requires one, so the backends adapt their progress sink to a writer at that seam — the mirror of `WriterSink` — splitting the child's output into progress records that carry the raw line. **The public API then has no `io.Writer` at all.**
+
+**The cost of line-splitting, stated rather than glossed.** Most sites already wrap in `io.MultiWriter(output, tail)` (`docker/build.go`, `tart` pull/provision/verify, `containerd`'s docker-build), so `os/exec` hands the child a pipe, the child already emits line-oriented output, and splitting loses nothing. **Three sites pass the writer through directly** — `tart/build.go:502-503` (the shutdown exec) and `containerd/image.go:227-228` (`ctr images import`). There, when the caller's writer is `os.Stderr`, the child inherits the fd and *can* see a TTY. Two of the three emit nothing worth rendering; `ctr import` is the one place an in-place progress render could exist today and would be flattened to lines. That is the whole price, and it is worth paying. **An earlier draft of this amendment asserted "always a pipe, never a TTY" — that was false, and checking it is why it is not in the record.**
+
+**`StdioExec` was miscategorised alongside these and genuinely stays.** It is not progress: it is a live bidirectional terminal, byte-exact and latency-sensitive, bridged through a PTY. Records there would be absurd. Terminal I/O is a fourth category, and the only one that is really a stream.
+
+**This makes the `forbidigo` gate simple, which the earlier design could not.** The plan's step 7 wanted a rule for *"`fmt.Fprint*` to a threaded writer outside the routing layer"*, and `forbidigo` matches call names, not argument types — it cannot tell `Fprintf(w, …)` from `Fprintf(&builder, …)`. The escape is the owner's: **ban `fmt.Fprint*` in library code outright**, and provide the sink helpers as the only way to format for a human. That works precisely because no legitimate feedback use survives once progress converts — the 64 remaining calls all target a `strings.Builder` and become `fmt.Sprintf`/`WriteString`, and the subprocess seam never used `fmt.Fprint*`. An absolute rule needs no type analysis and cannot drift.
+
+**Backwards compatibility is explicitly not a constraint here** (owner, 2026-08-19), which is what allows the public writers to go rather than be redefined.
+
+**Two gates, because one is not enough (owner, 2026-08-19).** The first version of the enforcement was `TestArch_LibraryTakesNoFeedbackWriter` alone, which catches a writer *declaration*. The owner's objection: an agent will reach for `fmt.Fprintf` by reflex, and a gate that fires on the parameter rather than on the line they wrote is a gate they meet late and indirectly. So `forbidigo` **bans `fmt.Fprint*` in library code outright**, which is the only form it can express — it matches call names, not argument types, and cannot distinguish a write to a caller's writer from one to a local builder.
+
+The first attempt at paying for that ban was wrong, and the owner caught it. Converting ~65 legitimate `strings.Builder` sites to `WriteString(fmt.Sprintf(…))` made **staticcheck's QF1012 recommend precisely the form now banned**, so the two linters genuinely conflicted and QF1012 had to be excluded — leaving a codebase deliberately writing unidiomatic Go and suppressing the check that said so.
+
+**`internal/textbuf.Printf` removes the conflict rather than resolving it.** It keeps the printf shape but takes a `Buffer` — an in-memory accumulator — instead of an `io.Writer`. That turns the distinction `forbidigo` could only approximate lexically into a **structural** one: the helper cannot be aimed at a caller's stream, so no misuse turns it back into the mechanism the ban removes. `Buffer` requires `String()` alongside `WriteString()` specifically to exclude `*os.File` and `*bufio.Writer`, which are real destinations; `TestArch_BufferExcludesRealDestinations` pins that, positive half included, so it cannot pass by the interface becoming unsatisfiable. QF1012 is back on, because the pattern it objected to no longer exists.
+
+This completes the owner's original suggestion — *"make our own fprintf that can't write to a writer, and force the code to use that instead."* The first build did the forcing half, missed the helper half, and settled for verbosity plus a suppressed linter instead of asking why the idiom had to be surrendered at all.
+
+Three files keep `fmt.Fprint*`: `feedback/writer.go` (the sanctioned rendering point), `internal/mcpsrv/proxy.go` (protocol frames, not prose), and `internal/testutil/`.
+
+The halves are complementary, not redundant: the ban cannot see a write into an already-licensed writer, and the fence cannot see a call. One residual is named rather than papered over — a writer-shaped parameter spelled as something other than `io.Writer` escapes the fence's AST match, and closing it properly needs go/types.
+

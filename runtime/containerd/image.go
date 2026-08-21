@@ -22,6 +22,7 @@ import (
 	"github.com/containerd/containerd/v2/pkg/labels"
 	"github.com/containerd/containerd/v2/pkg/namespaces"
 	"github.com/containerd/errdefs"
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/config"
 	yrt "github.com/kstenerud/yoloai/runtime"
 	dockerrt "github.com/kstenerud/yoloai/runtime/docker"
@@ -59,7 +60,7 @@ func dockerRefFor(tag string) string {
 // The layout parameter is currently unused by the containerd Setup path —
 // it's accepted to satisfy the runtime.Backend interface (Q-W.5) and remains
 // available for any future host-path needs without a further signature change.
-func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, output io.Writer, logger *slog.Logger, force bool) error {
+func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir string, progress feedback.ProgressSink, notices feedback.Sink, logger *slog.Logger, force bool) error {
 	ctx = r.withNamespace(ctx)
 
 	// Serialize against every other yoloai-base builder. Both containerd
@@ -83,11 +84,11 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	// while Docker still holds a current yoloai-base image. When the build
 	// inputs are unchanged, re-linking is near-instant — a full rebuild here is
 	// the cold-build footgun we are eliminating.
-	if !force && !dockerrt.NeedsBuild(layout, "containerd") && r.tryLink(ctx, imageRef, output) {
+	if !force && !dockerrt.NeedsBuild(layout, "containerd") && r.tryLink(ctx, imageRef, progress, logger) {
 		return nil
 	}
 
-	dockerBin, err := r.buildDockerImage(ctx, output, logger)
+	dockerBin, err := r.buildDockerImage(ctx, progress, logger)
 	if err != nil {
 		return err
 	}
@@ -102,22 +103,22 @@ func (r *Runtime) Setup(ctx context.Context, layout config.Layout, sourceDir str
 	// blob in the yoloai namespace via a pure bolt metadata write. GC ref
 	// labels are set on each parent blob so the garbage collector can trace
 	// the full manifest tree and keep all blobs reachable.
-	if r.tryLink(ctx, imageRef, output) {
+	if r.tryLink(ctx, imageRef, progress, logger) {
 		return nil
 	}
 
 	// Slow path: docker save | ctr images import -
 	// Used when Docker is not in containerd-snapshotter mode, or when the
 	// fast path fails verification.
-	return r.slowPathImport(ctx, dockerBin, imageRef, output)
+	return r.slowPathImport(ctx, dockerBin, imageRef, progress)
 }
 
 // tryLink attempts the fast containerd-snapshotter link path, returning true
 // only when the image is fully linked into the yoloai namespace. A false return
 // is expected when Docker is not in containerd-snapshotter mode; the caller then
 // falls back to a build and/or the slow `docker save | ctr import` path.
-func (r *Runtime) tryLink(ctx context.Context, tag string, output io.Writer) bool {
-	fmt.Fprintln(output, "Linking image into containerd namespace yoloai...") //nolint:errcheck // best-effort output
+func (r *Runtime) tryLink(ctx context.Context, tag string, progress feedback.ProgressSink, logger *slog.Logger) bool {
+	feedback.Progressf(progress, "image.namespace_linking", "Linking image into containerd namespace yoloai...")
 	if err := r.linkFromDockerNamespace(ctx, tag); err != nil {
 		// Say why. A false return costs the caller a `docker save | ctr import`,
 		// which is minutes rather than milliseconds, and the reason used to be
@@ -125,11 +126,11 @@ func (r *Runtime) tryLink(ctx context.Context, tag string, output io.Writer) boo
 		// nobody could tell a not-in-snapshotter-mode host (expected) from a
 		// permission or content error (not). Same discarded-diagnostic class as
 		// DF144/DF145.
-		fmt.Fprintf(output, "Fast namespace link unavailable (%v); falling back to import.\n", err) //nolint:errcheck // best-effort output
-		slog.Default().Debug("containerd namespace link failed; falling back to import", "tag", tag, "err", err)
+		feedback.Progressf(progress, "image.namespace_link_unavailable", "Fast namespace link unavailable (%v); falling back to import.", err)
+		logger.Debug("containerd namespace link failed; falling back to import", "tag", tag, "err", err)
 		return false
 	}
-	fmt.Fprintln(output, "Image ready.") //nolint:errcheck // best-effort output
+	feedback.Progressf(progress, "image.ready", "Image ready.")
 	return true
 }
 
@@ -149,7 +150,7 @@ func (r *Runtime) imageAlreadyReady(ctx context.Context, tag string, force bool)
 }
 
 // buildDockerImage builds the yoloai-base image using Docker and returns the docker binary path.
-func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger *slog.Logger) (string, error) {
+func (r *Runtime) buildDockerImage(ctx context.Context, progress feedback.ProgressSink, logger *slog.Logger) (string, error) {
 	dockerBin, err := exec.LookPath("docker")
 	if err != nil {
 		return "", fmt.Errorf("docker is required to build the yoloai-base image for the containerd backend\n" +
@@ -163,7 +164,7 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 		return "", fmt.Errorf("create build context: %w", err)
 	}
 
-	fmt.Fprintln(output, "Building yoloai-base image with Docker (this may take a few minutes)...") //nolint:errcheck // best-effort output
+	feedback.Progressf(progress, "image.base_building", "Building yoloai-base image with Docker (this may take a few minutes)...")
 	logger.Info("building yoloai-base image")
 
 	// Curated build env from the threaded snapshot (§12 — never os.Environ).
@@ -197,7 +198,9 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 	// error, not only the (possibly discarded) stream — same value on both so
 	// os/exec keeps its single-pipe path (DF144).
 	tail := sysexec.NewTailBuffer(buildErrorTailLines)
-	w := io.MultiWriter(output, tail)
+	pw := feedback.NewProgressWriter(progress, "image.build_output")
+	defer pw.Flush()
+	w := io.MultiWriter(pw, tail)
 	buildCmd.Stdout = w
 	buildCmd.Stderr = w
 	buildCmd.Stdin = buildCtx
@@ -209,13 +212,13 @@ func (r *Runtime) buildDockerImage(ctx context.Context, output io.Writer, logger
 }
 
 // slowPathImport uses "docker save | ctr images import -" to import the image.
-func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, tag string, output io.Writer) error {
+func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, tag string, progress feedback.ProgressSink) error {
 	ctrBin, err := exec.LookPath("ctr")
 	if err != nil {
 		return fmt.Errorf("ctr (containerd CLI) not found; install containerd:\n%s", ctrInstallHint())
 	}
 
-	fmt.Fprintln(output, "Importing image into containerd namespace yoloai (this may take a few minutes)...") //nolint:errcheck // best-effort output
+	feedback.Progressf(progress, "image.importing", "Importing image into containerd namespace yoloai (this may take a few minutes)...")
 
 	saveCmd := sysexec.CommandContext(ctx, r.execEnv, dockerBin, "save", tag)
 	importCmd := sysexec.CommandContext(ctx, r.execEnv, ctrBin, "-n", "yoloai", "images", "import", "-")
@@ -224,8 +227,14 @@ func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, tag stri
 	if err != nil {
 		return fmt.Errorf("pipe setup: %w", err)
 	}
-	importCmd.Stdout = output
-	importCmd.Stderr = output
+	// This is one of the three sites that used to hand the caller's writer
+	// straight to the child, so `ctr import` could render in place on a TTY.
+	// Line-splitting flattens that; the D145 amendment weighs it and takes the
+	// trade rather than keeping a public writer for it.
+	pw := feedback.NewProgressWriter(progress, "image.import_output")
+	defer pw.Flush()
+	importCmd.Stdout = pw
+	importCmd.Stderr = pw
 
 	if err := saveCmd.Start(); err != nil {
 		return fmt.Errorf("docker save: %w", err)
@@ -260,7 +269,7 @@ func (r *Runtime) slowPathImport(ctx context.Context, dockerBin string, tag stri
 		}
 	}
 
-	fmt.Fprintln(output, "Image imported successfully.") //nolint:errcheck // best-effort output
+	feedback.Progressf(progress, "image.imported", "Image imported successfully.")
 	return nil
 }
 

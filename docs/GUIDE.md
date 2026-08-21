@@ -213,10 +213,11 @@ yoloai ships with multiple agents. The architecture is agent-agnostic — more a
 You can select a model using shorthand aliases or full model names. Aliases are agent-specific — use `yoloai system agents <name>` to see the full list for each agent.
 
 ```bash
-# Claude model aliases
-yoloai new task ./my-project --model sonnet   # claude-sonnet-4-latest
-yoloai new task ./my-project --model opus     # claude-opus-4-latest
-yoloai new task ./my-project --model haiku    # claude-haiku-4-latest
+# Claude model aliases — passed through to Claude Code, which resolves each
+# to the current model of that name. yoloAI does not pin a version.
+yoloai new task ./my-project --model sonnet
+yoloai new task ./my-project --model opus
+yoloai new task ./my-project --model haiku
 yoloai new task ./my-project --model claude-sonnet-4-20250514  # exact model
 
 # Gemini model aliases
@@ -405,9 +406,6 @@ yoloai new task ./project --broker      # require brokering (error if unsupporte
 
 # Use a profile
 yoloai new task ./project --profile go-dev
-
-# Use base image even if config sets a default profile
-yoloai new task ./project --no-profile
 
 # Resource limits
 yoloai new task ./project --cpus 4 --memory 8g
@@ -678,11 +676,11 @@ yoloai config reset env.OLLAMA_API_BASE
 | `network.isolated` | `false` | Enable network isolation by default |
 | `network.allow` | (empty) | Additional domains to allow (additive with agent defaults) |
 | `auto_commit_interval` | `0` | Auto-commit interval in seconds (0 = disabled) |
-| `mounts` | (empty) | Additional bind mounts (list of `host:container` paths) |
+| `directories` | (empty) | Auxiliary host directories to mount (list of `{path, mode, mount}`) |
 | `ports` | (empty) | Port mappings (list of `host:container` ports) |
 | `cap_add` | (empty) | Additional Linux capabilities (list, e.g. `SYS_PTRACE`) |
 | `devices` | (empty) | Device mappings (list of `/dev/` paths) |
-| `setup` | (empty) | Shell commands to run inside the container on first start (list) |
+| `setup` | (empty) | Shell commands to run inside the container on every start (list) |
 | `tmux_conf` | `default+host` | Tmux config mode (global config): `default+host` sources yoloAI defaults then your `~/.tmux.conf`; `host` uses only yours |
 | `model_aliases.<alias>` | (empty) | Custom model alias (global config) |
 
@@ -852,7 +850,14 @@ yoloai new task ./project --no-broker
 yoloai new task ./project --broker
 ```
 
-The posture is **sticky**: once a sandbox is created with `--broker` / `--no-broker`, restarts keep that choice (so a restart never silently puts the key back in the box). `--broker` and `--no-broker` are mutually exclusive.
+The posture is **sticky**: once a sandbox is created with `--broker` / `--no-broker`, restarts keep that choice, so a restart never silently puts the key back in the box. Changing your mind does not mean recreating the sandbox — both flags are accepted by `start` and `restart` too, and the new posture is persisted the same way:
+
+```bash
+yoloai restart task --no-broker   # from here on, deliver the key directly
+yoloai start task --broker        # from here on, keep it host-side
+```
+
+`--broker` and `--no-broker` are mutually exclusive.
 
 **Caveats:**
 - **Composes with `--network-isolated`.** A brokered, network-isolated sandbox keeps its credential host-side *and* is egress-restricted: the agent's allowlist stays default-deny, but the injector endpoint is allowlisted so the agent reaches the host-side proxy (which reaches the real upstream host-side). The agent's LLM egress collapses to that single endpoint. (`--network-none` has no egress at all, so brokering is skipped there; `--broker` with `--network-none` is rejected. On a backend that needs a dedicated network mode to reach the injector — rootless podman's slirp — `--network-isolated` brokering isn't composed yet and falls back to direct delivery.)

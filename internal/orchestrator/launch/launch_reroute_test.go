@@ -6,8 +6,8 @@ package launch
 import (
 	"context"
 	"encoding/json"
+	"github.com/kstenerud/yoloai/feedback"
 	"github.com/kstenerud/yoloai/internal/testutil"
-	"io"
 	"log/slog"
 	"os"
 	"path/filepath"
@@ -71,12 +71,12 @@ func (r *rerouteBaseRuntime) GitExec(_ context.Context, _ string, _ string, _ st
 func (r *rerouteBaseRuntime) InteractiveExec(_ context.Context, _ string, _ []string, _ string, _ string, _ runtime.IOStreams) error {
 	return nil
 }
-func (r *rerouteBaseRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ io.Writer, _ *slog.Logger, _ bool) error {
+func (r *rerouteBaseRuntime) Setup(_ context.Context, _ config.Layout, _ string, _ feedback.ProgressSink, _ feedback.Sink, _ *slog.Logger, _ bool) error {
 	return nil
 }
 func (r *rerouteBaseRuntime) IsReady(_ context.Context) (bool, error) { return true, nil }
 func (r *rerouteBaseRuntime) Close() error                            { return nil }
-func (r *rerouteBaseRuntime) Prune(_ context.Context, _ []string, _ bool, _ io.Writer) (runtime.PruneResult, error) {
+func (r *rerouteBaseRuntime) Prune(_ context.Context, _ []string, _ bool) (runtime.PruneResult, error) {
 	return runtime.PruneResult{}, nil
 }
 func (r *rerouteBaseRuntime) Logs(_ context.Context, _ string, _ int) string { return "" }
@@ -224,7 +224,7 @@ func TestBuildAndStart_LaunchPath(t *testing.T) {
 	rt.markerPath = markerPath
 
 	st := makeTestState(dir)
-	err := buildAndStart(context.Background(), rt, st, nil, nil, true /*hasSecrets*/, nil, brokerOutcome{}, "")
+	err := buildAndStart(context.Background(), rt, testLogger(), st, nil, nil, true /*hasSecrets*/, nil, brokerOutcome{}, "")
 	require.NoError(t, err)
 
 	// keepalive_only must be set in the on-disk config.
@@ -297,7 +297,7 @@ func TestBuildAndStart_ContainerEnhancedTakesLegacyPath(t *testing.T) {
 
 	// hasSecrets=false so the legacy path doesn't block on the secrets marker
 	// (the entrypoint would write it in production; the fake doesn't simulate it).
-	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/, nil, brokerOutcome{}, "")
+	err := buildAndStart(context.Background(), rt, testLogger(), st, nil, nil, false /*hasSecrets*/, nil, brokerOutcome{}, "")
 	require.NoError(t, err)
 
 	// Legacy path: keepalive_only stays false and Launch is never called.
@@ -329,7 +329,7 @@ func TestBuildAndStart_LegacyPath(t *testing.T) {
 
 	st := makeTestState(dir)
 	// No secrets in this test — simplifies the legacy path (no marker wait).
-	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/, nil, brokerOutcome{}, "")
+	err := buildAndStart(context.Background(), rt, testLogger(), st, nil, nil, false /*hasSecrets*/, nil, brokerOutcome{}, "")
 	require.NoError(t, err)
 
 	// keepalive_only must NOT have been set.
@@ -374,7 +374,7 @@ func TestBuildAndStart_LaunchPath_NoSecrets(t *testing.T) {
 	rt.markerPath = ""
 
 	st := makeTestState(dir)
-	err := buildAndStart(context.Background(), rt, st, nil, nil, false /*hasSecrets*/, nil, brokerOutcome{}, "")
+	err := buildAndStart(context.Background(), rt, testLogger(), st, nil, nil, false /*hasSecrets*/, nil, brokerOutcome{}, "")
 	require.NoError(t, err)
 
 	assert.True(t, readRuntimeConfigKeepalive(t, dir),

@@ -153,21 +153,39 @@ thing standing between the tree and API that nothing calls.
 | Job | Runs | When |
 | --- | --- | --- |
 | `check` | `make setup-dev-python`, `make check` | PR and push |
-| `commits` | `scripts/lint_commits.py` over your PR's commits | PR only |
-| `content-gates` | `check_breaking_changes.py`, `check_research_bounds.py` | PR **and push** |
-| `revert-red` | `check_revert_red.py` — reverts each changed file, requires a red | PR only |
+| `commits` | `scripts/lint_commits.py` over the range | PR and push |
+| `content-gates` | `check_breaking_changes.py`, `check_research_bounds.py` | PR and push |
+| `revert-red` | `check_revert_red.py` — reverts each changed file, requires a red | PR and push |
 | `integration` | `make base-image`, `make integration`, `make e2e` | PR and push |
 | `integration-podman` | `make integration-podman` | PR and push |
 
-The `commits` / `content-gates` split is load-bearing. The two content gates judge *files*, so
-they have to see every path a file reaches `main` by, and this repo sends small fixes straight
-there. They previously sat in `commits` and inherited its PR-only guard, so a file pushed direct
-to `main` was examined by nothing at all.
+**Every job runs on both, and that column is a fence rather than a description** —
+`TestRepoHygiene_CIGates_AreNotPullRequestOnly` fails on a job that skips a push. Three jobs
+carried a `pull_request` guard at different times, each on the reasoning that a commit range only
+exists for a PR. It exists for a push too (`github.event.before`..`github.sha`), and the jobs that
+skipped one were skipping exactly the pushes this repo relies on: small fixes straight to `main`,
+and everything a `release-*` branch carries under rule 12. A skipped job renders on the summary
+page as a job that did not object, so nobody found any of the three by looking at CI.
+
+The range itself comes from **`.github/actions/resolve-range`**, one copy with one set of edge
+cases, required of every range-scoped job by `TestRepoHygiene_CIRangeGates_UseTheSharedResolver`.
+The edge case worth knowing: `github.base_ref` is empty on a push, so the naive spelling resolves
+to `--base origin/` — and git answers an unresolvable ref with an empty diff and exit 0, which
+reads exactly like a clean branch.
 
 `revert-red` is the mechanical form of rule 10. If it reports a file under *"Changed with nothing
 to notice"*, the change is real and no test disagrees with undoing it. Where that is genuinely
 true — a symptom only `make smoketest` reproduces, a path the single-principal CLI cannot reach —
 say so with a **`Verified-By:`** trailer naming what you ran, rather than relabelling the commit.
+
+Two things to know before you argue with its report. A file whose diff is only comments or
+formatting is classified **`COSMETIC`** and not held to rule 10, because there is no behaviour
+there to cover; that is exact for Go without block comments and for any Python that parses, and
+anything it cannot classify is probed as before. And a **`RED_BUILD`** verdict is the weak one —
+it proves the change is load-bearing, not that a test asserts what it does. A whole release
+branch judged in one range degrades almost entirely to `RED_BUILD`, because a cross-cutting
+signature change stops the tree compiling before any test runs. Judge a branch commit by commit
+if you want the answer rule 10 is actually asking for.
 
 `make check`'s `test` target is a bare `go test ./...`, which skips every
 `//go:build integration` and `//go:build e2e` file. A green `make check` does **not** predict
@@ -196,8 +214,11 @@ Absent tooling **fails**; it does not skip (D112). Install all of it:
 | --- | --- |
 | `uv` | the Python surface (`python-test`, `python-typecheck`) |
 | `hadolint` | Dockerfile lint |
+| `shellcheck` | shell lint (`make check`); falls back to a pinned container when Docker is running |
 | `actionlint` | workflow lint |
 | Docker | integration tiers |
+| `podman` | the rootless podman tier (`integration-podman`) |
+| `slirp4netns` | rootless podman **brokering** — the sandbox reaches the host injector via slirp's `10.0.2.2` alias. Podman 5 defaults to `pasta` and does not pull this in |
 
 The one carve-out is `YOLOAI_TEST_UNCONTROLLED_BACKENDS`, a comma-separated list of backends
 to exclude when the host genuinely cannot run them. CI uses it for containerd (GitHub runners
