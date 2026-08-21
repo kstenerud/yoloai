@@ -46,6 +46,7 @@ inclusion test first, then add a row to the index.
 | Apple sandbox: TUI loses left gutter / leading chars orphan onto row above, only on tmux scroll; `^b r` heals it; Docker clean; both emulators affected | [Apple: exec -t forces ONLCR, corrupting column tracking](#apple-container-exec--t-forces-onlcr-on-the-host-local-bridge-pty-corrupting-the-apps-column-tracking-on-scroll) |
 | Brokered agent on podman-macOS hangs on first API call; one-shot curl to the injector works | [Podman Machine: gvproxy stalls streaming](#podman-machine-macos-gvproxy-host-forward-passes-a-one-shot-curl-but-stalls-the-agents-streaming-connection) |
 | A healthy apple/tart guest suddenly resolves nothing (`UNRESOLVED` for every name) with no change to the guest; the host resolves fine; someone just flushed DNS or ran `killall -HUP mDNSResponder` | [macOS: restarting mDNSResponder takes guest DNS down through the vmnet gateway](#macos-restarting-the-hosts-mdnsresponder-takes-guest-dns-down-through-the-vmnet-gateway) |
+| Considering VM snapshot/restore on macOS to make sandbox creation instant; VZ's validator says snapshots are supported (**third-party report, unverified here**) | [macOS: VZ reports snapshots as supported, then fails them](#macos-virtualizationframework-reports-vm-snapshots-as-supported-then-fails-them--the-entitlement-is-apple-internal) |
 | `docker network create` fails with `iptables: No chain/target/match by that name` for `DOCKER-FORWARD`; existing containers unaffected; something recently ran a host-wide nftables flush | [Docker: `nft flush ruleset` destroys Docker's own chains](#nft-flush-ruleset-destroys-dockers-own-chains-and-docker-does-not-notice-until-the-next-network-operation) |
 | VM loses network silently; traffic stops | [Kata: tcfilter networking model](#tcfilter-networking-model) |
 | Container starts but has no network after `NewTask()` | [Kata: netns must be configured before NewTask](#kata-shim-startup-netns-must-be-fully-configured-before-newtask) |
@@ -3306,6 +3307,42 @@ on macOS — but the failure mode and on-disk residue differ.
 
 **Code:** `runtime/docker/resources/entrypoint.py` (`apply_overlays`, the
 `overlay.virtofs_fallback` / `overlay.local_upper` branch).
+
+## macOS: Virtualization.framework reports VM snapshots as supported, then fails them — the entitlement is Apple-internal
+
+> **THIRD-PARTY REPORT, NOT VERIFIED HERE.** Everything in this entry comes from one external
+> write-up (below). Nobody has run the probe on this project's hardware, so treat it as prior art
+> that says *where to look*, not as a measured fact. It is recorded because it closes a plausible
+> line of work cheaply, and finding it out the hard way costs a day. Any decision that actually
+> depends on it should be preceded by a probe of our own — and that probe should update this entry
+> to say so, in either direction.
+
+**Backends:** apple, tart, and anything else built on Virtualization.framework.
+
+**Reported behaviour:** VZ's own validator reports VM snapshotting as **supported**, and the
+snapshot operation then fails with `VZErrorInternal`. The capability is gated behind
+`com.apple.private.virtualization`, which per the report Apple does not grant to third-party
+applications. The public `com.apple.security.virtualization` entitlement — the one any developer
+can take — is enough to *create* VMs but not to snapshot them.
+
+**Why it is worth knowing before you need it.** The obvious way to make `yoloai new` instant on
+macOS is to boot a sandbox once, snapshot the warm VM, and clone the snapshot per sandbox. Nothing
+in the repo proposes that today; this entry exists so that when someone does, the design dies at the
+reading rather than after a spike. The shape of the failure is the expensive part: a validator that
+answers "supported" is exactly what a feasibility check would consult, so the capability probe
+passes and only the real call fails — and it fails as a *generic internal error*, which reads like a
+bug in our own code rather than a permission we can never hold.
+
+**What it does not say.** It is silent on whether `tart`'s own suspend/resume, or Apple Container's
+image caching, are affected — those are different mechanisms and neither was under test. It also
+says nothing about Linux; Firecracker snapshotting is unrelated and unaffected.
+
+**Source:** [Crackling: a Linux microVM stack on Apple Silicon](https://encore.dev/blog/firecracker-apple-silicon)
+(Encore, read 2026-08-21). Note the title oversells: they did not port Firecracker to Apple Silicon.
+They built a hypervisor-agnostic core that dispatches to Firecracker on Linux and to
+Virtualization.framework natively on macOS, explicitly to avoid nested virtualization. The rest of
+what they solved we already have — APFS `clonefile` reflinks (`internal/workspace/copy_darwin.go`)
+— or do not need, since we ship no kernel of our own.
 
 ## macOS: restarting the host's `mDNSResponder` takes guest DNS down through the vmnet gateway
 
