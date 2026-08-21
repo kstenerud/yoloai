@@ -4,7 +4,7 @@
 
 # Next release
 
-**Next release version: `v0.12.1`**
+**Next release version: `v0.13.0`**
 
 ## How this works
 
@@ -60,22 +60,22 @@ finding or decision first, and lands here only if it should block the release.
 *Entries stay until the release drains this file. Do not remove one because it is finished — see
 "This file points" above.*
 
-*Nothing yet.*
+*v0.13.0 is the **network** release, and it is migration-bearing — which is why this branch exists
+at all (D131, rule 12). These entries were deferred out of v0.12.0 on 2026-08-14 and promoted here
+when that release was tagged; the deferral reasoning is in the v0.12.0 cut, not restated here.*
 
-## Deferred to v0.13.0 — the network release
-
-*Not "dropped" and not "done": scoped out of this cut, deliberately, on 2026-08-14. Both remaining
+*Two things about the shape of this release, both consequences rather than choices. Both remaining
 plans build on [D143](decisions/working-notes.md#d143--configuration-is-resolved-from-provenance-tagged-layers-not-merged-eagerly-at-each-boundary)'s
-provenance — D141 must tell operator-authored from repo-derived, and the network mode validation must
-tell a typed port from an inherited one — so building either first means building provenance twice,
-in two places, and then owning both. **The migration rides with `network-mode-reshape.md`, so v0.12.0
-carries none** and rule 12's constraint applies to v0.13.0's branch rather than this one.*
+provenance — D141 must tell operator-authored from repo-derived, and the network mode validation
+must tell a typed port from an inherited one — so building either first means building provenance
+twice and then owning both. And the version field opens at `v0.13.0` rather than escalating into it,
+because `network-mode-reshape.md` is known to carry a migration: D131 cuts the branch at the
+escalated version the moment that is known, instead of waiting for the breakage to land.*
 
-*The Apple Container DNS work joined this section on 2026-08-20, on the same rule and not on its
-merits: it moves `LibrarySchemaVersion` to 7 and carries a v6→v7 migrator, and v0.12.0 was cut as a
-release that carries no migration. It is an outside contribution and it targets `release-v0.12.0`,
-so **it needs retargeting at `release-v0.13.0` rather than at `main`** — D131 is the whole reason
-that branch exists.*
+*[PR #50](https://github.com/kstenerud/yoloai/pull/50) is an outside contribution and **merges
+here, not to `main`** — it moves `LibrarySchemaVersion` to 7 with a v6→v7 migrator, which is exactly
+what rule 12 keeps off `main` until it ships. Rebasing onto `main` to clear conflicts is fine;
+merging there is not.*
 
 - [config-provenance-layers.md](design/plans/config-provenance-layers.md) — Config provenance layers — one resolver, one policy table
 - [enforcement-build.md](design/plans/enforcement-build.md) — Host-side enforcement — build brief
