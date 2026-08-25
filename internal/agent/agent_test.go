@@ -266,19 +266,25 @@ func TestGetAgent_Shell(t *testing.T) {
 	for _, sf := range def.SeedFiles {
 		targetPaths = append(targetPaths, sf.TargetPath)
 	}
+	// Claude Code
 	assert.Contains(t, targetPaths, ".claude/.credentials.json")
 	assert.Contains(t, targetPaths, ".claude/settings.json")
 	assert.Contains(t, targetPaths, ".claude.json") // was already HomeDir, unchanged
+	// Codex
 	assert.Contains(t, targetPaths, ".codex/auth.json")
 	assert.Contains(t, targetPaths, ".codex/config.toml")
+	// Gemini
 	assert.Contains(t, targetPaths, ".gemini/oauth_creds.json")
 	assert.Contains(t, targetPaths, ".gemini/settings.json")
+	// Aider
 	assert.Contains(t, targetPaths, ".aider.conf.yml") // was already HomeDir, unchanged
-	assert.Contains(t, targetPaths, "opencode/auth.json")
+	// OpenCode targets in HomeDir
 	assert.Contains(t, targetPaths, ".opencode.json")                    // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, ".config/github-copilot/hosts.json") // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, ".config/github-copilot/apps.json")  // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, ".config/opencode/.opencode.json")   // was already HomeDir, unchanged
+	// OpenCode targets in StateDir
+	assert.Contains(t, targetPaths, "opencode/auth.json")
 
 	// Each seed file should have OwnerAPIKeys set
 	for _, sf := range def.SeedFiles {

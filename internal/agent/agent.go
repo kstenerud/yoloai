@@ -519,7 +519,7 @@ var agents = map[string]*Definition{
 		AuthHintEnvVars: []string{"GITHUB_TOKEN", "LOCAL_ENDPOINT", "AZURE_OPENAI_ENDPOINT", "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "VERTEXAI_PROJECT"},
 		AuthOptional:    true,
 		SeedFiles: []SeedFile{
-			{HostPath: "~/.local/share/opencode/auth.json", TargetPath: "auth.json", AuthOnly: true},
+			// HomeDir targets
 			{HostPath: "~/.opencode.json", TargetPath: ".opencode.json", AuthOnly: true, HomeDir: true},
 			{HostPath: "~/.config/github-copilot/hosts.json", TargetPath: ".config/github-copilot/hosts.json", AuthOnly: true, HomeDir: true},
 			{HostPath: "~/.config/github-copilot/apps.json", TargetPath: ".config/github-copilot/apps.json", AuthOnly: true, HomeDir: true},
@@ -528,6 +528,9 @@ var agents = map[string]*Definition{
 			// OpenCode auto-loads): session.idle → idle, message.updated → active.
 			// yoloai-provided content (no host file). Makes OpenCode hook-authoritative.
 			{TargetPath: ".config/opencode/plugins/yoloai-status.js", Content: []byte(opencodeStatusPlugin), HomeDir: true},
+
+			// StateDir targets
+			{HostPath: "~/.local/share/opencode/auth.json", TargetPath: "auth.json", AuthOnly: true},
 		},
 		StateDir:       "/home/yoloai/.local/share/opencode/",
 		SubmitSequence: "Enter",
