@@ -5,7 +5,6 @@ package agent
 
 import (
 	_ "embed"
-	"path/filepath"
 	"sort"
 	"strings"
 	"sync"
@@ -741,7 +740,7 @@ func buildShellAgent() *Definition {
 			remapped.OwnerAPIKeys = ag.APIKeyEnvVars
 			if !sf.HomeDir {
 				remapped.HomeDir = true
-				remapped.TargetPath = filepath.Base(ag.StateDir) + "/" + sf.TargetPath
+				remapped.TargetPath = ag.StateRelPath() + "/" + sf.TargetPath
 			}
 			seedFiles = append(seedFiles, remapped)
 		}

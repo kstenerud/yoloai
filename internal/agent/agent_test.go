@@ -284,7 +284,7 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, targetPaths, ".config/github-copilot/apps.json")  // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, ".config/opencode/.opencode.json")   // was already HomeDir, unchanged
 	// OpenCode targets in StateDir
-	assert.Contains(t, targetPaths, "opencode/auth.json")
+	assert.Contains(t, targetPaths, ".local/share/opencode/auth.json")
 
 	// Each seed file should have OwnerAPIKeys set
 	for _, sf := range def.SeedFiles {

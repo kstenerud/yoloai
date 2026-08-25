@@ -54,7 +54,7 @@ func TestBuildContainerConfig_ValidJSON(t *testing.T) {
 	assert.Equal(t, layout.HostUID, cfg.HostUID)
 	assert.Equal(t, layout.HostGID, cfg.HostGID)
 	assert.Equal(t, "default+host", cfg.TmuxConf)
-	assert.Equal(t, ".claude", cfg.StateDirName)
+	assert.Equal(t, ".claude", cfg.StateRelPath)
 	assert.False(t, cfg.NetworkIsolated)
 	assert.Empty(t, cfg.AllowedDomains)
 }
@@ -144,14 +144,17 @@ func TestAgentHasUsableAuth_AuthFile(t *testing.T) {
 	assert.True(t, agentHasUsableAuth(agent.GetAgent("gemini"), nil, layout), "gemini with credentials file → viable")
 }
 
-func TestBuildContainerConfig_StateDirName(t *testing.T) {
+func TestBuildContainerConfig_StateRelPath(t *testing.T) {
 	tests := []struct {
 		agent    string
 		expected string
 	}{
+		{"aider", ""}, // no StateDir
 		{"claude", ".claude"},
 		{"gemini", ".gemini"},
-		{"test", ""},
+		{"opencode", ".local/share/opencode"},
+		{"codex", ".codex"},
+		{"test", ""}, // no StateDir
 	}
 	for _, tt := range tests {
 		t.Run(tt.agent, func(t *testing.T) {
@@ -160,7 +163,7 @@ func TestBuildContainerConfig_StateDirName(t *testing.T) {
 			require.NoError(t, err)
 			var cfg runtimeconfig.ContainerConfig
 			require.NoError(t, json.Unmarshal(data, &cfg))
-			assert.Equal(t, tt.expected, cfg.StateDirName)
+			assert.Equal(t, tt.expected, cfg.StateRelPath)
 		})
 	}
 }

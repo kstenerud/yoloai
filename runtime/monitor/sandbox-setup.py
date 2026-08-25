@@ -689,10 +689,11 @@ class SeatbeltBackend(Backend):
                 os.symlink(original_git_dir, new_git_dir)
 
         # Symlink agent state dir
-        state_dir_name = self.cfg.get("state_dir_name", "")
-        if state_dir_name:
+        state_rel_path = self.cfg.get("state_rel_path", "")
+        if state_rel_path:
             agent_dir = os.path.join(self.yoloai_dir, "agent-runtime")
-            state_link = os.path.join(new_home, state_dir_name)
+            state_link = os.path.join(new_home, state_rel_path)
+            os.makedirs(os.path.dirname(state_link), exist_ok=True)
             if not os.path.islink(state_link):
                 os.symlink(agent_dir, state_link)
 
