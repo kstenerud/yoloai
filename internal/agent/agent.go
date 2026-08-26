@@ -519,10 +519,12 @@ var agents = map[string]*Definition{
 		AuthOptional:    true,
 		SeedFiles: []SeedFile{
 			// HomeDir targets
-			{HostPath: "~/.opencode.json", TargetPath: ".opencode.json", AuthOnly: true, HomeDir: true},
+			{HostPath: "~/.opencode.json", TargetPath: ".opencode.json", HomeDir: true},
+			{HostPath: "~/.opencode.jsonc", TargetPath: ".opencode.jsonc", HomeDir: true},
+			{HostPath: "~/.config/opencode/opencode.json", TargetPath: ".config/opencode/opencode.json", HomeDir: true},
+			{HostPath: "~/.config/opencode/opencode.jsonc", TargetPath: ".config/opencode/opencode.jsonc", HomeDir: true},
 			{HostPath: "~/.config/github-copilot/hosts.json", TargetPath: ".config/github-copilot/hosts.json", AuthOnly: true, HomeDir: true},
 			{HostPath: "~/.config/github-copilot/apps.json", TargetPath: ".config/github-copilot/apps.json", AuthOnly: true, HomeDir: true},
-			{HostPath: "~/.config/opencode/.opencode.json", TargetPath: ".config/opencode/.opencode.json", HomeDir: true},
 			// Native turn-completion detection via an OpenCode plugin (a JS file
 			// OpenCode auto-loads): session.idle → idle, message.updated → active.
 			// yoloai-provided content (no host file). Makes OpenCode hook-authoritative.

@@ -129,31 +129,44 @@ func TestGetAgent_OpenCode(t *testing.T) {
 	assert.Equal(t, []string{"ANTHROPIC_API_KEY", "OPENAI_API_KEY", "GEMINI_API_KEY", "GROQ_API_KEY", "OPENROUTER_API_KEY", "XAI_API_KEY"}, def.APIKeyEnvVars)
 	assert.Equal(t, []string{"GITHUB_TOKEN", "LOCAL_ENDPOINT", "AZURE_OPENAI_ENDPOINT", "AWS_ACCESS_KEY_ID", "AWS_PROFILE", "AWS_DEFAULT_PROFILE", "AWS_REGION", "AWS_DEFAULT_REGION", "VERTEXAI_PROJECT"}, def.AuthHintEnvVars)
 	assert.True(t, def.AuthOptional)
-	require.Len(t, def.SeedFiles, 6)
-	assert.Equal(t, "~/.local/share/opencode/auth.json", def.SeedFiles[0].HostPath)
-	assert.Equal(t, "auth.json", def.SeedFiles[0].TargetPath)
-	assert.True(t, def.SeedFiles[0].AuthOnly)
-	assert.Equal(t, "~/.opencode.json", def.SeedFiles[1].HostPath)
-	assert.Equal(t, ".opencode.json", def.SeedFiles[1].TargetPath)
-	assert.True(t, def.SeedFiles[1].AuthOnly)
-	assert.True(t, def.SeedFiles[1].HomeDir)
-	assert.Equal(t, "~/.config/github-copilot/hosts.json", def.SeedFiles[2].HostPath)
-	assert.Equal(t, ".config/github-copilot/hosts.json", def.SeedFiles[2].TargetPath)
-	assert.True(t, def.SeedFiles[2].AuthOnly)
-	assert.True(t, def.SeedFiles[2].HomeDir)
-	assert.Equal(t, "~/.config/github-copilot/apps.json", def.SeedFiles[3].HostPath)
-	assert.Equal(t, ".config/github-copilot/apps.json", def.SeedFiles[3].TargetPath)
-	assert.True(t, def.SeedFiles[3].AuthOnly)
-	assert.True(t, def.SeedFiles[3].HomeDir)
-	assert.Equal(t, "~/.config/opencode/.opencode.json", def.SeedFiles[4].HostPath)
-	assert.Equal(t, ".config/opencode/.opencode.json", def.SeedFiles[4].TargetPath)
-	assert.True(t, def.SeedFiles[4].HomeDir)
-	assert.False(t, def.SeedFiles[4].AuthOnly)
-	// The yoloai-provided status plugin (embedded content, not a host file).
-	assert.Equal(t, ".config/opencode/plugins/yoloai-status.js", def.SeedFiles[5].TargetPath)
-	assert.NotEmpty(t, def.SeedFiles[5].Content)
-	assert.Empty(t, def.SeedFiles[5].HostPath)
-	assert.True(t, def.SeedFiles[5].HomeDir)
+
+	seedFileExpectations := []struct {
+		target     string
+		hostPath   string
+		authOnly   bool
+		homeDir    bool
+		hasContent bool
+	}{
+		{target: ".opencode.json", hostPath: "~/.opencode.json", homeDir: true},
+		{target: ".opencode.jsonc", hostPath: "~/.opencode.jsonc", homeDir: true},
+		{target: ".config/opencode/opencode.json", hostPath: "~/.config/opencode/opencode.json", homeDir: true},
+		{target: ".config/opencode/opencode.jsonc", hostPath: "~/.config/opencode/opencode.jsonc", homeDir: true},
+		{target: ".config/github-copilot/hosts.json", hostPath: "~/.config/github-copilot/hosts.json", authOnly: true, homeDir: true},
+		{target: ".config/github-copilot/apps.json", hostPath: "~/.config/github-copilot/apps.json", authOnly: true, homeDir: true},
+		// The yoloai-provided status plugin (embedded content, not a host file).
+		{target: ".config/opencode/plugins/yoloai-status.js", homeDir: true, hasContent: true},
+		{target: "auth.json", hostPath: "~/.local/share/opencode/auth.json", authOnly: true},
+	}
+	seedFileExpectationsByTarget := map[string]SeedFile{}
+
+	for _, seedFile := range def.SeedFiles {
+		seedFileExpectationsByTarget[seedFile.TargetPath] = seedFile
+	}
+	require.Len(t, def.SeedFiles, len(seedFileExpectations))
+	for _, seedFileExpectation := range seedFileExpectations {
+		t.Run(seedFileExpectation.target, func(t *testing.T) {
+			seedFile, ok := seedFileExpectationsByTarget[seedFileExpectation.target]
+			require.True(t, ok, "No seed file with TargetPath %q", seedFileExpectation.target)
+			assert.Equal(t, seedFileExpectation.hostPath, seedFile.HostPath)
+			assert.Equal(t, seedFileExpectation.authOnly, seedFile.AuthOnly)
+			assert.Equal(t, seedFileExpectation.homeDir, seedFile.HomeDir)
+			if seedFileExpectation.hasContent {
+				assert.NotEmpty(t, seedFile.Content)
+			} else {
+				assert.Empty(t, seedFile.Content)
+			}
+		})
+	}
 	assert.True(t, def.Idle.Hook, "opencode should be hook-authoritative")
 	assert.Equal(t, "/home/yoloai/.local/share/opencode/", def.StateDir)
 	assert.Equal(t, "Enter", def.SubmitSequence)
@@ -280,9 +293,9 @@ func TestGetAgent_Shell(t *testing.T) {
 	assert.Contains(t, targetPaths, ".aider.conf.yml") // was already HomeDir, unchanged
 	// OpenCode targets in HomeDir
 	assert.Contains(t, targetPaths, ".opencode.json")                    // was already HomeDir, unchanged
+	assert.Contains(t, targetPaths, ".config/opencode/opencode.json")    // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, ".config/github-copilot/hosts.json") // was already HomeDir, unchanged
 	assert.Contains(t, targetPaths, ".config/github-copilot/apps.json")  // was already HomeDir, unchanged
-	assert.Contains(t, targetPaths, ".config/opencode/.opencode.json")   // was already HomeDir, unchanged
 	// OpenCode targets in StateDir
 	assert.Contains(t, targetPaths, ".local/share/opencode/auth.json")
 
