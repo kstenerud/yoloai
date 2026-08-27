@@ -654,7 +654,8 @@ class SeatbeltBackend(Backend):
     """Backend for macOS Seatbelt sandboxing (lightweight, no VM)."""
 
     def setup(self) -> None:
-        """Seatbelt-specific setup: HOME redirection, CLI tool symlinks, git config."""
+        """Seatbelt-specific setup: HOME redirection, home-seed symlinks, git config."""
+
         log_info("sandbox.backend_setup", "Seatbelt backend setup", backend="seatbelt")
 
         original_home = os.environ.get("HOME", "")
@@ -674,7 +675,6 @@ class SeatbeltBackend(Backend):
                 if os.access(src, os.X_OK) and not os.path.lexists(dst):
                     os.symlink(src, dst)
 
-        # Symlink git config
         original_gitconfig = os.path.join(original_home, ".gitconfig")
         new_gitconfig = os.path.join(new_home, ".gitconfig")
         if os.path.isfile(original_gitconfig) and not os.path.lexists(new_gitconfig):
@@ -683,10 +683,13 @@ class SeatbeltBackend(Backend):
         original_git_dir = os.path.join(original_home, ".config", "git")
         new_config_dir = os.path.join(new_home, ".config")
         new_git_dir = os.path.join(new_config_dir, "git")
-        if os.path.isdir(original_git_dir):
+        if (
+            os.path.isdir(original_git_dir)
+            and not os.path.lexists(new_git_dir)
+            and not os.path.islink(new_config_dir)  # legacy link to home-seed/.config?
+        ):
             os.makedirs(new_config_dir, exist_ok=True)
-            if not os.path.lexists(new_git_dir):
-                os.symlink(original_git_dir, new_git_dir)
+            os.symlink(original_git_dir, new_git_dir)
 
         # Symlink agent state dir
         state_rel_path = self.cfg.get("state_rel_path", "")
@@ -701,12 +704,22 @@ class SeatbeltBackend(Backend):
         home_seed = os.path.join(self.yoloai_dir, "home-seed")
         if os.path.isdir(home_seed):
             for name in os.listdir(home_seed):
-                if name in (".", ".."):
-                    continue
                 src = os.path.join(home_seed, name)
                 dst = os.path.join(new_home, name)
-                if not os.path.lexists(dst):
-                    os.symlink(src, dst)
+                if name == ".config":  # XDG configs directory
+                    if not os.path.isdir(src):
+                        continue
+                    if os.path.islink(dst):
+                        continue  # legacy link to home-seed/.config
+                    os.makedirs(dst, exist_ok=True)
+                    for xdg_config_name in os.listdir(src):
+                        xdg_config_src = os.path.join(src, xdg_config_name)
+                        xdg_config_dst = os.path.join(dst, xdg_config_name)
+                        if not os.path.lexists(xdg_config_dst):
+                            os.symlink(xdg_config_src, xdg_config_dst)
+                else:  # ordinary dotfile/dotdirectory config
+                    if not os.path.lexists(dst):
+                        os.symlink(src, dst)
 
         # Create Swift wrapper to auto-add --disable-sandbox when running in Seatbelt
         # (macOS sandboxes don't nest, so Swift PM's sandbox-exec calls fail)
