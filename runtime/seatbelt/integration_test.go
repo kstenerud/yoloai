@@ -119,6 +119,32 @@ func TestSeatbelt_ReadOnlyTierIsUnwritableFromInside(t *testing.T) {
 	assert.NoError(t, err, "the deny must not extend past the read-only tier")
 }
 
+// OpenCode fails with an "Unexpected server error. Check server logs for details." error
+// if it is unable to write plugin-related files, beginning with a simple `.gitignore`,
+// next to its seeded config".
+func TestSeatbelt_HomeSeedIsWritableFromInside(t *testing.T) {
+	rt, ctx := seatbeltSetup(t)
+
+	name := "yoloai-test-home-seed-rw"
+	_ = rt.Remove(ctx, name) // evict any stale leftover from a failed run
+	require.NoError(t, rt.Create(ctx, runtime.InstanceConfig{Name: name}))
+	t.Cleanup(func() { _ = rt.Remove(context.Background(), name) })
+	require.NoError(t, rt.Start(ctx, name))
+
+	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), rt.sandboxName(name))
+	seededConfig := filepath.Join(config.HomeSeedPath(sandboxPath), ".config", "opencode", "opencode.jsonc")
+	require.NoError(t, os.MkdirAll(filepath.Dir(seededConfig), 0o750))
+	require.NoError(t, os.WriteFile(seededConfig, []byte(`{"$schema": "seeded"}`), 0o600))
+
+	gitIgnore := filepath.Join(config.GuestViewDir(sandboxPath), config.HomeSeedDirName, ".config", "opencode", ".gitignore")
+	_, err := rt.Exec(ctx, name, []string{"sh", "-c", "echo 'node_modules' > " + gitIgnore}, "")
+	assert.NoError(t, err, "the guest must be able to create files next to its seeded config")
+
+	onDisk, readErr := os.ReadFile(gitIgnore) //nolint:gosec // G304: path built from the test's own sandbox dir
+	require.NoError(t, readErr)
+	assert.Equal(t, "node_modules\n", string(onDisk), "the .gitignore write must reach home-seed on disk")
+}
+
 // TestSeatbelt_ReadOnlyMountHoldsUnderABroaderGrant drives the user-facing
 // `--dir <path>:ro` path (buildSingleAuxDirMount → MountSpec{ReadOnly:true} →
 // GenerateProfile) with a host path that sits inside one of the profile's own
