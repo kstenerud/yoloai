@@ -33,6 +33,23 @@ usable index of what actually broke (DF184).
 
 ## Unreleased
 
+### Seatbelt sandboxes are given read access to `~/.local/bin`, not all of `~/.local`
+
+**Previous behavior:** Seatbelt profiles were being created with read access to all of `~/.local`,
+even though comments indicated that only `~/.local/bin` was necessary.
+
+**New behavior:** in `new`ly-created or re`start`ed Seatbelt sandboxes,
+the profile will only grant read access to `~/.local/bin`.
+Use `--dir` or `directories:` with mode `ro` if you need to grant access to additional configs or state on the host.
+
+**Why it changed:** `~/.local/share` is the default `$XDG_DATA_HOME`
+and may contain arbitrary host application state,
+including secrets in the case of apps that do not integrate with the macOS Keychain.
+This state should not be readable in sandboxes, at least not by default.
+
+**Unaffected:** `--agent=opencode` still seeds `~/.local/share/opencode/auth.json`
+when auth delivery is enabled.
+
 ## v0.12.0
 
 ### Every public `io.Writer` is replaced by feedback sinks
