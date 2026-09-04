@@ -259,12 +259,12 @@ func TestGenerateProfile_HomeDirMinimalAccess(t *testing.T) {
 	homeDir := "/Users/testuser"
 	profile := GenerateProfile(cfg, "/tmp/sandbox", homeDir)
 
-	// Should allow read access to ~/.local (agent binaries)
-	localPath := filepath.Join(homeDir, ".local")
-	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`, localPath)) {
-		t.Error("~/.local should be readable for agent binaries")
+	// Should allow read access to ~/.local/bin (agent binaries)
+	for _, variant := range resolvePathVariants(filepath.Join(homeDir, ".local", "bin")) {
+		if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`, variant)) {
+			t.Errorf("variant %s of ~/.local/bin should be readable for agent binaries", variant)
+		}
 	}
-
 	// Should allow read access to git config files
 	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (literal %q))`, filepath.Join(homeDir, ".gitconfig"))) {
 		t.Error("~/.gitconfig should be readable")
@@ -273,12 +273,16 @@ func TestGenerateProfile_HomeDirMinimalAccess(t *testing.T) {
 		t.Error("~/.config/git/ should be readable")
 	}
 
-	// Should NOT grant blanket read access to the entire home directory.
-	// The .local rule contains homeDir as a prefix, so check for the exact
-	// standalone rule that would grant full home access.
-	blanketRule := fmt.Sprintf("(allow file-read* (subpath %q))\n", homeDir)
-	if strings.Contains(profile, blanketRule) {
-		t.Error("home dir should NOT have blanket read access")
+	// Should NOT grant blanket read access to broader directories.
+	// The ~/.local/bin rule contains ~/.local and ~ as prefixes,
+	// so check for exact standalone rules that would grant access to either of those.
+	localBlanketRule := fmt.Sprintf("(allow file-read* (subpath %q))\n", filepath.Join(homeDir, ".local"))
+	if strings.Contains(profile, localBlanketRule) {
+		t.Error("~/.local should NOT be readable")
+	}
+	homeBlanketRule := fmt.Sprintf("(allow file-read* (subpath %q))\n", homeDir)
+	if strings.Contains(profile, homeBlanketRule) {
+		t.Error("~ should NOT be readable")
 	}
 }
 

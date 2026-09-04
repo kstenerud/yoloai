@@ -334,7 +334,7 @@ func writeProfileMountRules(b *strings.Builder, mounts []runtime.MountSpec) {
 // writeProfileHomeDir writes rules for the user's home directory (minimal access).
 func writeProfileHomeDir(b *strings.Builder, homeDir string) {
 	b.WriteString("; Home directory (agent binaries and git config only)\n")
-	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".local")) {
+	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".local", "bin")) {
 		textbuf.Printf(b, "(allow file-read* (subpath %q))\n", p)
 	}
 	for _, p := range resolvePathVariants(filepath.Join(homeDir, ".gitconfig")) {
