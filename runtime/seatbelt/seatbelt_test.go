@@ -898,9 +898,9 @@ func TestToolchainReadPaths_DetectsPython(t *testing.T) {
 	}
 	prefix := filepath.Dir(filepath.Dir(resolved))
 
-	paths := toolchainReadPaths()
-	found := slices.Contains(paths, prefix)
-	// The prefix might be skipped if it's under a system path or is a parent
+	paths := toolchainReadPaths("/Users/testuser")
+	foundPrefix := slices.Contains(paths, prefix)
+	// The installation might be skipped if it's under a system path or is a parent
 	// of system paths (e.g. /usr when /usr/bin is a system path) — that's
 	// correct behavior. Only fail if it's unrelated to any system prefix.
 	sysPaths := systemReadPaths()
@@ -911,8 +911,8 @@ func TestToolchainReadPaths_DetectsPython(t *testing.T) {
 			break
 		}
 	}
-	if !covered && !found {
-		t.Errorf("expected toolchainReadPaths to include python3 prefix %q", prefix)
+	if !covered && !foundPrefix {
+		t.Errorf("expected toolchainReadPaths to grant python3's prefix wholesale, %q", prefix)
 	}
 }
 
@@ -924,7 +924,7 @@ func TestToolchainReadPaths_SkipsRootPrefix(t *testing.T) {
 		return "/bin/sh", nil
 	}
 
-	paths := toolchainReadPaths()
+	paths := toolchainReadPaths("/Users/testuser")
 	if len(paths) != 0 {
 		t.Errorf("expected empty result for root prefix, got %v", paths)
 	}
@@ -938,7 +938,7 @@ func TestToolchainReadPaths_SkipsSystemPaths(t *testing.T) {
 		return "/usr/bin/python3", nil
 	}
 
-	paths := toolchainReadPaths()
+	paths := toolchainReadPaths("/Users/testuser")
 	if len(paths) != 0 {
 		t.Errorf("expected empty result for system path prefix, got %v", paths)
 	}
@@ -961,13 +961,18 @@ func TestToolchainReadPaths_Deduplicates(t *testing.T) {
 		t.Fatal(err)
 	}
 
+	// Fake three toolchains that share the same installation prefix.
 	lookPath = func(name string) (string, error) {
-		return toolPath, nil
+		if name == "python3" || name == "node" || name == "ruby" {
+			return toolPath, nil
+		}
+		return "", fmt.Errorf("only python3, node, and ruby are fake-installed")
 	}
 
-	paths := toolchainReadPaths()
-	if len(paths) != 1 {
-		t.Errorf("expected 1 deduplicated entry, got %d: %v", len(paths), paths)
+	paths := toolchainReadPaths("/Users/testuser")
+	if len(paths) != 1 || paths[0] != filepath.Join(tmpDir, "fake-prefix") {
+		t.Errorf("expected one deduplicated wholesale grant for %q, got %v",
+			filepath.Join(tmpDir, "fake-prefix"), paths)
 	}
 }
 
@@ -979,11 +984,112 @@ func TestGenerateProfile_ToolchainPaths(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	binDir := filepath.Join(tmpDir, "custom-toolchain", "bin")
+	prefix := filepath.Join(tmpDir, "custom-toolchain")
+	binDir := filepath.Join(prefix, "bin")
 	if err := os.MkdirAll(binDir, 0750); err != nil {
 		t.Fatal(err)
 	}
-	toolPath := filepath.Join(binDir, "python3")
+	toolPath := filepath.Join(binDir, "multitool")
+	if err := os.WriteFile(toolPath, []byte("#!/bin/sh\n"), 0700); err != nil { //nolint:gosec // G306: fake executable needs +x
+		t.Fatal(err)
+	}
+
+	// Fake all toolchains with a single shared installation prefix.
+	lookPath = func(name string) (string, error) {
+		return toolPath, nil
+	}
+
+	cfg := runtime.InstanceConfig{Name: "test"}
+	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
+
+	if !strings.Contains(profile, "; Detected toolchain installations") {
+		t.Error("profile should contain toolchain section comment")
+	}
+	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`, prefix)) {
+		t.Errorf("toolchain prefix should be granted wholesale in profile:\n%s", profile)
+	}
+}
+
+// A toolchain binary installed under the "~/.local" prefix, in particular,
+// must not result in the (wholesale) grant of "~/.local" as a directory readable by the guest,
+// since "~/.local/share" is a host's default $XDG_DATA_HOME
+// and may in fact contain various types of secrets:
+// - OpenCode provider credentials
+// - data from arbitrary non-coding-harness apps, even on macOS
+func TestGenerateProfile_ExcludesXDGDataHome(t *testing.T) {
+	original := lookPath
+	defer func() { lookPath = original }()
+
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := filepath.Join(tmpDir, "home", ".local")
+	binDir := filepath.Join(prefix, "bin")
+	libDir := filepath.Join(prefix, "lib")
+	shareDir := filepath.Join(prefix, "share")
+	for _, dir := range []string{binDir, libDir, shareDir} {
+		if err := os.MkdirAll(dir, 0750); err != nil {
+			t.Fatal(err)
+		}
+	}
+	pythonPath := filepath.Join(binDir, "python3")
+	if err := os.WriteFile(pythonPath, []byte("#!/bin/sh\n"), 0700); err != nil { //nolint:gosec // G306: fake executable needs +x
+		t.Fatal(err)
+	}
+
+	lookPath = func(name string) (string, error) {
+		if name == "python3" {
+			return pythonPath, nil
+		}
+		return "", fmt.Errorf("only python3 is fake-installed")
+	}
+
+	cfg := runtime.InstanceConfig{Name: "test"}
+	profile := GenerateProfile(cfg, "/tmp/sandbox", filepath.Join(tmpDir, "home"))
+
+	if strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, prefix)) {
+		t.Errorf("~/.local/ should not be granted _wholesale_ in profile:\n%s", profile)
+	}
+	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`, binDir)) {
+		t.Errorf("~/.local/bin/ should be granted in profile:\n%s", profile)
+	}
+	if !strings.Contains(profile, fmt.Sprintf(`(allow file-read* (subpath %q))`, libDir)) {
+		t.Errorf("~/.local/lib/ should be granted in profile:\n%s", profile)
+	}
+	if strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, shareDir)) {
+		t.Errorf("~/.local/share/ should not be granted in profile:\n%s", profile)
+	}
+}
+
+func TestToolchainReadPaths_DeniesAccessToRootDir(t *testing.T) {
+	original := lookPath
+	defer func() { lookPath = original }()
+
+	lookPath = func(name string) (string, error) {
+		return "/bin/sh", nil
+	}
+
+	paths := toolchainReadPaths("/Users/testuser")
+	if len(paths) != 0 {
+		t.Errorf("a root-level prefix must not be granted, got %v", paths)
+	}
+}
+
+func TestToolchainReadPaths_RestrictsAccessToHomeDir(t *testing.T) {
+	original := lookPath
+	defer func() { lookPath = original }()
+
+	home, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	libDir := filepath.Join(home, "lib")
+	binDir := filepath.Join(home, "bin")
+	if err := os.MkdirAll(binDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	toolPath := filepath.Join(binDir, "tool")
 	if err := os.WriteFile(toolPath, []byte("#!/bin/sh\n"), 0700); err != nil { //nolint:gosec // G306: fake executable needs +x
 		t.Fatal(err)
 	}
@@ -992,15 +1098,106 @@ func TestGenerateProfile_ToolchainPaths(t *testing.T) {
 		return toolPath, nil
 	}
 
-	cfg := runtime.InstanceConfig{Name: "test"}
-	profile := GenerateProfile(cfg, "/tmp/sandbox", "/Users/testuser")
-
-	expectedPrefix := filepath.Join(tmpDir, "custom-toolchain")
-	if !strings.Contains(profile, "; Detected toolchain installation prefixes") {
-		t.Error("profile should contain toolchain section comment")
+	actual := toolchainReadPaths(home)
+	expected := []string{binDir, libDir}
+	if !slices.Equal(actual, expected) {
+		t.Errorf("only $HOME's bin and lib subtrees should be granted, got %v", actual)
 	}
-	if !strings.Contains(profile, fmt.Sprintf(`(subpath %q)`, expectedPrefix)) {
-		t.Errorf("profile should contain toolchain prefix %q, profile:\n%s", expectedPrefix, profile)
+}
+
+func TestToolchainReadPaths_AllowsAccessToDeepToolchain(t *testing.T) {
+	original := lookPath
+	defer func() { lookPath = original }()
+
+	tmpDir, err := filepath.EvalSymlinks(t.TempDir())
+	if err != nil {
+		t.Fatal(err)
+	}
+	prefix := filepath.Join(tmpDir, "opt", "toolchain")
+	binDir := filepath.Join(prefix, "bin")
+	if err := os.MkdirAll(binDir, 0750); err != nil {
+		t.Fatal(err)
+	}
+	toolPath := filepath.Join(binDir, "tool")
+	if err := os.WriteFile(toolPath, []byte("#!/bin/sh\n"), 0700); err != nil { //nolint:gosec // G306: fake executable needs +x
+		t.Fatal(err)
+	}
+
+	lookPath = func(name string) (string, error) {
+		return toolPath, nil
+	}
+
+	actual := toolchainReadPaths(tmpDir)
+	expected := []string{prefix}
+	if !slices.Equal(actual, expected) {
+		t.Errorf("unobjectionable deep prefix %q not included in grants: %v", prefix, actual)
+	}
+}
+
+func TestClassifyToolchainPrefix(t *testing.T) {
+	for _, tc := range []struct {
+		homeDir            string
+		prefix             string
+		expectedGrantClass ToolchainGrantClass
+	}{
+		// System directories that aren't generally granted by systemReadPaths.
+		{"/Users/testuser", "/", toolchainGrantDenied},    // "/bin", and apparently even "/sbin", are granted instead
+		{"/Users/testuser", "/usr", toolchainGrantDenied}, // "/usr/bin", "/usr/lib", etc. are granted instead
+		{"/Users/testuser", "/opt", toolchainGrantDenied},
+
+		// Prefixes that contain $HOME
+		{"/Users/testuser", "/", toolchainGrantDenied},
+		{"/Users/testuser", "/Users", toolchainGrantDenied},
+		{"/home/testuser", "/home", toolchainGrantDenied},
+		// Sanity check: we care about filesystem path matching, not string matching
+		{"/Users/testuser", "/User/test", toolchainGrantAllowed},
+
+		// $HOME itself
+		{"/Users/testuser", "/Users/testuser", toolchainGrantRestricted},
+		{"/Users/testuser/home", "/Users/testuser/home", toolchainGrantRestricted},
+		{"/home/testuser", "/home/testuser", toolchainGrantRestricted},
+		// Sanity check: the prefixes above are restricted _because they are the user's $HOME_
+		{"/foo/bar", "/Users/testuser", toolchainGrantAllowed},
+		{"/foo/bar", "/Users/testuser/home", toolchainGrantAllowed},
+		{"/foo/bar", "/home/testuser", toolchainGrantAllowed},
+		// Sanity check: classifyToolchainPrefix cleans the paths that it is given, just in case
+		{"/Users/testuser/", "/Users/testuser", toolchainGrantRestricted},
+		{"/Users/testuser", "/Users/testuser/", toolchainGrantRestricted},
+		{"/Users//testuser", "/Users/testuser", toolchainGrantRestricted},
+		{"/Users/testuser", "/Users//testuser", toolchainGrantRestricted},
+
+		// "$HOME/.local" and "$HOME/.cargo" contain secrets as well as the relevant "…/bin" and "…/lib" subdirectories
+		{"/Users/testuser", "/Users/testuser/.local", toolchainGrantRestricted}, // avoid "/Users/testuser/.local/share"
+		{"/Users/testuser", "/Users/testuser/.cargo", toolchainGrantRestricted}, // avoid "/Users/testuser/.cargo/credentials.toml"
+		// Sanity check: the prefixes above are restricted _because they are the user's $HOME_
+		{"/foo/bar", "/Users/testuser/.local", toolchainGrantAllowed},
+
+		// Special dotdirs that shouldn't need granting at all
+		{"/Users/testuser", "/Users/testuser/.local/share", toolchainGrantDenied},
+		{"/Users/testuser", "/Users/testuser/.config", toolchainGrantDenied},
+		{"/Users/testuser", "/Users/testuser/.cache", toolchainGrantDenied},
+		// Sanity check: the prefixes above are denied _because they are the user's $HOME_
+		{"/foo/bar", "/Users/testuser/.local/share", toolchainGrantAllowed},
+
+		// Specific toolchain-installation prefixes
+		{"/Users/testuser", "/usr/bin", toolchainGrantAllowed},
+		{"/Users/testuser", "/opt/local", toolchainGrantAllowed},
+		{"/Users/testuser", "/opt/homebrew", toolchainGrantAllowed},        // technically this _contains_ various prefixes, rather than being a prefix itself
+		{"/Users/testuser", "/opt/homebrew/Cellar", toolchainGrantAllowed}, // technically this _contains_ various prefixes, rather than being a prefix itself
+		{"/Users/testuser", "/Users/testuser/.asdf", toolchainGrantAllowed},
+		{"/Users/testuser", "/Users/testuser/.local/share/mise", toolchainGrantAllowed},
+		{"/Users/testuser", "/opt/hypothetical-toolchain", toolchainGrantAllowed},
+		{"/Users/testuser", "/Users/testuser/.pyenv", toolchainGrantAllowed},
+		{"/Users/testuser", "/Users/testuser/.local/share/uv/python/cpython-3.15", toolchainGrantAllowed},
+		{"/Users/testuser", "/Users/testuser/.nvm/versions/node/v24.21.0", toolchainGrantAllowed},
+		{"/Users/testuser", "/Users/testuser/.rbenv", toolchainGrantAllowed},
+		{"/Users/testuser", "/usr/local/go", toolchainGrantAllowed},
+		{"/Users/testuser", "/Users/testuser/.goenv", toolchainGrantAllowed},
+	} {
+		class := classifyToolchainPrefix(tc.prefix, tc.homeDir)
+		if class != tc.expectedGrantClass {
+			t.Errorf("classifyToolchainPrefix(%q, %q) returned class %v, expected %v", tc.prefix, tc.homeDir, class, tc.expectedGrantClass)
+		}
 	}
 }
 

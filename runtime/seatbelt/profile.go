@@ -3,13 +3,14 @@ package seatbelt
 // ABOUTME: Generates macOS sandbox-exec SBPL profiles from runtime config.
 
 import (
-	"github.com/kstenerud/yoloai/internal/textbuf"
+	"maps"
 	"os/exec"
 	"path/filepath"
 	"slices"
 	"strings"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/textbuf"
 	"github.com/kstenerud/yoloai/runtime"
 )
 
@@ -25,7 +26,7 @@ func GenerateProfile(cfg runtime.InstanceConfig, sandboxDir, homeDir string) str
 	b.WriteString("(deny default)\n\n")
 
 	writeProfileHeader(&b)
-	writeProfileSystemPaths(&b)
+	writeProfileSystemPaths(&b, homeDir)
 	writeProfileSandboxDir(&b, sandboxDir)
 	writeProfileMountRules(&b, cfg.Mounts)
 	writeProfileHomeDir(&b, homeDir)
@@ -260,7 +261,7 @@ func writeProfileHeader(b *strings.Builder) {
 }
 
 // writeProfileSystemPaths writes rules for system libraries, toolchains, and temp dirs.
-func writeProfileSystemPaths(b *strings.Builder) {
+func writeProfileSystemPaths(b *strings.Builder, homeDir string) {
 	b.WriteString("; System libraries, frameworks, and binaries\n")
 	for _, path := range systemReadPaths() {
 		// Resolve symlink variants: macOS firmlinks /var -> /private/var (and
@@ -274,9 +275,9 @@ func writeProfileSystemPaths(b *strings.Builder) {
 	}
 	b.WriteString("\n")
 
-	toolchainPaths := toolchainReadPaths()
+	toolchainPaths := toolchainReadPaths(homeDir)
 	if len(toolchainPaths) > 0 {
-		b.WriteString("; Detected toolchain installation prefixes\n")
+		b.WriteString("; Detected toolchain installations\n")
 		for _, path := range toolchainPaths {
 			for _, p := range resolvePathVariants(path) {
 				textbuf.Printf(b, "(allow file-read* (subpath %q))\n", p)
@@ -417,40 +418,92 @@ func tempPaths() []string {
 	}
 }
 
-// toolchainReadPaths discovers installation prefixes for common toolchain
-// binaries (python3, node, ruby, go, rustc, java) by resolving their paths
-// at runtime. Prefixes that are already covered by systemReadPaths(), equal
-// to "/", or have fewer than 3 path components are skipped.
-func toolchainReadPaths() []string {
-	toolchains := []string{"python3", "node", "ruby", "go", "rustc", "java"}
-	sysPaths := systemReadPaths()
-	seen := make(map[string]bool)
-	var result []string
+// Common toolchain binaries that may be present on the host and worth exposing to the guest.
+var toolchainNames = []string{"python3", "node", "ruby", "go", "rustc", "java"}
 
-	for _, name := range toolchains {
-		prefix, ok := resolveToolchainPrefix(name)
-		if !ok || prefix == "/" || pathComponentCount(prefix) < 2 || isCoveredBySysPaths(prefix, sysPaths) || seen[prefix] {
+// An enum indicating how a particular toolchain should be granted to the guest.
+type ToolchainGrantClass int
+
+const (
+	toolchainGrantDenied     ToolchainGrantClass = iota // no grant at all
+	toolchainGrantRestricted                            // prefix/bin/ and prefix/lib/ subtrees
+	toolchainGrantAllowed                               // entire prefix/
+)
+
+// toolchainReadPaths returns a list of grant subpaths for toolchains installed on the host.
+func toolchainReadPaths(homeDir string) []string {
+	grants := make(map[string]bool)
+
+	for _, name := range toolchainNames {
+		prefix, class := resolveToolchainPrefix(name, homeDir)
+		switch class {
+		case toolchainGrantDenied:
 			continue
+		case toolchainGrantRestricted:
+			grants[filepath.Join(prefix, "bin")] = true
+			grants[filepath.Join(prefix, "lib")] = true
+		case toolchainGrantAllowed:
+			grants[prefix] = true
 		}
-		seen[prefix] = true
-		result = append(result, prefix)
 	}
 
-	return result
+	return slices.Sorted(maps.Keys(grants))
 }
 
-// resolveToolchainPrefix resolves a binary name to its installation prefix
-// (two directories above the resolved binary path). Returns ("", false) on error.
-func resolveToolchainPrefix(name string) (string, bool) {
+// resolveToolchainPrefix idenities an on-$PATH toolchain binary,
+// follows the symlink chain (if applicable),
+// identifies the installation prefix (two directories above the resolved path),
+// and determines whether that installation directory (or at least its "…/bin" and "…/lib" subdirectories) can be safely granted.
+func resolveToolchainPrefix(name, homeDir string) (string, ToolchainGrantClass) {
 	binPath, err := lookPath(name)
 	if err != nil {
-		return "", false
+		return "", toolchainGrantDenied
 	}
 	resolved, err := filepath.EvalSymlinks(binPath)
 	if err != nil {
-		return "", false
+		return "", toolchainGrantDenied
 	}
-	return filepath.Dir(filepath.Dir(resolved)), true
+	prefix := filepath.Dir(filepath.Dir(resolved))
+
+	if resolved, err := filepath.EvalSymlinks(homeDir); err == nil {
+		homeDir = resolved
+	}
+
+	return prefix, classifyToolchainPrefix(prefix, homeDir)
+}
+
+// Determines whether a toolchain's prefix/installation directory is safe to expose to guests.
+func classifyToolchainPrefix(prefix, homeDir string) ToolchainGrantClass {
+	prefix = filepath.Clean(prefix)
+	homeDir = filepath.Clean(homeDir)
+
+	// Note that relevant systemReadPaths ("/usr", "/usr/local", "/opt/homebrew") are also granted separately.
+	if pathComponentCount(prefix) < 2 && !isCoveredBySysPaths(prefix, systemReadPaths()) {
+		return toolchainGrantDenied
+	}
+
+	// Directories that contain $HOME have no reason to be granted at all
+	// (exception: "/" has its "/bin" and "/lib" subtrees granted separately, via `systemReadPaths()`).
+	if strings.HasPrefix(homeDir, prefix+string(filepath.Separator)) {
+		return toolchainGrantDenied
+	}
+	// These user-specific directories, including $HOME itself, are unsafe to grant _wholesale_;
+	// but they are common installation prefixes, and their "…/bin" and "…/lib" subdirectories are hopefully safe enough to grant instead.
+	for _, name := range []string{"", ".local", ".cargo"} {
+		if prefix == filepath.Join(homeDir, name) {
+			return toolchainGrantRestricted
+		}
+	}
+	// An admittedly arbitrary choice of the various sensitive dotdirs that could appear in a user's $HOME,
+	// since these aren't common installation prefixes (unlike some of their _descendants_, e.g. "~/.local/share/mise");
+	// but some of these have leaked before and certainly shouldn't have been granted, at least not _wholesale_.
+	for _, name := range []string{".local/share", ".config", ".cache"} {
+		if prefix == filepath.Join(homeDir, name) {
+			return toolchainGrantDenied
+		}
+	}
+	// Other prefixes are probably toolchain-specific and are hopefully safe to grant wholesale.
+	return toolchainGrantAllowed
 }
 
 // pathComponentCount returns the number of non-empty path components in p.
