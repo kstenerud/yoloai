@@ -58,7 +58,6 @@ var entryTiers = map[string]Tier{
 	PromptFileName:        TierReadOnly,
 	ResumePromptFileName:  TierReadOnly,
 	MachineIDFileName:     TierReadOnly,
-	HomeSeedDirName:       TierReadOnly,
 	SecretsDirName:        TierReadOnly,
 
 	// Guest read-write.
@@ -72,6 +71,7 @@ var entryTiers = map[string]Tier{
 	VSCodeCLIDirName:                 TierReadWrite,
 	CreateDoneMarkerName:             TierReadWrite,
 	ContainerLogFileName:             TierReadWrite,
+	HomeSeedDirName:                  TierReadWrite,
 	"home":                           TierReadWrite,
 	"setup.log":                      TierReadWrite,
 	"xcodebuild-firstlaunch.log":     TierReadWrite,

@@ -290,7 +290,11 @@ OpenCode requires provider configuration on your **host machine** before use. yo
    yoloai new task ./my-project --agent opencode --model anthropic/claude-sonnet-4-20250514
    ```
 
-**Config files seeded:** `~/.local/share/opencode/auth.json`, `~/.config/opencode/.opencode.json`, GitHub Copilot credentials (if configured).
+**Config files seeded:**
+
+- `~/.local/share/opencode/auth.json`
+- `~/.opencode.json`, `~/.opencode.jsonc`, `~/.config/opencode/opencode.json`, `~/.config/opencode/opencode.jsonc`
+- GitHub Copilot credentials (if configured).
 
 **Alternative: Use API keys** — Instead of running `/connect`, set environment variables:
 ```bash

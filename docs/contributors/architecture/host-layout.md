@@ -68,7 +68,6 @@ library/
 │       │   ├── prompt.txt         # Agent prompt (if provided)
 │       │   ├── resume-prompt.txt  # Prompt for a resumed session
 │       │   ├── machine-id         # Stable per-sandbox machine id
-│       │   ├── home-seed/         # Files symlinked into sandbox HOME
 │       │   ├── secrets/           # Credentials staged for one launch, then removed
 │       │   └── bin/               # Executable scripts
 │       │       ├── sandbox-setup.py   # Consolidated setup script (all backends)
@@ -82,6 +81,7 @@ library/
 │           ├── files/             # Bidirectional file exchange (shared files directory)
 │           ├── cache/             # Agent cache (HTTP responses, cloned repos)
 │           ├── home/              # Sandbox HOME directory (seatbelt, tart)
+│           ├── home-seed/         # Files seeded by yoloAI and then mirrored in sandbox HOME
 │           ├── vscode-cli/        # VS Code CLI state
 │           ├── tmux.sock          # Per-sandbox tmux socket (seatbelt) — at the
 │           │                       # tier root, not under tmux/: a Unix socket
@@ -123,6 +123,11 @@ strong:
   it holds only while nothing broader grants the same access, and the profile grants broadly
   (the temp tree, the caches, any enclosing mount). That applies to reads as much as writes —
   `host/` is denied both (DF161, DF170).
+
+yoloAI pre-populates a `home-seed` directory with agent-specific configs
+and then mirrors that directory in the guest home
+(again using a read-write bind for **docker, podman, containerd, apple**
+and a symlink for **tart and seatbelt**).
 
 **The guest always sees one flat root, and on the two directory-sharing backends that root is
 the `rw/` tier itself**, with each `ro/` entry surfaced inside it as a *relative* symlink

@@ -11,7 +11,6 @@ import (
 	"io/fs"
 	"log/slog"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -790,9 +789,9 @@ func writeStatFiles(sandboxDir string, meta *store.Environment, agentDef *agent.
 // e.g. a 'PATH=...' prefix for Tart), computed once by the caller and stored here as the
 // single source of truth for the agent-command wrap (W1a of the architecture remediation plan).
 func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agentCommand string, agentLaunchPrefix string, tmuxConf string, workingDir string, debug bool, networkIsolated bool, allowedDomains []string, passthrough []string, setupCommands []string, autoCommitInterval int, copyDirs []string, sandboxName string, tmuxSocket string, isolation runtime.IsolationMode, vscodeTunnel bool, vscodeTunnelName string, lifecycle *runtimeconfig.LifecycleConfig, headless bool) ([]byte, error) {
-	var stateDirName string
+	var stateRelPath string
 	if agentDef.StateDir != "" {
-		stateDirName = filepath.Base(agentDef.StateDir)
+		stateRelPath = agentDef.StateRelPath()
 	}
 
 	cfg := runtimeconfig.ContainerConfig{
@@ -807,7 +806,7 @@ func buildContainerConfig(layout config.Layout, agentDef *agent.Definition, agen
 		SubmitSequence:     agentDef.SubmitSequence,
 		TmuxConf:           tmuxConf,
 		WorkingDir:         workingDir,
-		StateDirName:       stateDirName,
+		StateRelPath:       stateRelPath,
 		Debug:              debug,
 		NetworkIsolated:    networkIsolated,
 		AllowedDomains:     allowedDomains,

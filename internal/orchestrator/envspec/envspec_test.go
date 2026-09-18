@@ -54,24 +54,28 @@ func TestBuildEnvSpec_ShellAgent(t *testing.T) {
 
 	spec := envspec.BuildEnvSpec(def)
 
-	// Count real agents that have StateDir + ApplySettings
-	realNames := agent.RealAgents()
-	expectedCount := 0
-	for _, name := range realNames {
-		d := agent.GetAgent(name)
-		if d.StateDir != "" && d.ApplySettings != nil {
-			expectedCount++
-		}
-	}
-
-	assert.Len(t, spec.SettingsPatches, expectedCount)
-
-	// Each patch should be under home-seed/
+	// Each patch must resolve to the agent's FULL StateRelPath below home-seed.
+	// Set equality against a hardcoded table, so the count is implied and a
+	// mis-nested or spurious dir fails by diff. Truncating to the basename would
+	// mis-nest a StateDir like ".local/share/opencode" as "opencode" — exactly
+	// the seatbelt bug. Forward fence: the day an agent gains both a StateDir
+	// and ApplySettings (opencode has the StateDir already), its StateRelPath
+	// must be added to the table.
+	observedStateRelPaths := map[string]bool{}
 	for _, p := range spec.SettingsPatches {
-		assert.Equal(t, store.HomeSeedPath(sbDir), filepath.Dir(p.Dir(sbDir)),
-			"shell agent patches must target home-seed subdirs")
+		rel, err := filepath.Rel(store.HomeSeedPath(sbDir), p.Dir(sbDir))
+		require.NoError(t, err)
+		observedStateRelPaths[rel] = true
 		assert.NotNil(t, p.Apply)
 	}
+
+	expectedStateRelPaths := map[string]bool{
+		".claude": true,
+		".codex":  true,
+		".gemini": true,
+	}
+	assert.Equal(t, expectedStateRelPaths, observedStateRelPaths,
+		"shell settings patches must resolve to exactly the seeded agents' StateRelPaths")
 }
 
 func TestBuildEnvSpec_NoStateDirAgent(t *testing.T) {
