@@ -15,6 +15,10 @@ CREATING SANDBOXES (yoloai new)
   --prompt, -p <text> Prompt for headless mode
   --prompt-file, -f   File containing the prompt
   --dir, -d <path>    Auxiliary directory (repeatable)
+  --env KEY=VAL       Environment variable (repeatable). Not for secrets:
+                      see: yoloai help security
+  --env-file <path>   KEY=VAL lines from a file, or stdin with '-'
+                      (repeatable). Use this for secrets
   --port <h:c>        Port mapping (host:container)
   --network-none      Disable network access
   --network-isolated  Allow only agent API traffic (IPv4 iptables allowlist;

@@ -29,7 +29,8 @@ KEY SETTINGS
                      VM modes are experimental.
   os                 Target OS: linux (default), mac
   tmux_conf          Tmux config mode: default+host, default, host, none
-  env.<NAME>         Environment variable forwarded to container
+  env.<NAME>         Environment variable forwarded to container.
+                     Not for secrets: use --env-file
 
 EXAMPLES
 

@@ -134,7 +134,7 @@ https://github.com/user-attachments/assets/9d6740b4-a34e-4253-82ec-cb0e4c7a8bd9
 - Six backends: Docker, Podman, containerd (Kata), Apple Container, Tart, and Seatbelt. Runs on Linux, macOS, and Windows (WSL2).
 - Selectable isolation strength per sandbox, from runc through gVisor up to Kata VMs (QEMU or Firecracker).
 - Network policy per sandbox: open, allowlist, or none.
-- Minimal environment inside the sandbox. Anything from the host is an explicit opt-in (`--env`, `--dir`).
+- Minimal environment inside the sandbox. Anything from the host is an explicit opt-in (`--env`, `--env-file` for secrets, `--dir`).
 - Resource limits (`--cpus`, `--memory`) and port forwarding (`--port`).
 - Cheap workdir copies: whole-tree clones on macOS (APFS `clonefile`), per-file reflinks on Linux filesystems that support them (btrfs, XFS). Filesystems without reflink (ext4) get a regular copy.
 - `.gitignore` honored: Anything ignored is **NOT** copied to the sandbox (security practice for on-disk dev credentials).

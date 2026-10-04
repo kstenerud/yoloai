@@ -194,7 +194,7 @@ Both mechanisms accept a required `<type>` argument:
 | Type | Description |
 |------|-------------|
 | `safe` | Privacy-conscious report. Sensitive sections omitted or redacted. Suitable for sharing in a public GitHub issue. Includes a "Review before sharing" notice. |
-| `unsafe` | Author/developer report. No omissions, no redaction. Includes a prominent "**Do not share publicly**" warning banner. |
+| `unsafe` | Author/developer report. No omissions, no redaction except `--env` values (section 2). Includes a prominent "**Do not share publicly**" warning banner. |
 
 ### Output filename
 
@@ -310,7 +310,7 @@ Columns indicate whether a section is included in `safe` and `unsafe` reports. *
 | Section | safe | unsafe |
 |---------|------|------|
 | 1. Header | ✓ | ✓ |
-| 2. Command invocation *(flag)* | ✓ redacted | ✓ |
+| 2. Command invocation *(flag)* | ✓ redacted | ✓ `--env` values redacted |
 | 3. System | ✓ | ✓ |
 | 4. Backends | ✓ | ✓ |
 | 5. Configuration | ✓ sanitized | ✓ |
@@ -333,6 +333,8 @@ Columns indicate whether a section is included in `safe` and `unsafe` reports. *
 ### 2. Command Invocation *(flag only)*
 
 Full `os.Args` as a fenced code block. In `safe` mode, values for `--prompt` / `-p` flags are redacted: `--prompt [REDACTED]`. `--prompt-file` / `-P` paths are not redacted (the path itself is not sensitive; file contents are never included).
+
+In both modes, `--env` values are redacted to `KEY=[REDACTED]` (a token with no `=` is replaced whole), since an env value is never diagnostic and is often a secret. Each rule reads the original argv, so one rewrite cannot hide a flag from another. The exit line has no redactor of its own (DF237), so errors on the `--env` / `--env-file` path never quote a value.
 
 ### 3. System
 

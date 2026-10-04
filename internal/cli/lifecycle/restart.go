@@ -20,7 +20,6 @@ type restartOpts struct {
 	promptFile   string
 	isolation    string
 	vscodeTunnel bool
-	env          []string
 	broker       bool
 	noBroker     bool
 }
@@ -41,7 +40,7 @@ func NewRestartCmd() *cobra.Command {
 	cmd.Flags().StringVarP(&opts.promptFile, "prompt-file", "f", "", "File containing new prompt")
 	cmd.Flags().StringVar(&opts.isolation, "isolation", "", "Override isolation mode (e.g. container-privileged for Docker-in-Docker)")
 	cmd.Flags().BoolVar(&opts.vscodeTunnel, "vscode-tunnel", false, "Enable VS Code Remote Tunnel (persisted; tunnel starts with the restarted container)")
-	cmd.Flags().StringArrayVar(&opts.env, "env", nil, "Per-sandbox env var KEY=VAL (not persisted; re-supply on each restart)")
+	addEnvFlags(cmd, perStartEnvUsage("restart"))
 	// INTERIM SHAPE — see the note on the same pair in start.go, and DF225. Two
 	// booleans for one tri-state, matching `new` deliberately rather than fixing
 	// it here, because the encoding also lives in the persisted meta and cannot
@@ -55,6 +54,27 @@ func NewRestartCmd() *cobra.Command {
 	cmd.MarkFlagsMutuallyExclusive("prompt", "prompt-file")
 
 	return cmd
+}
+
+// resolveRestartOptions builds the library options for `restart` from the parsed
+// flags. Separate from runRestart for the same reason as `start`'s: the
+// flag-to-options wiring is testable without a backend, and it is where a
+// resolved environment can be dropped with nothing failing.
+func resolveRestartOptions(cmd *cobra.Command, opts *restartOpts) (yoloai.SandboxStartOptions, error) {
+	envMap, err := resolveEnvFromFlags(cmd)
+	if err != nil {
+		return yoloai.SandboxStartOptions{}, err
+	}
+	return yoloai.SandboxStartOptions{
+		Resume:       opts.resume,
+		Prompt:       opts.prompt,
+		PromptFile:   opts.promptFile,
+		Isolation:    yoloai.IsolationMode(opts.isolation),
+		VscodeTunnel: opts.vscodeTunnel,
+		Env:          envMap,
+		Broker:       opts.broker,
+		NoBroker:     opts.noBroker,
+	}, nil
 }
 
 // runRestart implements the restart command body.
@@ -75,23 +95,14 @@ func runRestart(cmd *cobra.Command, args []string, opts *restartOpts) error {
 		defer cliutil.SetTerminalTitle("")
 	}
 
-	envMap, err := parseEnvSlice(opts.env)
+	restartOptions, err := resolveRestartOptions(cmd, opts)
 	if err != nil {
 		return err
 	}
 
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		slog.Info("restarting sandbox", "event", "sandbox.restart", "sandbox", name)
-		res, restartErr := sb.Restart(ctx, yoloai.SandboxStartOptions{
-			Resume:       opts.resume,
-			Prompt:       opts.prompt,
-			PromptFile:   opts.promptFile,
-			Isolation:    yoloai.IsolationMode(opts.isolation),
-			VscodeTunnel: opts.vscodeTunnel,
-			Env:          envMap,
-			Broker:       opts.broker,
-			NoBroker:     opts.noBroker,
-		})
+		res, restartErr := sb.Restart(ctx, restartOptions)
 		if res != nil {
 			cliutil.RenderNotices(cmd, res.Notices)
 		}

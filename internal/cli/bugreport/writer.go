@@ -54,29 +54,47 @@ func WriteHeader(w io.Writer, version, commit, date, reportType string) {
 }
 
 // WriteCommandInvocation writes section 2: the full command invocation.
-// In safe mode, --prompt / -p values are redacted.
+// --env values are redacted in every report; --prompt / -p only in safe ones.
 func WriteCommandInvocation(w io.Writer, reportType string) {
-	args := os.Args
-	if reportType == "safe" {
-		args = redactPromptArgs(args)
-	}
-	cmd := strings.Join(args, " ")
+	cmd := strings.Join(redactArgs(os.Args, reportType), " ")
 	fmt.Fprintf(w, "**Command:** `%s`\n\n", cmd) //nolint:errcheck // G705: cmd is constructed from os.Args which are caller-controlled, not attacker-controlled
 }
 
-// redactPromptArgs redacts the values of --prompt / -p flags.
-func redactPromptArgs(args []string) []string {
+// redactArgs returns a copy of args with --env values redacted, and --prompt / -p
+// values too in a safe report. An unsafe report keeps its diagnostic material,
+// but an env value is never diagnostic and is often a secret, so it is redacted
+// in both. Each rule reads the original args and writes only the copy, so one
+// rewrite cannot hide a flag from another (`--env --prompt <text>`).
+func redactArgs(args []string, reportType string) []string {
 	result := make([]string, len(args))
 	copy(result, args)
-	for i, arg := range result {
-		if (arg == "--prompt" || arg == "-p") && i+1 < len(result) {
-			result[i+1] = "[REDACTED]"
+	for i, arg := range args {
+		switch {
+		case arg == "--env" && i+1 < len(args):
+			result[i+1] = redactEnvAssignment(args[i+1])
+		case strings.HasPrefix(arg, "--env="):
+			result[i] = "--env=" + redactEnvAssignment(strings.TrimPrefix(arg, "--env="))
 		}
-		if strings.HasPrefix(arg, "--prompt=") {
+		if reportType != "safe" {
+			continue
+		}
+		switch {
+		case (arg == "--prompt" || arg == "-p") && i+1 < len(args):
+			result[i+1] = "[REDACTED]"
+		case strings.HasPrefix(arg, "--prompt="):
 			result[i] = "--prompt=[REDACTED]"
 		}
 	}
 	return result
+}
+
+// redactEnvAssignment turns KEY=VAL into KEY=[REDACTED]. A token without '=' is
+// replaced whole: a mistyped --env may be the secret itself.
+func redactEnvAssignment(assignment string) string {
+	if key, _, ok := strings.Cut(assignment, "="); ok {
+		return key + "=[REDACTED]"
+	}
+	return "[REDACTED]"
 }
 
 // WriteDiagnostics renders sections 3–5 (System, Backends, VM slots, Config)
