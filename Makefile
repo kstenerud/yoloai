@@ -160,10 +160,11 @@ govulncheck:
 ## audit: what the nightly workflow runs (.github/workflows/audit.yml), in one
 ## command, for the maintainer to run on demand. govulncheck is the only member
 ## `check` does not already cover -- see its note above for why it is not in there.
-## Worth running before a release and whenever the nightly goes red: a scheduled
-## workflow's failure reaches nobody who is looking, which is how 22 reachable
-## vulnerabilities sat for three nights (2026-10-10 to 10-12) with every local
-## gate green.
+## Worth running before a release and whenever the nightly goes red. The nightly
+## now opens an issue on failure and closes it on the next success, because a
+## scheduled workflow's failure otherwise reaches nobody who is looking: that is
+## how 22 reachable vulnerabilities sat for three nights (2026-10-10 to 10-12)
+## with every local gate green.
 .PHONY: audit
 audit: govulncheck hadolint actionlint
 

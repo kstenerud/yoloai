@@ -7,6 +7,7 @@ on:
 
 permissions:
   contents: read
+  issues: write   # the failure has to land somewhere a person reads -- see the last two steps
 
 jobs:
   audit:
@@ -39,3 +40,47 @@ jobs:
 
       - name: Run actionlint
         run: make actionlint
+
+      # A scheduled workflow's failure reaches nobody who is looking. 22 reachable
+      # vulnerabilities sat red for three nights (2026-10-10 to 10-12) while every
+      # local gate stayed green, because nothing a person reads was red -- and the
+      # fix was a dependency bump the whole time. So a failure opens an issue, and
+      # a later success closes it: a notification that cannot clear itself becomes
+      # noise, and noise is what gets muted (D122's shape, applied to an alert).
+      #
+      # Matched on title rather than a label, so no label has to exist for this to
+      # work. Every expression goes through env rather than being interpolated into
+      # the script, which is both actionlint's rule and the reason it is its rule.
+      - name: Report a failing audit as an issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: Nightly audit is failing
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == \"$TITLE\")] | .[0].number // empty")
+          body=$(printf '%s\n\n%s\n\n%s\n' \
+            "The nightly audit failed: $RUN_URL" \
+            'Reproduce locally with: make audit' \
+            'The usual cause is govulncheck: a new advisory against a module we call, or an allowlist entry whose fix has shipped. scripts/govulncheck.py is self-policing and fails such an entry deliberately, so a suppression cannot outlive its fix.')
+          if [ -n "$existing" ]; then
+            gh issue comment "$existing" --body "$body"
+          else
+            gh issue create --title "$TITLE" --body "$body"
+          fi
+
+      - name: Close the issue when the audit is green again
+        if: success()
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TITLE: Nightly audit is failing
+        run: |
+          set -euo pipefail
+          existing=$(gh issue list --state open --limit 100 --json number,title \
+            --jq "[.[] | select(.title == \"$TITLE\")] | .[0].number // empty")
+          if [ -n "$existing" ]; then
+            gh issue close "$existing" --comment "Green again: $RUN_URL"
+          fi
