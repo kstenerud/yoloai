@@ -31,18 +31,14 @@ from dataclasses import dataclass
 #   docker/docker release exists -- the fix lives in github.com/moby/moby/v2
 #   (>= v2.0.0-beta.8), a separate module. These entries auto-fail if and when
 #   docker/docker publishes a fixed version.
-# GO-2026-5617: race in `docker cp` allows bind-mount redirection to a host path.
-# GO-2026-5668: race in `docker cp` allows creating empty host files via symlink swap.
-# GO-2026-5746: PUT /containers/{id}/archive executes a container binary on the host.
-#   Same situation as the two above: daemon-side handlers yoloAI never runs, no
-#   affected symbols declared, no fixed docker/docker release (fix is in
-#   github.com/moby/moby/v2).
+# GO-2026-5617, GO-2026-5668, GO-2026-5746 were allowlisted here on the same
+#   grounds and are gone: govulncheck stopped reporting them altogether, so the
+#   suppression had nothing left to suppress and the wrapper asked for their
+#   removal. An entry that outlives its finding is the mirror of one that
+#   outlives its fix, and this file is supposed to catch both.
 ALLOW: dict[str, str] = {
     "GO-2026-4887": "github.com/docker/docker",
     "GO-2026-4883": "github.com/docker/docker",
-    "GO-2026-5617": "github.com/docker/docker",
-    "GO-2026-5668": "github.com/docker/docker",
-    "GO-2026-5746": "github.com/docker/docker",
 }
 
 
