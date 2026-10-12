@@ -191,6 +191,55 @@ def test_it_stays_quiet_when_a_test_does_go_red(tmp_path: Path) -> None:
     assert "a test fails when it is reverted" in done.stdout
 
 
+def _build_only_repo(tmp_path: Path) -> Path:
+    """A module whose one behavioural change adds a symbol the test file merely calls.
+    Reverting the change removes the symbol, so the package stops compiling — and
+    nothing anywhere asserts what the symbol does."""
+    repo = tmp_path / "buildonly"
+    (repo / "calc").mkdir(parents=True)
+    _run(["git", "init", "-q", "-b", "main"], repo)
+    (repo / "go.mod").write_text("module example.com/m\n\ngo 1.21\n")
+    (repo / "calc" / "calc.go").write_text(
+        "package calc\n\nfunc Double(n int) int { return n * 2 }\n"
+    )
+    (repo / "calc" / "calc_test.go").write_text(
+        'package calc\n\nimport "testing"\n\nfunc TestDouble(t *testing.T) { _ = Double(3) }\n'
+    )
+    _commit(repo, "chore: baseline")
+    (repo / "calc" / "calc.go").write_text(
+        "package calc\n\nfunc Double(n int) int { return n * 2 }\n\n"
+        "func Triple(n int) int { return n * 3 }\n"
+    )
+    (repo / "calc" / "calc_test.go").write_text(
+        'package calc\n\nimport "testing"\n\n'
+        "func TestDouble(t *testing.T) { _ = Double(3); _ = Triple(3) }\n"
+    )
+    _commit(repo, "feat(calc): add Triple")
+    return repo
+
+
+def test_arch_build_only_revert_is_reported_not_failed(tmp_path: Path) -> None:
+    """D146: a revert that only breaks the build is reported separately and passes.
+
+    It proves the change is load-bearing and not that a test asserts its behaviour,
+    so the author still owes the counting — but failing on it would fire on every
+    added file, and this gate's margin is its false-positive rate (DF233, ci.yml).
+
+    Asserting the exit code alone would not pin this: a covered file exits 0 too.
+    The verdict heading is what separates the two worlds (TEST §12).
+    """
+    repo = _build_only_repo(tmp_path)
+    done = _run(
+        [sys.executable, str(_REPO / "scripts/check_revert_red.py"), "--base", "HEAD~1"], repo
+    )
+    assert done.returncode == 0, done.stdout + done.stderr
+    assert "Load-bearing, but only at compile time" in done.stdout
+    assert "calc/calc.go" in done.stdout
+    assert "reverting it breaks the build" in done.stdout
+    assert "Changed with nothing to notice" not in done.stdout
+    assert "a test fails when it is reverted" not in done.stdout
+
+
 def test_the_commit_type_exempts_the_same_uncovered_change(tmp_path: Path) -> None:
     """The escape hatch, proven to work on input the gate otherwise rejects."""
     repo = _go_repo(tmp_path, covered=False)

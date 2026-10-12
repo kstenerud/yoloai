@@ -126,7 +126,7 @@ narrowly-scoped documents, a narrower surface than any of the other twelve gover
    register's own audit found 16 such mechanisms, of which **0** recorded a date.
    **And it does not go to `main`** — see rule 12.
 10. **Every behavior change in the PR carries a test that fails when that change is reverted**
-   (D128, D129). *Every* is the load-bearing word: count the behavior changes, count the tests
+   (D128, D129, D146). *Every* is the load-bearing word: count the behavior changes, count the tests
    that would go red on revert, and make the numbers match — not "the package has tests", and
    not "the headline fix has one", because the second change in a PR is the one that escapes.
    **Gated on the PR** (`scripts/check_revert_red.py`): it reverts each changed file and reports
@@ -159,7 +159,9 @@ narrowly-scoped documents, a narrower surface than any of the other twelve gover
    holding, and cite it in the prose by its bare name in backticks — `` `TestArch_ProfileIgnoresPersonalDefaults` ``
    — so "is this still true?" is answered by `make check`, not by trust. Reserve the prefix for
    this alone; it is what makes `scripts/check_claim_citations.py` a grep instead of a judgment
-   call. The scope is deliberately narrow — `docs/contributors/architecture/*.md`,
+   call. A claim about one of the Python gates takes the same form in pytest —
+   `test_arch_<claim>`, under a `tests/` directory — because the gates are the most-retuned code
+   here and nothing else could cite them (D146). The scope is deliberately narrow — `docs/contributors/architecture/*.md`,
    `docs/contributors/design/config.md`, `docs/contributors/principles/*.md`, and
    `docs/contributors/decisions/working-notes.md`, nowhere else — for the same reason
    `check_citation_provenance.py` is scoped to `research/*.md` (D122): a gate that fires on

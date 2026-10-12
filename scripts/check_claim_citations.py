@@ -12,7 +12,8 @@ and built on it. The documentation manufactured a shared false model, and nothin
 short of independently re-deriving the claim from the code would have caught it.
 
 The fix is a convention, not a smarter reader: a load-bearing claim's authoritative
-form is a `TestArch_`-prefixed test, and the prose cites it by name in backticks —
+form is a `TestArch_`-prefixed Go test (or a `test_arch_`-prefixed Python one, for a
+claim about one of the gates), and the prose cites it by name in backticks —
 
     **Profiles are self-contained** (`TestArch_ProfileIgnoresPersonalDefaults`) —
     personal defaults do not carry into a profile.
@@ -52,14 +53,30 @@ GATED_DOCS = (
     "docs/contributors/decisions/working-notes.md",
 )
 
-# A citation is the bare test name in backticks: `TestArch_Foo`. Backticks only —
-# the name written in running prose without them is not a citation, it is the
-# convention paragraph explaining the convention (this module's own docstring,
-# for instance), and matching that would make the gate fire on itself.
-CITATION_RE = re.compile(r"`(TestArch_[A-Za-z0-9_]+)`")
+# A citation is the bare test name in backticks: `TestArch_Foo`, or `test_arch_foo`
+# for a claim a Python test pins. Backticks only — the name written in running
+# prose without them is not a citation, it is the convention paragraph explaining
+# the convention (this module's own docstring, for instance), and matching that
+# would make the gate fire on itself.
+CITATION_RE = re.compile(r"`(TestArch_[A-Za-z0-9_]+|test_arch_[a-z0-9_]+)`")
 
-# A claim test's definition, anywhere in the Go tree's test files.
+# A claim test's definition. Two languages, one convention: Go claims are
+# `func TestArch_X`, Python claims `def test_arch_x`. The Python half exists
+# because a dozen gates in scripts/ are Python, they are the most-retuned code
+# in the tree, and until this was added no claim about any of them could be
+# cited at all — a decision could assert what a gate does with nothing keeping
+# it true (D146). Both patterns are applied to every test file: `^func` cannot
+# appear in a .py file and `^def` cannot appear in a .go one, so no dispatch on
+# extension is needed and defined_tests_in stays pure.
 TEST_FUNC_RE = re.compile(r"^func (TestArch_[A-Za-z0-9_]+)\(", re.MULTILINE)
+PY_TEST_FUNC_RE = re.compile(r"^def (test_arch_[a-z0-9_]+)\(", re.MULTILINE)
+
+
+def _definition_hint(name: str) -> str:
+    """How the gate tells a reader to look for `name`'s definition."""
+    if name.startswith("test_arch_"):
+        return f"no `def {name}(` under any tests/ directory"
+    return f"no `func {name}(` in any *_test.go"
 
 
 def _tracked_and_new(root: Path, pattern: str) -> list[str]:
@@ -97,18 +114,33 @@ def citations_in(text: str) -> list[tuple[str, int]]:
 
 
 def defined_tests_in(sources: dict[str, str]) -> set[str]:
-    """Every TestArch_ function name defined across a map of path -> file content."""
+    """Every claim-test name defined across a map of path -> file content."""
     names: set[str] = set()
     for text in sources.values():
         names.update(TEST_FUNC_RE.findall(text))
+        names.update(PY_TEST_FUNC_RE.findall(text))
     return names
 
 
+def claim_test_files(root: Path) -> list[str]:
+    """Every file a claim test can be defined in: Go test files, and Python files
+    under a tests/ directory.
+
+    A Python test is one by the directory it sits in, not by its name — the same
+    rule check_revert_red.py uses, and for the same reason: scripts/smoke_test.py
+    is a 4000-line harness rather than a test, and every real Python test in this
+    repo lives under a tests/ root.
+    """
+    go = _tracked_and_new(root, "*_test.go")
+    py = [f for f in _tracked_and_new(root, "*.py") if "/tests/" in f or f.startswith("tests/")]
+    return sorted(set(go) | set(py))
+
+
 def defined_tests(root: Path) -> set[str]:
-    """Every TestArch_ function defined anywhere in the repo's *_test.go files."""
+    """Every claim test defined anywhere in the repo."""
     sources = {
         f: (root / f).read_text(encoding="utf-8", errors="replace")
-        for f in _tracked_and_new(root, "*_test.go")
+        for f in claim_test_files(root)
     }
     return defined_tests_in(sources)
 
@@ -152,9 +184,9 @@ def main() -> int:
         problems += 1
         print("Claim citations naming a test that does not exist:\n")
         for doc, line, name in missing:
-            print(f"  {doc}:{line}: `{name}` — no `func {name}(` in any *_test.go")
+            print(f"  {doc}:{line}: `{name}` — {_definition_hint(name)}")
         print(
-            "\nA `TestArch_` citation is a claim that the test backing it is real.\n"
+            "\nA claim citation is a claim that the test backing it is real.\n"
             "Either the test was renamed or deleted and the doc was not updated, or\n"
             "the citation was written before the test. Add the test, or fix the name.\n"
         )
@@ -162,14 +194,14 @@ def main() -> int:
     orphaned = orphaned_tests(doc_texts, tests)
     if orphaned:
         problems += 1
-        print("TestArch_ tests with no citing claim in a gated document:\n")
+        print("Claim tests with no citing claim in a gated document:\n")
         for name in orphaned:
             print(f"  {name}")
         print(
-            "\nAn uncited TestArch_ test is an orphaned claim: its prose was removed\n"
+            "\nAn uncited claim test is an orphaned claim: its prose was removed\n"
             "(or never written), so the corpus silently lost a claim nobody decided\n"
             "to drop. Cite it from the doc whose claim it backs, in backticks, or\n"
-            "rename it off the TestArch_ prefix if it never was a load-bearing claim.\n"
+            "rename it off the claim prefix if it never was a load-bearing claim.\n"
         )
 
     return 1 if problems else 0

@@ -14,6 +14,7 @@ sys.path.insert(0, str(_REPO / "scripts"))
 from check_claim_citations import (  # noqa: E402
     GATED_DOCS,
     citations_in,
+    claim_test_files,
     defined_tests_in,
     gated_doc_files,
     missing_tests,
@@ -94,6 +95,47 @@ def test_a_test_cited_by_one_of_several_docs_is_not_orphaned() -> None:
 
 
 # --- gated_doc_files: the scope is narrow and does not silently drift ----------
+
+
+# --- the Python half of the convention (D146) ----------------------------------
+
+
+def test_a_backticked_python_claim_name_is_a_citation() -> None:
+    text = "a build-only revert is reported, not failed (`test_arch_build_only`) — etc."
+    assert citations_in(text) == [("test_arch_build_only", 1)]
+
+
+def test_a_python_claim_test_is_found() -> None:
+    sources = {"scripts/tests/test_x.py": "def test_arch_the_gate_passes_it() -> None:\n    pass\n"}
+    assert defined_tests_in(sources) == {"test_arch_the_gate_passes_it"}
+
+
+def test_an_ordinary_python_test_is_not_a_claim() -> None:
+    """The prefix exists for nothing else, which is what keeps this gate a grep.
+    An ordinary pytest function must not become an orphaned claim."""
+    sources = {"scripts/tests/test_x.py": "def test_something_else() -> None:\n    pass\n"}
+    assert defined_tests_in(sources) == set()
+
+
+def test_both_languages_pool_into_one_namespace() -> None:
+    sources = {
+        "a_test.go": "func TestArch_Go(t *testing.T) {}\n",
+        "scripts/tests/test_b.py": "def test_arch_py() -> None:\n    pass\n",
+    }
+    assert defined_tests_in(sources) == {"TestArch_Go", "test_arch_py"}
+
+
+def test_an_uncited_python_claim_is_orphaned_too() -> None:
+    assert orphaned_tests({"d.md": "no citation here"}, {"test_arch_py"}) == ["test_arch_py"]
+
+
+def test_a_python_claim_files_set_includes_tests_dirs_and_go_tests() -> None:
+    """A Python test is one by the directory it sits in, not by its name — so
+    scripts/smoke_test.py, a harness rather than a test, is not scanned."""
+    files = claim_test_files(_REPO)
+    assert any(f.endswith("_test.go") for f in files)
+    assert "scripts/tests/test_check_revert_red.py" in files
+    assert "scripts/smoke_test.py" not in files
 
 
 def test_gated_docs_are_exactly_the_documented_narrow_set() -> None:
