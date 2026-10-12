@@ -80,7 +80,13 @@ At least one flag must be provided; bare `yoloai reconfigure <name>` is an error
 
 - `-d` is **additive**: it adds a directory not already mounted. Re-specifying an existing host path with a different mode is an error — use `--remove-dir` first.
 - `--remove-dir` removes by host path. If the directory has a `:copy` mode and has accumulated changes (unapplied diff), warn and require `--yes` or `--abandon-unapplied` to proceed. Changes are not automatically applied.
-- `--env KEY=VAL` adds or replaces a key. `--unset-env KEY` removes it. Both are additive to the existing env.
+- `--env KEY=VAL` adds or replaces a key. `--unset-env KEY` removes it. Both are additive to the
+  existing env.
+- **If `--env-file` has landed by the time this verb is built, it takes that too.**
+  [PR #57](https://github.com/kstenerud/yoloai/pull/57) adds `--env-file` to every verb that
+  takes `--env` and registers the two together so neither can be added alone — a `--env` value
+  sits on yoloai's argv, where other local accounts can read it. The `--env`-only shape above
+  predates that, and nothing will fail if this verb is built without the pair.
 - `--cpus` / `--memory` replace the current value outright.
 - `--agent` replaces the current agent. Agent-state for the previous agent remains on disk but the new agent starts fresh.
 

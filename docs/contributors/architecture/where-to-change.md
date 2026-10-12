@@ -31,6 +31,9 @@
 1. Add the flag on the `*cobra.Command` the command's constructor builds (`NewDiffCmd`, `NewApplyCmd`, …)
 2. Read it with `cmd.Flags().GetXxx(...)` in the `RunE` handler
 3. Sweep the doc surfaces that name flags verbatim — see `docs/contributors/procedures/pull-requests.md` ("The name sweep — the surfaces") for the full surface list and why each one drifts independently of the code: `internal/cli/helpcmd/help/*.md` (`//go:embed`'ed **shipped UI** despite living under `internal/` — check every block, the settings table and the examples drift separately; wrap at 80 columns per `../standards/cli.md`), cobra `Short`/`Long` strings, `docs/GUIDE.md`, `README.md`.
+4. Settle the two questions `../standards/cli.md` asks of every flag, neither of which any gate checks — both are review-caught, and both were missed by the first outside PR to add a flag:
+   - § *CLI and config parity* — does this option deserve a config key, and if not, say in the PR why it is genuinely single-shot. The rule governs *options*, not spellings: a `--x-file` transport inherits `--x`'s answer, and a config key need only be the option's recognised home (`--port`→`ports`, `--cpus`→`resources.cpus`), not its literal name.
+   - § *Exit Codes* — a bad argument exits 2, which means `yoerrors.NewUsageError`, not a bare `fmt.Errorf`. A nonexistent path handed to a flag is a bad argument; falling through to a wrapped read error exits 1.
 
 **Change container setup (Dockerfile, entrypoint):**
 1. Edit files in `runtime/docker/resources/`
