@@ -64,13 +64,28 @@ Every command supports:
 ## CLI and config parity
 
 **The CLI is for one-offs; config is for repeatability. An option worth setting at all is
-settable in both, under the same name.** `yoloai new --agent gemini` for this run; `agent:
-gemini` in config for every run.
+settable in both.** `yoloai new --agent gemini` for this run; `agent: gemini` in config for
+every run.
 
 The failure is asymmetry in either direction: a flag with no config key makes a user retype
 their own defaults forever, and a config key with no flag makes them edit a file to try
 something once. When you add one, add the other — or say in the PR why the option is
 genuinely single-shot (`--json`) or genuinely persistent-only.
+
+**What "the same option" means.** The rule governs options, not spellings or transports. A
+config key need only be the option's recognised home — `--port` is `ports`, `--cpus` is
+`resources.cpus`, `--backend` is `container_backend` — and eight of the thirteen keyed flags
+on `new` do not share their key's literal name, so a name match was never the test. A
+`--x-file` variant that supplies an existing `--x` by another route inherits `--x`'s answer
+and owes no key of its own.
+
+**Nothing checks any of this**, and until 2026-10 nothing had enforced it either: the rule was
+unmet in both directions — flags with no key, keys with no flag — and its first recorded use
+was a reviewer citing it at an outside contributor without having checked it against the tree.
+A gate was designed and rejected: a registry of deliberately single-shot flags is ~56 rows of
+which approximately none are defects on the day it lands, which is worse precision than the
+dead-name gate already rejected on the same test. So this is review's, and
+`architecture/where-to-change.md`'s flag recipe is what routes a flag author here.
 
 ### Verbosity Mapping
 
