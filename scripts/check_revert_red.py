@@ -347,11 +347,30 @@ def probe(tree: str, base: str, head: str, change: Change, timeout: int) -> Outc
         _git("checkout", head, "--", change.path, cwd=tree)
 
 
+def tally(outcomes: list[Outcome]) -> str:
+    """One line putting the gap in front of a reader who passed.
+
+    A green run with one test behind six files is not six covered files, and
+    rule 10 puts that difference on the author. The heading below says so per
+    file; this says it in a number, because a passing run is exactly when
+    nobody reads the rows (D146).
+    """
+    evidenced = sum(1 for o in outcomes if o.verdict == "RED_TEST")
+    build_only = sum(1 for o in outcomes if o.verdict == "RED_BUILD")
+    line = f"\n{len(outcomes)} behavioural file(s): {evidenced} with test evidence"
+    if build_only:
+        line += (
+            f", {build_only} load-bearing at compile time only — not coverage, so count "
+            f"{'those' if build_only > 1 else 'that one'} yourself (AGENTS.md rule 10)"
+        )
+    return line + "."
+
+
 def report(outcomes: list[Outcome]) -> str:
     lines = []
     for verdict, heading in (
         ("GREEN", "Changed with nothing to notice — no test goes red when these are reverted"),
-        ("RED_BUILD", "Load-bearing, but only at compile time"),
+        ("RED_BUILD", "Load-bearing, but only at compile time — not coverage, and still yours to count"),
         ("RED_TEST", "Covered — a test fails when these are reverted"),
         ("CLAIMED", "Verified outside the suite, on the author's word — review this"),
         ("COSMETIC", "No behaviour changed, so nothing could cover it"),
@@ -419,6 +438,7 @@ def main() -> int:
 
     print(f"Reverted {len(owed)} behavioral source change(s); {exempt} exempt by commit type.")
     print(report(outcomes))
+    print(tally(outcomes))
 
     failures = [o for o in outcomes if o.is_failure]
     if not failures:

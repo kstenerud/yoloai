@@ -23,6 +23,7 @@ from check_revert_red import (  # noqa: E402
     is_cosmetic,
     probe,
     scope_for,
+    tally,
     types_touching,
     wide_scope,
 )
@@ -110,6 +111,33 @@ def test_a_test_asserting_on_compiler_prose_is_not_misread() -> None:
 
 def test_pytest_collection_error_is_a_build_failure() -> None:
     assert is_build_failure("ERROR collecting scripts/tests/test_x.py\nImportError: no mod") is True
+
+
+# --- the tally line (D146) -----------------------------------------------------
+
+
+def _outcomes(**counts: int) -> list[Outcome]:
+    return [
+        Outcome(f"{verdict}{i}.go", verdict, "detail")
+        for verdict, n in counts.items()
+        for i in range(n)
+    ]
+
+
+def test_the_tally_separates_test_evidence_from_a_build_only_revert() -> None:
+    """PR #57's shape: six behavioural files, one with a test behind it. A passing
+    run is exactly when nobody reads the per-file rows, so the number says it."""
+    line = tally(_outcomes(RED_TEST=1, RED_BUILD=5))
+    assert "6 behavioural file(s)" in line
+    assert "1 with test evidence" in line
+    assert "5 load-bearing at compile time only" in line
+    assert "count those yourself" in line
+
+
+def test_the_tally_says_nothing_about_counting_when_everything_is_covered() -> None:
+    """Advice nobody needs trains a reader to skip the line."""
+    line = tally(_outcomes(RED_TEST=3))
+    assert line == "\n3 behavioural file(s): 3 with test evidence."
 
 
 # --- the end-to-end behaviour, on a repo built for the purpose ----------------
