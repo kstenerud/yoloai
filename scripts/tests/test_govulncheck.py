@@ -3,8 +3,11 @@
 
 from __future__ import annotations
 
+import re
+from pathlib import Path
+
 import govulncheck
-from govulncheck import Finding, classify, parse_findings
+from govulncheck import GOVULNCHECK_VERSION, Finding, classify, parse_findings
 
 DOCKER = "github.com/docker/docker"
 ALLOW = {"GO-2026-4887": DOCKER}
@@ -77,3 +80,22 @@ def test_stale_allowlist_entry_is_flagged_but_not_fatal() -> None:
 def test_allow_constant_entries_are_single_module_strings() -> None:
     assert govulncheck.ALLOW
     assert all(isinstance(mod, str) and mod for mod in govulncheck.ALLOW.values())
+
+
+# --- the scanner's own version -------------------------------------------------
+
+
+def test_the_scanner_version_is_pinned() -> None:
+    """`@latest` made the gate's own version a moving part: a scanner release can
+    add or drop a finding with nothing in this repo changing, and CI and a
+    developer can silently run different scanners -- DF187's shape, which bit
+    shellcheck in the other direction. Bumping it is a commit."""
+    assert re.fullmatch(r"v\d+\.\d+\.\d+", GOVULNCHECK_VERSION), GOVULNCHECK_VERSION
+
+
+def test_the_pin_is_what_actually_gets_invoked() -> None:
+    """Pinning the constant while still invoking @latest would read as fixed and
+    behave as before, so the source must not name the floating version at all."""
+    src = Path(govulncheck.__file__).read_text(encoding="utf-8")
+    assert "govulncheck@latest" not in src
+    assert "GOVULNCHECK_VERSION" in src.split("def run_govulncheck")[1]

@@ -36,6 +36,13 @@ from dataclasses import dataclass
 #   suppression had nothing left to suppress and the wrapper asked for their
 #   removal. An entry that outlives its finding is the mirror of one that
 #   outlives its fix, and this file is supposed to catch both.
+# The scanner itself is pinned. `@latest` made the gate's own version a moving
+# part: a new release can add or drop a finding with nothing in this repo
+# changing, which is the drift DF187 records for shellcheck in the other
+# direction -- CI and a developer silently running different tools. Bump this
+# deliberately, as a commit.
+GOVULNCHECK_VERSION = "v1.9.0"
+
 ALLOW: dict[str, str] = {
     "GO-2026-4887": "github.com/docker/docker",
     "GO-2026-4883": "github.com/docker/docker",
@@ -152,7 +159,7 @@ def run_govulncheck() -> str:
         ["go", "env", "GOVERSION"], capture_output=True, text=True, check=True
     ).stdout.strip()
     proc = subprocess.run(
-        ["go", "run", "golang.org/x/vuln/cmd/govulncheck@latest", "-format=json", "./..."],
+        ["go", "run", f"golang.org/x/vuln/cmd/govulncheck@{GOVULNCHECK_VERSION}", "-format=json", "./..."],
         capture_output=True,
         text=True,
         env={**os.environ, "GOTOOLCHAIN": toolchain},

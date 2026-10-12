@@ -147,8 +147,25 @@ tidy-check:
 ## govulncheck: scan for known vulnerabilities, applying a self-policing
 ## allowlist of unfixable-today findings that auto-fails once a fix ships
 ## (see scripts/govulncheck.py).
+##
+## Deliberately NOT in `check`, and the reason is worth keeping: it queries the
+## vulnerability database, so a finding appears when the world changes rather than
+## when this repo does. In `check` it would stop a contributor's unrelated commit
+## for an advisory published overnight -- a true positive about something that is
+## not their change, which is the fastest way to teach someone to bypass a gate.
+## It is the maintainer's to run (`make audit`), and the nightly workflow's.
 govulncheck:
 	python3 scripts/govulncheck.py
+
+## audit: what the nightly workflow runs (.github/workflows/audit.yml), in one
+## command, for the maintainer to run on demand. govulncheck is the only member
+## `check` does not already cover -- see its note above for why it is not in there.
+## Worth running before a release and whenever the nightly goes red: a scheduled
+## workflow's failure reaches nobody who is looking, which is how 22 reachable
+## vulnerabilities sat for three nights (2026-10-10 to 10-12) with every local
+## gate green.
+.PHONY: audit
+audit: govulncheck hadolint actionlint
 
 ## hadolint: lint the Dockerfile. The Dockerfile ships in the binary and builds
 ## every sandbox image, so this is REQUIRED, not optional (D112) — its absence

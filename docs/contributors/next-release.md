@@ -124,10 +124,18 @@ landed — verified-stale doc claims not to "finish". Scoped to one release cycl
    newer shellcheck than the runner had ([DF187](design/findings-unresolved.md)). The tool is
    pinned now; the class is not. **Nothing is tagged on an unverified head** — if the head moves
    while you are preparing, re-check the new head.
-3. **Check for open Dependabot PRs and bring them to the owner**, each with what it updates and why
-   it matters — a security fix, a bug affecting a path yoloAI uses, or routine currency. The owner
-   decides whether each rides this tag or waits. They are easy to miss because their branches are
-   the one kind the cleanup sweep deliberately leaves alone, so nothing else surfaces them.
+3. **Check the dependency surface, which nothing else surfaces.** Two halves:
+   - **Open Dependabot PRs**, brought to the owner with what each updates and why it matters — a
+     security fix, a bug affecting a path yoloAI uses, or routine currency. The owner decides
+     whether each rides this tag or waits. They are easy to miss because their branches are the one
+     kind the cleanup sweep deliberately leaves alone.
+   - **`make audit`**, which is what the nightly workflow runs. `govulncheck` is deliberately not in
+     `make check` (a finding appears when the world changes, not when this repo does, so in `check`
+     it would stop a contributor's unrelated commit), and a scheduled workflow's failure reaches
+     nobody who is looking — so this is the moment it gets read. On 2026-10-10 the nightly went red
+     with 22 reachable vulnerabilities and stayed red for three nights while every local gate was
+     green; all 22 were fixable by a bump nothing had offered, because no Dependabot PR was open
+     either. Both halves of this step missed it, which is why it is one step now.
 4. On the owner's go-ahead:
    - Drain `## Unreleased` into a `## vX.Y.Z` heading; leave the marker (D117). `release.yml` fails
      the tag if it is non-empty.
