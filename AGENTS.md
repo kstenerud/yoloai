@@ -126,29 +126,16 @@ narrowly-scoped documents, a narrower surface than any of the other twelve gover
    register's own audit found 16 such mechanisms, of which **0** recorded a date.
    **And it does not go to `main`** — see rule 12.
 10. **Every behavior change in the PR carries a test that fails when that change is reverted**
-   (D128, D129). *Every* is the load-bearing word: count the behavior changes, then count the
-   tests that would go red on revert, and make the numbers match. Not "the package has tests",
-   and not "the headline fix has one" — the second change in a PR is the one that escapes.
-   **Now gated on the PR** (`scripts/check_revert_red.py`): it reverts each changed file and
-   requires something to fail, so you no longer have to remember to try. It judges only files
-   touched by a `feat`/`fix`/`perf` commit, and a change that genuinely cannot go red in the
-   suite — a smoketest-only symptom, a path the single-principal CLI cannot reach — is declared
-   with a **`Verified-By:` trailer** naming what you actually ran. That is a claim on the record,
-   not a bypass; without it the only route past the gate would be mislabelling the commit. **Red-on-revert is necessary and not sufficient**: reverting a line inside a
-   function nothing can reach still turns its test red, so the check proves a test is wired to the
-   code, never that the code is wired to the program. A fake is free to invent a capability
-   combination the product does not contain, and when it does, its tests certify a dead path — six
-   of them once did. So for anything capability-guarded, **name the backends that pass the guard and
-   the statuses that reach it, and confirm the intersection is non-empty** before writing the first
-   test; prefer a `runtime/runtimetest` conformance case, which no fake can satisfy. Common cases,
-   none of them the definition: an **argv** handed to a subprocess
-   (assert the flags, and which paths must be absolute); which **environment** a subprocess
-   draws from; an error's **content**, not just that one was returned. The fake-binary fixture
-   covers all three cheaply — `runtime/apple/build_test.go`. Three traps, all drawn from the
-   first two outside PRs: asserting only *that* an error was wrapped tests the wrapping, not the
-   fix; a test whose comment explains why the code does the wrong thing has pinned the defect as
-   intended behavior; and a change that is invisible in the single-principal CLI — because two
-   values coincide there — is exactly the change no manual check will ever catch.
+   (D128, D129). *Every* is the load-bearing word: count the behavior changes, count the tests
+   that would go red on revert, and make the numbers match — not "the package has tests", and
+   not "the headline fix has one", because the second change in a PR is the one that escapes.
+   **Gated on the PR** (`scripts/check_revert_red.py`): it reverts each changed file and reports
+   which ones a test catches. A revert that only **breaks the build** is not coverage — it proves
+   the change is load-bearing, nothing more, and an added file can report nothing else — so those
+   stay yours to count. A change that genuinely cannot go red in the suite is declared with a
+   **`Verified-By:` trailer** naming what you actually ran: a claim on the record, not a bypass.
+   **Red-on-revert is necessary and not sufficient** — what it cannot prove, and the assertions
+   it is usually missing, are TEST §12.
 11. **Multi-commit work goes on a `work/<topic>` branch**, cut from an up-to-date `main`, merged
    back into `main` when it is done, and **deleted once merged**. A one-commit fix needs no
    branch. The prefix is there so a branch's name says which procedure it followed — the 2026-08

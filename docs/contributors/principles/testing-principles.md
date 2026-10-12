@@ -417,6 +417,44 @@ Project: the 2026-08 enforcement verification pass (`design/research/linux-enfor
 
 ---
 
+## §12. A test that would pass without the fix pins nothing — assert what separates the two worlds
+
+> **Rule.** Write the assertion that fails in the world where the change was never made. At a boundary that means the payload — the argv, the environment the subprocess draws from, the error's content — never that the call happened or that something went wrong.
+>
+> **Bites when:** the test is written after the fix, from the fixed code, by asserting what it now does. · **See also:** TEST §11, TEST §2, AGENTS.md rule 10.
+
+**Principle.** §11 is about a control that could not have failed: its prerequisite was missing, so "denied" and "not found" came for free. This is the next one along, and it is harder to see because nothing is absent. The mechanism is installed, the test runs, the assertion is real — and it is satisfied equally by the fixed code and by the code before the fix. The test does not cover nothing; it covers something other than the change.
+
+Red-on-revert (AGENTS.md rule 10) is the mechanical check for exactly this, and it has two blind spots of its own. A revert that only **breaks the build** proves the change is load-bearing and says nothing about coverage — an added file can report nothing else. And where two values **coincide in the configuration you run**, reverting the change leaves every test green, because in that configuration there is no difference to detect.
+
+The common root is that an assertion written by reading the fixed implementation describes the implementation. What distinguishes the two worlds has to be decided before the code is read.
+
+### Pattern
+
+1. **At a boundary, assert the payload.** For a subprocess: the **argv** (which flags, and which paths must be absolute), which **environment** it draws from, and an error's **content** rather than its existence. A fake binary that exits non-zero on the wrong input asserts all three cheaply — `runtime/apple/build_test.go`.
+2. **Name the configuration in which the two values differ.** If they coincide in the single-principal CLI, no manual check and no revert can see the change. Say so in the test's comment, and re-run the revert at the step where they separate.
+3. **For anything capability-guarded, confirm the guard is reachable before writing the first test:** name the backends that pass it and the statuses that reach it, and check the intersection is non-empty. A fake is free to invent a capability combination the product does not contain, and when it does, its tests certify a dead path — six of them once did. Prefer a `runtime/runtimetest` conformance case, which no fake can satisfy.
+4. **Never build the fixture with the mechanism under test.** A test whose fixture and whose subject resolve the same path through the same builder agrees with itself and with nothing on disk, whatever the layout does.
+5. **Two of this shape are review's, deliberately** (DF151, D128): a test whose comment explains why the code does the wrong thing has pinned the defect as intended behavior, and a test whose name does not match what it asserts. D128 declined to write a rule for either — they are not mechanically detectable, and review catching them is the system working. They are here to be recognised, not gated.
+
+### Worked examples
+
+- **The exemplar, and what makes it one.** `TestBuildProfileImage_DrawsEnvFromBuildEnvNotTheRuntime` (`runtime/apple/build_test.go`) pins which environment the build subprocess draws from, and its comment does the §12 work explicitly: *"The two are the same in the single-principal CLI, which is why using the wrong one is invisible there… The fake binary fails loudly if it sees the Runtime's env, so this test fails when the fix is reverted rather than merely covering the line."*
+- **`assert.Error`'s negative space.** A guard was verified on the backend where the defect does not manifest; the assertion checked that *something* failed, which a kernel denial and a mis-parsed command satisfy identically. From the record: *"this is the failure mode of `assert.Error` itself, which asserts that something went wrong and never that the thing I care about did."* The author had read rule 10's one-case-over version of this the same morning (`agent-failures.md`) — emphasis had already been tried.
+- **The coincidence trap, named and still open.** Four `work/` paths in `migrate_overlay.go` read identically whether spelled `pretier.WorkDirFor` or `store.WorkDir`, because `work/` is deliberately still flat while `ro/`+`rw/` wait. *"Reverting any of those four leaves every test green."* The remedy is scheduling, not cleverness: the flat-literal fixtures become their red-on-revert the moment the tier move lands, and the reverts are re-run at that step (DF164).
+- **A fixture that agreed with its subject.** `f3bd546b` updated `migrate_agentcfg_test.go` to seed its fixture through `store.EnvironmentFilePath` — the same builder the migrator reads with. *"The test then passes because the fixture and the migrator agree with each other, while neither agrees with any sandbox that exists on disk."* `ff7f7499` keeps literal paths in the backend tests for this reason; migration fixtures need it more, because their whole subject is a layout that is no longer current (DF164).
+- **An assertion that was simply absent.** PR #57's `--env-file` path-expansion branch — the only code reaching `cliutil.Layout()` and the reason a `forbidigo` allowlist grew an entry — could be deleted whole with the suite still green, while the gate reported the file it lived in as load-bearing at compile time, which is not coverage.
+
+### Cost-vs-benefit
+
+Cost of applying: one question before the first assertion — *what would this test do if the change were reverted?* — and, where the answer is "nothing", either a fake that can fail or a note saying which configuration separates the values. Damage prevented: a test that certifies the behaviour it was written to prevent, which is worse than no test because it also supplies the confidence. Threshold: apply at every boundary the change crosses, and whenever a value the change touches has a twin that happens to be equal today.
+
+### Sources
+
+AGENTS.md rule 10 (D128, D129) is the rule; this section holds what the gate behind it cannot check. Instances: `agent-failures.md` (the `assert.Error` entry, and the vacuous-capability entry that produced rule 10's "necessary and not sufficient" clause); DF164 (the coincidence trap and the self-agreeing fixture); DF151/D128 for the two kinds left to review.
+
+---
+
 ## Closing note
 
 Testing is the safety net that makes refactoring possible. Most of the actual code-improvement work in yoloAI's architecture remediation (W1–W14) was unblocked by tests at the right layer: the W11 runtime-registry refactor would have been terrifying without the integration tests at the backend boundary; the W12 sandbox carve-out would have been terrifying without the unit tests inside the domain code. Tests aren't there to make CI green; they're there so future-Karl (or a future contributor, or an AI agent) can change the code without breaking it.

@@ -77,6 +77,8 @@ This file is small on purpose: load all of it at the start of a task. It carries
 | TEST §8   | Hand-rolled fakes over generated mocks — fakes test behaviour and survive refactor.                                  | Reaching for a mock-generator or call-sequence assertions.                       |
 | TEST §9   | A test that surfaces a new failure mode beats coverage on an already-working path.                                   | Adding coverage on a working path instead of pinning the new failure mode.       |
 | TEST §10  | Steer tests via explicit inputs (config.Layout, injected io.Reader/Writer), not global process state (t.Setenv("HOME"), os.Stdin). | A test mutates HOME/os.Stdin to steer a code path instead of passing inputs.     |
+| TEST §11  | Before believing a negative, confirm the mechanism under test was present and the control could have failed.          | An assertion passes because a prerequisite was missing, not because behaviour is right. |
+| TEST §12  | Assert what separates the fixed world from the broken one — the argv, the env a subprocess draws from, an error's content. | A test written after the fix, from the fixed code, asserting what it now does.   |
 
 ## security-principles.md
 

@@ -592,18 +592,19 @@ itself worth knowing when reading pattern 4.
   code is connected to the program.
 - **Gated now?** Yes, both halves. **Rule 10 in `AGENTS.md` was amended** (2026-07-30) to say
   red-on-revert is necessary and not sufficient, and to require naming the backends that pass a
-  capability guard and confirming the intersection is non-empty *before* the first test — this entry
-  had identified rule 10 as insufficient and then left it unchanged, which is the reachability
-  failure GEN §17 warns about: the lesson sat in this log, and this log is a write target that
-  nothing routes an agent to read. Structurally, the fix also moved the guarantee into
-  `runtimetest`'s `InstanceLabelsRoundTrip`, a **conformance** case gated on the real capability:
-  every backend that builds images must round-trip Create's labels through Inspect, and no fake can
-  satisfy it. That covers this mechanism. The general habit it argues for, unguarded: **when a check
-  is capability-guarded, name the backends that pass the guard and the statuses that reach it, and
-  confirm the intersection is non-empty** — before writing the first test. Also a specific
-  by-catch worth keeping: the docker/podman conformance helper builds its `container.Config` through
-  the SDK and had silently stopped covering `Labels`, so a harness that bypasses the interface it
-  certifies drifts the same way.
+  capability guard and confirming the intersection is non-empty *before* the first test — both now
+  held by TEST §12, which rule 10 points at, the rule itself having been shortened to its sentence
+  and its gate. This entry had identified rule 10 as insufficient and then left it unchanged, which
+  is the reachability failure GEN §17 warns about: the lesson sat in this log, and this log is a
+  write target that nothing routes an agent to read. Structurally, the fix also moved the guarantee
+  into `runtimetest`'s `InstanceLabelsRoundTrip`, a **conformance** case gated on the real
+  capability: every backend that builds images must round-trip Create's labels through Inspect, and
+  no fake can satisfy it. That covers this mechanism. The general habit it argues for, unguarded:
+  **when a check is capability-guarded, name the backends that pass the guard and the statuses that
+  reach it, and confirm the intersection is non-empty** — before writing the first test. Also a
+  specific by-catch worth keeping: the docker/podman conformance helper builds its
+  `container.Config` through the SDK and had silently stopped covering `Labels`, so a harness that
+  bypasses the interface it certifies drifts the same way.
 
 ### A16 — verified an exploit thoroughly, never asked whether the attacker needed it (2026-07-30)
 
