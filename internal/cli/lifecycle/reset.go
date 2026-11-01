@@ -23,7 +23,6 @@ type resetOpts struct {
 	keepFiles        bool
 	attach           bool
 	debug            bool
-	env              []string
 }
 
 func NewResetCmd() *cobra.Command {
@@ -43,9 +42,33 @@ func NewResetCmd() *cobra.Command {
 	cmd.Flags().BoolVar(&opts.keepCache, "keep-cache", false, "Preserve cache directory")
 	cmd.Flags().BoolVar(&opts.keepFiles, "keep-files", false, "Preserve files directory")
 	cmd.Flags().BoolVarP(&opts.attach, "attach", "a", false, "Auto-attach after restart (implies --restart)")
-	cmd.Flags().StringArrayVar(&opts.env, "env", nil, "Per-sandbox env var KEY=VAL applied on --restart (not persisted)")
+	addEnvFlags(cmd, resetEnvUsage)
 
 	return cmd
+}
+
+// resolveResetOptions builds the library options for `reset` from the parsed
+// flags. Separate from runReset so the flag-to-options wiring is testable without
+// a backend, as on start and restart.
+func resolveResetOptions(cmd *cobra.Command, opts *resetOpts) (yoloai.SandboxResetOptions, error) {
+	envMap, err := resolveEnvFromFlags(cmd)
+	if err != nil {
+		return yoloai.SandboxResetOptions{}, err
+	}
+	return yoloai.SandboxResetOptions{
+		RestartContainer: opts.restart,
+		ClearState:       opts.clearState,
+		KeepCache:        opts.keepCache,
+		KeepFiles:        opts.keepFiles,
+		NoPrompt:         opts.noPrompt,
+		Debug:            opts.debug,
+		Env:              envMap,
+		// Reset overwrites every tracked work copy from the host, so it destroys
+		// unapplied work exactly as destroy does — and authorizes it the same way.
+		// Like destroy, there is no prompt to widen the scope and therefore no
+		// --yes to paper over it (see destroy.go).
+		AbandonUnappliedWork: opts.abandonUnapplied,
+	}, nil
 }
 
 // runReset implements the reset command body.
@@ -70,27 +93,14 @@ func runReset(cmd *cobra.Command, args []string, opts *resetOpts) error {
 		defer cliutil.SetTerminalTitle("")
 	}
 
-	envMap, err := parseEnvSlice(opts.env)
+	resetOptions, err := resolveResetOptions(cmd, opts)
 	if err != nil {
 		return err
 	}
 
 	return cliutil.WithSandbox(cmd, name, func(ctx context.Context, sb *yoloai.Sandbox) error {
 		slog.Info("resetting sandbox", "event", "sandbox.reset", "sandbox", name, "restart", opts.restart, "clear_state", opts.clearState)
-		res, resetErr := sb.Reset(ctx, yoloai.SandboxResetOptions{
-			RestartContainer: opts.restart,
-			ClearState:       opts.clearState,
-			KeepCache:        opts.keepCache,
-			KeepFiles:        opts.keepFiles,
-			NoPrompt:         opts.noPrompt,
-			Debug:            opts.debug,
-			Env:              envMap,
-			// Reset overwrites every tracked work copy from the host, so it
-			// destroys unapplied work exactly as destroy does — and authorizes it
-			// the same way. Like destroy, there is no prompt to widen the scope
-			// and therefore no --yes to paper over it (see destroy.go).
-			AbandonUnappliedWork: opts.abandonUnapplied,
-		})
+		res, resetErr := sb.Reset(ctx, resetOptions)
 		if res != nil {
 			cliutil.RenderNotices(cmd, res.Notices)
 		}

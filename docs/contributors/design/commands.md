@@ -14,7 +14,7 @@ Single Go binary. No runtime dependencies — just the binary and Docker.
 - `--no-color`: Disable colored output.
 - `--json`: Output as JSON for scripting and CI. Errors go to stderr as `{"error": "message"}`. Interactive commands (`attach`, `exec`) reject `--json`.
 - `--debug`: Enable debug-level logging to the sandbox's persistent debug log (`~/.yoloai/library/sandboxes/<name>/debug.log`). For commands that do not operate on a sandbox, silently ignored. Useful for capturing a detailed trail before a problem occurs, so it is available when filing a bug report.
-- `--bugreport <type>`: Write a structured Markdown bug report. `<type>` is `safe` (sanitized, suitable for sharing) or `unsafe` (unsanitized, for author debugging). Implicitly enables `--debug`. Report is always written regardless of outcome (success, error, panic, or signal). Output filename is auto-generated in the current directory: `yoloai-bugreport-[<sandbox>-]<timestamp>.md`. See [Bug Report Design](bugreport.md).
+- `--bugreport <type>`: Write a structured Markdown bug report. `<type>` is `safe` (sanitized, suitable for sharing) or `unsafe` (unsanitized except for `--env` values, for author debugging). Implicitly enables `--debug`. Report is always written regardless of outcome (success, error, panic, or signal). Output filename is auto-generated in the current directory: `yoloai-bugreport-[<sandbox>-]<timestamp>.md`. See [Bug Report Design](bugreport.md).
 
 **Environment Variables:**
 - `YOLOAI_SANDBOX`: Default sandbox name for commands that accept `<name>`. Explicit `<name>` argument always takes precedence. Example: `YOLOAI_SANDBOX=my-task yoloai diff` is equivalent to `yoloai diff my-task`.
@@ -206,7 +206,8 @@ Options:
 - `--isolation <mode>`: Isolation mode: `container` (default), `container-enhanced` (gVisor), `container-privileged` (`--privileged`, for Docker-in-Docker), `vm` (Kata+QEMU), `vm-enhanced` (Kata+Firecracker).
 - `--os <os>`: Target OS: `linux` (default) or `mac`.
 - `--cpus <n>` / `--memory <size>`: Per-sandbox resource limits (e.g. `--cpus 2.5`, `--memory 8g`).
-- `--env <KEY=VAL>`: Set an environment variable inside the sandbox (repeatable).
+- `--env <KEY=VAL>`: Set an environment variable inside the sandbox (repeatable). Not for secrets: the value is on yoloai's command line, readable by other local users.
+- `--env-file <path>`: Read `KEY=VAL` lines from a file, or from stdin with `-` (repeatable). The way to pass secrets. Also on `run`, `start`, `restart` and `reset`. A key set twice — in a file, across files, or in a file and `--env` — is an error. Format: [GUIDE.md § Passing secrets to the sandbox](../../GUIDE.md#passing-secrets-to-the-sandbox).
 - `--archetype <name>`: Environment archetype (run `yoloai new --help` for the current set).
 - `--runtime <name>`: Apple simulator runtime for `mac` targets (`ios`, `tvos`, `watchos`, `visionos`; repeatable, e.g. `--runtime tvos:26.1`).
 - `--vscode-tunnel`: Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine).
@@ -762,6 +763,7 @@ Options:
 - `--no-prompt`: Skip re-sending the prompt after reset.
 - `-a`/`--attach`: Auto-attach after restart. Implies `--restart`.
 - `--env <KEY=VAL>`: Per-sandbox env var applied on `--restart` (repeatable, not persisted).
+- `--env-file <path>`: The same, from a file of `KEY=VAL` lines or stdin with `-`; use it for secrets.
 - `--debug`: Enable debug logging in sandbox entrypoint.
 
 Implied behaviors:

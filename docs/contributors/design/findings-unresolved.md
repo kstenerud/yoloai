@@ -1347,6 +1347,24 @@ earlier signal and records nothing else.
 - **What would actually close it:** typecheck the research corpus for a fixed platform rather than the host's (mypy's `--platform`), so both hosts agree — or accept that the corpus is Linux-only and exclude it from the macOS run. Either makes the gate say the same thing on both machines, which is the property it currently lacks.
 - **Pointer:** `docs/contributors/design/research/mac-channel/c1_guest_initiate.py`; `docs/contributors/design/research/mac-channel/c1_guest_vsock.py` (the convention); `Makefile` (`python-typecheck`).
 
+### DF237 — a bug report's redactors are per-section, so a secret is caught only on the section that knows its shape
+
+- **Discovered:** 2026-10-03 · **Workstream:** secret passing (`--env-file`)
+- **Severity:** LOW
+- **Disposition:** UNRESOLVED — PARKED. The argv instance is fixed; the class is not.
+- **Rides:** **any**.
+- **Description:** Section 2 (command line) now redacts `--env` values in both report types, but the other sections each have their own narrow rule: the config section redacts a value only when its *key name* reads as sensitive (a secret under `env: DB_DSN:` is published), and the exit line has no redactor at all, so any error that quotes its input publishes it. The `--env` and `--env-file` errors are worded never to quote a value for that reason.
+- **Pointer:** `internal/cli/bugreport/writer.go` (`sanitizeYAMLConfig`, `WriteCommandInvocation`, the exit-line writer)
+
+### DF238 — `--env` keys are not validated, and a key becomes a host-side filename
+
+- **Discovered:** 2026-10-03 · **Workstream:** secret passing (`--env-file`)
+- **Severity:** LOW — single-principal CLI: the write lands only where the invoking user could already write.
+- **Disposition:** UNRESOLVED — PARKED. `--env` was kept unchanged on purpose; `--env-file` validates its keys.
+- **Rides:** **breaking** — each fix refuses input accepted today.
+- **Description:** `parseEnvSlice` splits on the first `=` and validates nothing: a repeated key silently takes the last value, a key with a space is accepted, and a key such as `../../tmp/x` is used as a staging filename on the backends that deliver env as files. Closing it means validating `--env` keys as `--env-file` does and refusing a repeated key, with a `docs/BREAKING-CHANGES.md` entry.
+- **Pointer:** `internal/cli/lifecycle/new.go` (`parseEnvSlice`); `internal/envsetup/envsetup.go` (`StageSecretEnv`)
+
 ## Policy origin
 
 Established in [architecture-remediation.md](../archive/plans/architecture-remediation.md) and inherited by [layering-refactor.md](../archive/plans/layering-refactor.md).

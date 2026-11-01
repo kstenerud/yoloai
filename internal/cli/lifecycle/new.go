@@ -62,7 +62,7 @@ func addCreateFlags(cmd *cobra.Command) {
 	cmd.Flags().String("memory", "", "Memory limit (e.g., 8g, 512m)")
 	cmd.Flags().String("isolation", "", "Isolation mode: container (default), container-enhanced (gVisor), container-privileged (--privileged, use for Docker-in-Docker), vm (Kata+QEMU), vm-enhanced (Kata+Firecracker)")
 	cmd.Flags().String("os", "", "Target OS: linux (default), mac")
-	cmd.Flags().StringArray("env", nil, "Environment variable (KEY=VAL, repeatable)")
+	addEnvFlags(cmd, createEnvUsage)
 	cmd.Flags().StringArray("runtime", []string{}, "Apple simulator runtime (ios, tvos, watchos, visionos). Repeatable. Example: --runtime ios --runtime tvos:26.1")
 	cmd.Flags().Bool("vscode-tunnel", false, "Launch a VS Code Remote Tunnel alongside the agent (connect from VS Code on any machine)")
 	cmd.Flags().Bool("broker", false, "Require credential brokering: keep the agent's API key host-side (errors if the backend can't). On by default for supported backends (Linux docker)")
@@ -213,7 +213,6 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 	cpus, _ := cmd.Flags().GetString("cpus")
 	memory, _ := cmd.Flags().GetString("memory")
 	debug, _ := cmd.Flags().GetBool("debug")
-	envSlice, _ := cmd.Flags().GetStringArray("env")
 	runtimes, _ := cmd.Flags().GetStringArray("runtime")
 	vscodeTunnel, _ := cmd.Flags().GetBool("vscode-tunnel")
 	broker, _ := cmd.Flags().GetBool("broker")
@@ -225,7 +224,7 @@ func resolveCreateOptions(cmd *cobra.Command, name, rawWorkdirArg string, passth
 		return yoloai.SandboxCreateOptions{}, err
 	}
 
-	envMap, err := parseEnvSlice(envSlice)
+	envMap, err := resolveEnvFromFlags(cmd)
 	if err != nil {
 		return yoloai.SandboxCreateOptions{}, err
 	}
@@ -309,13 +308,15 @@ func parsePortFlags(rawPorts []string) ([]yoloai.PortMapping, error) {
 	return ports, nil
 }
 
-// parseEnvSlice parses KEY=VAL env flag values into a map.
+// parseEnvSlice parses KEY=VAL env flag values into a map. The error names the
+// occurrence, not its text: a mistyped `--env 'TOKEN s3cret'` holds the secret,
+// and an error is copied verbatim into a bug report's exit line (DF237).
 func parseEnvSlice(envSlice []string) (map[string]string, error) {
 	envMap := make(map[string]string, len(envSlice))
-	for _, e := range envSlice {
+	for i, e := range envSlice {
 		k, v, ok := strings.Cut(e, "=")
 		if !ok {
-			return nil, yoerrors.NewUsageError("invalid --env value %q: must be KEY=VAL", e)
+			return nil, yoerrors.NewUsageError("invalid --env value (#%d): must be KEY=VAL", i+1)
 		}
 		envMap[k] = v
 	}

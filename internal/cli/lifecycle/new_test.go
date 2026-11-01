@@ -153,6 +153,16 @@ func TestParseEnvSlice(t *testing.T) {
 		assertUsageError(t, err, "must be KEY=VAL")
 	})
 
+	// A mistyped separator puts the secret in the token, and the error reaches a
+	// bug report's exit line unredacted (DF237), so the error names the position.
+	t.Run("the error does not echo the value", func(t *testing.T) {
+		t.Parallel()
+		_, err := parseEnvSlice([]string{"OK=1", "API_TOKEN s3cret-value"})
+		assertUsageError(t, err, "must be KEY=VAL")
+		assert.NotContains(t, err.Error(), "s3cret-value")
+		assert.Contains(t, err.Error(), "#2", "which --env occurrence it was")
+	})
+
 	t.Run("valid pairs", func(t *testing.T) {
 		t.Parallel()
 		m, err := parseEnvSlice([]string{"A=1", "B=two", "C="})

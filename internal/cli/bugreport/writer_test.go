@@ -74,11 +74,11 @@ func TestBugReportFilename_Collision(t *testing.T) {
 	assert.Contains(t, err.Error(), "already exists")
 }
 
-// --- redactPromptArgs ---
+// --- redactArgs ---
 
 func TestRedactPromptArgs_LongForm(t *testing.T) {
 	args := []string{"yoloai", "--prompt", "secret task"}
-	result := redactPromptArgs(args)
+	result := redactArgs(args, "safe")
 	assert.Equal(t, "yoloai", result[0])
 	assert.Equal(t, "--prompt", result[1])
 	assert.Equal(t, "[REDACTED]", result[2])
@@ -86,22 +86,41 @@ func TestRedactPromptArgs_LongForm(t *testing.T) {
 
 func TestRedactPromptArgs_ShortForm(t *testing.T) {
 	args := []string{"yoloai", "-p", "secret task"}
-	result := redactPromptArgs(args)
+	result := redactArgs(args, "safe")
 	assert.Equal(t, "-p", result[1])
 	assert.Equal(t, "[REDACTED]", result[2])
 }
 
 func TestRedactPromptArgs_EqualsForm(t *testing.T) {
 	args := []string{"yoloai", "--prompt=secret task"}
-	result := redactPromptArgs(args)
+	result := redactArgs(args, "safe")
 	assert.Equal(t, "--prompt=[REDACTED]", result[1])
 }
 
 func TestRedactPromptArgs_OtherFlagsUnchanged(t *testing.T) {
 	args := []string{"--agent", "claude"}
-	result := redactPromptArgs(args)
+	result := redactArgs(args, "safe")
 	assert.Equal(t, "--agent", result[0])
 	assert.Equal(t, "claude", result[1])
+}
+
+func TestRedactArgs_EnvRedactedInBothReportTypes(t *testing.T) {
+	args := []string{"yoloai", "new", "--env", "TOKEN=s3cret", "--env=OTHER=s3cret", "--env", "s3cret"}
+	for _, reportType := range []string{"safe", "unsafe"} {
+		result := redactArgs(args, reportType)
+		assert.Equal(t, []string{"yoloai", "new", "--env", "TOKEN=[REDACTED]", "--env=OTHER=[REDACTED]", "--env", "[REDACTED]"}, result, reportType)
+	}
+}
+
+func TestRedactArgs_PromptKeptInUnsafe(t *testing.T) {
+	result := redactArgs([]string{"yoloai", "--prompt", "task"}, "unsafe")
+	assert.Equal(t, "task", result[2])
+}
+
+// A rewrite by one rule must not hide a flag from another.
+func TestRedactArgs_RulesReadTheOriginalArgs(t *testing.T) {
+	assert.Equal(t, []string{"--env", "--prompt=[REDACTED]"}, redactArgs([]string{"--env", "--prompt=task"}, "safe"))
+	assert.Equal(t, []string{"--env", "[REDACTED]", "TOKEN=[REDACTED]"}, redactArgs([]string{"--env", "--env", "TOKEN=s3cret"}, "safe"))
 }
 
 // --- sanitizeYAMLConfig ---

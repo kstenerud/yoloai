@@ -18,6 +18,19 @@ CREDENTIAL INJECTION
   On macOS, yoloai checks the Keychain for Claude Code OAuth
   credentials automatically.
 
+PASSING YOUR OWN SECRETS
+
+  For secrets of your own (a registry token, a database password),
+  use --env-file, not --env. A --env value is on yoloai's command
+  line, which other local users can usually read with 'ps -ww'.
+
+     yoloai new task . --env-file ./secrets.env
+     printf 'API_TOKEN=%s\n' "$token" | yoloai new task . --env-file -
+
+  The file holds KEY=VAL lines. Lines starting with # are comments;
+  the value is literal to end of line. A key set twice is an error.
+  Works on new, run, start, restart and reset.
+
 CLAUDE CODE SUBSCRIPTION USERS (Pro/Max/Team)
 
   If you use a Claude subscription (not an API key), run:

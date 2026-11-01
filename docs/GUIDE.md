@@ -416,6 +416,10 @@ yoloai new task ./project --port 3000:3000
 # Pass environment variables to the sandbox
 yoloai new task ./project --env MY_VAR=value --env OTHER=val2
 
+# Pass secrets from a file or stdin, keeping them off the command line
+yoloai new task ./project --env-file ./secrets.env
+printf 'API_TOKEN=%s\n' "$token" | yoloai new task ./project --env-file -
+
 # Debug entrypoint issues
 yoloai new task ./project --debug
 ```
@@ -835,6 +839,26 @@ mv ~/.yoloai/library/trash/<name> ~/.yoloai/library/sandboxes/<name>
 - **Dirty repo warning.** Prompts if your workdir has uncommitted git changes, so you don't lose work.
 - **Credential brokering (default).** For supported setups the agent's LLM API key is held **host-side** and never enters the sandbox — see [Credential Brokering](#credential-brokering) below. Credentials that aren't brokered (other agents, subscription tokens, unsupported backends) are delivered as files instead (next bullet).
 - **Credential injection via files.** Non-brokered API keys are mounted as read-only files at `/run/secrets/`, not passed as environment variables. Temp files on the host are cleaned up after container start. Some agents support additional credential sources — for example, on macOS, yoloai checks the macOS Keychain for Claude Code OAuth credentials (service `Claude Code-credentials`). If you're logged in via `claude` CLI, yoloai will automatically detect your credentials even without `~/.claude/.credentials.json` on disk.
+
+### Passing secrets to the sandbox
+
+The agent's own API key needs none of this; it is brokered or injected as above. For anything else the sandbox needs — a registry token, a database password — use `--env-file`, not `--env`. A `--env KEY=VAL` value sits on the yoloai process's command line while it runs, where other local accounts can usually read it with `ps -ww` (always on macOS; on Linux unless `/proc` is mounted with `hidepid`), and `start`, `restart` and `reset` expose it again. With `--env-file` only the path is on the command line:
+
+```bash
+yoloai new task ./project --env-file ./secrets.env
+yoloai start task --env-file ./secrets.env        # also restart, and reset --restart
+printf 'API_TOKEN=%s\n' "$token" | yoloai new task ./project --env-file -
+```
+
+`--env-file` is repeatable and works wherever `--env` does (`new`, `run`, `start`, `restart`, `reset`). `-` reads stdin, and cannot be combined with `--prompt -` or `--prompt-file -`. The file holds `KEY=VAL` lines:
+
+- Blank lines and lines starting with `#` are ignored; a `#` anywhere else is part of the value.
+- A leading `export` and spaces around the key and `=` are allowed. The value is otherwise literal to the end of the line: quotes are kept, nothing is expanded, trailing spaces count. `KEY=` sets an empty value.
+- CRLF line endings are fine.
+- Setting the same variable twice — in one file, in two files, or in a file and `--env` — is an error.
+- Errors give the file and line number but never the line itself.
+
+yoloai does not check the file's permissions; `chmod 600` it if it holds long-lived secrets. A bug report (`--bugreport`) redacts every `--env` value from the recorded command line, safe or unsafe.
 
 ### Credential Brokering
 
