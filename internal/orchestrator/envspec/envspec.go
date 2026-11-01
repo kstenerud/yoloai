@@ -64,10 +64,10 @@ func settingsPatches(def *agent.Definition) []envsetup.SettingsPatch {
 			if d.StateDir == "" || d.ApplySettings == nil {
 				continue
 			}
-			stateDirName := filepath.Base(d.StateDir)
+			stateRelPath := d.StateRelPath()
 			ps = append(ps, envsetup.SettingsPatch{
 				Dir: func(sandboxDir string) string {
-					return filepath.Join(store.HomeSeedPath(sandboxDir), stateDirName)
+					return filepath.Join(store.HomeSeedPath(sandboxDir), stateRelPath)
 				},
 				DirPerm:  0o750,
 				FileName: d.SettingsFileName,
