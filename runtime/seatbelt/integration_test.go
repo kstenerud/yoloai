@@ -13,6 +13,7 @@ import (
 	"testing"
 
 	"github.com/kstenerud/yoloai/internal/config"
+	"github.com/kstenerud/yoloai/internal/sysexec"
 	"github.com/kstenerud/yoloai/runtime"
 	"github.com/kstenerud/yoloai/runtime/runtimetest"
 	"github.com/stretchr/testify/assert"
@@ -117,6 +118,80 @@ func TestSeatbelt_ReadOnlyTierIsUnwritableFromInside(t *testing.T) {
 	canary := filepath.Join(config.ReadWriteTierDir(sandboxPath), "canary.txt")
 	_, err = rt.Exec(ctx, name, []string{"sh", "-c", "echo ok > " + canary}, "")
 	assert.NoError(t, err, "the deny must not extend past the read-only tier")
+}
+
+// OpenCode fails with an "Unexpected server error. Check server logs for details." error
+// if it is unable to write plugin-related files, beginning with a simple `.gitignore`,
+// next to its seeded config".
+func TestSeatbelt_HomeSeedIsWritableFromInside(t *testing.T) {
+	rt, ctx := seatbeltSetup(t)
+
+	name := "yoloai-test-home-seed-rw"
+	_ = rt.Remove(ctx, name) // evict any stale leftover from a failed run
+	require.NoError(t, rt.Create(ctx, runtime.InstanceConfig{Name: name}))
+	t.Cleanup(func() { _ = rt.Remove(context.Background(), name) })
+	require.NoError(t, rt.Start(ctx, name))
+
+	sandboxPath := filepath.Join(rt.layout.SandboxesDir(), rt.sandboxName(name))
+	seededConfig := filepath.Join(config.HomeSeedPath(sandboxPath), ".config", "opencode", "opencode.jsonc")
+	require.NoError(t, os.MkdirAll(filepath.Dir(seededConfig), 0o750))
+	require.NoError(t, os.WriteFile(seededConfig, []byte(`{"$schema": "seeded"}`), 0o600))
+
+	gitIgnore := filepath.Join(config.GuestViewDir(sandboxPath), config.HomeSeedDirName, ".config", "opencode", ".gitignore")
+	_, err := rt.Exec(ctx, name, []string{"sh", "-c", "echo 'node_modules' > " + gitIgnore}, "")
+	assert.NoError(t, err, "the guest must be able to create files next to its seeded config")
+
+	onDisk, readErr := os.ReadFile(gitIgnore) //nolint:gosec // G304: path built from the test's own sandbox dir
+	require.NoError(t, readErr)
+	assert.Equal(t, "node_modules\n", string(onDisk), "the .gitignore write must reach home-seed on disk")
+}
+
+// The Seatbelt profile formerly granted (read-only) access to _all_ of "~/.local",
+// which was surely too broad because it included "~/.local/share",
+// which is the default $XDG_DATA_HOME and may thus include secrets like "~/.local/share/opencode/auth.json".
+// We now grant access to "~/.local/bin" alone.
+func TestSeatbelt_LocalShareIsUnreadableFromInside(t *testing.T) {
+	if !isMacOS() {
+		t.Skip("seatbelt requires macOS; structurally impossible on this platform")
+	}
+	sbExec := "/usr/bin/sandbox-exec"
+	if _, err := os.Stat(sbExec); err != nil {
+		t.Skip("sandbox-exec not present")
+	}
+
+	// We need a fake HomeDir that lies outside every profile grant
+	// (thus precluding `t.TempDir()` as well as any directory in the host's "/tmp"),
+	// so create a temporary directory under the host user's real home directory.
+	realHome, err := os.UserHomeDir()
+	require.NoError(t, err)
+	fakeHome, err := os.MkdirTemp(realHome, ".yoloai-localshare-test-*")
+	require.NoError(t, err)
+	t.Cleanup(func() { _ = os.RemoveAll(fakeHome) })
+
+	// Create canary files under ".local/" in the fake host HomeDir.
+	for _, dir := range []string{
+		filepath.Join(fakeHome, ".local", "bin"),
+		filepath.Join(fakeHome, ".local", "share"),
+	} {
+		require.NoError(t, os.MkdirAll(dir, 0o750))
+	}
+	binCanary := filepath.Join(fakeHome, ".local", "bin", "canary.bin")
+	require.NoError(t, os.WriteFile(binCanary, []byte("faked host binary"), 0o600))
+	shareCanary := filepath.Join(fakeHome, ".local", "share", "canary.auth.txt")
+	require.NoError(t, os.WriteFile(shareCanary, []byte("faked host application state"), 0o600))
+
+	// Request a Seatbelt profile.
+	root := t.TempDir()
+	profilePath := filepath.Join(root, "profile.sb")
+	profile := GenerateProfile(runtime.InstanceConfig{Name: "localShareTestProfile"}, filepath.Join(root, "sandbox"), fakeHome)
+	require.NoError(t, os.WriteFile(profilePath, []byte(profile), 0o600))
+
+	// Attempt to read the canaries via the provided Seatbelt profile.
+	out, err := sysexec.Command(sandboxExecEnv, sbExec, "-f", profilePath, "/bin/cat", binCanary).CombinedOutput()
+	require.NoError(t, err, "the sandbox should be allowed to read ~/.local/bin; output: %s", out)
+	assert.Contains(t, string(out), "faked host binary")
+	out, err = sysexec.Command(sandboxExecEnv, sbExec, "-f", profilePath, "/bin/cat", shareCanary).CombinedOutput()
+	assert.Errorf(t, err, "the sandbox must not be able to read ~/.local/share; output: %s", out)
 }
 
 // TestSeatbelt_ReadOnlyMountHoldsUnderABroaderGrant drives the user-facing

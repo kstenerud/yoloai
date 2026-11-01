@@ -56,7 +56,7 @@ type ContainerConfig struct {
 	SubmitSequence     string      `json:"submit_sequence"`
 	TmuxConf           string      `json:"tmux_conf"`
 	WorkingDir         string      `json:"working_dir"`
-	StateDirName       string      `json:"state_dir_name"`
+	StateRelPath       string      `json:"state_rel_path"`
 	Debug              bool        `json:"debug,omitempty"`
 	NetworkIsolated    bool        `json:"network_isolated,omitempty"`
 	AllowedDomains     []string    `json:"allowed_domains,omitempty"`

@@ -122,7 +122,7 @@ Backends Tart (macOS VM) and Seatbelt (sandbox-exec) are separate axes — chose
 - **gVisor `--isolation container-enhanced`** (D17, commit `87956ac`, 2026-03-17). User-space kernel intercepts syscalls. (An earlier design assumed UID remapping forced relaxed/world-readable bind-mount permissions; finding **DF20** empirically disproved that — the container runs as the invoking host UID, so host-side paths now use the same restrictive `0750`/`0600` as standard Docker. See `docs/contributors/design/security.md`.)
 - **gVisor on macOS refused** (commit `d078db6`, 2026-03-17). The upstream Claude Code + gVisor `epoll_pwait` hang is a known platform-specific bug; yoloAI refuses upfront with a pointer rather than silently failing. This is `§9 — document residual risk` in action.
 - **Tart for macOS VMs** (commits `814d379` and following, 2026-02-26). Full VM isolation; ~3× I/O cost on macOS (`docs/contributors/design/research/sandboxing.md`); chosen by users who want hardware-level isolation.
-- **Seatbelt** (D15, default-deny credential access, `docs/contributors/design/security.md` §Seatbelt Backend Security). macOS sandbox-exec syscall filtering. Restricted to specific paths (`~/.local/`, `~/.gitconfig`, `~/.config/git/`) and a safe environment subset.
+- **Seatbelt** (D15, default-deny credential access, `docs/contributors/design/security.md` §Seatbelt Backend Security). macOS sandbox-exec syscall filtering. Restricted to specific paths (`~/.local/bin`, `~/.gitconfig`, `~/.config/git/`) and a safe environment subset.
 - **Layered isolation rename** (commit `098672c`, 2026-03-18): the values were originally named more cryptically; the rename to `container / container-enhanced / vm / vm-enhanced` makes the layer explicit.
 
 ### Cost-vs-benefit
@@ -268,7 +268,7 @@ Threshold: anywhere the agent might reach for something we didn't anticipate, de
 ### Worked examples
 
 - **Seatbelt environment** (D15): whitelist of safe variables, not blocklist of unsafe ones. The agent gets `PATH`, `HOME`, locale; it doesn't get `SSH_AUTH_SOCK`, `AWS_SECRET_ACCESS_KEY` unless the user opts in via `env:` config.
-- **Seatbelt filesystem allowlist**: `~/.local/`, `~/.gitconfig`, `~/.config/git/`. Everything else is denied. The agent can't read `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.git-credentials`, `~/.npmrc`.
+- **Seatbelt filesystem allowlist**: `~/.local/bin`, `~/.gitconfig`, `~/.config/git/`. Everything else is denied. The agent can't read `~/.ssh/`, `~/.gnupg/`, `~/.aws/`, `~/.git-credentials`, `~/.npmrc`, `~/.local/share/`.
 - **Network isolation `--network-isolated`** (D11): default-deny iptables with an explicit allowlist of domains. The agent reaches Anthropic's API because we allowlisted it; everything else is denied.
 - **Dangerous-directory refusal**: refuses a set of host paths unless `:force`. The list is enumerable; new dangerous paths can be added when discovered.
 - **Mount modes**: `:ro` is the default for aux dirs (D4). Writable access requires explicit `:rw`. `:copy` and `:overlay` are workdir-only (Q-U).

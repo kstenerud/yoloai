@@ -70,6 +70,17 @@ func TestSandboxLayout_HostTierIsNotReachableByPrefixConfusion(t *testing.T) {
 	}
 }
 
+// HomeSeed must live in the read-write tier because some agents (certainly OpenCode)
+// may fail if they are unable to write state next to their seeded config files.
+func TestSandboxLayout_HomeSeedIsInReadWriteTier(t *testing.T) {
+	const sb = "/sandboxes/box"
+	readWriteTierDir := filepath.Join(sb, ReadWriteTierName)
+	homeSeedDir := HomeSeedPath(sb)
+	if !strings.HasPrefix(homeSeedDir, readWriteTierDir+"/") {
+		t.Errorf("home-seed must be guest-writable")
+	}
+}
+
 // TestTierOfEntry_AgreesWithTheTieredBuilders is the drift guard between the two
 // representations of one fact. The path builders say where a file goes; the
 // entry table says where the v5->v6 mover puts it. If they disagree, migration
@@ -99,7 +110,6 @@ func TestTierOfEntry_AgreesWithTheTieredBuilders(t *testing.T) {
 		PromptFileName:        PromptPath(sb),
 		ResumePromptFileName:  ResumePromptPath(sb),
 		MachineIDFileName:     MachineIDPath(sb),
-		HomeSeedDirName:       HomeSeedPath(sb),
 		SecretsDirName:        SecretsPath(sb),
 	}
 	readWrite := map[string]string{
@@ -113,6 +123,7 @@ func TestTierOfEntry_AgreesWithTheTieredBuilders(t *testing.T) {
 		VSCodeCLIDirName:     VSCodeCLIPath(sb),
 		ContainerLogFileName: ContainerLogPath(sb),
 		CreateDoneMarkerName: CreateDoneMarkerPath(sb),
+		HomeSeedDirName:      HomeSeedPath(sb),
 	}
 	all := map[string]string{}
 	for _, m := range []map[string]string{hostBuilders, readOnly, readWrite} {

@@ -180,12 +180,14 @@ func MachineIDPath(sandboxDir string) string {
 	return filepath.Join(ReadOnlyTierDir(sandboxDir), MachineIDFileName)
 }
 
-// HomeSeedPath returns the home-seed directory within a sandbox.
-func HomeSeedPath(sandboxDir string) string {
-	return filepath.Join(ReadOnlyTierDir(sandboxDir), HomeSeedDirName)
-}
-
 // Read-write-tier paths. The guest reads and writes these.
+
+// HomeSeedPath returns the home-seed directory within a sandbox,
+// containing agent-configuration files seeded by yoloAI
+// and subsequently mirrored in the actual sandbox home.
+func HomeSeedPath(sandboxDir string) string {
+	return filepath.Join(ReadWriteTierDir(sandboxDir), HomeSeedDirName)
+}
 
 // LogsPath returns the logs/ directory within a sandbox.
 func LogsPath(sandboxDir string) string {

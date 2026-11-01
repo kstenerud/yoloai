@@ -264,7 +264,7 @@ generated SBPL profile. `runtime/seatbelt/` implements the backend.
 `docs/contributors/design/security.md` §Seatbelt Backend Security documents the default-deny
 credential posture: only `PATH`, `HOME`, `USER`, `SHELL`, `TERM`, `LANG`,
 `LC_*` are passed to the sandboxed process; sensitive variables are excluded;
-the SBPL profile grants read access only to `~/.local/`, `~/.gitconfig`, and
+the SBPL profile grants read access only to `~/.local/bin`, `~/.gitconfig`, and
 `~/.config/git/` — not the entire home directory.
 
 **Known limitation (cited in §9 below):** Recent CVEs demonstrate sandbox escape
@@ -529,7 +529,7 @@ be the default, and that specific exceptions be specified when needed."
 
 Applied to yoloAI across three surfaces:
 1. **Filesystem (Seatbelt):** `docs/contributors/design/security.md` §Seatbelt Backend Security
-   — SBPL profile is `(deny default)` with explicit allows for `~/.local/`,
+   — SBPL profile is `(deny default)` with explicit allows for `~/.local/bin`,
    `~/.gitconfig`, `~/.config/git/`. The entire home directory is denied by
    default; SSH keys, AWS credentials, `.npmrc`, `.git-credentials` are
    inaccessible unless explicitly added.

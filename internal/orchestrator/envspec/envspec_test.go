@@ -49,29 +49,33 @@ func TestBuildEnvSpec_NormalAgent(t *testing.T) {
 }
 
 func TestBuildEnvSpec_ShellAgent(t *testing.T) {
+
 	def := agent.GetAgent("shell")
 	require.NotNil(t, def)
 
 	spec := envspec.BuildEnvSpec(def)
 
-	// Count real agents that have StateDir + ApplySettings
-	realNames := agent.RealAgents()
-	expectedCount := 0
-	for _, name := range realNames {
-		d := agent.GetAgent(name)
-		if d.StateDir != "" && d.ApplySettings != nil {
-			expectedCount++
-		}
-	}
-
-	assert.Len(t, spec.SettingsPatches, expectedCount)
-
-	// Each patch should be under home-seed/
+	observedStateRelPaths := map[string]bool{}
 	for _, p := range spec.SettingsPatches {
-		assert.Equal(t, store.HomeSeedPath(sbDir), filepath.Dir(p.Dir(sbDir)),
-			"shell agent patches must target home-seed subdirs")
+		rel, err := filepath.Rel(store.HomeSeedPath(sbDir), p.Dir(sbDir))
+		require.NoError(t, err)
+		observedStateRelPaths[rel] = true
 		assert.NotNil(t, p.Apply)
 	}
+
+	// Assert that each patch resolves to that agent's full StateRelPath below home-seed.
+	// For example, if OpenCode had `ApplySettings`, we would expect to `observe` ".local/share/opencode" (not "opencode")
+	// and would therefore have to include ".local/share/opencode" in `expectedStateRelPaths`.
+	expectedStateRelPaths := map[string]bool{
+		".claude": true,
+		".codex":  true,
+		".gemini": true,
+	}
+	assert.Equal(t, expectedStateRelPaths, observedStateRelPaths,
+		"shell settings patches must resolve to exactly the seeded agents' StateRelPaths")
+
+	assert.Len(t, spec.SettingsPatches, len(expectedStateRelPaths),
+		"unexpected number of settings patches; check that `expectedStateRelPaths` is up to date")
 }
 
 func TestBuildEnvSpec_NoStateDirAgent(t *testing.T) {
